@@ -8,6 +8,8 @@ import (
 	"github.com/drake/rune/mud"
 )
 
+// Note: time is still needed for DialTimeout
+
 // TCPClient implements the Network interface with real telnet support
 type TCPClient struct {
 	conn       net.Conn
@@ -91,27 +93,15 @@ func (c *TCPClient) Output() <-chan mud.Event {
 }
 
 // readerLoop reads from the connection and processes telnet protocol
+// Uses reactive prompt detection - no timeout-based polling
 func (c *TCPClient) readerLoop() {
 	buf := make([]byte, 4096)
 
 	for {
-		select {
-		case <-c.done:
-			return
-		default:
-		}
-
-		// Set read deadline to allow checking done channel
-		c.conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
-
+		// Blocking read - no timeout
 		n, err := c.conn.Read(buf)
 		if err != nil {
-			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				// Timeout is expected, check for pending prompt
-				c.checkPendingPrompt()
-				continue
-			}
-			// Real error or connection closed
+			// Connection closed or error
 			c.mu.Lock()
 			if c.connected {
 				c.connected = false
@@ -141,12 +131,12 @@ func (c *TCPClient) readerLoop() {
 			}
 		}
 
-		// Handle prompt logic (Blightmud strategy)
+		// Reactive prompt detection - only check when data arrives
 		pending := c.telnet.GetPending(false) // Peek only
 
 		if len(pending) > 0 && len(pending) < 500 {
 			if c.telnet.HasSignal() {
-				// CASE A: Terminated Prompt (Server sent GA/EOR)
+				// Terminated Prompt (Server sent GA/EOR)
 				// Consume the buffer and emit as prompt
 				finalPrompt := c.telnet.GetPending(true)
 				c.outputChan <- mud.Event{
@@ -154,26 +144,13 @@ func (c *TCPClient) readerLoop() {
 					Payload: finalPrompt,
 				}
 			} else {
-				// CASE B: Unterminated Prompt (No signal)
-				// Always emit - let UI handle deduplication
+				// Unterminated Prompt (No signal)
+				// Emit on data arrival - let UI handle deduplication
 				c.outputChan <- mud.Event{
 					Type:    mud.EventServerPrompt,
 					Payload: pending,
 				}
 			}
-		}
-	}
-}
-
-// checkPendingPrompt emits any pending buffer content as a prompt
-// This handles the timeout case for servers that don't send GA/EOR
-func (c *TCPClient) checkPendingPrompt() {
-	pending := c.telnet.GetPending(false)
-	if len(pending) > 0 && len(pending) < 500 {
-		// After timeout with no new data, treat as prompt
-		c.outputChan <- mud.Event{
-			Type:    mud.EventServerPrompt,
-			Payload: pending,
 		}
 	}
 }
