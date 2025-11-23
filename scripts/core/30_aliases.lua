@@ -5,11 +5,6 @@ local storage = {}  -- Private storage
 
 function rune.alias.add(key, value)
     storage[key] = value
-    if type(value) == "function" then
-        rune.print("[Alias] Added: " .. key .. " -> (function)")
-    else
-        rune.print("[Alias] Added: " .. key .. " -> " .. value)
-    end
 end
 
 function rune.alias.remove(key)

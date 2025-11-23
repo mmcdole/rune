@@ -23,9 +23,6 @@ function rune.trigger.add(pattern, action, options)
         is_regex = options.regex or false,   -- Use Go regex instead of Lua patterns
     }
     table.insert(order, id)
-
-    local action_desc = type(action) == "function" and "(function)" or action
-    rune.print("[Trigger] Added #" .. id .. ": " .. pattern .. " -> " .. action_desc)
     return id
 end
 

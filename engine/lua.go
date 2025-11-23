@@ -301,13 +301,28 @@ func (e *LuaEngine) LoadUserScripts(paths []string) error {
 	return nil
 }
 
+// getHooksCall returns the rune.hooks.call function
+func (e *LuaEngine) getHooksCall() lua.LValue {
+	runeTable := e.L.GetGlobal("rune").(*lua.LTable)
+	hooksTable := e.L.GetField(runeTable, "hooks").(*lua.LTable)
+	return e.L.GetField(hooksTable, "call")
+}
+
 // OnInput handles user typing
 func (e *LuaEngine) OnInput(text string) bool {
 	if err := e.L.CallByParam(lua.P{
-		Fn:      e.L.GetGlobal("on_input"),
-		NRet:    0,
+		Fn:      e.getHooksCall(),
+		NRet:    1,
 		Protect: true,
-	}, lua.LString(text)); err != nil {
+	}, lua.LString("input"), lua.LString(text)); err != nil {
+		return false
+	}
+
+	ret := e.L.Get(-1)
+	e.L.Pop(1)
+
+	// false means input was consumed/stopped
+	if ret == lua.LFalse {
 		return false
 	}
 	return true
@@ -316,62 +331,58 @@ func (e *LuaEngine) OnInput(text string) bool {
 // OnOutput handles server text
 func (e *LuaEngine) OnOutput(text string) (string, bool) {
 	if err := e.L.CallByParam(lua.P{
-		Fn:      e.L.GetGlobal("on_output"),
-		NRet:    1,
+		Fn:      e.getHooksCall(),
+		NRet:    2,
 		Protect: true,
-	}, lua.LString(text)); err != nil {
+	}, lua.LString("output"), lua.LString(text)); err != nil {
 		return text, true
 	}
 
-	ret := e.L.Get(-1)
-	e.L.Pop(1)
+	// hooks.call returns (modified_text, show)
+	show := e.L.Get(-1)
+	modified := e.L.Get(-2)
+	e.L.Pop(2)
 
-	if ret == lua.LNil {
+	if show == lua.LFalse {
 		return "", false
 	}
 
-	return ret.String(), true
+	return modified.String(), true
 }
 
 // OnPrompt handles server prompts
 func (e *LuaEngine) OnPrompt(text string) string {
-	fn := e.L.GetGlobal("on_prompt")
-	if fn == lua.LNil {
-		return text
-	}
-
 	if err := e.L.CallByParam(lua.P{
-		Fn:      fn,
-		NRet:    1,
+		Fn:      e.getHooksCall(),
+		NRet:    2,
 		Protect: true,
-	}, lua.LString(text)); err != nil {
+	}, lua.LString("prompt"), lua.LString(text)); err != nil {
 		return text
 	}
 
-	ret := e.L.Get(-1)
-	e.L.Pop(1)
+	// hooks.call returns (modified_text, show)
+	show := e.L.Get(-1)
+	modified := e.L.Get(-2)
+	e.L.Pop(2)
 
-	if ret == lua.LNil {
-		return text
+	if show == lua.LFalse {
+		return ""
 	}
 
-	return ret.String()
+	return modified.String()
 }
 
-// CallHook calls a Lua hook function by name with string arguments
-func (e *LuaEngine) CallHook(name string, args ...string) {
-	fn := e.L.GetGlobal(name)
-	if fn == lua.LNil {
-		return
-	}
-
-	luaArgs := make([]lua.LValue, len(args))
+// CallHook calls a hook event with string arguments
+func (e *LuaEngine) CallHook(event string, args ...string) {
+	// Build args: event name + string args
+	luaArgs := make([]lua.LValue, len(args)+1)
+	luaArgs[0] = lua.LString(event)
 	for i, arg := range args {
-		luaArgs[i] = lua.LString(arg)
+		luaArgs[i+1] = lua.LString(arg)
 	}
 
 	e.L.CallByParam(lua.P{
-		Fn:      fn,
+		Fn:      e.getHooksCall(),
 		NRet:    0,
 		Protect: true,
 	}, luaArgs...)
