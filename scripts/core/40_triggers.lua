@@ -163,8 +163,8 @@ function rune.trigger.process(line)
                     for i, match in ipairs(matches) do
                         cmd = cmd:gsub("%%" .. i, match)
                     end
-                    -- Process the command through on_input
-                    on_input(cmd)
+                    -- Process the command through rune.send
+                    rune.send(cmd)
                 end
             end
         end

@@ -2,6 +2,7 @@ package engine
 
 import (
 	"embed"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -10,57 +11,94 @@ import (
 	"sync"
 	"time"
 
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/drake/rune/mud"
 	lua "github.com/yuin/gopher-lua"
 )
 
+// timerEntry holds a timer and its done channel for clean shutdown
+type timerEntry struct {
+	ticker *time.Ticker
+	done   chan struct{}
+}
+
 // LuaEngine implements the ScriptEngine interface
 type LuaEngine struct {
 	L          *lua.LState
-	regexCache map[string]*regexp.Regexp
-	timers     map[int]*time.Ticker
+	regexCache *lru.Cache[string, *regexp.Regexp]
+	timers     map[int]*timerEntry
 	timerID    int
 	timerMu    sync.Mutex
+
+	// Cached table reference
+	runeTable *lua.LTable
+
+	// Channel references for reload
+	events  chan<- mud.Event
+	uplink  chan<- string
+	display chan<- string
 }
 
 // NewLuaEngine initializes a Lua VM with regex caching and timer management.
 func NewLuaEngine() *LuaEngine {
+	cache, _ := lru.New[string, *regexp.Regexp](100)
 	return &LuaEngine{
 		L:          lua.NewState(),
-		regexCache: make(map[string]*regexp.Regexp),
-		timers:     make(map[int]*time.Ticker),
+		regexCache: cache,
+		timers:     make(map[int]*timerEntry),
 		timerID:    0,
 	}
 }
 
+// toDuration converts Lua number seconds to Go duration
+func toDuration(seconds lua.LNumber) time.Duration {
+	return time.Duration(float64(seconds) * float64(time.Second))
+}
+
 // SetConfigDir sets the rune.config_dir variable for user scripts
 func (e *LuaEngine) SetConfigDir(dir string) {
-	runeTable := e.L.GetGlobal("rune").(*lua.LTable)
-	e.L.SetField(runeTable, "config_dir", lua.LString(dir))
+	e.L.SetField(e.runeTable, "config_dir", lua.LString(dir))
 }
 
 // RegisterHostFuncs binds Go functions to the rune namespace
 func (e *LuaEngine) RegisterHostFuncs(events chan<- mud.Event, uplink chan<- string, display chan<- string) {
-	runeTable := e.L.NewTable()
-	e.L.SetGlobal("rune", runeTable)
+	// Store channel references for reload
+	e.events = events
+	e.uplink = uplink
+	e.display = display
 
+	e.registerHostFuncs()
+}
+
+// registerHostFuncs does the actual binding using stored channel references
+func (e *LuaEngine) registerHostFuncs() {
+	e.runeTable = e.L.NewTable()
+	e.L.SetGlobal("rune", e.runeTable)
+
+	e.registerCoreFuncs()
+	e.registerTimerFuncs()
+	e.registerRegexFuncs()
+}
+
+// registerCoreFuncs registers core rune.* functions
+func (e *LuaEngine) registerCoreFuncs() {
 	// rune.send_raw(text): Bypasses alias processing, writes directly to socket
-	e.L.SetField(runeTable, "send_raw", e.L.NewFunction(func(L *lua.LState) int {
+	e.L.SetField(e.runeTable, "send_raw", e.L.NewFunction(func(L *lua.LState) int {
 		cmd := L.CheckString(1)
-		uplink <- cmd
+		e.uplink <- cmd
 		return 0
 	}))
 
 	// rune.print(text): Outputs text to the local display
-	e.L.SetField(runeTable, "print", e.L.NewFunction(func(L *lua.LState) int {
+	e.L.SetField(e.runeTable, "print", e.L.NewFunction(func(L *lua.LState) int {
 		msg := L.CheckString(1)
-		display <- msg
+		e.display <- msg
 		return 0
 	}))
 
 	// rune.quit(): Exit the client
-	e.L.SetField(runeTable, "quit", e.L.NewFunction(func(L *lua.LState) int {
-		events <- mud.Event{
+	e.L.SetField(e.runeTable, "quit", e.L.NewFunction(func(L *lua.LState) int {
+		e.events <- mud.Event{
 			Type:    mud.EventSystemControl,
 			Control: mud.ControlOp{Action: mud.ActionQuit},
 		}
@@ -68,9 +106,9 @@ func (e *LuaEngine) RegisterHostFuncs(events chan<- mud.Event, uplink chan<- str
 	}))
 
 	// rune.connect(address): Connect to server
-	e.L.SetField(runeTable, "connect", e.L.NewFunction(func(L *lua.LState) int {
+	e.L.SetField(e.runeTable, "connect", e.L.NewFunction(func(L *lua.LState) int {
 		addr := L.CheckString(1)
-		events <- mud.Event{
+		e.events <- mud.Event{
 			Type:    mud.EventSystemControl,
 			Control: mud.ControlOp{Action: mud.ActionConnect, Address: addr},
 		}
@@ -78,8 +116,8 @@ func (e *LuaEngine) RegisterHostFuncs(events chan<- mud.Event, uplink chan<- str
 	}))
 
 	// rune.disconnect(): Disconnect from server
-	e.L.SetField(runeTable, "disconnect", e.L.NewFunction(func(L *lua.LState) int {
-		events <- mud.Event{
+	e.L.SetField(e.runeTable, "disconnect", e.L.NewFunction(func(L *lua.LState) int {
+		e.events <- mud.Event{
 			Type:    mud.EventSystemControl,
 			Control: mud.ControlOp{Action: mud.ActionDisconnect},
 		}
@@ -87,35 +125,37 @@ func (e *LuaEngine) RegisterHostFuncs(events chan<- mud.Event, uplink chan<- str
 	}))
 
 	// rune.reload(): Reload all scripts
-	e.L.SetField(runeTable, "reload", e.L.NewFunction(func(L *lua.LState) int {
-		events <- mud.Event{
+	e.L.SetField(e.runeTable, "reload", e.L.NewFunction(func(L *lua.LState) int {
+		e.events <- mud.Event{
 			Type:    mud.EventSystemControl,
 			Control: mud.ControlOp{Action: mud.ActionReload},
 		}
 		return 0
 	}))
 
-	// rune.load(path): Load a Lua script with proper path setup for relative requires
-	e.L.SetField(runeTable, "load", e.L.NewFunction(func(L *lua.LState) int {
+	// rune.load(path): Load a Lua script
+	e.L.SetField(e.runeTable, "load", e.L.NewFunction(func(L *lua.LState) int {
 		scriptPath := L.CheckString(1)
-		events <- mud.Event{
+		e.events <- mud.Event{
 			Type:    mud.EventSystemControl,
 			Control: mud.ControlOp{Action: mud.ActionLoad, ScriptPath: scriptPath},
 		}
 		return 0
 	}))
+}
 
-	// Create rune.timer submodule
+// registerTimerFuncs registers rune.timer.* functions
+func (e *LuaEngine) registerTimerFuncs() {
 	timerTable := e.L.NewTable()
-	e.L.SetField(runeTable, "timer", timerTable)
+	e.L.SetField(e.runeTable, "timer", timerTable)
 
 	// rune.timer.after(seconds, callback): Schedule delayed callback
 	e.L.SetField(timerTable, "after", e.L.NewFunction(func(L *lua.LState) int {
 		seconds := L.CheckNumber(1)
 		fn := L.CheckFunction(2)
 
-		time.AfterFunc(time.Duration(float64(seconds)*float64(time.Second)), func() {
-			events <- mud.Event{
+		time.AfterFunc(toDuration(seconds), func() {
+			e.events <- mud.Event{
 				Type: mud.EventTimer,
 				Callback: func() {
 					L.Push(fn)
@@ -134,18 +174,24 @@ func (e *LuaEngine) RegisterHostFuncs(events chan<- mud.Event, uplink chan<- str
 		e.timerMu.Lock()
 		e.timerID++
 		id := e.timerID
-		ticker := time.NewTicker(time.Duration(float64(seconds) * float64(time.Second)))
-		e.timers[id] = ticker
+		ticker := time.NewTicker(toDuration(seconds))
+		done := make(chan struct{})
+		e.timers[id] = &timerEntry{ticker: ticker, done: done}
 		e.timerMu.Unlock()
 
 		go func() {
-			for range ticker.C {
-				events <- mud.Event{
-					Type: mud.EventTimer,
-					Callback: func() {
-						L.Push(fn)
-						L.PCall(0, 0, nil)
-					},
+			for {
+				select {
+				case <-done:
+					return
+				case <-ticker.C:
+					e.events <- mud.Event{
+						Type: mud.EventTimer,
+						Callback: func() {
+							L.Push(fn)
+							L.PCall(0, 0, nil)
+						},
+					}
 				}
 			}
 		}()
@@ -157,40 +203,40 @@ func (e *LuaEngine) RegisterHostFuncs(events chan<- mud.Event, uplink chan<- str
 	// rune.timer.cancel(id): Cancel a repeating timer
 	e.L.SetField(timerTable, "cancel", e.L.NewFunction(func(L *lua.LState) int {
 		id := int(L.CheckNumber(1))
-
-		e.timerMu.Lock()
-		if ticker, ok := e.timers[id]; ok {
-			ticker.Stop()
-			delete(e.timers, id)
-		}
-		e.timerMu.Unlock()
-
+		e.cancelTimer(id)
 		return 0
 	}))
 
 	// rune.timer.cancel_all(): Cancel all repeating timers
 	e.L.SetField(timerTable, "cancel_all", e.L.NewFunction(func(L *lua.LState) int {
-		e.timerMu.Lock()
-		for id, ticker := range e.timers {
-			ticker.Stop()
-			delete(e.timers, id)
-		}
-		e.timerMu.Unlock()
-
+		e.CancelAllTimers()
 		return 0
 	}))
+}
 
-	// Create rune.regex submodule
+// cancelTimer cancels a single timer by ID
+func (e *LuaEngine) cancelTimer(id int) {
+	e.timerMu.Lock()
+	if entry, ok := e.timers[id]; ok {
+		close(entry.done)
+		entry.ticker.Stop()
+		delete(e.timers, id)
+	}
+	e.timerMu.Unlock()
+}
+
+// registerRegexFuncs registers rune.regex.* functions
+func (e *LuaEngine) registerRegexFuncs() {
 	regexTable := e.L.NewTable()
-	e.L.SetField(runeTable, "regex", regexTable)
+	e.L.SetField(e.runeTable, "regex", regexTable)
 
-	// rune.regex.match(pattern, text): Match using Go's regexp with caching
+	// rune.regex.match(pattern, text): Match using Go's regexp with LRU caching
 	e.L.SetField(regexTable, "match", e.L.NewFunction(func(L *lua.LState) int {
 		pattern := L.CheckString(1)
 		text := L.CheckString(2)
 
-		// Check cache first
-		re, ok := e.regexCache[pattern]
+		// Check LRU cache first
+		re, ok := e.regexCache.Get(pattern)
 		if !ok {
 			var err error
 			re, err = regexp.Compile(pattern)
@@ -199,7 +245,7 @@ func (e *LuaEngine) RegisterHostFuncs(events chan<- mud.Event, uplink chan<- str
 				L.Push(lua.LString(err.Error()))
 				return 2
 			}
-			e.regexCache[pattern] = re
+			e.regexCache.Add(pattern, re)
 		}
 
 		// FindStringSubmatch returns [full_match, group1, group2...]
@@ -226,7 +272,7 @@ func (e *LuaEngine) LoadEmbeddedCore(scripts embed.FS) error {
 	// Read all files from core directory
 	entries, err := fs.ReadDir(scripts, "core")
 	if err != nil {
-		return err
+		return fmt.Errorf("reading core scripts: %w", err)
 	}
 
 	// Sort entries to ensure consistent load order (00_, 10_, 20_, etc.)
@@ -242,10 +288,10 @@ func (e *LuaEngine) LoadEmbeddedCore(scripts embed.FS) error {
 	for _, file := range files {
 		content, err := scripts.ReadFile("core/" + file)
 		if err != nil {
-			return err
+			return fmt.Errorf("reading %s: %w", file, err)
 		}
 		if err := e.L.DoString(string(content)); err != nil {
-			return err
+			return fmt.Errorf("executing %s: %w", file, err)
 		}
 	}
 
@@ -271,7 +317,7 @@ func (e *LuaEngine) LoadUserScripts(paths []string) error {
 		// Get absolute path and directory
 		absPath, err := filepath.Abs(path)
 		if err != nil {
-			return err
+			return fmt.Errorf("resolving %s: %w", path, err)
 		}
 		dir := filepath.Dir(absPath)
 
@@ -287,12 +333,12 @@ func (e *LuaEngine) LoadUserScripts(paths []string) error {
 		content, err := os.ReadFile(absPath)
 		if err != nil {
 			e.L.SetField(pkg, "path", lua.LString(oldPath))
-			return err
+			return fmt.Errorf("reading %s: %w", absPath, err)
 		}
 
 		if err := e.L.DoString(string(content)); err != nil {
 			e.L.SetField(pkg, "path", lua.LString(oldPath))
-			return err
+			return fmt.Errorf("executing %s: %w", absPath, err)
 		}
 
 		// Restore original package.path
@@ -303,8 +349,7 @@ func (e *LuaEngine) LoadUserScripts(paths []string) error {
 
 // getHooksCall returns the rune.hooks.call function
 func (e *LuaEngine) getHooksCall() lua.LValue {
-	runeTable := e.L.GetGlobal("rune").(*lua.LTable)
-	hooksTable := e.L.GetField(runeTable, "hooks").(*lua.LTable)
+	hooksTable := e.L.GetField(e.runeTable, "hooks").(*lua.LTable)
 	return e.L.GetField(hooksTable, "call")
 }
 
@@ -398,8 +443,9 @@ func (e *LuaEngine) ExecuteCallback(cb func()) {
 // CancelAllTimers stops all repeating timers
 func (e *LuaEngine) CancelAllTimers() {
 	e.timerMu.Lock()
-	for id, ticker := range e.timers {
-		ticker.Stop()
+	for id, entry := range e.timers {
+		close(entry.done)
+		entry.ticker.Stop()
 		delete(e.timers, id)
 	}
 	e.timerMu.Unlock()
@@ -415,17 +461,33 @@ func (e *LuaEngine) ClearRequireCache() {
 	})
 }
 
-// Reload reloads all scripts (core + user init)
+// Reload reloads all scripts (core + user init) with fresh Lua state
 func (e *LuaEngine) Reload(coreScripts embed.FS, configDir string) error {
 	// Cancel all timers
 	e.CancelAllTimers()
-	// Clear require cache
-	e.ClearRequireCache()
-	// Reload core scripts
+
+	// Close old Lua state
+	e.L.Close()
+
+	// Create fresh Lua state
+	e.L = lua.NewState()
+	cache, _ := lru.New[string, *regexp.Regexp](100)
+	e.regexCache = cache
+	e.timers = make(map[int]*timerEntry)
+	e.timerID = 0
+
+	// Re-register host functions
+	e.registerHostFuncs()
+
+	// Set config dir
+	e.SetConfigDir(configDir)
+
+	// Load core scripts
 	if err := e.LoadEmbeddedCore(coreScripts); err != nil {
 		return err
 	}
-	// Reload init.lua
+
+	// Load init.lua
 	initPath := filepath.Join(configDir, "init.lua")
 	if _, err := os.Stat(initPath); err == nil {
 		if err := e.LoadUserScripts([]string{initPath}); err != nil {

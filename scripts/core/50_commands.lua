@@ -1,10 +1,5 @@
 -- Command Processing System
 
--- Smart send that processes aliases and semicolons
-rune.send = function(input)
-    on_input(input)
-end
-
 -- Helper: Split string into a queue
 local function parse_to_queue(input)
     local queue = {}
@@ -18,8 +13,36 @@ local function parse_to_queue(input)
     return queue
 end
 
+-- Current queue reference for rune.send() to append to
+local current_queue = nil
+
+-- Smart send that processes aliases and semicolons
+-- If called during queue processing, appends to current queue
+-- Otherwise starts new queue processing
+rune.send = function(input)
+    -- Preprocess TinTin++ syntax
+    if rune.tintin and rune.tintin.expandRepeats then
+        input = rune.tintin.expandRepeats(input)
+    end
+
+    local new_items = parse_to_queue(input)
+
+    if current_queue then
+        -- Append to existing queue (called from function alias)
+        for i = #new_items, 1, -1 do
+            table.insert(current_queue, 1, new_items[i])
+        end
+    else
+        -- Start new queue processing
+        process_queue(new_items)
+    end
+end
+
 -- The Iterative Executor (avoids stack overflow with deep alias chains)
 local function process_queue(queue)
+    -- Set current queue so rune.send() can append to it
+    current_queue = queue
+
     while #queue > 0 do
         -- Pop first item
         local current = table.remove(queue, 1)
@@ -31,6 +54,7 @@ local function process_queue(queue)
             rune.timer.after(tonumber(wait_time), function()
                 process_queue(queue)
             end)
+            current_queue = nil
             return
         end
 
@@ -46,6 +70,7 @@ local function process_queue(queue)
         if alias_value then
             if type(alias_value) == "function" then
                 -- Function alias: call with args
+                -- It can use rune.send() to add commands to current queue
                 alias_value(args)
             else
                 -- String alias: expand and prepend to queue
@@ -70,6 +95,9 @@ local function process_queue(queue)
             rune.send_raw(current)
         end
     end
+
+    -- Clear current queue when done
+    current_queue = nil
 end
 
 -- Register core input handler

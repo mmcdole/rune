@@ -64,7 +64,7 @@ function rune.alias.run(name, args)
         if args and args ~= "" then
             expansion = expansion .. " " .. args
         end
-        on_input(expansion)
+        rune.send(expansion)
     end
     return true
 end
