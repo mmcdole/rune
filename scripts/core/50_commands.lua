@@ -1,122 +1,115 @@
 -- Command Processing System
 
--- Helper: Split string into a queue
-local function parse_to_queue(input)
-    local queue = {}
-    -- Handle empty input - should send empty command
-    if input == "" then
-        return {""}
-    end
-    for part in string.gmatch(input, "[^"..rune.config.delimiter.."]+") do
-        table.insert(queue, part:match("^%s*(.-)%s*$"))
-    end
-    return queue
-end
+-- STATE
+local active_queue = nil   -- The table of pending commands
+local inject_cursor = 1    -- Where to insert new commands (1 = front)
 
--- Queue state for rune.send()
-local current_queue = nil
-local insert_cursor = nil  -- nil = append to tail; number = insert at cursor
+-- CONFIG
+local MAX_OPS = 5000       -- Prevent infinite loops
 
--- Smart send that processes aliases and semicolons
--- If called during queue processing, inserts at cursor or appends to queue
--- Otherwise starts new queue processing
-rune.send = function(input)
-    -- Preprocess TinTin++ syntax
+-- Forward declaration
+local process_queue
+
+-- HELPER: Parse string to list (handles separators and TinTin expansion)
+local function parse_to_list(input)
+    -- 1. TinTin Expansion (#N {})
     if rune.tintin and rune.tintin.expandRepeats then
         input = rune.tintin.expandRepeats(input)
     end
 
-    local new_items = parse_to_queue(input)
+    -- 2. Split by delimiter
+    local list = {}
+    if input == "" then return {""} end
+    for part in string.gmatch(input, "[^"..rune.config.delimiter.."]+") do
+        table.insert(list, part:match("^%s*(.-)%s*$"))
+    end
+    return list
+end
 
-    if current_queue then
-        if insert_cursor then
-            -- Insert at cursor position (function alias mode)
-            for _, item in ipairs(new_items) do
-                table.insert(current_queue, insert_cursor, item)
-                insert_cursor = insert_cursor + 1
-            end
-        else
-            -- Append to tail
-            for _, item in ipairs(new_items) do
-                table.insert(current_queue, item)
-            end
+-- RUNE.SEND: The Gateway
+-- If called during queue processing, inserts at cursor position
+-- Otherwise starts new queue processing
+rune.send = function(input)
+    local new_cmds = parse_to_list(input)
+
+    if active_queue then
+        -- Insert at current cursor (preserves order A -> B -> C)
+        for _, cmd in ipairs(new_cmds) do
+            table.insert(active_queue, inject_cursor, cmd)
+            inject_cursor = inject_cursor + 1
         end
     else
         -- Start new queue processing
-        process_queue(new_items)
+        process_queue(new_cmds)
     end
 end
 
--- The Iterative Executor (avoids stack overflow with deep alias chains)
-local function process_queue(queue)
-    -- Set current queue so rune.send() can insert into it
-    current_queue = queue
+-- PROCESS QUEUE: The Event Loop
+local run_loop
 
-    while #queue > 0 do
-        -- Pop first item
-        local current = table.remove(queue, 1)
+run_loop = function(queue)
+    active_queue = queue
 
-        -- 1. Check for #wait
-        local wait_time = current:match("^"..rune.config.wait_cmd.."%s+(%d+%.?%d*)")
-        if wait_time then
-            rune.print("[System] Pausing for " .. wait_time .. "s...")
-            rune.timer.after(tonumber(wait_time), function()
-                process_queue(queue)
-            end)
-            current_queue = nil
-            return
-        end
+    local ok, err = pcall(function()
+        local ops = 0
 
-        -- 2. Check for Alias (with argument support)
-        -- Split current into command and args
-        local cmd, args = current:match("^(%S+)%s*(.*)")
-        if not cmd then
-            cmd = current
-            args = ""
-        end
+        while #queue > 0 do
+            ops = ops + 1
+            if ops > MAX_OPS then error("Infinite alias loop detected") end
 
-        local alias_value = rune.alias.get(cmd)
-        if alias_value then
-            if type(alias_value) == "function" then
-                -- Function alias: call with args
-                -- Save old cursor (for nested function aliases)
-                local prev_cursor = insert_cursor
+            -- Reset cursor for the NEW command we are about to process.
+            -- Expansions for this command must happen at the front.
+            inject_cursor = 1
 
-                -- Set cursor to position 1 (current execution position after pop)
-                insert_cursor = 1
+            local line = table.remove(queue, 1)
 
-                alias_value(args)
-
-                -- Restore cursor
-                insert_cursor = prev_cursor
-            else
-                -- String alias: expand and insert at current position
-                local expansion = alias_value
-                if args ~= "" then
-                    expansion = expansion .. " " .. args
-                end
-                -- Apply TinTin++ preprocessing to alias expansion
-                if rune.tintin and rune.tintin.expandRepeats then
-                    expansion = rune.tintin.expandRepeats(expansion)
-                end
-                local expanded_queue = parse_to_queue(expansion)
-
-                -- Insert at position 1 (where we just popped from)
-                for i = #expanded_queue, 1, -1 do
-                    table.insert(queue, 1, expanded_queue[i])
-                end
+            -- 1. Check for #wait
+            local wait_time = line:match("^"..rune.config.wait_cmd.."%s+(%d+%.?%d*)")
+            if wait_time then
+                -- Release lock so user can type while waiting
+                active_queue = nil
+                rune.print("[System] Pausing for " .. wait_time .. "s...")
+                rune.timer.after(tonumber(wait_time), function()
+                    run_loop(queue)
+                end)
+                return -- Exit completely
             end
-            -- Continue loop to process expanded/remaining queue
-        else
-            -- 3. Normal Command - send directly to network
-            rune.send_raw(current)
-        end
-    end
 
-    -- Clear queue state when done
-    current_queue = nil
-    insert_cursor = nil
+            -- 2. Check for Alias (with argument support)
+            local cmd, args = line:match("^(%S+)%s*(.*)")
+            cmd = cmd or line
+            args = args or ""
+
+            local alias = rune.alias.get(cmd)
+            if alias then
+                if type(alias) == "function" then
+                    -- Execute function alias
+                    -- rune.send() calls inside will use the global inject_cursor
+                    alias(args)
+                else
+                    -- String alias: expand and insert via rune.send
+                    local expansion = alias
+                    if args ~= "" then
+                        expansion = expansion .. " " .. args
+                    end
+                    rune.send(expansion)
+                end
+            else
+                -- 3. Normal Command - send directly to network
+                rune.send_raw(line)
+            end
+        end
+    end)
+
+    -- Cleanup - only runs if loop finished or errored (not if #wait returned early)
+    active_queue = nil
+
+    if not ok then
+        rune.print("\027[31m[Error] " .. tostring(err) .. "\027[0m")
+    end
 end
+
+process_queue = run_loop
 
 -- Register core input handler
 rune.hooks.register("input", function(input)
@@ -132,13 +125,8 @@ rune.hooks.register("input", function(input)
         return false  -- consumed
     end
 
-    -- Preprocess TinTin++ syntax (e.g., #6 north)
-    if rune.tintin and rune.tintin.expandRepeats then
-        input = rune.tintin.expandRepeats(input)
-    end
-
-    -- Process as normal command
-    local queue = parse_to_queue(input)
+    -- Process as normal command (TinTin expansion happens in parse_to_list)
+    local queue = parse_to_list(input)
     process_queue(queue)
     return false  -- consumed
 end, { priority = 100 })
