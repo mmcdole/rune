@@ -100,7 +100,7 @@ function rune.hooks.call(event, ...)
         -- System events (notifications) - all handlers run
         local args = {...}
         for _, entry in ipairs(handlers) do
-            entry.handler(table.unpack(args))
+            entry.handler(unpack(args))
         end
     end
 end
@@ -132,4 +132,17 @@ end
 -- Check if any handlers are registered for an event
 function rune.hooks.has(event)
     return registry[event] and #registry[event] > 0
+end
+
+-- Debug: inspect registry contents
+function rune.hooks.debug(event)
+    local handlers = registry[event]
+    if not handlers then
+        rune.print("No handlers for: " .. event)
+        return
+    end
+    for i, entry in ipairs(handlers) do
+        rune.print(string.format("#%d: id=%s handler=%s priority=%s",
+            i, tostring(entry.id), type(entry.handler), tostring(entry.priority)))
+    end
 end

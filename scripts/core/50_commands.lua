@@ -13,11 +13,12 @@ local function parse_to_queue(input)
     return queue
 end
 
--- Current queue reference for rune.send() to append to
+-- Queue state for rune.send()
 local current_queue = nil
+local insert_cursor = nil  -- nil = append to tail; number = insert at cursor
 
 -- Smart send that processes aliases and semicolons
--- If called during queue processing, appends to current queue
+-- If called during queue processing, inserts at cursor or appends to queue
 -- Otherwise starts new queue processing
 rune.send = function(input)
     -- Preprocess TinTin++ syntax
@@ -28,9 +29,17 @@ rune.send = function(input)
     local new_items = parse_to_queue(input)
 
     if current_queue then
-        -- Append to existing queue (called from function alias)
-        for i = #new_items, 1, -1 do
-            table.insert(current_queue, 1, new_items[i])
+        if insert_cursor then
+            -- Insert at cursor position (function alias mode)
+            for _, item in ipairs(new_items) do
+                table.insert(current_queue, insert_cursor, item)
+                insert_cursor = insert_cursor + 1
+            end
+        else
+            -- Append to tail
+            for _, item in ipairs(new_items) do
+                table.insert(current_queue, item)
+            end
         end
     else
         -- Start new queue processing
@@ -40,7 +49,7 @@ end
 
 -- The Iterative Executor (avoids stack overflow with deep alias chains)
 local function process_queue(queue)
-    -- Set current queue so rune.send() can append to it
+    -- Set current queue so rune.send() can insert into it
     current_queue = queue
 
     while #queue > 0 do
@@ -70,11 +79,18 @@ local function process_queue(queue)
         if alias_value then
             if type(alias_value) == "function" then
                 -- Function alias: call with args
-                -- It can use rune.send() to add commands to current queue
+                -- Save old cursor (for nested function aliases)
+                local prev_cursor = insert_cursor
+
+                -- Set cursor to position 1 (current execution position after pop)
+                insert_cursor = 1
+
                 alias_value(args)
+
+                -- Restore cursor
+                insert_cursor = prev_cursor
             else
-                -- String alias: expand and prepend to queue
-                -- If there were args, append them to the expansion
+                -- String alias: expand and insert at current position
                 local expansion = alias_value
                 if args ~= "" then
                     expansion = expansion .. " " .. args
@@ -85,6 +101,7 @@ local function process_queue(queue)
                 end
                 local expanded_queue = parse_to_queue(expansion)
 
+                -- Insert at position 1 (where we just popped from)
                 for i = #expanded_queue, 1, -1 do
                     table.insert(queue, 1, expanded_queue[i])
                 end
@@ -96,8 +113,9 @@ local function process_queue(queue)
         end
     end
 
-    -- Clear current queue when done
+    -- Clear queue state when done
     current_queue = nil
+    insert_cursor = nil
 end
 
 -- Register core input handler

@@ -59,8 +59,6 @@ func (c *ConsoleUI) Input() <-chan string {
 func (c *ConsoleUI) Run() error {
 	scanner := bufio.NewScanner(os.Stdin)
 
-	fmt.Println("Rune MUD Client - Type 'quit' to exit")
-	fmt.Println("--------------------------------------")
 
 	for scanner.Scan() {
 		text := scanner.Text()

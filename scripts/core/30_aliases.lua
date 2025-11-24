@@ -18,17 +18,25 @@ end
 
 function rune.alias.list()
     rune.print("[Aliases]")
-    local count = 0
-    for k, v in pairs(storage) do
+    -- Collect and sort keys
+    local keys = {}
+    for k in pairs(storage) do
+        table.insert(keys, k)
+    end
+    table.sort(keys)
+
+    if #keys == 0 then
+        rune.print("  (none)")
+        return
+    end
+
+    for _, k in ipairs(keys) do
+        local v = storage[k]
         if type(v) == "function" then
             rune.print("  " .. k .. " -> (function)")
         else
             rune.print("  " .. k .. " -> " .. v)
         end
-        count = count + 1
-    end
-    if count == 0 then
-        rune.print("  (none)")
     end
 end
 

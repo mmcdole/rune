@@ -24,16 +24,9 @@ func main() {
 	uiIn, uiOut := buffer.Unbounded[string](100, 50000)
 
 	// Component initialization
-	luaEngine := engine.NewLuaEngine()
+	luaEngine := engine.NewLuaEngine(events, netOut, uiIn)
 	tcpClient := network.NewTCPClient()
 	tui := ui.NewConsoleUI()
-
-	// Setup engine bindings
-	// Note: We pass 'uiIn' (the write side) to Lua
-	luaEngine.RegisterHostFuncs(events, netOut, uiIn)
-
-	// Set config directory
-	luaEngine.SetConfigDir(config.Dir())
 
 	defer luaEngine.Close()
 
@@ -71,6 +64,11 @@ func main() {
 			tui.Render(line)
 		}
 	}()
+
+	// Initialize Lua state with core and user scripts
+	if err := luaEngine.InitState(scripts.CoreScripts, config.Dir()); err != nil {
+		uiIn <- fmt.Sprintf("\033[31m[Error] Loading scripts: %v\033[0m", err)
+	}
 
 	// Orchestrator loop - single goroutine owns Lua state
 	go func() {
@@ -128,7 +126,7 @@ func main() {
 					luaEngine.CallHook("disconnected")
 				case mud.ActionReload:
 					luaEngine.CallHook("reloading")
-					if err := luaEngine.Reload(scripts.CoreScripts, config.Dir()); err != nil {
+					if err := luaEngine.InitState(scripts.CoreScripts, config.Dir()); err != nil {
 						luaEngine.CallHook("error", err.Error())
 						break
 					}
@@ -144,25 +142,6 @@ func main() {
 			}
 		}
 	}()
-
-	// Load scripts
-	fmt.Println("Loading core scripts...")
-	if err := luaEngine.LoadEmbeddedCore(scripts.CoreScripts); err != nil {
-		fmt.Println("Error loading core scripts:", err)
-		os.Exit(1)
-	}
-	fmt.Println("Core scripts loaded.")
-
-	// Auto-load init.lua if it exists
-	initPath := config.InitFile()
-	if _, err := os.Stat(initPath); err == nil {
-		fmt.Println("Loading init.lua...")
-		if err := luaEngine.LoadUserScripts([]string{initPath}); err != nil {
-			fmt.Println("Error loading init.lua:", err)
-			// Continue anyway - don't exit on user script error
-		}
-		fmt.Println("init.lua loaded.")
-	}
 
 	// Load user scripts from command line args
 	userScripts := os.Args[1:]

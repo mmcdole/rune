@@ -1,6 +1,11 @@
 -- Default System Event Handlers
 -- Users can register additional handlers or override with lower priority
 
+rune.hooks.register("ready", function()
+    rune.print("Rune MUD Client")
+    rune.print("Type /help for commands")
+end, { priority = 100 })
+
 rune.hooks.register("connecting", function(addr)
     rune.print("[System] Connecting to " .. addr .. "...")
 end, { priority = 100 })
