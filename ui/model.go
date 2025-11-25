@@ -345,6 +345,11 @@ func (m Model) handleFuzzyKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.fuzzySearch.Search(m.fuzzySearch.query + string(msg.Runes))
 		return m, nil
 
+	case tea.KeySpace:
+		// Add space to search query
+		m.fuzzySearch.Search(m.fuzzySearch.query + " ")
+		return m, nil
+
 	case tea.KeyBackspace:
 		if len(m.fuzzySearch.query) > 0 {
 			m.fuzzySearch.Search(m.fuzzySearch.query[:len(m.fuzzySearch.query)-1])
