@@ -17,11 +17,25 @@ local function parse_to_list(input)
         input = rune.tintin.expandRepeats(input)
     end
 
-    -- 2. Split by delimiter
+    -- 2. Split by delimiter (preserving empty commands)
     local list = {}
     if input == "" then return {""} end
-    for part in string.gmatch(input, "[^"..rune.config.delimiter.."]+") do
+
+    -- Manual split to preserve empty strings between delimiters
+    local delimiter = rune.config.delimiter
+    local start = 1
+    while true do
+        local pos = input:find(delimiter, start, true)
+        if not pos then
+            -- Last part (or only part if no delimiter found)
+            local part = input:sub(start)
+            table.insert(list, part:match("^%s*(.-)%s*$"))
+            break
+        end
+        -- Extract part before delimiter
+        local part = input:sub(start, pos - 1)
         table.insert(list, part:match("^%s*(.-)%s*$"))
+        start = pos + #delimiter
     end
     return list
 end

@@ -1,0 +1,34 @@
+{
+  "tests": [
+    {
+      "name": "Single Command",
+      "input": "north",
+      "expected_commands": ["north"]
+    },
+    {
+      "name": "Multiple Commands",
+      "input": "say hello;east;look",
+      "expected_commands": ["say hello", "east", "look"]
+    },
+    {
+      "name": "Extra Whitespace",
+      "input": "  say hello ;  east; look  ",
+      "expected_commands": ["say hello", "east", "look"]
+    },
+    {
+      "name": "Empty Commands",
+      "input": ";say hello;;look;",
+      "expected_commands": ["", "say hello", "", "look", ""]
+    },
+    {
+      "name": "Only Whitespace",
+      "input": "   ",
+      "expected_commands": [""]
+    },
+    {
+      "name": "Whitespace Between Semicolons",
+      "input": ";   ;   ;",
+      "expected_commands": ["", "", "", ""]
+    }
+  ]
+} 
