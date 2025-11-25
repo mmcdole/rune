@@ -1,14 +1,19 @@
 -- Trigger System
 
 rune.trigger = {}
-local storage = {}   -- { id = { pattern, action, enabled, gag, is_regex } }
+local storage = {}   -- { id = { pattern, action, enabled, gag, is_regex, raw } }
 local order = {}     -- List for ordered execution
 local next_id = 1    -- Auto-incrementing ID
+
+-- Note: ANSI stripping is done in Go. Line object has :raw() and :line() methods.
+-- Triggers match against :line() (clean) by default, use {raw=true} to match with ANSI.
+-- Callback signature: function(matches, line)
 
 -- Add a trigger
 -- Returns: trigger ID for later removal
 -- action can be a string (command to send) or a function (callback)
--- options: { gag = bool, enabled = bool, regex = bool }
+-- options: { gag = bool, enabled = bool, regex = bool, raw = bool }
+-- By default, triggers match against ANSI-stripped text. Use raw=true to match with ANSI codes.
 function rune.trigger.add(pattern, action, options)
     options = options or {}
 
@@ -21,6 +26,7 @@ function rune.trigger.add(pattern, action, options)
         enabled = options.enabled ~= false,  -- default true
         gag = options.gag or false,
         is_regex = options.regex or false,   -- Use Go regex instead of Lua patterns
+        raw = options.raw or false,          -- Match on raw line with ANSI (default: clean)
     }
     table.insert(order, id)
     return id
@@ -115,10 +121,16 @@ function rune.trigger.list()
     end
 end
 
--- Process triggers against a line
--- Returns: modified_line, should_display
+-- Process triggers against a Line object
+-- Line object has :raw() and :line() methods
+-- Returns: modified_line (string), should_display (bool)
 function rune.trigger.process(line)
     local gagged = false  -- track if line should be gagged
+    local modified_text = nil  -- track if line was modified
+
+    -- Get both versions from the Line object
+    local raw_line = line:raw()
+    local clean_line = line:line()
 
     -- Iterate using the ORDER list
     for _, id in ipairs(order) do
@@ -126,14 +138,17 @@ function rune.trigger.process(line)
         if trig and trig.enabled then
             local matches = nil
 
+            -- Choose which line to match against (clean by default, raw if requested)
+            local match_line = trig.raw and raw_line or clean_line
+
             -- Support both Lua patterns and Go Regex
             if trig.is_regex then
                 -- rune.regex.match returns a table of captures {full, group1, group2...}
-                matches = rune.regex.match(trig.pattern, line)
+                matches = rune.regex.match(trig.pattern, match_line)
             else
                 -- Standard Lua match
-                local m = {line:match(trig.pattern)}
-                if #m > 0 or line:match(trig.pattern) then
+                local m = {match_line:match(trig.pattern)}
+                if #m > 0 or match_line:match(trig.pattern) then
                     matches = m
                 end
             end
@@ -146,8 +161,9 @@ function rune.trigger.process(line)
 
                 -- Execute action
                 if type(trig.action) == "function" then
-                    -- Call function with captures (pass matches table)
-                    local result = trig.action(line, matches)
+                    -- Callback signature: function(matches, line)
+                    -- matches = table of captures, line = Line object
+                    local result = trig.action(matches, line)
                     -- Function can return:
                     --   false = gag the line
                     --   string = modified line
@@ -155,7 +171,7 @@ function rune.trigger.process(line)
                     if result == false then
                         gagged = true
                     elseif type(result) == "string" then
-                        line = result
+                        modified_text = result
                     end
                 elseif type(trig.action) == "string" then
                     -- Send command (expand with captures using %1, %2, etc.)
@@ -173,5 +189,5 @@ function rune.trigger.process(line)
     if gagged then
         return "", false
     end
-    return line, true
+    return modified_text or raw_line, true
 end

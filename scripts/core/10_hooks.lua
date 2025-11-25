@@ -62,7 +62,11 @@ function rune.hooks.call(event, ...)
     local handlers = registry[event]
     if not handlers or #handlers == 0 then
         -- No handlers registered
-        if event == "output" or event == "prompt" then
+        if event == "output" then
+            -- Line object - return raw text
+            local line = select(1, ...)
+            return line:raw(), true
+        elseif event == "prompt" then
             return select(1, ...), true
         elseif event == "input" then
             return true
@@ -71,19 +75,47 @@ function rune.hooks.call(event, ...)
     end
 
     -- Determine event type for return value handling
-    if event == "output" or event == "prompt" then
-        -- Chain modifications
-        local current = select(1, ...)
+    if event == "output" then
+        -- Output receives a Line object (userdata with :raw() and :line() methods)
+        -- Chain handlers, passing the Line object to each
+        local line = select(1, ...)
+        local modified_text = nil  -- Track if any handler modified the output
+
         for _, entry in ipairs(handlers) do
-            local result = entry.handler(current)
+            local result = entry.handler(line)
             if result == false then
                 return "", false  -- gagged
             elseif type(result) == "string" then
-                current = result  -- modified
+                modified_text = result  -- handler returned modified text
             end
             -- nil = pass through unchanged
         end
-        return current, true
+
+        -- Return modified text if any handler changed it, otherwise raw line
+        if modified_text then
+            return modified_text, true
+        end
+        return line:raw(), true
+
+    elseif event == "prompt" then
+        -- Prompt receives a Line object (like output)
+        local line = select(1, ...)
+        local modified_text = nil
+
+        for _, entry in ipairs(handlers) do
+            local result = entry.handler(line)
+            if result == false then
+                return "", false  -- gagged
+            elseif type(result) == "string" then
+                modified_text = result  -- modified
+            end
+            -- nil = pass through unchanged
+        end
+
+        if modified_text then
+            return modified_text, true
+        end
+        return line:raw(), true
 
     elseif event == "input" then
         -- Any handler returning false stops processing

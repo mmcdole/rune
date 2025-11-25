@@ -75,3 +75,24 @@ type UI interface {
 	Input() <-chan string     // Stream from user
 	Run() error
 }
+
+// UIControlType identifies the type of UI control message
+type UIControlType int
+
+const (
+	UIControlStatus UIControlType = iota
+	UIControlPaneCreate
+	UIControlPaneWrite
+	UIControlPaneToggle
+	UIControlPaneClear
+	UIControlPaneBind
+	UIControlInfobar
+)
+
+// UIControl is a message for controlling the TUI from Lua
+type UIControl struct {
+	Type UIControlType
+	Text string // For status, pane write
+	Name string // Pane name
+	Key  string // For key bindings
+}

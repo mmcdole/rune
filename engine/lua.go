@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +16,27 @@ import (
 	"github.com/drake/rune/mud"
 	lua "github.com/yuin/gopher-lua"
 )
+
+// stripAnsi removes ANSI escape codes from a string.
+// Used to pre-compute clean text for trigger matching.
+func stripAnsi(s string) string {
+	var result strings.Builder
+	inEscape := false
+	for _, r := range s {
+		if r == '\x1b' {
+			inEscape = true
+			continue
+		}
+		if inEscape {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+				inEscape = false
+			}
+			continue
+		}
+		result.WriteRune(r)
+	}
+	return result.String()
+}
 
 // timerEntry holds a timer and its done channel for clean shutdown
 type timerEntry struct {
@@ -34,13 +56,14 @@ type LuaEngine struct {
 	runeTable *lua.LTable
 
 	// Channel references for reload
-	events  chan<- mud.Event
-	uplink  chan<- string
-	display chan<- string
+	events    chan<- mud.Event
+	uplink    chan<- string
+	display   chan<- string
+	uiControl chan<- mud.UIControl
 }
 
 // NewLuaEngine initializes a Lua VM with regex caching and timer management.
-func NewLuaEngine(events chan<- mud.Event, uplink chan<- string, display chan<- string) *LuaEngine {
+func NewLuaEngine(events chan<- mud.Event, uplink chan<- string, display chan<- string, uiControl chan<- mud.UIControl) *LuaEngine {
 	cache, _ := lru.New[string, *regexp.Regexp](100)
 	return &LuaEngine{
 		regexCache: cache,
@@ -48,6 +71,7 @@ func NewLuaEngine(events chan<- mud.Event, uplink chan<- string, display chan<- 
 		events:     events,
 		uplink:     uplink,
 		display:    display,
+		uiControl:  uiControl,
 	}
 }
 
@@ -154,11 +178,17 @@ func (e *LuaEngine) OnInput(text string) bool {
 
 // OnOutput handles server text
 func (e *LuaEngine) OnOutput(text string) (string, bool) {
+	// Pre-compute ANSI-stripped version for trigger matching
+	clean := stripAnsi(text)
+
+	// Create Line userdata object with both versions
+	lineUD := newLine(e.L, text, clean)
+
 	if err := e.L.CallByParam(lua.P{
 		Fn:      e.getHooksCall(),
 		NRet:    2,
 		Protect: true,
-	}, lua.LString("output"), lua.LString(text)); err != nil {
+	}, lua.LString("output"), lineUD); err != nil {
 		return text, true
 	}
 
@@ -176,11 +206,17 @@ func (e *LuaEngine) OnOutput(text string) (string, bool) {
 
 // OnPrompt handles server prompts
 func (e *LuaEngine) OnPrompt(text string) string {
+	// Pre-compute ANSI-stripped version for trigger matching
+	clean := stripAnsi(text)
+
+	// Create Line userdata object with both versions
+	lineUD := newLine(e.L, text, clean)
+
 	if err := e.L.CallByParam(lua.P{
 		Fn:      e.getHooksCall(),
 		NRet:    2,
 		Protect: true,
-	}, lua.LString("prompt"), lua.LString(text)); err != nil {
+	}, lua.LString("prompt"), lineUD); err != nil {
 		return text
 	}
 
@@ -261,6 +297,9 @@ func (e *LuaEngine) InitState(coreScripts embed.FS, configDir string) error {
 	e.timers = make(map[int]*timerEntry)
 	e.timerID = 0
 
+	// Register custom types
+	registerLineType(e.L)
+
 	// Bind host functions to the new state
 	e.registerHostFuncs()
 
@@ -301,6 +340,9 @@ func (e *LuaEngine) registerHostFuncs() {
 	e.registerCoreFuncs()
 	e.registerTimerFuncs()
 	e.registerRegexFuncs()
+	e.registerStatusFuncs()
+	e.registerPaneFuncs()
+	e.registerInfobarFuncs()
 }
 
 // registerCoreFuncs registers core rune.* functions
@@ -509,4 +551,110 @@ func expandTilde(path string) string {
 		}
 	}
 	return path
+}
+
+// registerStatusFuncs registers rune.status.* functions
+func (e *LuaEngine) registerStatusFuncs() {
+	statusTable := e.L.NewTable()
+	e.L.SetField(e.runeTable, "status", statusTable)
+
+	// rune.status.set(text): Set the status bar text
+	e.L.SetField(statusTable, "set", e.L.NewFunction(func(L *lua.LState) int {
+		text := L.CheckString(1)
+		if e.uiControl != nil {
+			e.uiControl <- mud.UIControl{
+				Type: mud.UIControlStatus,
+				Text: text,
+			}
+		}
+		return 0
+	}))
+}
+
+// registerPaneFuncs registers rune.pane.* functions
+func (e *LuaEngine) registerPaneFuncs() {
+	paneTable := e.L.NewTable()
+	e.L.SetField(e.runeTable, "pane", paneTable)
+
+	// rune.pane.create(name): Create a named pane
+	e.L.SetField(paneTable, "create", e.L.NewFunction(func(L *lua.LState) int {
+		name := L.CheckString(1)
+		if e.uiControl != nil {
+			e.uiControl <- mud.UIControl{
+				Type: mud.UIControlPaneCreate,
+				Name: name,
+			}
+		}
+		return 0
+	}))
+
+	// rune.pane.write(name, text): Write to a pane
+	e.L.SetField(paneTable, "write", e.L.NewFunction(func(L *lua.LState) int {
+		name := L.CheckString(1)
+		text := L.CheckString(2)
+		if e.uiControl != nil {
+			e.uiControl <- mud.UIControl{
+				Type: mud.UIControlPaneWrite,
+				Name: name,
+				Text: text,
+			}
+		}
+		return 0
+	}))
+
+	// rune.pane.toggle(name): Toggle pane visibility
+	e.L.SetField(paneTable, "toggle", e.L.NewFunction(func(L *lua.LState) int {
+		name := L.CheckString(1)
+		if e.uiControl != nil {
+			e.uiControl <- mud.UIControl{
+				Type: mud.UIControlPaneToggle,
+				Name: name,
+			}
+		}
+		return 0
+	}))
+
+	// rune.pane.clear(name): Clear pane contents
+	e.L.SetField(paneTable, "clear", e.L.NewFunction(func(L *lua.LState) int {
+		name := L.CheckString(1)
+		if e.uiControl != nil {
+			e.uiControl <- mud.UIControl{
+				Type: mud.UIControlPaneClear,
+				Name: name,
+			}
+		}
+		return 0
+	}))
+
+	// rune.pane.bind(key, name): Bind key to toggle pane
+	e.L.SetField(paneTable, "bind", e.L.NewFunction(func(L *lua.LState) int {
+		key := L.CheckString(1)
+		name := L.CheckString(2)
+		if e.uiControl != nil {
+			e.uiControl <- mud.UIControl{
+				Type: mud.UIControlPaneBind,
+				Key:  key,
+				Name: name,
+			}
+		}
+		return 0
+	}))
+}
+
+// registerInfobarFuncs registers rune.infobar.* functions
+func (e *LuaEngine) registerInfobarFuncs() {
+	infobarTable := e.L.NewTable()
+	e.L.SetField(e.runeTable, "infobar", infobarTable)
+
+	// rune.infobar.set(text): Set the info bar from Lua
+	e.L.SetField(infobarTable, "set", e.L.NewFunction(func(L *lua.LState) int {
+		text := L.CheckString(1)
+		if e.uiControl != nil {
+			e.uiControl <- mud.UIControl{
+				Type: mud.UIControlInfobar,
+				Text: text,
+			}
+		}
+		return 0
+	}))
 }

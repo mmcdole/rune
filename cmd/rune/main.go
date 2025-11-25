@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 
@@ -14,6 +15,10 @@ import (
 )
 
 func main() {
+	// Parse flags
+	simpleUI := flag.Bool("simple", false, "Use simple console UI instead of TUI")
+	flag.Parse()
+
 	// Event bus and coordination channels
 	events := make(chan mud.Event, 100)
 	netOut := make(chan string, 100)
@@ -23,10 +28,20 @@ func main() {
 	// the client is likely broken anyway, so we start dropping to save RAM.
 	uiIn, uiOut := buffer.Unbounded[string](100, 50000)
 
+	// UI control channel for Lua-driven status, panes, etc.
+	uiControl := make(chan mud.UIControl, 100)
+
 	// Component initialization
-	luaEngine := engine.NewLuaEngine(events, netOut, uiIn)
+	luaEngine := engine.NewLuaEngine(events, netOut, uiIn, uiControl)
 	tcpClient := network.NewTCPClient()
-	tui := ui.NewConsoleUI()
+
+	// Select UI mode
+	var tui mud.UI
+	if *simpleUI {
+		tui = ui.NewConsoleUI()
+	} else {
+		tui = ui.NewBubbleTeaUI()
+	}
 
 	defer luaEngine.Close()
 
@@ -65,6 +80,31 @@ func main() {
 		}
 	}()
 
+	// UI control dispatcher (for Lua-driven status, panes)
+	// Only works with BubbleTeaUI, silently ignored for ConsoleUI
+	if btui, ok := tui.(*ui.BubbleTeaUI); ok {
+		go func() {
+			for ctrl := range uiControl {
+				switch ctrl.Type {
+				case mud.UIControlStatus:
+					btui.SetStatusText(ctrl.Text)
+				case mud.UIControlPaneCreate:
+					btui.CreatePane(ctrl.Name)
+				case mud.UIControlPaneWrite:
+					btui.WritePane(ctrl.Name, ctrl.Text)
+				case mud.UIControlPaneToggle:
+					btui.TogglePane(ctrl.Name)
+				case mud.UIControlPaneClear:
+					btui.ClearPane(ctrl.Name)
+				case mud.UIControlPaneBind:
+					btui.BindPaneKey(ctrl.Key, ctrl.Name)
+				case mud.UIControlInfobar:
+					btui.SetInfobar(ctrl.Text)
+				}
+			}
+		}()
+	}
+
 	// Initialize Lua state with core and user scripts
 	if err := luaEngine.InitState(scripts.CoreScripts, config.Dir()); err != nil {
 		uiIn <- fmt.Sprintf("\033[31m[Error] Loading scripts: %v\033[0m", err)
@@ -88,7 +128,7 @@ func main() {
 				tui.RenderPrompt(modified)
 
 			case mud.EventUserInput:
-				tui.Render("> " + event.Payload) // Local echo
+				tui.Render(event.Payload) // Local echo
 				luaEngine.OnInput(event.Payload)
 
 			case mud.EventTimer:
@@ -143,8 +183,8 @@ func main() {
 		}
 	}()
 
-	// Load user scripts from command line args
-	userScripts := os.Args[1:]
+	// Load user scripts from command line args (after flags)
+	userScripts := flag.Args()
 	if len(userScripts) > 0 {
 		if err := luaEngine.LoadUserScripts(userScripts); err != nil {
 			fmt.Println("Error loading user scripts:", err)

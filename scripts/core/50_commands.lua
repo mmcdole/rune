@@ -156,9 +156,9 @@ rune.hooks.register("output", function(line)
 end, { priority = 100 })
 
 -- Register core prompt handler
-rune.hooks.register("prompt", function(text)
-    -- Process triggers against prompt text too
-    local modified, show = rune.trigger.process(text)
+rune.hooks.register("prompt", function(line)
+    -- Process triggers against prompt (line is now a Line object)
+    local modified, show = rune.trigger.process(line)
     if not show then
         return false  -- gag the prompt
     end

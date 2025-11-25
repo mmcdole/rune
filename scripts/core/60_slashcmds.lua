@@ -1,16 +1,32 @@
 -- Slash Command System
 
 rune.command = {}
-local commands = {}  -- Private storage
+local commands = {}  -- Private storage: name -> {handler, description}
 
 -- Add a slash command
-function rune.command.add(name, handler)
-    commands[name] = handler
+-- rune.command.add(name, handler) or rune.command.add(name, handler, description)
+function rune.command.add(name, handler, description)
+    commands[name] = {
+        handler = handler,
+        description = description or ""
+    }
 end
 
 -- Get a slash command handler
 function rune.command.get(name)
-    return commands[name]
+    local cmd = commands[name]
+    return cmd and cmd.handler or nil
+end
+
+-- List all commands for the picker (returns array of {name, description})
+function rune.command.list()
+    local result = {}
+    for name, cmd in pairs(commands) do
+        table.insert(result, {name = name, description = cmd.description})
+    end
+    -- Sort alphabetically
+    table.sort(result, function(a, b) return a.name < b.name end)
+    return result
 end
 
 -- Track last connection for reconnect
@@ -27,13 +43,13 @@ rune.command.add("connect", function(args)
     else
         rune.print("[Usage] /connect <host> <port>")
     end
-end)
+end, "Connect to a MUD server")
 
 -- /disconnect or /dc - Disconnect from server
 rune.command.add("disconnect", function(args)
     rune.disconnect()
-end)
-rune.command.add("dc", rune.command.get("disconnect"))
+end, "Disconnect from server")
+rune.command.add("dc", rune.command.get("disconnect"), "Disconnect (alias)")
 
 -- /reconnect or /rc - Reconnect to last server
 rune.command.add("reconnect", function(args)
@@ -42,8 +58,8 @@ rune.command.add("reconnect", function(args)
     else
         rune.print("[Error] No previous connection")
     end
-end)
-rune.command.add("rc", rune.command.get("reconnect"))
+end, "Reconnect to last server")
+rune.command.add("rc", rune.command.get("reconnect"), "Reconnect (alias)")
 
 -- /load <path> - Load a Lua script
 rune.command.add("load", function(args)
@@ -52,12 +68,12 @@ rune.command.add("load", function(args)
         return
     end
     rune.load(args)
-end)
+end, "Load a Lua script file")
 
 -- /reload - Clear state and reload init.lua
 rune.command.add("reload", function(args)
     rune.reload()
-end)
+end, "Reload all scripts")
 
 -- /lua <code> - Execute Lua code directly
 rune.command.add("lua", function(args)
@@ -79,17 +95,17 @@ rune.command.add("lua", function(args)
     else
         rune.print("[Error] " .. tostring(err))
     end
-end)
+end, "Execute Lua code")
 
 -- /aliases - List all aliases
 rune.command.add("aliases", function(args)
     rune.alias.list()
-end)
+end, "List all aliases")
 
 -- /triggers - List all triggers
 rune.command.add("triggers", function(args)
     rune.trigger.list()
-end)
+end, "List all triggers")
 
 -- /test <line> - Simulate server output (test triggers)
 rune.command.add("test", function(args)
@@ -105,7 +121,7 @@ rune.command.add("test", function(args)
     else
         rune.print("[Test Output] (gagged)")
     end
-end)
+end, "Test triggers with simulated line")
 
 -- /rmtrigger <id or pattern> - Remove a trigger
 rune.command.add("rmtrigger", function(args)
@@ -121,14 +137,14 @@ rune.command.add("rmtrigger", function(args)
     else
         rune.trigger.remove(args)
     end
-end)
+end, "Remove a trigger by ID or pattern")
 
 -- /quit or /q - Exit the client
 rune.command.add("quit", function(args)
     rune.print("[System] Goodbye!")
     rune.quit()
-end)
-rune.command.add("q", rune.command.get("quit"))
+end, "Exit the client")
+rune.command.add("q", rune.command.get("quit"), "Exit (alias)")
 
 -- /help - Show available commands
 rune.command.add("help", function(args)
@@ -160,4 +176,24 @@ rune.command.add("help", function(args)
     rune.print("  rune.trigger.enable(id_or_pattern, bool)")
     rune.print("  rune.timer.after(seconds, func)")
     rune.print("  rune.timer.every(seconds, func)")
-end)
+end, "Show available commands")
+
+-- Populate the "commands" pane for the slash picker
+-- This function writes all commands to a hidden pane that the TUI filters
+local function populate_commands_pane()
+    rune.pane.create("commands")
+    rune.pane.clear("commands")
+    for _, cmd in ipairs(rune.command.list()) do
+        local line = "/" .. cmd.name
+        if cmd.description and cmd.description ~= "" then
+            line = line .. " - " .. cmd.description
+        end
+        rune.pane.write("commands", line)
+    end
+end
+
+-- Register to populate commands on ready (after all scripts loaded)
+rune.hooks.register("ready", populate_commands_pane, { priority = 50 })
+
+-- Also repopulate after reload
+rune.hooks.register("reloaded", populate_commands_pane, { priority = 50 })
