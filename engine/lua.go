@@ -13,7 +13,6 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
-	"github.com/drake/rune/mud"
 	lua "github.com/yuin/gopher-lua"
 )
 
@@ -55,23 +54,17 @@ type LuaEngine struct {
 	// Cached table reference
 	runeTable *lua.LTable
 
-	// Channel references for reload
-	events    chan<- mud.Event
-	uplink    chan<- string
-	display   chan<- string
-	uiControl chan<- mud.UIControl
+	// Host interface for communication with the rest of the system
+	host Host
 }
 
 // NewLuaEngine initializes a Lua VM with regex caching and timer management.
-func NewLuaEngine(events chan<- mud.Event, uplink chan<- string, display chan<- string, uiControl chan<- mud.UIControl) *LuaEngine {
+func NewLuaEngine(host Host) *LuaEngine {
 	cache, _ := lru.New[string, *regexp.Regexp](100)
 	return &LuaEngine{
 		regexCache: cache,
 		timers:     make(map[int]*timerEntry),
-		events:     events,
-		uplink:     uplink,
-		display:    display,
-		uiControl:  uiControl,
+		host:       host,
 	}
 }
 
@@ -350,61 +343,46 @@ func (e *LuaEngine) registerCoreFuncs() {
 	// rune._send_raw(text): Bypasses alias processing, writes directly to socket
 	e.L.SetField(e.runeTable, "_send_raw", e.L.NewFunction(func(L *lua.LState) int {
 		cmd := L.CheckString(1)
-		e.uplink <- cmd
+		e.host.SendToNetwork(cmd)
 		return 0
 	}))
 
 	// rune._print(text): Outputs text to the local display
 	e.L.SetField(e.runeTable, "_print", e.L.NewFunction(func(L *lua.LState) int {
 		msg := L.CheckString(1)
-		e.display <- msg
+		e.host.SendToDisplay(msg)
 		return 0
 	}))
 
 	// rune._quit(): Exit the client
 	e.L.SetField(e.runeTable, "_quit", e.L.NewFunction(func(L *lua.LState) int {
-		e.events <- mud.Event{
-			Type:    mud.EventSystemControl,
-			Control: mud.ControlOp{Action: mud.ActionQuit},
-		}
+		e.host.RequestQuit()
 		return 0
 	}))
 
 	// rune._connect(address): Connect to server
 	e.L.SetField(e.runeTable, "_connect", e.L.NewFunction(func(L *lua.LState) int {
 		addr := L.CheckString(1)
-		e.events <- mud.Event{
-			Type:    mud.EventSystemControl,
-			Control: mud.ControlOp{Action: mud.ActionConnect, Address: addr},
-		}
+		e.host.RequestConnect(addr)
 		return 0
 	}))
 
 	// rune._disconnect(): Disconnect from server
 	e.L.SetField(e.runeTable, "_disconnect", e.L.NewFunction(func(L *lua.LState) int {
-		e.events <- mud.Event{
-			Type:    mud.EventSystemControl,
-			Control: mud.ControlOp{Action: mud.ActionDisconnect},
-		}
+		e.host.RequestDisconnect()
 		return 0
 	}))
 
 	// rune._reload(): Reload all scripts
 	e.L.SetField(e.runeTable, "_reload", e.L.NewFunction(func(L *lua.LState) int {
-		e.events <- mud.Event{
-			Type:    mud.EventSystemControl,
-			Control: mud.ControlOp{Action: mud.ActionReload},
-		}
+		e.host.RequestReload()
 		return 0
 	}))
 
 	// rune._load(path): Load a Lua script
 	e.L.SetField(e.runeTable, "_load", e.L.NewFunction(func(L *lua.LState) int {
 		scriptPath := L.CheckString(1)
-		e.events <- mud.Event{
-			Type:    mud.EventSystemControl,
-			Control: mud.ControlOp{Action: mud.ActionLoad, ScriptPath: scriptPath},
-		}
+		e.host.RequestLoad(scriptPath)
 		return 0
 	}))
 }
@@ -420,13 +398,10 @@ func (e *LuaEngine) registerTimerFuncs() {
 		fn := L.CheckFunction(2)
 
 		time.AfterFunc(toDuration(seconds), func() {
-			e.events <- mud.Event{
-				Type: mud.EventTimer,
-				Callback: func() {
-					L.Push(fn)
-					L.PCall(0, 0, nil)
-				},
-			}
+			e.host.SendTimerEvent(func() {
+				L.Push(fn)
+				L.PCall(0, 0, nil)
+			})
 		})
 		return 0
 	}))
@@ -450,13 +425,10 @@ func (e *LuaEngine) registerTimerFuncs() {
 				case <-done:
 					return
 				case <-ticker.C:
-					e.events <- mud.Event{
-						Type: mud.EventTimer,
-						Callback: func() {
-							L.Push(fn)
-							L.PCall(0, 0, nil)
-						},
-					}
+					e.host.SendTimerEvent(func() {
+						L.Push(fn)
+						L.PCall(0, 0, nil)
+					})
 				}
 			}
 		}()
@@ -561,12 +533,7 @@ func (e *LuaEngine) registerStatusFuncs() {
 	// rune._status.set(text): Set the status bar text
 	e.L.SetField(statusTable, "set", e.L.NewFunction(func(L *lua.LState) int {
 		text := L.CheckString(1)
-		if e.uiControl != nil {
-			e.uiControl <- mud.UIControl{
-				Type: mud.UIControlStatus,
-				Text: text,
-			}
-		}
+		e.host.SetStatus(text)
 		return 0
 	}))
 }
@@ -579,12 +546,7 @@ func (e *LuaEngine) registerPaneFuncs() {
 	// rune._pane.create(name): Create a named pane
 	e.L.SetField(paneTable, "create", e.L.NewFunction(func(L *lua.LState) int {
 		name := L.CheckString(1)
-		if e.uiControl != nil {
-			e.uiControl <- mud.UIControl{
-				Type: mud.UIControlPaneCreate,
-				Name: name,
-			}
-		}
+		e.host.CreatePane(name)
 		return 0
 	}))
 
@@ -592,37 +554,21 @@ func (e *LuaEngine) registerPaneFuncs() {
 	e.L.SetField(paneTable, "write", e.L.NewFunction(func(L *lua.LState) int {
 		name := L.CheckString(1)
 		text := L.CheckString(2)
-		if e.uiControl != nil {
-			e.uiControl <- mud.UIControl{
-				Type: mud.UIControlPaneWrite,
-				Name: name,
-				Text: text,
-			}
-		}
+		e.host.WritePane(name, text)
 		return 0
 	}))
 
 	// rune._pane.toggle(name): Toggle pane visibility
 	e.L.SetField(paneTable, "toggle", e.L.NewFunction(func(L *lua.LState) int {
 		name := L.CheckString(1)
-		if e.uiControl != nil {
-			e.uiControl <- mud.UIControl{
-				Type: mud.UIControlPaneToggle,
-				Name: name,
-			}
-		}
+		e.host.TogglePane(name)
 		return 0
 	}))
 
 	// rune._pane.clear(name): Clear pane contents
 	e.L.SetField(paneTable, "clear", e.L.NewFunction(func(L *lua.LState) int {
 		name := L.CheckString(1)
-		if e.uiControl != nil {
-			e.uiControl <- mud.UIControl{
-				Type: mud.UIControlPaneClear,
-				Name: name,
-			}
-		}
+		e.host.ClearPane(name)
 		return 0
 	}))
 
@@ -630,13 +576,7 @@ func (e *LuaEngine) registerPaneFuncs() {
 	e.L.SetField(paneTable, "bind", e.L.NewFunction(func(L *lua.LState) int {
 		key := L.CheckString(1)
 		name := L.CheckString(2)
-		if e.uiControl != nil {
-			e.uiControl <- mud.UIControl{
-				Type: mud.UIControlPaneBind,
-				Key:  key,
-				Name: name,
-			}
-		}
+		e.host.BindPaneKey(key, name)
 		return 0
 	}))
 }
@@ -649,12 +589,7 @@ func (e *LuaEngine) registerInfobarFuncs() {
 	// rune._infobar.set(text): Set the info bar from Lua
 	e.L.SetField(infobarTable, "set", e.L.NewFunction(func(L *lua.LState) int {
 		text := L.CheckString(1)
-		if e.uiControl != nil {
-			e.uiControl <- mud.UIControl{
-				Type: mud.UIControlInfobar,
-				Text: text,
-			}
-		}
+		e.host.SetInfobar(text)
 		return 0
 	}))
 }

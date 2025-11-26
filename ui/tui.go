@@ -158,8 +158,8 @@ func (b *BubbleTeaUI) SetConnectionState(state ConnectionState, addr string) {
 	}
 }
 
-// SetStatusText sets the status bar text (called from Lua via rune.status.set).
-func (b *BubbleTeaUI) SetStatusText(text string) {
+// SetStatus sets the status bar text (called from Lua via rune.status.set).
+func (b *BubbleTeaUI) SetStatus(text string) {
 	select {
 	case <-b.ready:
 		b.program.Send(StatusTextMsg(text))

@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/drake/rune/mud"
 	"github.com/drake/rune/scripts"
 )
 
@@ -25,53 +24,12 @@ type testDataFile struct {
 	Tests []testCase `json:"tests"`
 }
 
-// mockChannels holds all channels needed for testing
-type mockChannels struct {
-	events  chan mud.Event
-	uplink  chan string
-	display chan string
-}
-
-func newMockChannels() *mockChannels {
-	return &mockChannels{
-		events:  make(chan mud.Event, 100),
-		uplink:  make(chan string, 100),
-		display: make(chan string, 100),
-	}
-}
-
-// drainUplink collects all commands sent to the uplink channel
-func (m *mockChannels) drainUplink() []string {
-	var commands []string
-	for {
-		select {
-		case cmd := <-m.uplink:
-			commands = append(commands, cmd)
-		default:
-			return commands
-		}
-	}
-}
-
-// drainDisplay collects all output sent to the display channel
-func (m *mockChannels) drainDisplay() []string {
-	var output []string
-	for {
-		select {
-		case text := <-m.display:
-			output = append(output, text)
-		default:
-			return output
-		}
-	}
-}
-
 // setupTest creates a test environment and returns a cleanup function
-func setupTest(t *testing.T) (*LuaEngine, *mockChannels, func()) {
+func setupTest(t *testing.T) (*LuaEngine, *MockHost, func()) {
 	t.Helper()
 
-	channels := newMockChannels()
-	engine := NewLuaEngine(channels.events, channels.uplink, channels.display)
+	host := NewMockHost()
+	engine := NewLuaEngine(host)
 
 	// Initialize the engine with embedded core scripts
 	// Use empty string for config dir in tests
@@ -81,12 +39,9 @@ func setupTest(t *testing.T) (*LuaEngine, *mockChannels, func()) {
 
 	cleanup := func() {
 		engine.Close()
-		close(channels.events)
-		close(channels.uplink)
-		close(channels.display)
 	}
 
-	return engine, channels, cleanup
+	return engine, host, cleanup
 }
 
 func loadTestData(t *testing.T, filename string) testDataFile {
@@ -125,7 +80,7 @@ func executeTest(t *testing.T, feature string, tt testCase) {
 	t.Helper()
 	testName := fmt.Sprintf("%s/%s", feature, tt.Name)
 	t.Run(testName, func(t *testing.T) {
-		engine, channels, cleanup := setupTest(t)
+		engine, host, cleanup := setupTest(t)
 		defer cleanup()
 
 		if tt.SetupLua != nil {
@@ -143,16 +98,16 @@ func executeTest(t *testing.T, feature string, tt testCase) {
 		}
 
 		if tt.ExpectedCommands != nil {
-			assertCommands(t, channels, tt.ExpectedCommands)
+			assertCommands(t, host, tt.ExpectedCommands)
 		}
 	})
 }
 
 // assertCommands verifies commands are received in order
-func assertCommands(t *testing.T, channels *mockChannels, expected []string) {
+func assertCommands(t *testing.T, host *MockHost, expected []string) {
 	t.Helper()
 
-	actualCommands := channels.drainUplink()
+	actualCommands := host.DrainNetworkCalls()
 
 	if len(actualCommands) != len(expected) {
 		// Only show debug output if there's a mismatch

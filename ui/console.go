@@ -80,3 +80,13 @@ func (c *ConsoleUI) Run() error {
 func (c *ConsoleUI) Done() <-chan struct{} {
 	return c.done
 }
+
+// Controller methods (no-op for ConsoleUI - advanced features not supported in simple mode)
+
+func (c *ConsoleUI) SetStatus(text string)           {}
+func (c *ConsoleUI) SetInfobar(text string)          {}
+func (c *ConsoleUI) CreatePane(name string)          {}
+func (c *ConsoleUI) WritePane(name, text string)     {}
+func (c *ConsoleUI) TogglePane(name string)          {}
+func (c *ConsoleUI) ClearPane(name string)           {}
+func (c *ConsoleUI) BindPaneKey(key, name string)    {}

@@ -70,29 +70,19 @@ type Network interface {
 
 // UI defines the Terminal layer
 type UI interface {
+	// Core rendering
 	Render(text string)       // Render a complete line (with newline)
 	RenderPrompt(text string) // Render a prompt (no newline, overwrites previous prompt)
 	Input() <-chan string     // Stream from user
 	Run() error
-}
+	Done() <-chan struct{} // Signals when UI exits
 
-// UIControlType identifies the type of UI control message
-type UIControlType int
-
-const (
-	UIControlStatus UIControlType = iota
-	UIControlPaneCreate
-	UIControlPaneWrite
-	UIControlPaneToggle
-	UIControlPaneClear
-	UIControlPaneBind
-	UIControlInfobar
-)
-
-// UIControl is a message for controlling the TUI from Lua
-type UIControl struct {
-	Type UIControlType
-	Text string // For status, pane write
-	Name string // Pane name
-	Key  string // For key bindings
+	// Controller methods (no-op for ConsoleUI)
+	SetStatus(text string)
+	SetInfobar(text string)
+	CreatePane(name string)
+	WritePane(name, text string)
+	TogglePane(name string)
+	ClearPane(name string)
+	BindPaneKey(key, name string)
 }
