@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/drake/rune/internal/buffer"
 	"github.com/drake/rune/lua"
 	"github.com/drake/rune/mud"
 )
@@ -28,11 +27,9 @@ type Session struct {
 	engine *lua.Engine
 
 	// Internal channels
-	eventsIn  chan<- mud.Event
-	eventsOut <-chan mud.Event
-	netOut    chan string
-	uiIn      chan<- string
-	uiOut     <-chan string
+	events chan mud.Event
+	netOut chan string
+	uiOut  chan string
 
 	// Config
 	coreScripts embed.FS
@@ -42,19 +39,15 @@ type Session struct {
 
 // New creates a new Session with the given dependencies.
 func New(network mud.Network, ui mud.UI, cfg Config) *Session {
-	// Create channels (unbounded buffers)
-	eventsIn, eventsOut := buffer.Unbounded[mud.Event](100, 50000)
-	netOut := make(chan string, 100)
-	uiIn, uiOut := buffer.Unbounded[string](100, 50000)
-
+	// Create buffered channels with generous sizes
+	// Events: network lines + user input + timers + control
+	// UI output: processed lines heading to display
 	s := &Session{
 		network:     network,
 		ui:          ui,
-		eventsIn:    eventsIn,
-		eventsOut:   eventsOut,
-		netOut:      netOut,
-		uiIn:        uiIn,
-		uiOut:       uiOut,
+		events:      make(chan mud.Event, 1000),
+		netOut:      make(chan string, 1000),
+		uiOut:       make(chan string, 1000),
 		coreScripts: cfg.CoreScripts,
 		configDir:   cfg.ConfigDir,
 		userScripts: cfg.UserScripts,
@@ -78,7 +71,7 @@ func (s *Session) Run() error {
 
 	// Initialize Lua state with core scripts
 	if err := s.engine.InitState(s.coreScripts, s.configDir); err != nil {
-		s.uiIn <- fmt.Sprintf("\033[31m[Error] Loading scripts: %v\033[0m", err)
+		s.uiOut <- fmt.Sprintf("\033[31m[Error] Loading scripts: %v\033[0m", err)
 	}
 
 	// Start event loop in goroutine
@@ -99,13 +92,13 @@ func (s *Session) Run() error {
 
 func (s *Session) bridgeNetworkToEvents() {
 	for event := range s.network.Output() {
-		s.eventsIn <- event
+		s.events <- event
 	}
 }
 
 func (s *Session) bridgeUIToEvents() {
 	for line := range s.ui.Input() {
-		s.eventsIn <- mud.Event{Type: mud.EventUserInput, Payload: line}
+		s.events <- mud.Event{Type: mud.EventUserInput, Payload: line}
 	}
 }
 
@@ -124,12 +117,12 @@ func (s *Session) runUIRenderer() {
 // --- Event loop ---
 
 func (s *Session) runEventLoop() {
-	for event := range s.eventsOut {
+	for event := range s.events {
 		switch event.Type {
 		case mud.EventServerLine:
 			modified, keep := s.engine.OnOutput(event.Payload)
 			if keep {
-				s.uiIn <- modified
+				s.uiOut <- modified
 			}
 
 		case mud.EventServerPrompt:
@@ -161,14 +154,14 @@ func (s *Session) handleSystemControl(ctrl mud.ControlOp) {
 		s.engine.CallHook("connecting", addr)
 		go func() {
 			if err := s.network.Connect(addr); err != nil {
-				s.eventsIn <- mud.Event{
+				s.events <- mud.Event{
 					Type: mud.EventTimer,
 					Callback: func() {
 						s.engine.CallHook("error", "Connection failed: "+err.Error())
 					},
 				}
 			} else {
-				s.eventsIn <- mud.Event{
+				s.events <- mud.Event{
 					Type: mud.EventTimer,
 					Callback: func() {
 						s.engine.CallHook("connected", addr)
@@ -207,39 +200,39 @@ func (s *Session) SendToNetwork(data string) {
 }
 
 func (s *Session) SendToDisplay(text string) {
-	s.uiIn <- text
+	s.uiOut <- text
 }
 
 func (s *Session) RequestQuit() {
-	s.eventsIn <- mud.Event{
+	s.events <- mud.Event{
 		Type:    mud.EventSystemControl,
 		Control: mud.ControlOp{Action: mud.ActionQuit},
 	}
 }
 
 func (s *Session) RequestConnect(address string) {
-	s.eventsIn <- mud.Event{
+	s.events <- mud.Event{
 		Type:    mud.EventSystemControl,
 		Control: mud.ControlOp{Action: mud.ActionConnect, Address: address},
 	}
 }
 
 func (s *Session) RequestDisconnect() {
-	s.eventsIn <- mud.Event{
+	s.events <- mud.Event{
 		Type:    mud.EventSystemControl,
 		Control: mud.ControlOp{Action: mud.ActionDisconnect},
 	}
 }
 
 func (s *Session) RequestReload() {
-	s.eventsIn <- mud.Event{
+	s.events <- mud.Event{
 		Type:    mud.EventSystemControl,
 		Control: mud.ControlOp{Action: mud.ActionReload},
 	}
 }
 
 func (s *Session) RequestLoad(scriptPath string) {
-	s.eventsIn <- mud.Event{
+	s.events <- mud.Event{
 		Type:    mud.EventSystemControl,
 		Control: mud.ControlOp{Action: mud.ActionLoad, ScriptPath: scriptPath},
 	}
@@ -274,5 +267,5 @@ func (s *Session) BindPaneKey(key, name string) {
 }
 
 func (s *Session) SendTimerEvent(callback func()) {
-	s.eventsIn <- mud.Event{Type: mud.EventTimer, Callback: callback}
+	s.events <- mud.Event{Type: mud.EventTimer, Callback: callback}
 }
