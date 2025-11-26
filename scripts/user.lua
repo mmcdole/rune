@@ -8,10 +8,13 @@ rune.alias.add("l", "look")
 -- Recursive Alias (expands into multiple commands)
 rune.alias.add("path_to_fountain", "s;s;w;open gate;n")
 
--- Bot logic (Alias with Wait)
--- When user types 'bot', it expands.
--- Expansion hits #wait, which calls Go's timer, which calls back Lua.
-rune.alias.add("bot", "kill orc; #wait 3; get coins; #wait 1; s")
+-- Bot logic (Function alias with delays)
+-- Use rune.delay() for asynchronous timing
+rune.alias.add("bot", function()
+    rune.send("kill orc")
+    rune.delay(3, "get coins")
+    rune.delay(4, "s")
+end)
 
 -- Nested alias example
 rune.alias.add("prep", "tt;l")

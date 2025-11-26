@@ -19,8 +19,11 @@ func main() {
 	simpleUI := flag.Bool("simple", false, "Use simple console UI instead of TUI")
 	flag.Parse()
 
-	// Event bus and coordination channels
-	events := make(chan mud.Event, 100)
+	// Event bus - unbounded buffer so producers never block or drop
+	// Hard limit of 50,000 events prevents runaway memory usage
+	eventsIn, eventsOut := buffer.Unbounded[mud.Event](100, 50000)
+
+	// Network output channel
 	netOut := make(chan string, 100)
 
 	// Unbounded buffer for UI output
@@ -32,7 +35,7 @@ func main() {
 	uiControl := make(chan mud.UIControl, 100)
 
 	// Component initialization
-	luaEngine := engine.NewLuaEngine(events, netOut, uiIn, uiControl)
+	luaEngine := engine.NewLuaEngine(eventsIn, netOut, uiIn, uiControl)
 	tcpClient := network.NewTCPClient()
 
 	// Select UI mode
@@ -48,21 +51,14 @@ func main() {
 	// Network -> Event loop
 	go func() {
 		for event := range tcpClient.Output() {
-			events <- event
+			eventsIn <- event
 		}
 	}()
 
-	// UI -> Event loop (Non-blocking to prevent deadlock)
+	// UI -> Event loop
 	go func() {
 		for line := range tui.Input() {
-			evt := mud.Event{Type: mud.EventUserInput, Payload: line}
-			select {
-			case events <- evt:
-				// Success: Event queued normally
-			default:
-				// Channel full - give feedback instead of blocking
-				tui.Render("\033[31m[WARNING] Engine lagging. Input dropped: " + line + "\033[0m")
-			}
+			eventsIn <- mud.Event{Type: mud.EventUserInput, Payload: line}
 		}
 	}()
 
@@ -112,7 +108,7 @@ func main() {
 
 	// Orchestrator loop - single goroutine owns Lua state
 	go func() {
-		for event := range events {
+		for event := range eventsOut {
 			switch event.Type {
 
 			case mud.EventServerLine:
@@ -145,14 +141,14 @@ func main() {
 					luaEngine.CallHook("connecting", addr)
 					go func() {
 						if err := tcpClient.Connect(addr); err != nil {
-							events <- mud.Event{
+							eventsIn <- mud.Event{
 								Type: mud.EventTimer,
 								Callback: func() {
 									luaEngine.CallHook("error", "Connection failed: "+err.Error())
 								},
 							}
 						} else {
-							events <- mud.Event{
+							eventsIn <- mud.Event{
 								Type: mud.EventTimer,
 								Callback: func() {
 									luaEngine.CallHook("connected", addr)

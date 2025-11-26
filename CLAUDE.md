@@ -60,8 +60,12 @@ Control -> EventChan -> Orchestrator -> CallHook() -> Lua on_sys_*()
 
 Use `mud.Action*` constants instead of string literals: `ActionQuit`, `ActionConnect`, `ActionDisconnect`, `ActionReload`, `ActionLoad`
 
-### Lua Host Functions (rune namespace)
+### Lua API (rune namespace)
 
+Go provides internal primitives (`rune._*`), wrapped by Lua for the public API:
+
+**Core:**
+- `rune.send(text)` - Process aliases and send to server
 - `rune.send_raw(text)` - Bypass alias processing, write directly to socket
 - `rune.print(text)` - Output text to local display
 - `rune.quit()` - Exit the client
@@ -69,11 +73,23 @@ Use `mud.Action*` constants instead of string literals: `ActionQuit`, `ActionCon
 - `rune.disconnect()` - Disconnect from server
 - `rune.reload()` - Reload all scripts
 - `rune.load(path)` - Load a Lua script
+
+**Timers:**
 - `rune.timer.after(seconds, callback)` - Schedule delayed callback
 - `rune.timer.every(seconds, callback)` - Schedule repeating callback, returns timer ID
 - `rune.timer.cancel(id)` - Cancel a repeating timer
 - `rune.timer.cancel_all()` - Cancel all repeating timers
+- `rune.delay(seconds, action)` - Convenience: delay a command string or function
+
+**Regex:**
 - `rune.regex.match(pattern, text)` - Match using Go's regexp (cached)
+
+**UI:**
+- `rune.status.set(text)` - Set status bar
+- `rune.pane.create(name)`, `rune.pane.write(name, text)`, `rune.pane.toggle(name)`, `rune.pane.clear(name)`, `rune.pane.bind(key, name)`
+- `rune.infobar.set(text)` - Set info bar
+
+**Config:**
 - `rune.config_dir` - Path to ~/.config/rune
 
 ### Lua Hook Functions
@@ -101,7 +117,7 @@ Core scripts in `scripts/core/` load in numeric order (00_, 05_, 10_, 20_, 30_, 
 
 - **Aliases**: `rune.alias.add(key, value)`, `rune.alias.remove(key)`, `rune.alias.list()`, `rune.alias.get(key)`, `rune.alias.run(name, args)`
 - **Triggers**: `rune.trigger.add(pattern, action, {gag, enabled, regex})`, `rune.trigger.remove(id)`, `rune.trigger.list()`, `rune.trigger.enable(id, bool)`, `rune.trigger.process(line)`
-- **Commands**: Semicolon-separated queues, `#wait <seconds>` for async delays
+- **Commands**: Semicolon-separated, use `rune.delay()` for async timing in function aliases
 - **TinTin++ Syntax**: `#N command` expands to N repetitions (e.g., `#3 north` → `north;north;north`)
 - **Slash Commands**: `/connect`, `/disconnect`, `/reconnect`, `/load`, `/reload`, `/lua`, `/aliases`, `/triggers`, `/test`, `/rmtrigger`, `/help`, `/quit`
 
