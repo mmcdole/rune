@@ -196,9 +196,27 @@ func (f *FuzzySearch) SetWidth(w int) {
 	f.width = w
 }
 
-// SetHistory provides the command history to search.
+// SetHistory provides the command history to search (deduplicated).
 func (f *FuzzySearch) SetHistory(history []string) {
-	f.history = history
+	// Deduplicate: keep only most recent occurrence of each command
+	seen := make(map[string]bool)
+	deduped := make([]string, 0, len(history))
+
+	// Iterate backwards (most recent first)
+	for i := len(history) - 1; i >= 0; i-- {
+		cmd := history[i]
+		if !seen[cmd] {
+			seen[cmd] = true
+			deduped = append(deduped, cmd)
+		}
+	}
+
+	// Reverse to restore chronological order (oldest first, newest last)
+	for i, j := 0, len(deduped)-1; i < j; i, j = i+1, j-1 {
+		deduped[i], deduped[j] = deduped[j], deduped[i]
+	}
+
+	f.history = deduped
 }
 
 // Search updates the query and re-filters results.

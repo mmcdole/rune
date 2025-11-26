@@ -25,10 +25,13 @@ type InputModel struct {
 	draft        string // Preserved when browsing history
 	mode         InputMode
 	width        int
+
+	// Tab completion
+	completer *WordCache // Word cache for completions
 }
 
-// NewInputModel creates a new input model.
-func NewInputModel() InputModel {
+// NewInputModel creates a new input model with the given word cache for completion.
+func NewInputModel(completer *WordCache) InputModel {
 	ti := textinput.New()
 	ti.Placeholder = ""
 	ti.Prompt = "> "
@@ -36,12 +39,17 @@ func NewInputModel() InputModel {
 	ti.Width = 80
 	ti.Focus()
 
+	// Enable native suggestions (ghost text)
+	// Tab = accept, Ctrl+N/P = cycle
+	ti.ShowSuggestions = true
+
 	return InputModel{
 		textinput:    ti,
 		history:      make([]string, 0, 1000),
 		historyIndex: -1,
 		historyLimit: 10000,
 		mode:         ModeNormal,
+		completer:    completer,
 	}
 }
 
@@ -74,6 +82,7 @@ func (m *InputModel) SetValue(s string) {
 // Reset clears the input and resets history navigation.
 func (m *InputModel) Reset() {
 	m.textinput.SetValue("")
+	m.textinput.SetSuggestions(nil) // Clear ghost text
 	m.historyIndex = -1
 	m.draft = ""
 }
@@ -160,15 +169,12 @@ func (m *InputModel) Update(msg tea.Msg) (*InputModel, tea.Cmd) {
 			m.HistoryDown()
 			return m, nil
 		case tea.KeyCtrlU:
-			// Clear line
 			m.textinput.SetValue("")
 			return m, nil
 		case tea.KeyCtrlW:
-			// Delete word
 			val := m.textinput.Value()
 			pos := m.textinput.Position()
 			if pos > 0 {
-				// Find word boundary
 				newPos := pos - 1
 				for newPos > 0 && val[newPos-1] == ' ' {
 					newPos--
@@ -183,7 +189,12 @@ func (m *InputModel) Update(msg tea.Msg) (*InputModel, tea.Cmd) {
 		}
 	}
 
+	// Let textinput handle the key (including Tab for suggestions)
 	m.textinput, cmd = m.textinput.Update(msg)
+
+	// Update suggestions based on current word
+	m.updateSuggestions()
+
 	return m, cmd
 }
 
@@ -204,4 +215,81 @@ func (m *InputModel) GetSlashQuery() string {
 		return val[1:]
 	}
 	return ""
+}
+
+// updateSuggestions updates the textinput suggestions based on current word.
+func (m *InputModel) updateSuggestions() {
+	if m.completer == nil {
+		return
+	}
+
+	val := m.textinput.Value()
+	if val == "" {
+		m.textinput.SetSuggestions(nil)
+		return
+	}
+
+	// Find the word at/before cursor
+	pos := m.textinput.Position()
+	start, end := m.findWordBoundaries(val, pos)
+	if start == end {
+		m.textinput.SetSuggestions(nil)
+		return
+	}
+
+	prefix := val[start:end]
+	if len(prefix) < 2 {
+		m.textinput.SetSuggestions(nil)
+		return
+	}
+
+	matches := m.completer.FindMatches(prefix)
+	if len(matches) == 0 {
+		m.textinput.SetSuggestions(nil)
+		return
+	}
+
+	// Build full-line suggestions by replacing the current word
+	before := val[:start]
+	after := ""
+	if end < len(val) {
+		after = val[end:]
+	}
+
+	suggestions := make([]string, 0, len(matches))
+	for _, match := range matches {
+		suggestions = append(suggestions, before+match+after)
+	}
+
+	m.textinput.SetSuggestions(suggestions)
+}
+
+// findWordBoundaries finds the start and end of the word at or before cursor.
+func (m *InputModel) findWordBoundaries(text string, cursor int) (int, int) {
+	if cursor > len(text) {
+		cursor = len(text)
+	}
+
+	if cursor == 0 {
+		return 0, 0
+	}
+
+	// Check if we're right after a space (no word at cursor)
+	if text[cursor-1] == ' ' {
+		return cursor, cursor
+	}
+
+	// Scan back for word start
+	start := cursor
+	for start > 0 && text[start-1] != ' ' {
+		start--
+	}
+
+	// Scan forward for word end (from cursor)
+	end := cursor
+	for end < len(text) && text[end] != ' ' {
+		end++
+	}
+
+	return start, end
 }

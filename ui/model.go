@@ -20,6 +20,9 @@ type Model struct {
 	slashPicker SlashPicker
 	fuzzySearch FuzzySearch
 
+	// Tab completion
+	wordCache *WordCache
+
 	// State
 	lastPrompt   string // For deduplication
 	infobar      string // Lua-controlled info bar (above input)
@@ -38,16 +41,18 @@ func NewModel(inputChan chan<- string) Model {
 	styles := DefaultStyles()
 	scrollback := NewScrollbackBuffer(100000)
 	viewport := NewScrollbackViewport(scrollback)
+	wordCache := NewWordCache(5000) // Remember last 5000 unique words
 
 	return Model{
 		scrollback:  scrollback,
 		viewport:    viewport,
-		input:       NewInputModel(),
+		input:       NewInputModel(wordCache),
 		status:      NewStatusBar(styles),
 		panes:       NewPaneManager(styles),
 		styles:      styles,
 		slashPicker: NewSlashPicker(styles),
 		fuzzySearch: NewFuzzySearch(styles),
+		wordCache:   wordCache,
 		inputChan:   inputChan,
 	}
 }
@@ -87,6 +92,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Batched lines from aggregator
 	case flushLinesMsg:
 		m.viewport.ClearPrompt() // Clear partial line when full lines arrive
+		for _, line := range msg.Lines {
+			m.wordCache.AddLine(line) // Feed tab completion cache
+		}
 		m.appendLines(msg.Lines)
 		return m, nil
 
@@ -94,6 +102,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ServerLineMsg:
 		m.viewport.ClearPrompt() // Clear partial line when full line arrives
 		m.pendingLines = append(m.pendingLines, string(msg))
+		m.wordCache.AddLine(string(msg)) // Feed tab completion cache
 		return m, nil
 
 	// Server prompt (partial line)
@@ -205,6 +214,7 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		text := m.input.Value()
 		if text != "" {
 			m.input.AddToHistory(text)
+			m.wordCache.AddInput(text) // Feed user input to completion cache (preserves punctuation)
 		}
 		// Send to orchestrator (including empty string for blank enter)
 		select {
