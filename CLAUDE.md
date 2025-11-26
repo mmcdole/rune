@@ -29,13 +29,17 @@ Rune is a MUD (Multi-User Dungeon) client built with Go for system-level operati
 ### Component Structure
 
 ```
-cmd/rune/main.go       - Orchestrator: event loop that routes between UI, Network, and Lua
-engine/lua.go          - LuaEngine: wraps gopher-lua, registers host functions under `rune` namespace
-mud/types.go           - Core interfaces (ScriptEngine, Network, UI), event types, and action constants
-network/tcp_client.go  - TCP client with telnet protocol support
-network/telnet.go      - Telnet protocol buffer and negotiation
-ui/console.go          - Console UI (stdin/stdout)
-scripts/               - Lua scripts (core scripts embedded in binary via go:embed)
+cmd/rune/main.go              - Bootstrap: creates Session and runs UI
+internal/session/session.go   - Session: orchestrates event loop, implements lua.Host
+lua/                          - Lua runtime package
+  engine.go                   - Engine: wraps gopher-lua, manages VM lifecycle
+  api_*.go                    - Go→Lua bindings (core, timer, regex, ui)
+  host.go                     - Host interface: bridge between Engine and Session
+  core/*.lua                  - Embedded Lua scripts (aliases, triggers, hooks, etc.)
+mud/types.go                  - Core interfaces (Network, UI), event types, action constants
+network/tcp_client.go         - TCP client with telnet protocol support
+network/telnet.go             - Telnet protocol buffer and negotiation
+ui/                           - UI implementations (console and TUI)
 ```
 
 ### Event Flow
@@ -113,7 +117,7 @@ Go calls these to notify Lua of system events (defined in `00_init.lua`, users c
 
 ## Lua Scripting System
 
-Core scripts in `scripts/core/` load in numeric order (00_, 05_, 10_, 20_, 30_, 40_) and provide:
+Core scripts in `lua/core/` load in numeric order (00_, 10_, 20_, 30_, 40_, 50_, 60_) and provide:
 
 - **Aliases**: `rune.alias.add(key, value)`, `rune.alias.remove(key)`, `rune.alias.list()`, `rune.alias.get(key)`, `rune.alias.run(name, args)`
 - **Triggers**: `rune.trigger.add(pattern, action, {gag, enabled, regex})`, `rune.trigger.remove(id)`, `rune.trigger.list()`, `rune.trigger.enable(id, bool)`, `rune.trigger.process(line)`
@@ -125,8 +129,8 @@ User scripts auto-load from `~/.config/rune/init.lua` at startup.
 
 ## Current Development State
 
-- No test suite exists
-- UI is basic console - could upgrade to TUI
+- Test suite exists in `lua/testdata/` (JSON-driven tests)
+- UI has both console mode (`-simple` flag) and TUI (default)
 
 ## Dependencies
 

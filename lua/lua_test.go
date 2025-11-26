@@ -1,4 +1,4 @@
-package engine
+package lua
 
 import (
 	"encoding/json"
@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/drake/rune/scripts"
 )
 
 // testCase represents a single test case from JSON
@@ -25,15 +23,15 @@ type testDataFile struct {
 }
 
 // setupTest creates a test environment and returns a cleanup function
-func setupTest(t *testing.T) (*LuaEngine, *MockHost, func()) {
+func setupTest(t *testing.T) (*Engine, *MockHost, func()) {
 	t.Helper()
 
 	host := NewMockHost()
-	engine := NewLuaEngine(host)
+	engine := NewEngine(host)
 
 	// Initialize the engine with embedded core scripts
 	// Use empty string for config dir in tests
-	if err := engine.InitState(scripts.CoreScripts, ""); err != nil {
+	if err := engine.InitState(CoreScripts, ""); err != nil {
 		t.Fatal("Failed to initialize engine:", err)
 	}
 
@@ -59,7 +57,7 @@ func loadTestData(t *testing.T, filename string) testDataFile {
 }
 
 // executeSetupLua handles both string and []string Lua setup code
-func executeSetupLua(t *testing.T, engine *LuaEngine, setup any) {
+func executeSetupLua(t *testing.T, engine *Engine, setup any) {
 	t.Helper()
 	switch lua := setup.(type) {
 	case string:

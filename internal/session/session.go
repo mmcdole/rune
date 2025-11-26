@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/drake/rune/engine"
 	"github.com/drake/rune/internal/buffer"
+	"github.com/drake/rune/lua"
 	"github.com/drake/rune/mud"
 )
 
@@ -25,7 +25,7 @@ type Session struct {
 	ui      mud.UI
 
 	// Owned components
-	engine *engine.LuaEngine
+	engine *lua.Engine
 
 	// Internal channels
 	eventsIn  chan<- mud.Event
@@ -61,7 +61,7 @@ func New(network mud.Network, ui mud.UI, cfg Config) *Session {
 	}
 
 	// Create engine with Session as Host
-	s.engine = engine.NewLuaEngine(s)
+	s.engine = lua.NewEngine(s)
 
 	return s
 }

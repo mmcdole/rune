@@ -7,9 +7,9 @@ import (
 
 	"github.com/drake/rune/config"
 	"github.com/drake/rune/internal/session"
+	"github.com/drake/rune/lua"
 	"github.com/drake/rune/mud"
 	"github.com/drake/rune/network"
-	"github.com/drake/rune/scripts"
 	"github.com/drake/rune/ui"
 )
 
@@ -31,7 +31,7 @@ func main() {
 
 	// Create and run session
 	sess := session.New(tcpClient, tui, session.Config{
-		CoreScripts: scripts.CoreScripts,
+		CoreScripts: lua.CoreScripts,
 		ConfigDir:   config.Dir(),
 		UserScripts: flag.Args(),
 	})

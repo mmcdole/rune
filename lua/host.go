@@ -1,4 +1,4 @@
-package engine
+package lua
 
 // Host provides the bridge between LuaEngine and the rest of the system.
 // This abstraction decouples LuaEngine from specific channel implementations,
