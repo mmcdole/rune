@@ -101,10 +101,11 @@ func (c *TCPClient) readerLoop() {
 		// Blocking read - no timeout
 		n, err := c.conn.Read(buf)
 		if err != nil {
-			// Connection closed or error
+			// Connection closed or error - properly cleanup to signal writerLoop
 			c.mu.Lock()
 			if c.connected {
 				c.connected = false
+				close(c.done)
 			}
 			c.mu.Unlock()
 			return
