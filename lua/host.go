@@ -1,7 +1,7 @@
 package lua
 
-// Host provides the bridge between LuaEngine and the rest of the system.
-// This abstraction decouples LuaEngine from specific channel implementations,
+// Host provides the bridge between Engine and the rest of the system.
+// This abstraction decouples Engine from specific channel implementations,
 // making it testable without full channel infrastructure.
 type Host interface {
 	// Core communication
@@ -24,6 +24,6 @@ type Host interface {
 	ClearPane(name string)
 	BindPaneKey(key, name string)
 
-	// Timer callback routing (LuaEngine owns timer goroutines, Host routes callbacks to event loop)
+	// Timer callback routing (Engine owns timer goroutines, Host routes callbacks to event loop)
 	SendTimerEvent(callback func())
 }

@@ -35,31 +35,6 @@ type Event struct {
 	Control  ControlOp  // For SystemControl events
 }
 
-// ScriptEngine describes the Lua interactions
-type ScriptEngine interface {
-	// Init loads the Lua state and scripts
-	Init(corePath, userPath string) error
-
-	// RegisterHostFuncs allows Go to bind 'client.send', 'client.timer'
-	// The 'out' channel is how the Engine sends commands back to the Orchestrator
-	RegisterHostFuncs(out chan<- Event, sendToNet chan<- string, renderToUI chan<- string)
-
-	// OnInput handles user typing. Returns true if handled.
-	OnInput(text string) bool
-
-	// OnOutput handles server text. Returns modified text and boolean (false = gag).
-	OnOutput(text string) (string, bool)
-
-	// OnPrompt handles server prompts. Returns modified text.
-	OnPrompt(text string) string
-
-	// ExecuteCallback runs a stored Lua function (from a timer)
-	ExecuteCallback(cb func())
-
-	// Close cleans up
-	Close()
-}
-
 // Network defines the TCP/Telnet layer
 type Network interface {
 	Connect(address string) error
