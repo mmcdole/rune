@@ -90,10 +90,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.appendLines(msg.Lines)
 		return m, nil
 
-	// Single server line (fallback)
+	// Single server line - batch for next tick
 	case ServerLineMsg:
 		m.viewport.ClearPrompt() // Clear partial line when full line arrives
-		m.appendLines([]string{string(msg)})
+		m.pendingLines = append(m.pendingLines, string(msg))
 		return m, nil
 
 	// Server prompt (partial line)
