@@ -9,6 +9,7 @@ const (
 	EventNetPrompt           // A partial line/prompt (no \n, possibly GA/EOR terminated)
 	EventTimer
 	EventSystemControl
+	EventDeferred      // Internal deferred callback (not a timer)
 	EventDisplayLine   // Append a line to scrollback (server output or prompt commit)
 	EventDisplayEcho   // Append a local echo line (e.g., "> cmd")
 	EventDisplayPrompt // Set/update the live prompt overlay
