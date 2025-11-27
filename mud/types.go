@@ -57,6 +57,7 @@ type UI interface {
 	Input() <-chan string          // Stream from user
 	Run() error
 	Done() <-chan struct{} // Signals when UI exits
+	Quit()                 // Request UI to exit
 
 	// Controller methods (no-op for ConsoleUI)
 	SetStatus(text string)

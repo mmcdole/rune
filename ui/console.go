@@ -4,12 +4,14 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"sync"
 )
 
 // ConsoleUI implements a simple stdin/stdout UI
 type ConsoleUI struct {
 	inputChan     chan string
 	done          chan struct{}
+	doneOnce      sync.Once
 	lastWasPrompt bool   // Track if last output was a prompt (no newline)
 	lastPrompt    string // Track last prompt content for deduplication
 }
@@ -68,26 +70,40 @@ func (c *ConsoleUI) Input() <-chan string {
 // Run starts the UI and blocks until done
 func (c *ConsoleUI) Run() error {
 	scanner := bufio.NewScanner(os.Stdin)
+	scanDone := make(chan error, 1)
 
-	for scanner.Scan() {
-		text := scanner.Text()
-		if text == "quit" {
-			close(c.done)
-			return nil
+	go func() {
+		for scanner.Scan() {
+			select {
+			case <-c.done:
+				scanDone <- nil
+				return
+			default:
+			}
+			text := scanner.Text()
+			c.inputChan <- text
 		}
-		c.inputChan <- text
-	}
+		scanDone <- scanner.Err()
+	}()
 
-	if err := scanner.Err(); err != nil {
+	select {
+	case <-c.done:
+		return nil
+	case err := <-scanDone:
 		return err
 	}
-
-	return nil
 }
 
 // Done returns a channel that closes when the UI is done
 func (c *ConsoleUI) Done() <-chan struct{} {
 	return c.done
+}
+
+// Quit requests the console UI to exit.
+func (c *ConsoleUI) Quit() {
+	c.doneOnce.Do(func() {
+		close(c.done)
+	})
 }
 
 // Controller methods (no-op for ConsoleUI - advanced features not supported in simple mode)
