@@ -33,6 +33,16 @@ func (c *ConsoleUI) Render(text string) {
 	fmt.Println(text)
 }
 
+// RenderDisplayLine outputs text to the console (alias of Render)
+func (c *ConsoleUI) RenderDisplayLine(text string) {
+	c.Render(text)
+}
+
+// RenderEcho outputs a local echo line with a prompt-style prefix
+func (c *ConsoleUI) RenderEcho(text string) {
+	c.Render("\033[32m> " + text + "\033[0m")
+}
+
 // RenderPrompt outputs a prompt without a trailing newline
 // Subsequent calls will overwrite the previous prompt
 func (c *ConsoleUI) RenderPrompt(text string) {

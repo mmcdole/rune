@@ -127,6 +127,18 @@ func (c *TCPClient) IsConnected() bool {
 	return c.current != nil
 }
 
+// LocalEchoEnabled reports whether the current connection prefers local echo.
+// Defaults to true if no active connection.
+func (c *TCPClient) LocalEchoEnabled() bool {
+	c.mu.Lock()
+	cx := c.current
+	c.mu.Unlock()
+	if cx == nil {
+		return true
+	}
+	return cx.telnet.LocalEchoEnabled()
+}
+
 // --- Worker Routines ---
 
 // readLoop reads from a specific connection instance.
@@ -175,25 +187,25 @@ func (c *TCPClient) readLoop(cx *connection) {
 		// Emit Lines
 		for _, line := range cx.telnet.ExtractLines() {
 			cx.enqueueEvent(mud.Event{
-				Type:    mud.EventServerLine,
+				Type:    mud.EventNetLine,
 				Payload: line,
 			})
 		}
 
 		// Emit Prompts
 		pending := cx.telnet.GetPending(false)
-		if len(pending) > 0 && len(pending) < 500 {
+		if len(pending) > 0 {
+			payload := pending
 			if cx.telnet.HasSignal() {
-				cx.enqueueEvent(mud.Event{
-					Type:    mud.EventServerPrompt,
-					Payload: cx.telnet.GetPending(true),
-				})
+				payload = cx.telnet.GetPending(true) // consume when signal seen
 			} else {
-				cx.enqueueEvent(mud.Event{
-					Type:    mud.EventServerPrompt,
-					Payload: pending,
-				})
+				// consume even without explicit signal to avoid prompt accumulation
+				cx.telnet.GetPending(true)
 			}
+			cx.enqueueEvent(mud.Event{
+				Type:    mud.EventNetPrompt,
+				Payload: payload,
+			})
 		}
 	}
 }

@@ -9,6 +9,12 @@ import (
 // ServerLineMsg represents a line from the MUD server.
 type ServerLineMsg string
 
+// DisplayLineMsg represents a line to append to scrollback (server output or prompt commit).
+type DisplayLineMsg string
+
+// EchoLineMsg represents a local echo (user input) to append to scrollback.
+type EchoLineMsg string
+
 // BatchedLinesMsg carries multiple lines in one message for efficient batching.
 type BatchedLinesMsg struct {
 	Lines []string

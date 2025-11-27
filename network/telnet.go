@@ -48,11 +48,14 @@ type TelnetBuffer struct {
 	// Track what we've agreed to
 	willEOR bool
 	doEOR   bool
+
+	// Local echo state (true = client should locally echo)
+	localEcho bool
 }
 
 // NewTelnetBuffer initializes the state machine for processing incoming RFC 854 byte streams.
 func NewTelnetBuffer() *TelnetBuffer {
-	return &TelnetBuffer{}
+	return &TelnetBuffer{localEcho: true}
 }
 
 // ProcessBytes takes raw TCP data, strips Telnet codes, updates state
@@ -162,7 +165,8 @@ func (tb *TelnetBuffer) handleWill(opt byte) {
 		tb.responses = append(tb.responses, IAC, DO, OptSuppressGoAhead)
 
 	case OptEcho:
-		// Let server echo
+		// Server will echo; turn off local echo
+		tb.localEcho = false
 		tb.responses = append(tb.responses, IAC, DO, OptEcho)
 
 	default:
@@ -176,6 +180,9 @@ func (tb *TelnetBuffer) handleWont(opt byte) {
 	switch opt {
 	case OptEOR:
 		tb.willEOR = false
+	case OptEcho:
+		// Server won't echo; turn on local echo
+		tb.localEcho = true
 	}
 	// Acknowledge with DONT
 	tb.responses = append(tb.responses, IAC, DONT, opt)
@@ -208,6 +215,8 @@ func (tb *TelnetBuffer) handleDont(opt byte) {
 	switch opt {
 	case OptEOR:
 		tb.doEOR = false
+	case OptEcho:
+		// Server doesn't want us to echo; leave localEcho unchanged
 	}
 	// Acknowledge with WONT
 	tb.responses = append(tb.responses, IAC, WONT, opt)
@@ -308,4 +317,11 @@ func (tb *TelnetBuffer) HasEORSupport() bool {
 	tb.mu.Lock()
 	defer tb.mu.Unlock()
 	return tb.willEOR || tb.doEOR
+}
+
+// LocalEchoEnabled reports whether the client should locally echo input.
+func (tb *TelnetBuffer) LocalEchoEnabled() bool {
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+	return tb.localEcho
 }

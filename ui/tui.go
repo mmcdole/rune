@@ -48,6 +48,17 @@ func (b *BubbleTeaUI) Render(text string) {
 	b.send(ServerLineMsg(text))
 }
 
+// RenderDisplayLine implements mud.UI - queues a display line for scrollback.
+func (b *BubbleTeaUI) RenderDisplayLine(text string) {
+	b.send(DisplayLineMsg(text))
+}
+
+// RenderEcho implements mud.UI - queues a local echo line.
+func (b *BubbleTeaUI) RenderEcho(text string) {
+	styled := "\033[32m> " + text + "\033[0m"
+	b.send(EchoLineMsg(styled))
+}
+
 // RenderPrompt implements mud.UI - updates the prompt area.
 func (b *BubbleTeaUI) RenderPrompt(text string) {
 	b.send(PromptMsg(text))

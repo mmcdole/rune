@@ -24,13 +24,13 @@ type Model struct {
 	wordCache *WordCache
 
 	// State
-	lastPrompt   string // For deduplication
-	infobar      string // Lua-controlled info bar (above input)
-	width        int
-	height       int
-	inputChan    chan<- string
-	quitting     bool
-	initialized  bool
+	lastPrompt  string // For deduplication
+	infobar     string // Lua-controlled info bar (above input)
+	width       int
+	height      int
+	inputChan   chan<- string
+	quitting    bool
+	initialized bool
 
 	// Pending lines for batched rendering
 	pendingLines []string
@@ -91,18 +91,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Batched lines from aggregator
 	case flushLinesMsg:
-		m.viewport.ClearPrompt() // Clear partial line when full lines arrive
 		for _, line := range msg.Lines {
 			m.wordCache.AddLine(line) // Feed tab completion cache
 		}
 		m.appendLines(msg.Lines)
 		return m, nil
 
+	// General display line (server output or prompt commit)
+	case DisplayLineMsg:
+		m.wordCache.AddLine(string(msg))
+		m.appendLines([]string{string(msg)})
+		return m, nil
+
 	// Single server line - batch for next tick
 	case ServerLineMsg:
-		m.viewport.ClearPrompt() // Clear partial line when full line arrives
 		m.pendingLines = append(m.pendingLines, string(msg))
 		m.wordCache.AddLine(string(msg)) // Feed tab completion cache
+		return m, nil
+
+	// Echo line
+	case EchoLineMsg:
+		m.appendLines([]string{string(msg)})
 		return m, nil
 
 	// Server prompt (partial line)
