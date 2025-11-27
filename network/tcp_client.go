@@ -8,104 +8,149 @@ import (
 	"github.com/drake/rune/mud"
 )
 
-// TCPClient implements the Network interface with real telnet support
+// TCPClient manages the lifecycle of TCP connections.
+// It provides a stable interface for the Session while handling the
+// chaotic reality of network sockets underneath.
 type TCPClient struct {
-	conn       net.Conn
+	// Stable channel that Session reads from. Never closes.
 	outputChan chan mud.Event
-	sendChan   chan string
-	telnet     *TelnetBuffer
 
-	mu        sync.Mutex
-	connected bool
-	done      chan struct{}
+	// State protection
+	mu      sync.Mutex
+	current *connection // The currently active connection, or nil
 }
 
-// NewTCPClient initializes a TCP client with buffered channels for async I/O.
+// connection represents a single, ephemeral TCP session.
+// It is created on Connect() and discarded on Disconnect().
+type connection struct {
+	conn   net.Conn
+	telnet *TelnetBuffer
+
+	// Buffered queue for outgoing data specific to this connection
+	sendQueue chan string
+
+	// Signal to stop internal goroutines (Writer)
+	done chan struct{}
+}
+
+// NewTCPClient creates a new client.
 func NewTCPClient() *TCPClient {
 	return &TCPClient{
 		outputChan: make(chan mud.Event, 256),
-		sendChan:   make(chan string, 64),
-		telnet:     NewTelnetBuffer(),
 	}
 }
 
-// Connect establishes a connection to the MUD server
+// Connect establishes a new connection.
+// If a connection already exists, it is cleanly closed and replaced.
 func (c *TCPClient) Connect(address string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.connected {
-		c.disconnectLocked()
+	// 1. Clean up existing connection if present
+	if c.current != nil {
+		c.current.close()
 	}
 
+	// 2. Dial new connection
 	conn, err := net.DialTimeout("tcp", address, 10*time.Second)
 	if err != nil {
 		return err
 	}
 
-	c.conn = conn
-	c.connected = true
-	c.done = make(chan struct{})
-	c.telnet.Clear()
+	// 3. Configure TCP KeepAlive (for detecting dropped connections)
+	if tcpConn, ok := conn.(*net.TCPConn); ok {
+		tcpConn.SetKeepAlive(true)
+		tcpConn.SetKeepAlivePeriod(30 * time.Second)
+	}
 
-	// Start reader and writer goroutines
-	go c.readerLoop()
-	go c.writerLoop()
+	// 4. Create the new connection object
+	cx := &connection{
+		conn:      conn,
+		telnet:    NewTelnetBuffer(),
+		sendQueue: make(chan string, 100),
+		done:      make(chan struct{}),
+	}
+
+	// 5. Set as current and start workers
+	c.current = cx
+
+	// We pass the specific 'cx' pointer to the workers.
+	// They bind to THIS connection instance, not the TCPClient.
+	go c.readLoop(cx)
+	go c.writeLoop(cx)
 
 	return nil
 }
 
-// Disconnect closes the connection
+// Disconnect manually closes the connection.
 func (c *TCPClient) Disconnect() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.disconnectLocked()
-}
 
-func (c *TCPClient) disconnectLocked() {
-	if !c.connected {
-		return
-	}
-
-	c.connected = false
-	close(c.done)
-
-	if c.conn != nil {
-		c.conn.Close()
-		c.conn = nil
+	if c.current != nil {
+		c.current.close()
+		c.current = nil
+		// We initiate the disconnect, so we don't send an event.
+		// The readLoop will see the close, check c.current, see it's nil, and exit silently.
 	}
 }
 
-// Send queues data to be sent to the server
+// Send queues data for the current connection.
+// Safe to call even if disconnected (data is dropped).
 func (c *TCPClient) Send(data string) {
-	select {
-	case c.sendChan <- data:
-	default:
-		// Channel full, drop data (or could block)
+	c.mu.Lock()
+	cx := c.current
+	c.mu.Unlock()
+
+	if cx != nil {
+		select {
+		case cx.sendQueue <- data:
+		default:
+			// Queue full - drop data to prevent blocking the Session
+		}
 	}
 }
 
-// Output returns the channel of events from the server
+// Output returns the stable event channel.
 func (c *TCPClient) Output() <-chan mud.Event {
 	return c.outputChan
 }
 
-// readerLoop reads from the connection and processes telnet protocol
-// Uses reactive prompt detection - no timeout-based polling
-func (c *TCPClient) readerLoop() {
+// IsConnected checks if there is an active connection.
+func (c *TCPClient) IsConnected() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.current != nil
+}
+
+// --- Worker Routines ---
+
+// readLoop reads from a specific connection instance.
+func (c *TCPClient) readLoop(cx *connection) {
 	buf := make([]byte, 4096)
 
 	for {
-		// Blocking read - no timeout
-		n, err := c.conn.Read(buf)
+		// BLOCKING READ.
+		// Exits on: Network Error, Remote Close, or Local Close.
+		n, err := cx.conn.Read(buf)
 		if err != nil {
-			// Connection closed or error - properly cleanup to signal writerLoop
+			// THE CRITICAL CHECK:
+			// Why did we fail? Was it a crash, or were we replaced?
 			c.mu.Lock()
-			if c.connected {
-				c.connected = false
-				close(c.done)
+			isCurrent := (c.current == cx)
+			if isCurrent {
+				// We are the active connection and we just died.
+				// This is a real disconnect.
+				c.current = nil
 			}
 			c.mu.Unlock()
+
+			if isCurrent {
+				c.outputChan <- mud.Event{
+					Type:    mud.EventSystemControl,
+					Control: mud.ControlOp{Action: mud.ActionDisconnect},
+				}
+			}
 			return
 		}
 
@@ -113,38 +158,32 @@ func (c *TCPClient) readerLoop() {
 			continue
 		}
 
-		// Process telnet protocol
-		responses := c.telnet.ProcessBytes(buf[:n])
-
-		// Send any negotiation responses back to server
+		// Protocol processing
+		responses := cx.telnet.ProcessBytes(buf[:n])
 		if len(responses) > 0 {
-			c.conn.Write(responses)
+			// Best effort write for negotiation
+			cx.conn.SetWriteDeadline(time.Now().Add(time.Second))
+			cx.conn.Write(responses)
+			cx.conn.SetWriteDeadline(time.Time{})
 		}
 
-		// Extract and emit complete lines
-		lines := c.telnet.ExtractLines()
-		for _, line := range lines {
+		// Emit Lines
+		for _, line := range cx.telnet.ExtractLines() {
 			c.outputChan <- mud.Event{
 				Type:    mud.EventServerLine,
 				Payload: line,
 			}
 		}
 
-		// Reactive prompt detection - only check when data arrives
-		pending := c.telnet.GetPending(false) // Peek only
-
+		// Emit Prompts
+		pending := cx.telnet.GetPending(false)
 		if len(pending) > 0 && len(pending) < 500 {
-			if c.telnet.HasSignal() {
-				// Terminated Prompt (Server sent GA/EOR)
-				// Consume the buffer and emit as prompt
-				finalPrompt := c.telnet.GetPending(true)
+			if cx.telnet.HasSignal() {
 				c.outputChan <- mud.Event{
 					Type:    mud.EventServerPrompt,
-					Payload: finalPrompt,
+					Payload: cx.telnet.GetPending(true),
 				}
 			} else {
-				// Unterminated Prompt (No signal)
-				// Emit on data arrival - let UI handle deduplication
 				c.outputChan <- mud.Event{
 					Type:    mud.EventServerPrompt,
 					Payload: pending,
@@ -154,26 +193,31 @@ func (c *TCPClient) readerLoop() {
 	}
 }
 
-// writerLoop sends data to the connection
-func (c *TCPClient) writerLoop() {
+// writeLoop handles outgoing data for a specific connection.
+func (c *TCPClient) writeLoop(cx *connection) {
 	for {
 		select {
-		case <-c.done:
-			return
-		case data := <-c.sendChan:
-			c.mu.Lock()
-			if c.connected && c.conn != nil {
-				// Add CR+LF as per telnet protocol
-				c.conn.Write([]byte(data + "\r\n"))
+		case <-cx.done:
+			return // Connection closed
+		case data := <-cx.sendQueue:
+			// Write with deadline to prevent hanging on stalled connections
+			cx.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+			_, err := cx.conn.Write([]byte(data + "\r\n"))
+			cx.conn.SetWriteDeadline(time.Time{})
+
+			if err != nil {
+				// We don't need to handle cleanup here.
+				// The Read() in readLoop will fail momentarily and handle it.
+				return
 			}
-			c.mu.Unlock()
 		}
 	}
 }
 
-// IsConnected returns the connection status
-func (c *TCPClient) IsConnected() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.connected
+// close cleanly shuts down the connection resources
+func (cx *connection) close() {
+	// Closing the net.Conn causes Read() to return error immediately
+	cx.conn.Close()
+	// Closing done signal causes writeLoop to exit
+	close(cx.done)
 }
