@@ -297,6 +297,7 @@ func (s *Session) Pane(op, name, data string) {
 // ScheduleTimer schedules a timer wake-up call.
 func (s *Session) ScheduleTimer(id int, d time.Duration) {
 	cancel := s.scheduler.Schedule(d, func() {
+		delete(s.timerCancels, id) // Clean up - cancel func is now useless
 		s.events <- mud.Event{
 			Type:     mud.EventTimer,
 			Callback: func() { s.engine.OnTimer(id) },
