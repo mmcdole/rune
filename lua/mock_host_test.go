@@ -1,73 +1,65 @@
 package lua
 
-import "sync"
+import (
+	"sync"
+	"time"
+)
 
 // MockHost implements Host for testing.
 type MockHost struct {
 	mu sync.Mutex
 
 	// Captured calls
-	NetworkCalls    []string
-	DisplayCalls    []string
+	SendCalls       []string
+	PrintCalls      []string
 	QuitCalled      bool
 	ConnectCalls    []string
 	DisconnectCalls int
 	ReloadCalls     int
-	LoadCalls       []string
 	StatusCalls     []string
 	InfobarCalls    []string
-	PaneCreateCalls []string
-	PaneWriteCalls  []struct{ Name, Text string }
-	PaneToggleCalls []string
-	PaneClearCalls  []string
-	PaneBindCalls   []struct{ Key, Name string }
-	TimerCallbacks  []func()
+	PaneCalls       []struct{ Op, Name, Data string }
+	ScheduledTimers []int // Timer IDs that were scheduled
 }
 
 func NewMockHost() *MockHost {
 	return &MockHost{}
 }
 
-func (m *MockHost) SendToNetwork(data string) {
+func (m *MockHost) Send(data string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.NetworkCalls = append(m.NetworkCalls, data)
+	m.SendCalls = append(m.SendCalls, data)
 }
 
-func (m *MockHost) SendToDisplay(text string) {
+func (m *MockHost) Print(text string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.DisplayCalls = append(m.DisplayCalls, text)
+	m.PrintCalls = append(m.PrintCalls, text)
 }
 
-func (m *MockHost) RequestQuit() {
+func (m *MockHost) Quit() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.QuitCalled = true
 }
 
-func (m *MockHost) RequestConnect(address string) {
+func (m *MockHost) Connect(addr string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.ConnectCalls = append(m.ConnectCalls, address)
+	m.ConnectCalls = append(m.ConnectCalls, addr)
 }
 
-func (m *MockHost) RequestDisconnect() {
+func (m *MockHost) Disconnect() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.DisconnectCalls++
 }
 
-func (m *MockHost) RequestReload() {
+func (m *MockHost) Reload() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.ReloadCalls++
-}
-
-func (m *MockHost) RequestLoad(scriptPath string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.LoadCalls = append(m.LoadCalls, scriptPath)
 }
 
 func (m *MockHost) SetStatus(text string) {
@@ -82,40 +74,24 @@ func (m *MockHost) SetInfobar(text string) {
 	m.InfobarCalls = append(m.InfobarCalls, text)
 }
 
-func (m *MockHost) CreatePane(name string) {
+func (m *MockHost) Pane(op, name, data string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.PaneCreateCalls = append(m.PaneCreateCalls, name)
+	m.PaneCalls = append(m.PaneCalls, struct{ Op, Name, Data string }{op, name, data})
 }
 
-func (m *MockHost) WritePane(name, text string) {
+func (m *MockHost) ScheduleTimer(id int, d time.Duration) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.PaneWriteCalls = append(m.PaneWriteCalls, struct{ Name, Text string }{name, text})
+	m.ScheduledTimers = append(m.ScheduledTimers, id)
 }
 
-func (m *MockHost) TogglePane(name string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.PaneToggleCalls = append(m.PaneToggleCalls, name)
+func (m *MockHost) CancelTimer(id int) {
+	// No-op for tests
 }
 
-func (m *MockHost) ClearPane(name string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.PaneClearCalls = append(m.PaneClearCalls, name)
-}
-
-func (m *MockHost) BindPaneKey(key, name string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.PaneBindCalls = append(m.PaneBindCalls, struct{ Key, Name string }{key, name})
-}
-
-func (m *MockHost) SendTimerEvent(callback func()) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.TimerCallbacks = append(m.TimerCallbacks, callback)
+func (m *MockHost) CancelAllTimers() {
+	// No-op for tests
 }
 
 // Helper methods for tests
@@ -123,26 +99,23 @@ func (m *MockHost) SendTimerEvent(callback func()) {
 func (m *MockHost) DrainNetworkCalls() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	calls := m.NetworkCalls
-	m.NetworkCalls = nil
+	calls := m.SendCalls
+	m.SendCalls = nil
 	return calls
 }
 
-func (m *MockHost) DrainDisplayCalls() []string {
+func (m *MockHost) DrainPrintCalls() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	calls := m.DisplayCalls
-	m.DisplayCalls = nil
+	calls := m.PrintCalls
+	m.PrintCalls = nil
 	return calls
 }
 
-func (m *MockHost) ExecuteTimerCallbacks() {
+func (m *MockHost) DrainScheduledTimers() []int {
 	m.mu.Lock()
-	callbacks := m.TimerCallbacks
-	m.TimerCallbacks = nil
-	m.mu.Unlock()
-
-	for _, cb := range callbacks {
-		cb()
-	}
+	defer m.mu.Unlock()
+	ids := m.ScheduledTimers
+	m.ScheduledTimers = nil
+	return ids
 }

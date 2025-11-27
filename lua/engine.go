@@ -1,66 +1,57 @@
 package lua
 
 import (
-	"embed"
-	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	glua "github.com/yuin/gopher-lua"
 )
 
-//go:embed core/*.lua
-var CoreScripts embed.FS
-
-// --- Types ---
-
-// timerEntry holds a timer and its done channel for clean shutdown
+// timerEntry holds timer metadata.
+// Engine owns the callback, Session owns the scheduling.
 type timerEntry struct {
-	ticker *time.Ticker
-	done   chan struct{}
+	fn       *glua.LFunction
+	interval time.Duration // 0 = one-shot, >0 = repeating
 }
 
-// Engine implements the ScriptEngine interface
+// Engine wraps gopher-lua and manages the VM lifecycle.
+// It is a pure mechanism: it knows how to run Lua code and expose APIs.
+// It does NOT know about core scripts, config dirs, or boot sequences.
 type Engine struct {
 	L          *glua.LState
 	regexCache *lru.Cache[string, *regexp.Regexp]
-	timers     map[int]*timerEntry
-	timerID    int
-	timerMu    sync.Mutex
 
 	// Cached table reference
 	runeTable *glua.LTable
 
 	// Host interface for communication with the rest of the system
 	host Host
+
+	// Timer ownership - Engine owns the callbacks, Session owns time
+	timers map[int]timerEntry
+	nextID int // Monotonic counter prevents stale timer ID collisions
 }
 
-// --- Constructor ---
-
-// NewEngine initializes a Lua VM with regex caching and timer management.
+// NewEngine creates an Engine with the given Host.
 func NewEngine(host Host) *Engine {
 	cache, _ := lru.New[string, *regexp.Regexp](100)
 	return &Engine{
 		regexCache: cache,
-		timers:     make(map[int]*timerEntry),
 		host:       host,
+		timers:     make(map[int]timerEntry),
+		nextID:     0,
 	}
 }
 
 // --- Lifecycle ---
 
-// InitState initializes (or re-initializes) the Lua VM with fresh state
-func (e *Engine) InitState(coreScripts embed.FS, configDir string) error {
-	// Cancel all timers
-	e.CancelAllTimers()
-
+// Init initializes (or re-initializes) the Lua VM with fresh state.
+// It registers the API but does NOT load any scripts - that's the caller's job.
+func (e *Engine) Init() error {
 	// Close old Lua state if it exists
 	if e.L != nil {
 		e.L.Close()
@@ -68,116 +59,105 @@ func (e *Engine) InitState(coreScripts embed.FS, configDir string) error {
 
 	// Create fresh Lua state
 	e.L = glua.NewState()
+
+	// Reset regex cache
 	cache, _ := lru.New[string, *regexp.Regexp](100)
 	e.regexCache = cache
-	e.timers = make(map[int]*timerEntry)
-	e.timerID = 0
+
+	// Cancel all pending timers and clear callback map
+	e.host.CancelAllTimers()
+	e.timers = make(map[int]timerEntry)
 
 	// Register custom types
 	registerLineType(e.L)
 
-	// Bind host functions to the new state
-	e.registerHostFuncs()
+	// Register API functions
+	e.registerAPIs()
 
-	// Set config dir
-	e.SetConfigDir(configDir)
+	return nil
+}
 
-	// Load core scripts
-	if err := e.LoadEmbeddedCore(coreScripts); err != nil {
+// Close cleans up the Lua state.
+func (e *Engine) Close() {
+	e.host.CancelAllTimers()
+	e.timers = nil
+	if e.L != nil {
+		e.L.Close()
+		e.L = nil
+	}
+}
+
+// OnTimer handles wake-up calls from Session.
+// This is the single entry point for all timer callback execution.
+func (e *Engine) OnTimer(id int) {
+	if e.L == nil {
+		return
+	}
+
+	entry, ok := e.timers[id]
+	if !ok {
+		return // Cancelled, or belonged to previous Engine instance
+	}
+
+	// Execute callback with protected call
+	e.L.Push(entry.fn)
+	if err := e.L.PCall(0, 0, nil); err != nil {
+		e.CallHook("error", "timer: "+err.Error())
+	}
+
+	// Handle one-shot vs repeating
+	if entry.interval == 0 {
+		delete(e.timers, id)
+		return
+	}
+
+	// Repeating: reschedule only if not cancelled during callback
+	if _, still := e.timers[id]; still {
+		e.host.ScheduleTimer(id, entry.interval)
+	}
+}
+
+// --- Execution Primitives (Mechanism) ---
+
+// DoString executes a raw string of Lua code.
+// The name parameter is used for stack traces.
+func (e *Engine) DoString(name, code string) error {
+	fn, err := e.L.Load(strings.NewReader(code), name)
+	if err != nil {
 		return err
 	}
-
-	// Fire ready hook after core but before user scripts
-	e.CallHook("ready")
-
-	// Load init.lua
-	initPath := filepath.Join(configDir, "init.lua")
-	if _, err := os.Stat(initPath); err == nil {
-		if err := e.LoadUserScripts([]string{initPath}); err != nil {
-			return err
-		}
-	}
-	return nil
+	e.L.Push(fn)
+	return e.L.PCall(0, 0, nil)
 }
 
-// Close cleans up the Lua state
-func (e *Engine) Close() {
-	e.CancelAllTimers()
-	e.L.Close()
-}
+// DoFile executes a Lua file from the filesystem.
+// It temporarily adjusts package.path to allow local requires.
+func (e *Engine) DoFile(path string) error {
+	path = expandTilde(path)
 
-// --- Script Loading ---
-
-// SetConfigDir sets the rune.config_dir variable for user scripts
-func (e *Engine) SetConfigDir(dir string) {
-	e.L.SetField(e.runeTable, "config_dir", glua.LString(dir))
-}
-
-// LoadEmbeddedCore loads core scripts from embedded filesystem
-func (e *Engine) LoadEmbeddedCore(scripts embed.FS) error {
-	entries, err := fs.ReadDir(scripts, "core")
+	absPath, err := filepath.Abs(path)
 	if err != nil {
-		return fmt.Errorf("reading core scripts: %w", err)
+		return err
 	}
+	dir := filepath.Dir(absPath)
 
-	// Sort entries to ensure consistent load order (00_, 10_, 20_, etc.)
-	var files []string
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			files = append(files, entry.Name())
-		}
-	}
-	sort.Strings(files)
+	// Temporarily prepend script's directory to package.path
+	pkg := e.L.GetGlobal("package").(*glua.LTable)
+	oldPath := e.L.GetField(pkg, "path").String()
+	newPath := dir + "/?.lua;" + oldPath
+	e.L.SetField(pkg, "path", glua.LString(newPath))
 
-	for _, file := range files {
-		content, err := scripts.ReadFile("core/" + file)
-		if err != nil {
-			return fmt.Errorf("reading %s: %w", file, err)
-		}
-		if err := e.L.DoString(string(content)); err != nil {
-			return fmt.Errorf("executing %s: %w", file, err)
-		}
-	}
+	err = e.L.DoFile(absPath)
 
-	return nil
-}
+	// Restore original path
+	e.L.SetField(pkg, "path", glua.LString(oldPath))
 
-// LoadUserScripts loads user scripts from filesystem paths
-func (e *Engine) LoadUserScripts(paths []string) error {
-	for _, path := range paths {
-		path = expandTilde(path)
-
-		absPath, err := filepath.Abs(path)
-		if err != nil {
-			return fmt.Errorf("resolving %s: %w", path, err)
-		}
-		dir := filepath.Dir(absPath)
-
-		// Temporarily prepend script's directory to package.path
-		pkg := e.L.GetGlobal("package").(*glua.LTable)
-		oldPath := e.L.GetField(pkg, "path").String()
-		newPath := dir + "/?.lua;" + oldPath
-		e.L.SetField(pkg, "path", glua.LString(newPath))
-
-		content, err := os.ReadFile(absPath)
-		if err != nil {
-			e.L.SetField(pkg, "path", glua.LString(oldPath))
-			return fmt.Errorf("reading %s: %w", absPath, err)
-		}
-
-		if err := e.L.DoString(string(content)); err != nil {
-			e.L.SetField(pkg, "path", glua.LString(oldPath))
-			return fmt.Errorf("executing %s: %w", absPath, err)
-		}
-
-		e.L.SetField(pkg, "path", glua.LString(oldPath))
-	}
-	return nil
+	return err
 }
 
 // --- Event Handlers ---
 
-// OnInput handles user typing
+// OnInput handles user typing.
 func (e *Engine) OnInput(text string) bool {
 	if err := e.L.CallByParam(glua.P{
 		Fn:      e.getHooksCall(),
@@ -196,7 +176,7 @@ func (e *Engine) OnInput(text string) bool {
 	return true
 }
 
-// OnOutput handles server text
+// OnOutput handles server text.
 func (e *Engine) OnOutput(text string) (string, bool) {
 	clean := stripAnsi(text)
 	lineUD := newLine(e.L, text, clean)
@@ -219,7 +199,7 @@ func (e *Engine) OnOutput(text string) (string, bool) {
 	return modified.String(), true
 }
 
-// OnPrompt handles server prompts
+// OnPrompt handles server prompts.
 func (e *Engine) OnPrompt(text string) string {
 	clean := stripAnsi(text)
 	lineUD := newLine(e.L, text, clean)
@@ -242,7 +222,7 @@ func (e *Engine) OnPrompt(text string) string {
 	return modified.String()
 }
 
-// CallHook calls a hook event with string arguments
+// CallHook calls a hook event with string arguments.
 func (e *Engine) CallHook(event string, args ...string) {
 	luaArgs := make([]glua.LValue, len(args)+1)
 	luaArgs[0] = glua.LString(event)
@@ -257,57 +237,34 @@ func (e *Engine) CallHook(event string, args ...string) {
 	}, luaArgs...)
 }
 
-// ExecuteCallback runs a stored Lua function
+// ExecuteCallback runs a callback function.
 func (e *Engine) ExecuteCallback(cb func()) {
 	if cb != nil {
 		cb()
 	}
 }
 
-// --- Timer Management ---
+// --- API Registration ---
 
-// CancelAllTimers stops all repeating timers
-func (e *Engine) CancelAllTimers() {
-	e.timerMu.Lock()
-	for id, entry := range e.timers {
-		close(entry.done)
-		entry.ticker.Stop()
-		delete(e.timers, id)
-	}
-	e.timerMu.Unlock()
-}
-
-// --- Private Helpers ---
-
-// registerHostFuncs binds Lua API functions to the rune table
-func (e *Engine) registerHostFuncs() {
+func (e *Engine) registerAPIs() {
 	e.runeTable = e.L.NewTable()
 	e.L.SetGlobal("rune", e.runeTable)
 
 	e.registerCoreFuncs()
 	e.registerTimerFuncs()
 	e.registerRegexFuncs()
-	e.registerStatusFuncs()
-	e.registerPaneFuncs()
-	e.registerInfobarFuncs()
+	e.registerUIFuncs()
 }
 
-// getHooksCall returns the rune.hooks.call function
+// getHooksCall returns the rune.hooks.call function.
 func (e *Engine) getHooksCall() glua.LValue {
 	hooksTable := e.L.GetField(e.runeTable, "hooks").(*glua.LTable)
 	return e.L.GetField(hooksTable, "call")
 }
 
-// clearRequireCache clears the Lua require cache so modules reload fresh
-func (e *Engine) clearRequireCache() {
-	pkg := e.L.GetGlobal("package").(*glua.LTable)
-	loaded := e.L.GetField(pkg, "loaded").(*glua.LTable)
-	loaded.ForEach(func(key, value glua.LValue) {
-		e.L.SetField(loaded, key.String(), glua.LNil)
-	})
-}
+// --- Private Helpers ---
 
-// stripAnsi removes ANSI escape codes from a string
+// stripAnsi removes ANSI escape codes from a string.
 func stripAnsi(s string) string {
 	var result strings.Builder
 	inEscape := false
@@ -327,7 +284,7 @@ func stripAnsi(s string) string {
 	return result.String()
 }
 
-// expandTilde expands ~ to home directory
+// expandTilde expands ~ to home directory.
 func expandTilde(path string) string {
 	if len(path) > 0 && path[0] == '~' {
 		if home, err := os.UserHomeDir(); err == nil {

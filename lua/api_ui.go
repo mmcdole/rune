@@ -2,6 +2,13 @@ package lua
 
 import glua "github.com/yuin/gopher-lua"
 
+// registerUIFuncs registers all UI-related API functions
+func (e *Engine) registerUIFuncs() {
+	e.registerStatusFuncs()
+	e.registerPaneFuncs()
+	e.registerInfobarFuncs()
+}
+
 // registerStatusFuncs registers internal rune._status.* primitives (wrapped by Lua)
 func (e *Engine) registerStatusFuncs() {
 	statusTable := e.L.NewTable()
@@ -23,7 +30,7 @@ func (e *Engine) registerPaneFuncs() {
 	// rune._pane.create(name): Create a named pane
 	e.L.SetField(paneTable, "create", e.L.NewFunction(func(L *glua.LState) int {
 		name := L.CheckString(1)
-		e.host.CreatePane(name)
+		e.host.Pane("create", name, "")
 		return 0
 	}))
 
@@ -31,21 +38,21 @@ func (e *Engine) registerPaneFuncs() {
 	e.L.SetField(paneTable, "write", e.L.NewFunction(func(L *glua.LState) int {
 		name := L.CheckString(1)
 		text := L.CheckString(2)
-		e.host.WritePane(name, text)
+		e.host.Pane("write", name, text)
 		return 0
 	}))
 
 	// rune._pane.toggle(name): Toggle pane visibility
 	e.L.SetField(paneTable, "toggle", e.L.NewFunction(func(L *glua.LState) int {
 		name := L.CheckString(1)
-		e.host.TogglePane(name)
+		e.host.Pane("toggle", name, "")
 		return 0
 	}))
 
 	// rune._pane.clear(name): Clear pane contents
 	e.L.SetField(paneTable, "clear", e.L.NewFunction(func(L *glua.LState) int {
 		name := L.CheckString(1)
-		e.host.ClearPane(name)
+		e.host.Pane("clear", name, "")
 		return 0
 	}))
 
@@ -53,7 +60,7 @@ func (e *Engine) registerPaneFuncs() {
 	e.L.SetField(paneTable, "bind", e.L.NewFunction(func(L *glua.LState) int {
 		key := L.CheckString(1)
 		name := L.CheckString(2)
-		e.host.BindPaneKey(key, name)
+		e.host.Pane("bind", name, key)
 		return 0
 	}))
 }

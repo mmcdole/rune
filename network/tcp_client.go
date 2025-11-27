@@ -8,8 +8,6 @@ import (
 	"github.com/drake/rune/mud"
 )
 
-// Note: time is still needed for DialTimeout
-
 // TCPClient implements the Network interface with real telnet support
 type TCPClient struct {
 	conn       net.Conn

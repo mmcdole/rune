@@ -3,126 +3,106 @@ package session
 import (
 	"embed"
 	"fmt"
+	"io/fs"
 	"os"
+	"path/filepath"
+	"sort"
+	"time"
 
+	"github.com/drake/rune/internal/timer"
 	"github.com/drake/rune/lua"
 	"github.com/drake/rune/mud"
 )
 
 // Config holds session configuration
 type Config struct {
-	CoreScripts embed.FS
-	ConfigDir   string
-	UserScripts []string
+	CoreScripts embed.FS // Embedded core Lua scripts
+	ConfigDir   string   // Path to ~/.config/rune
+	UserScripts []string // CLI script arguments
 }
 
 // Session orchestrates the MUD client components.
-// It implements engine.Host to bridge the LuaEngine with the rest of the system.
 type Session struct {
-	// Dependencies (injected)
-	network mud.Network
-	ui      mud.UI
+	// Components
+	net       mud.Network
+	ui        mud.UI
+	engine    *lua.Engine
+	scheduler *timer.Scheduler
 
-	// Owned components
-	engine *lua.Engine
+	// Channels
+	events   chan mud.Event
+	timerOut chan func()
 
-	// Internal channels
-	events chan mud.Event
-	netOut chan string
-	uiOut  chan string
+	// Timer cancellation - Session owns Go timers, Engine owns callbacks
+	timerCancels map[int]func()
 
-	// Config
-	coreScripts embed.FS
-	configDir   string
-	userScripts []string
+	// Config (retained for reload)
+	config Config
 }
 
-// New creates a new Session with the given dependencies.
-func New(network mud.Network, ui mud.UI, cfg Config) *Session {
-	// Create buffered channels with generous sizes
-	// Events: network lines + user input + timers + control
-	// UI output: processed lines heading to display
+// New creates a new Session. It is passive - no goroutines start here.
+func New(net mud.Network, ui mud.UI, cfg Config) *Session {
+	timerOut := make(chan func(), 100)
+
 	s := &Session{
-		network:     network,
-		ui:          ui,
-		events:      make(chan mud.Event, 1000),
-		netOut:      make(chan string, 1000),
-		uiOut:       make(chan string, 1000),
-		coreScripts: cfg.CoreScripts,
-		configDir:   cfg.ConfigDir,
-		userScripts: cfg.UserScripts,
+		net:          net,
+		ui:           ui,
+		scheduler:    timer.New(timerOut),
+		timerOut:     timerOut,
+		events:       make(chan mud.Event, 1000),
+		timerCancels: make(map[int]func()),
+		config:       cfg,
 	}
 
-	// Create engine with Session as Host
 	s.engine = lua.NewEngine(s)
 
 	return s
 }
 
-// Run starts the session and blocks until the UI exits.
+// Run starts the session and blocks until exit.
 func (s *Session) Run() error {
 	defer s.engine.Close()
 
-	// Spawn bridge goroutines
-	go s.bridgeNetworkToEvents()
-	go s.bridgeUIToEvents()
-	go s.runNetworkSender()
-	go s.runUIRenderer()
-
-	// Initialize Lua state with core scripts
-	if err := s.engine.InitState(s.coreScripts, s.configDir); err != nil {
-		s.uiOut <- fmt.Sprintf("\033[31m[Error] Loading scripts: %v\033[0m", err)
-	}
-
-	// Start event loop in goroutine
-	go s.runEventLoop()
-
-	// Load user scripts from command line args
-	if len(s.userScripts) > 0 {
-		if err := s.engine.LoadUserScripts(s.userScripts); err != nil {
-			return fmt.Errorf("loading user scripts: %w", err)
+	// Network -> Events
+	go func() {
+		for evt := range s.net.Output() {
+			s.events <- evt
 		}
+	}()
+
+	// UI -> Events
+	go func() {
+		for line := range s.ui.Input() {
+			s.events <- mud.Event{Type: mud.EventUserInput, Payload: line}
+		}
+	}()
+
+	// Timer -> Events
+	go func() {
+		for cb := range s.timerOut {
+			s.events <- mud.Event{Type: mud.EventTimer, Callback: cb}
+		}
+	}()
+
+	// Boot the system
+	if err := s.boot(); err != nil {
+		s.ui.Render(fmt.Sprintf("\033[31m[System] Boot Error: %v\033[0m", err))
 	}
+
+	// Start event loop
+	go s.processEvents()
 
 	// Block on UI
 	return s.ui.Run()
 }
 
-// --- Bridge goroutines ---
-
-func (s *Session) bridgeNetworkToEvents() {
-	for event := range s.network.Output() {
-		s.events <- event
-	}
-}
-
-func (s *Session) bridgeUIToEvents() {
-	for line := range s.ui.Input() {
-		s.events <- mud.Event{Type: mud.EventUserInput, Payload: line}
-	}
-}
-
-func (s *Session) runNetworkSender() {
-	for line := range s.netOut {
-		s.network.Send(line)
-	}
-}
-
-func (s *Session) runUIRenderer() {
-	for line := range s.uiOut {
-		s.ui.Render(line)
-	}
-}
-
-// --- Event loop ---
-
-func (s *Session) runEventLoop() {
+// processEvents is the main event loop.
+func (s *Session) processEvents() {
 	for event := range s.events {
 		switch event.Type {
 		case mud.EventServerLine:
-			modified, keep := s.engine.OnOutput(event.Payload)
-			if keep {
-				s.uiOut <- modified
+			if modified, show := s.engine.OnOutput(event.Payload); show {
+				s.ui.Render(modified)
 			}
 
 		case mud.EventServerPrompt:
@@ -130,142 +110,176 @@ func (s *Session) runEventLoop() {
 			s.ui.RenderPrompt(modified)
 
 		case mud.EventUserInput:
-			s.ui.Render(event.Payload) // Local echo
+			s.ui.Render(event.Payload) // Echo
 			s.engine.OnInput(event.Payload)
 
 		case mud.EventTimer:
 			if event.Callback != nil {
-				s.engine.ExecuteCallback(event.Callback)
+				event.Callback()
 			}
 
 		case mud.EventSystemControl:
-			s.handleSystemControl(event.Control)
+			s.handleControl(event.Control)
 		}
 	}
 }
 
-func (s *Session) handleSystemControl(ctrl mud.ControlOp) {
+// boot loads the VM state.
+func (s *Session) boot() error {
+	if err := s.engine.Init(); err != nil {
+		return err
+	}
+
+	// Set config directory
+	setupCode := fmt.Sprintf("rune.config_dir = [[%s]]", s.config.ConfigDir)
+	if err := s.engine.DoString("boot_config", setupCode); err != nil {
+		return err
+	}
+
+	// Load Core Scripts
+	entries, err := fs.ReadDir(s.config.CoreScripts, "core")
+	if err != nil {
+		return fmt.Errorf("reading core scripts: %w", err)
+	}
+
+	var files []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			files = append(files, e.Name())
+		}
+	}
+	sort.Strings(files)
+
+	for _, file := range files {
+		content, err := s.config.CoreScripts.ReadFile("core/" + file)
+		if err != nil {
+			return fmt.Errorf("core/%s: %w", file, err)
+		}
+		if err := s.engine.DoString(file, string(content)); err != nil {
+			return fmt.Errorf("core/%s: %w", file, err)
+		}
+	}
+
+	// Load user init.lua
+	initPath := filepath.Join(s.config.ConfigDir, "init.lua")
+	if _, err := os.Stat(initPath); err == nil {
+		if err := s.engine.DoFile(initPath); err != nil {
+			return fmt.Errorf("init.lua: %w", err)
+		}
+	}
+
+	// Load CLI scripts
+	for _, path := range s.config.UserScripts {
+		if err := s.engine.DoFile(path); err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+	}
+
+	s.engine.CallHook("ready")
+	return nil
+}
+
+// handleControl processes system control events.
+func (s *Session) handleControl(ctrl mud.ControlOp) {
 	switch ctrl.Action {
 	case mud.ActionQuit:
 		os.Exit(0)
-
 	case mud.ActionConnect:
-		addr := ctrl.Address
-		s.engine.CallHook("connecting", addr)
-		go func() {
-			if err := s.network.Connect(addr); err != nil {
-				s.events <- mud.Event{
-					Type: mud.EventTimer,
-					Callback: func() {
-						s.engine.CallHook("error", "Connection failed: "+err.Error())
-					},
-				}
-			} else {
-				s.events <- mud.Event{
-					Type: mud.EventTimer,
-					Callback: func() {
-						s.engine.CallHook("connected", addr)
-					},
-				}
-			}
-		}()
-
+		s.Connect(ctrl.Address)
 	case mud.ActionDisconnect:
-		s.engine.CallHook("disconnecting")
-		s.network.Disconnect()
-		s.engine.CallHook("disconnected")
-
+		s.Disconnect()
 	case mud.ActionReload:
-		s.engine.CallHook("reloading")
-		if err := s.engine.InitState(s.coreScripts, s.configDir); err != nil {
-			s.engine.CallHook("error", err.Error())
-			return
+		s.Reload()
+	}
+}
+
+// --- Host Implementation ---
+
+func (s *Session) Print(text string) { s.ui.Render(text) }
+func (s *Session) Send(data string)  { s.net.Send(data) }
+
+func (s *Session) Quit() {
+	os.Exit(0)
+}
+
+func (s *Session) Connect(addr string) {
+	s.engine.CallHook("connecting", addr)
+	go func() {
+		err := s.net.Connect(addr)
+		s.events <- mud.Event{
+			Type: mud.EventTimer,
+			Callback: func() {
+				if err != nil {
+					s.engine.CallHook("error", err.Error())
+				} else {
+					s.engine.CallHook("connected", addr)
+				}
+			},
 		}
-		s.engine.CallHook("reloaded")
+	}()
+}
 
-	case mud.ActionLoad:
-		path := ctrl.ScriptPath
-		if err := s.engine.LoadUserScripts([]string{path}); err != nil {
-			s.engine.CallHook("error", err.Error())
-		} else {
-			s.engine.CallHook("loaded", path)
+func (s *Session) Disconnect() {
+	s.engine.CallHook("disconnecting")
+	s.net.Disconnect()
+	s.engine.CallHook("disconnected")
+}
+
+func (s *Session) Reload() {
+	s.engine.CallHook("reloading")
+	s.events <- mud.Event{
+		Type: mud.EventTimer,
+		Callback: func() {
+			if err := s.boot(); err != nil {
+				s.ui.Render(fmt.Sprintf("\033[31mReload Failed: %v\033[0m", err))
+			} else {
+				s.engine.CallHook("reloaded")
+			}
+		},
+	}
+}
+
+func (s *Session) SetStatus(text string)  { s.ui.SetStatus(text) }
+func (s *Session) SetInfobar(text string) { s.ui.SetInfobar(text) }
+
+func (s *Session) Pane(op, name, data string) {
+	switch op {
+	case "create":
+		s.ui.CreatePane(name)
+	case "write":
+		s.ui.WritePane(name, data)
+	case "toggle":
+		s.ui.TogglePane(name)
+	case "clear":
+		s.ui.ClearPane(name)
+	case "bind":
+		s.ui.BindPaneKey(data, name)
+	}
+}
+
+// ScheduleTimer schedules a timer wake-up call.
+func (s *Session) ScheduleTimer(id int, d time.Duration) {
+	cancel := s.scheduler.Schedule(d, func() {
+		s.events <- mud.Event{
+			Type:     mud.EventTimer,
+			Callback: func() { s.engine.OnTimer(id) },
 		}
+	})
+	s.timerCancels[id] = cancel
+}
+
+// CancelTimer implements Host - cancels a scheduled wake-up.
+func (s *Session) CancelTimer(id int) {
+	if cancel, ok := s.timerCancels[id]; ok {
+		cancel()
+		delete(s.timerCancels, id)
 	}
 }
 
-// --- Host interface implementation ---
-
-func (s *Session) SendToNetwork(data string) {
-	s.netOut <- data
-}
-
-func (s *Session) SendToDisplay(text string) {
-	s.uiOut <- text
-}
-
-func (s *Session) RequestQuit() {
-	s.events <- mud.Event{
-		Type:    mud.EventSystemControl,
-		Control: mud.ControlOp{Action: mud.ActionQuit},
+// CancelAllTimers implements Host - cancels all scheduled wake-ups.
+func (s *Session) CancelAllTimers() {
+	for id, cancel := range s.timerCancels {
+		cancel()
+		delete(s.timerCancels, id)
 	}
-}
-
-func (s *Session) RequestConnect(address string) {
-	s.events <- mud.Event{
-		Type:    mud.EventSystemControl,
-		Control: mud.ControlOp{Action: mud.ActionConnect, Address: address},
-	}
-}
-
-func (s *Session) RequestDisconnect() {
-	s.events <- mud.Event{
-		Type:    mud.EventSystemControl,
-		Control: mud.ControlOp{Action: mud.ActionDisconnect},
-	}
-}
-
-func (s *Session) RequestReload() {
-	s.events <- mud.Event{
-		Type:    mud.EventSystemControl,
-		Control: mud.ControlOp{Action: mud.ActionReload},
-	}
-}
-
-func (s *Session) RequestLoad(scriptPath string) {
-	s.events <- mud.Event{
-		Type:    mud.EventSystemControl,
-		Control: mud.ControlOp{Action: mud.ActionLoad, ScriptPath: scriptPath},
-	}
-}
-
-func (s *Session) SetStatus(text string) {
-	s.ui.SetStatus(text)
-}
-
-func (s *Session) SetInfobar(text string) {
-	s.ui.SetInfobar(text)
-}
-
-func (s *Session) CreatePane(name string) {
-	s.ui.CreatePane(name)
-}
-
-func (s *Session) WritePane(name, text string) {
-	s.ui.WritePane(name, text)
-}
-
-func (s *Session) TogglePane(name string) {
-	s.ui.TogglePane(name)
-}
-
-func (s *Session) ClearPane(name string) {
-	s.ui.ClearPane(name)
-}
-
-func (s *Session) BindPaneKey(key, name string) {
-	s.ui.BindPaneKey(key, name)
-}
-
-func (s *Session) SendTimerEvent(callback func()) {
-	s.events <- mud.Event{Type: mud.EventTimer, Callback: callback}
 }

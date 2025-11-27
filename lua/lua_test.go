@@ -29,10 +29,40 @@ func setupTest(t *testing.T) (*Engine, *MockHost, func()) {
 	host := NewMockHost()
 	engine := NewEngine(host)
 
-	// Initialize the engine with embedded core scripts
-	// Use empty string for config dir in tests
-	if err := engine.InitState(CoreScripts, ""); err != nil {
+	// Initialize the VM
+	if err := engine.Init(); err != nil {
 		t.Fatal("Failed to initialize engine:", err)
+	}
+
+	// Load core scripts (mimicking Session.boot())
+	entries, err := CoreScripts.ReadDir("core")
+	if err != nil {
+		t.Fatal("Failed to read core scripts:", err)
+	}
+
+	var files []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			files = append(files, entry.Name())
+		}
+	}
+	// Sort for consistent load order
+	for i := 0; i < len(files)-1; i++ {
+		for j := i + 1; j < len(files); j++ {
+			if files[i] > files[j] {
+				files[i], files[j] = files[j], files[i]
+			}
+		}
+	}
+
+	for _, file := range files {
+		content, err := CoreScripts.ReadFile("core/" + file)
+		if err != nil {
+			t.Fatalf("Failed to read %s: %v", file, err)
+		}
+		if err := engine.DoString(file, string(content)); err != nil {
+			t.Fatalf("Failed to execute %s: %v", file, err)
+		}
 	}
 
 	cleanup := func() {

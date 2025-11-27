@@ -1,29 +1,28 @@
 package lua
 
+import "time"
+
 // Host provides the bridge between Engine and the rest of the system.
-// This abstraction decouples Engine from specific channel implementations,
-// making it testable without full channel infrastructure.
+// This abstraction decouples Engine from specific implementations,
+// making it testable without full infrastructure.
 type Host interface {
-	// Core communication
-	SendToNetwork(data string)
-	SendToDisplay(text string)
+	// IO
+	Print(text string)
+	Send(data string)
 
-	// System control
-	RequestQuit()
-	RequestConnect(address string)
-	RequestDisconnect()
-	RequestReload()
-	RequestLoad(scriptPath string)
+	// System / Lifecycle
+	Quit()
+	Connect(addr string)
+	Disconnect()
+	Reload()
 
-	// UI control (forwarded to UI implementation)
+	// UI
 	SetStatus(text string)
 	SetInfobar(text string)
-	CreatePane(name string)
-	WritePane(name, text string)
-	TogglePane(name string)
-	ClearPane(name string)
-	BindPaneKey(key, name string)
+	Pane(op, name, data string)
 
-	// Timer callback routing (Engine owns timer goroutines, Host routes callbacks to event loop)
-	SendTimerEvent(callback func())
+	// Timer scheduling - Session owns Go timers, Engine owns Lua callbacks
+	ScheduleTimer(id int, d time.Duration)
+	CancelTimer(id int)
+	CancelAllTimers()
 }
