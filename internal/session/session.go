@@ -226,7 +226,8 @@ func (s *Session) handleControl(ctrl mud.ControlOp) {
 // --- Host Implementation ---
 
 func (s *Session) Print(text string) {
-	s.events <- mud.Event{Type: mud.EventDisplayLine, Payload: text}
+	// Render immediately to preserve ordering with the current prompt/event.
+	s.ui.RenderDisplayLine(text)
 }
 func (s *Session) Send(data string) { s.net.Send(data) }
 
