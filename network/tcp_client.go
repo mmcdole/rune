@@ -23,20 +23,22 @@ type TCPClient struct {
 // connection represents a single, ephemeral TCP session.
 // It is created on Connect() and discarded on Disconnect().
 type connection struct {
-	conn   net.Conn
-	telnet *TelnetBuffer
+	conn      net.Conn
+	telnet    *TelnetBuffer
+	recvQueue chan mud.Event
 
 	// Buffered queue for outgoing data specific to this connection
 	sendQueue chan string
 
 	// Signal to stop internal goroutines (Writer)
-	done chan struct{}
+	done      chan struct{}
+	closeOnce sync.Once
 }
 
 // NewTCPClient creates a new client.
 func NewTCPClient() *TCPClient {
 	return &TCPClient{
-		outputChan: make(chan mud.Event, 256),
+		outputChan: make(chan mud.Event, 4096),
 	}
 }
 
@@ -67,7 +69,8 @@ func (c *TCPClient) Connect(address string) error {
 	cx := &connection{
 		conn:      conn,
 		telnet:    NewTelnetBuffer(),
-		sendQueue: make(chan string, 100),
+		sendQueue: make(chan string, 1024),
+		recvQueue: make(chan mud.Event, 4096),
 		done:      make(chan struct{}),
 	}
 
@@ -78,6 +81,7 @@ func (c *TCPClient) Connect(address string) error {
 	// They bind to THIS connection instance, not the TCPClient.
 	go c.readLoop(cx)
 	go c.writeLoop(cx)
+	go c.drainLoop(cx)
 
 	return nil
 }
@@ -106,7 +110,7 @@ func (c *TCPClient) Send(data string) {
 		select {
 		case cx.sendQueue <- data:
 		default:
-			// Queue full - drop data to prevent blocking the Session
+			// Drop rather than block callers
 		}
 	}
 }
@@ -146,10 +150,11 @@ func (c *TCPClient) readLoop(cx *connection) {
 			c.mu.Unlock()
 
 			if isCurrent {
-				c.outputChan <- mud.Event{
+				cx.enqueueEvent(mud.Event{
 					Type:    mud.EventSystemControl,
 					Control: mud.ControlOp{Action: mud.ActionDisconnect},
-				}
+				})
+				cx.shutdown()
 			}
 			return
 		}
@@ -169,25 +174,25 @@ func (c *TCPClient) readLoop(cx *connection) {
 
 		// Emit Lines
 		for _, line := range cx.telnet.ExtractLines() {
-			c.outputChan <- mud.Event{
+			cx.enqueueEvent(mud.Event{
 				Type:    mud.EventServerLine,
 				Payload: line,
-			}
+			})
 		}
 
 		// Emit Prompts
 		pending := cx.telnet.GetPending(false)
 		if len(pending) > 0 && len(pending) < 500 {
 			if cx.telnet.HasSignal() {
-				c.outputChan <- mud.Event{
+				cx.enqueueEvent(mud.Event{
 					Type:    mud.EventServerPrompt,
 					Payload: cx.telnet.GetPending(true),
-				}
+				})
 			} else {
-				c.outputChan <- mud.Event{
+				cx.enqueueEvent(mud.Event{
 					Type:    mud.EventServerPrompt,
 					Payload: pending,
-				}
+				})
 			}
 		}
 	}
@@ -198,7 +203,7 @@ func (c *TCPClient) writeLoop(cx *connection) {
 	for {
 		select {
 		case <-cx.done:
-			return // Connection closed
+			return
 		case data := <-cx.sendQueue:
 			// Write with deadline to prevent hanging on stalled connections
 			cx.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
@@ -214,10 +219,41 @@ func (c *TCPClient) writeLoop(cx *connection) {
 	}
 }
 
+// drainLoop forwards queued events to the stable output channel. It is allowed to
+// block on outputChan, but the TCP reader remains unblocked because it only
+// writes to the queue.
+func (c *TCPClient) drainLoop(cx *connection) {
+	for {
+		select {
+		case <-cx.done:
+			return
+		case item := <-cx.recvQueue:
+			c.outputChan <- item
+		}
+	}
+}
+
 // close cleanly shuts down the connection resources
 func (cx *connection) close() {
 	// Closing the net.Conn causes Read() to return error immediately
 	cx.conn.Close()
-	// Closing done signal causes writeLoop to exit
-	close(cx.done)
+	cx.shutdown()
+}
+
+// enqueueEvent is a best-effort send that drops on full buffers to keep the reader moving.
+func (cx *connection) enqueueEvent(evt mud.Event) {
+	select {
+	case <-cx.done:
+		return
+	case cx.recvQueue <- evt:
+	default:
+		// Drop rather than block the TCP reader
+	}
+}
+
+// shutdown closes the done channel exactly once to stop workers.
+func (cx *connection) shutdown() {
+	cx.closeOnce.Do(func() {
+		close(cx.done)
+	})
 }

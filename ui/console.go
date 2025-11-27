@@ -17,7 +17,7 @@ type ConsoleUI struct {
 // NewConsoleUI initializes a stdin/stdout based terminal interface.
 func NewConsoleUI() *ConsoleUI {
 	return &ConsoleUI{
-		inputChan: make(chan string, 100),
+		inputChan: make(chan string, 2048),
 		done:      make(chan struct{}),
 	}
 }
@@ -59,7 +59,6 @@ func (c *ConsoleUI) Input() <-chan string {
 func (c *ConsoleUI) Run() error {
 	scanner := bufio.NewScanner(os.Stdin)
 
-
 	for scanner.Scan() {
 		text := scanner.Text()
 		if text == "quit" {
@@ -83,10 +82,10 @@ func (c *ConsoleUI) Done() <-chan struct{} {
 
 // Controller methods (no-op for ConsoleUI - advanced features not supported in simple mode)
 
-func (c *ConsoleUI) SetStatus(text string)           {}
-func (c *ConsoleUI) SetInfobar(text string)          {}
-func (c *ConsoleUI) CreatePane(name string)          {}
-func (c *ConsoleUI) WritePane(name, text string)     {}
-func (c *ConsoleUI) TogglePane(name string)          {}
-func (c *ConsoleUI) ClearPane(name string)           {}
-func (c *ConsoleUI) BindPaneKey(key, name string)    {}
+func (c *ConsoleUI) SetStatus(text string)        {}
+func (c *ConsoleUI) SetInfobar(text string)       {}
+func (c *ConsoleUI) CreatePane(name string)       {}
+func (c *ConsoleUI) WritePane(name, text string)  {}
+func (c *ConsoleUI) TogglePane(name string)       {}
+func (c *ConsoleUI) ClearPane(name string)        {}
+func (c *ConsoleUI) BindPaneKey(key, name string) {}

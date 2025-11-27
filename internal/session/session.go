@@ -42,14 +42,14 @@ type Session struct {
 
 // New creates a new Session. It is passive - no goroutines start here.
 func New(net mud.Network, ui mud.UI, cfg Config) *Session {
-	timerOut := make(chan func(), 100)
+	timerOut := make(chan func(), 1024)
 
 	s := &Session{
 		net:          net,
 		ui:           ui,
 		scheduler:    timer.New(timerOut),
 		timerOut:     timerOut,
-		events:       make(chan mud.Event, 1000),
+		events:       make(chan mud.Event, 4096),
 		timerCancels: make(map[int]func()),
 		config:       cfg,
 	}

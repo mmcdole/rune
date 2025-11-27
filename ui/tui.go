@@ -25,8 +25,8 @@ type BubbleTeaUI struct {
 // NewBubbleTeaUI creates a new Bubble Tea-based UI.
 func NewBubbleTeaUI() *BubbleTeaUI {
 	return &BubbleTeaUI{
-		inputChan: make(chan string, 100),
-		msgQueue:  make(chan tea.Msg, 10000), // Large buffer for burst absorption
+		inputChan: make(chan string, 2048),
+		msgQueue:  make(chan tea.Msg, 4096),
 		done:      make(chan struct{}),
 	}
 }
@@ -35,9 +35,11 @@ func NewBubbleTeaUI() *BubbleTeaUI {
 // Never blocks - drops message if queue is full.
 func (b *BubbleTeaUI) send(msg tea.Msg) {
 	select {
+	case <-b.done:
+		return
 	case b.msgQueue <- msg:
 	default:
-		// Queue full - drop message to avoid blocking event loop
+		// Drop rather than block producers
 	}
 }
 
@@ -68,10 +70,18 @@ func (b *BubbleTeaUI) Run() error {
 	)
 
 	// Single goroutine drains message queue to Bubble Tea.
-	// This can block on Send() without affecting the event loop.
+	// This can block on Send() without affecting producers.
 	go func() {
-		for msg := range b.msgQueue {
-			b.program.Send(msg)
+		for {
+			select {
+			case <-b.done:
+				return
+			case msg, ok := <-b.msgQueue:
+				if !ok {
+					return
+				}
+				b.program.Send(msg)
+			}
 		}
 	}()
 
@@ -97,6 +107,9 @@ func (b *BubbleTeaUI) Quit() {
 	if b.program != nil {
 		b.program.Quit()
 	}
+	b.doneOnce.Do(func() {
+		close(b.done)
+	})
 }
 
 // SetConnectionState updates the connection status display.
