@@ -148,7 +148,7 @@ func (s *Session) processEvents() {
 				event.Callback()
 			}
 
-		case mud.EventDeferred:
+		case mud.EventAsyncResult:
 			if event.Callback != nil {
 				event.Callback()
 			}
@@ -244,7 +244,7 @@ func (s *Session) Connect(addr string) {
 	go func() {
 		err := s.net.Connect(addr)
 		s.events <- mud.Event{
-			Type: mud.EventDeferred,
+			Type: mud.EventAsyncResult,
 			Callback: func() {
 				if err != nil {
 					s.engine.CallHook("error", err.Error())
@@ -265,7 +265,7 @@ func (s *Session) Disconnect() {
 func (s *Session) Reload() {
 	s.engine.CallHook("reloading")
 	s.events <- mud.Event{
-		Type: mud.EventDeferred,
+		Type: mud.EventAsyncResult,
 		Callback: func() {
 			if err := s.boot(); err != nil {
 				s.ui.Render(fmt.Sprintf("\033[31mReload Failed: %v\033[0m", err))
