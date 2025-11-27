@@ -66,11 +66,13 @@ local function send_impl(input, depth)
     local commands = expand_input(input)
 
     for _, line in ipairs(commands) do
-        if line ~= "" then
-            local cmd, args = line:match("^(%S+)%s*(.*)")
-            cmd = cmd or line
-            args = args or ""
+        local cmd, args = line:match("^(%S+)%s*(.*)")
 
+        if not cmd then
+            -- Empty command - send it directly
+            rune.send_raw(line)
+        else
+            args = args or ""
             local alias = rune.alias.get(cmd)
 
             if alias then
