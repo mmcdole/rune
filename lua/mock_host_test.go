@@ -16,10 +16,18 @@ type MockHost struct {
 	ConnectCalls    []string
 	DisconnectCalls int
 	ReloadCalls     int
+	LoadCalls       []string
 	StatusCalls     []string
 	InfobarCalls    []string
 	PaneCalls       []struct{ Op, Name, Data string }
-	ScheduledTimers []int // Timer IDs that were scheduled
+	ScheduledTimers []struct {
+		ID       int
+		Duration time.Duration
+		Repeat   bool
+	}
+
+	// Timer ID generation
+	nextTimerID int
 }
 
 func NewMockHost() *MockHost {
@@ -62,6 +70,12 @@ func (m *MockHost) Reload() {
 	m.ReloadCalls++
 }
 
+func (m *MockHost) Load(path string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.LoadCalls = append(m.LoadCalls, path)
+}
+
 func (m *MockHost) SetStatus(text string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -80,17 +94,37 @@ func (m *MockHost) Pane(op, name, data string) {
 	m.PaneCalls = append(m.PaneCalls, struct{ Op, Name, Data string }{op, name, data})
 }
 
-func (m *MockHost) ScheduleTimer(id int, d time.Duration) {
+func (m *MockHost) TimerAfter(d time.Duration) int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.ScheduledTimers = append(m.ScheduledTimers, id)
+	m.nextTimerID++
+	id := m.nextTimerID
+	m.ScheduledTimers = append(m.ScheduledTimers, struct {
+		ID       int
+		Duration time.Duration
+		Repeat   bool
+	}{id, d, false})
+	return id
 }
 
-func (m *MockHost) CancelTimer(id int) {
+func (m *MockHost) TimerEvery(d time.Duration) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.nextTimerID++
+	id := m.nextTimerID
+	m.ScheduledTimers = append(m.ScheduledTimers, struct {
+		ID       int
+		Duration time.Duration
+		Repeat   bool
+	}{id, d, true})
+	return id
+}
+
+func (m *MockHost) TimerCancel(id int) {
 	// No-op for tests
 }
 
-func (m *MockHost) CancelAllTimers() {
+func (m *MockHost) TimerCancelAll() {
 	// No-op for tests
 }
 
@@ -112,10 +146,14 @@ func (m *MockHost) DrainPrintCalls() []string {
 	return calls
 }
 
-func (m *MockHost) DrainScheduledTimers() []int {
+func (m *MockHost) DrainScheduledTimers() []struct {
+	ID       int
+	Duration time.Duration
+	Repeat   bool
+} {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	ids := m.ScheduledTimers
+	timers := m.ScheduledTimers
 	m.ScheduledTimers = nil
-	return ids
+	return timers
 }

@@ -15,6 +15,9 @@ import (
 	"github.com/drake/rune/timer"
 )
 
+// Ensure Session implements lua.Host at compile time
+var _ lua.Host = (*Session)(nil)
+
 // Config holds session configuration
 type Config struct {
 	CoreScripts embed.FS // Embedded core Lua scripts
@@ -25,17 +28,14 @@ type Config struct {
 // Session orchestrates the MUD client components.
 type Session struct {
 	// Components
-	net       mud.Network
-	ui        mud.UI
-	engine    *lua.Engine
-	scheduler *timer.Scheduler
+	net    mud.Network
+	ui     mud.UI
+	engine *lua.Engine
+	timer  *timer.Service
 
 	// Channels
-	events   chan mud.Event
-	timerOut chan func()
-
-	// Timer cancellation - Session owns Go timers, Engine owns callbacks
-	timerCancels map[int]func()
+	events      chan mud.Event
+	timerEvents chan timer.Event
 
 	// Track last prompt overlay to commit to history when replaced
 	lastPrompt string
@@ -50,17 +50,16 @@ type Session struct {
 
 // New creates a new Session. It is passive - no goroutines start here.
 func New(net mud.Network, ui mud.UI, cfg Config) *Session {
-	timerOut := make(chan func(), 1024)
+	timerEvents := make(chan timer.Event, 1024)
 
 	s := &Session{
-		net:          net,
-		ui:           ui,
-		scheduler:    timer.New(timerOut),
-		timerOut:     timerOut,
-		events:       make(chan mud.Event, 4096),
-		timerCancels: make(map[int]func()),
-		config:       cfg,
-		done:         make(chan struct{}),
+		net:         net,
+		ui:          ui,
+		timer:       timer.NewService(timerEvents),
+		timerEvents: timerEvents,
+		events:      make(chan mud.Event, 4096),
+		config:      cfg,
+		done:        make(chan struct{}),
 	}
 
 	s.engine = lua.NewEngine(s)
@@ -99,8 +98,8 @@ func (s *Session) processEvents() {
 			s.handleEvent(event)
 		case line := <-s.ui.Input():
 			s.handleEvent(mud.Event{Type: mud.EventUserInput, Payload: line})
-		case cb := <-s.timerOut:
-			s.handleEvent(mud.Event{Type: mud.EventTimer, Callback: cb})
+		case evt := <-s.timerEvents:
+			s.engine.OnTimer(evt.ID, evt.Repeating)
 		}
 	}
 }
@@ -146,11 +145,6 @@ func (s *Session) handleEvent(event mud.Event) {
 		// Local echo to scrollback (styled in UI)
 		if le, ok := s.net.(interface{ LocalEchoEnabled() bool }); !ok || le.LocalEchoEnabled() {
 			s.ui.RenderEcho(event.Payload)
-		}
-
-	case mud.EventTimer:
-		if event.Callback != nil {
-			event.Callback()
 		}
 
 	case mud.EventAsyncResult:
@@ -311,7 +305,7 @@ func (s *Session) shutdown() {
 	s.closeOnce.Do(func() {
 		close(s.done)
 		// Stop timers and network; request UI exit.
-		s.CancelAllTimers()
+		s.timer.CancelAll()
 		s.net.Disconnect()
 		s.ui.Quit()
 	})
@@ -335,32 +329,22 @@ func (s *Session) Pane(op, name, data string) {
 	}
 }
 
-// ScheduleTimer schedules a timer wake-up call.
-func (s *Session) ScheduleTimer(id int, d time.Duration) {
-	cancel := s.scheduler.Schedule(d, func() {
-		s.events <- mud.Event{
-			Type: mud.EventTimer,
-			Callback: func() {
-				delete(s.timerCancels, id) // Clean up on session goroutine
-				s.engine.OnTimer(id)
-			},
-		}
-	})
-	s.timerCancels[id] = cancel
+// TimerAfter schedules a one-shot timer. Returns the timer ID.
+func (s *Session) TimerAfter(d time.Duration) int {
+	return s.timer.After(d)
 }
 
-// CancelTimer implements Host - cancels a scheduled wake-up.
-func (s *Session) CancelTimer(id int) {
-	if cancel, ok := s.timerCancels[id]; ok {
-		cancel()
-		delete(s.timerCancels, id)
-	}
+// TimerEvery schedules a repeating timer. Returns the timer ID.
+func (s *Session) TimerEvery(d time.Duration) int {
+	return s.timer.Every(d)
 }
 
-// CancelAllTimers implements Host - cancels all scheduled wake-ups.
-func (s *Session) CancelAllTimers() {
-	for id, cancel := range s.timerCancels {
-		cancel()
-		delete(s.timerCancels, id)
-	}
+// TimerCancel cancels a timer by ID.
+func (s *Session) TimerCancel(id int) {
+	s.timer.Cancel(id)
+}
+
+// TimerCancelAll cancels all timers.
+func (s *Session) TimerCancelAll() {
+	s.timer.CancelAll()
 }

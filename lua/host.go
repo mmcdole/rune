@@ -15,14 +15,16 @@ type Host interface {
 	Connect(addr string)
 	Disconnect()
 	Reload()
+	Load(path string)
 
 	// UI
 	SetStatus(text string)
 	SetInfobar(text string)
 	Pane(op, name, data string)
 
-	// Timer scheduling - Session owns Go timers, Engine owns Lua callbacks
-	ScheduleTimer(id int, d time.Duration)
-	CancelTimer(id int)
-	CancelAllTimers()
+	// Timers - Timer service owns IDs, scheduling, and cancellation
+	TimerAfter(d time.Duration) int
+	TimerEvery(d time.Duration) int
+	TimerCancel(id int)
+	TimerCancelAll()
 }

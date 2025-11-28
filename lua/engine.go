@@ -5,18 +5,10 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	glua "github.com/yuin/gopher-lua"
 )
-
-// timerEntry holds timer metadata.
-// Engine owns the callback, Session owns the scheduling.
-type timerEntry struct {
-	fn       *glua.LFunction
-	interval time.Duration // 0 = one-shot, >0 = repeating
-}
 
 // Engine wraps gopher-lua and manages the VM lifecycle.
 // It is a pure mechanism: it knows how to run Lua code and expose APIs.
@@ -31,9 +23,8 @@ type Engine struct {
 	// Host interface for communication with the rest of the system
 	host Host
 
-	// Timer ownership - Engine owns the callbacks, Session owns time
-	timers map[int]timerEntry
-	nextID int // Monotonic counter prevents stale timer ID collisions
+	// Timer callbacks - Engine owns callbacks, Timer service owns IDs and scheduling
+	callbacks map[int]*glua.LFunction
 }
 
 // NewEngine creates an Engine with the given Host.
@@ -42,8 +33,7 @@ func NewEngine(host Host) *Engine {
 	return &Engine{
 		regexCache: cache,
 		host:       host,
-		timers:     make(map[int]timerEntry),
-		nextID:     0,
+		callbacks:  make(map[int]*glua.LFunction),
 	}
 }
 
@@ -65,8 +55,8 @@ func (e *Engine) Init() error {
 	e.regexCache = cache
 
 	// Cancel all pending timers and clear callback map
-	e.host.CancelAllTimers()
-	e.timers = make(map[int]timerEntry)
+	e.host.TimerCancelAll()
+	e.callbacks = make(map[int]*glua.LFunction)
 
 	// Register custom types
 	registerLineType(e.L)
@@ -79,8 +69,8 @@ func (e *Engine) Init() error {
 
 // Close cleans up the Lua state.
 func (e *Engine) Close() {
-	e.host.CancelAllTimers()
-	e.timers = nil
+	e.host.TimerCancelAll()
+	e.callbacks = nil
 	if e.L != nil {
 		e.L.Close()
 		e.L = nil
@@ -89,31 +79,25 @@ func (e *Engine) Close() {
 
 // OnTimer handles wake-up calls from Session.
 // This is the single entry point for all timer callback execution.
-func (e *Engine) OnTimer(id int) {
+func (e *Engine) OnTimer(id int, repeating bool) {
 	if e.L == nil {
 		return
 	}
 
-	entry, ok := e.timers[id]
+	fn, ok := e.callbacks[id]
 	if !ok {
 		return // Cancelled, or belonged to previous Engine instance
 	}
 
 	// Execute callback with protected call
-	e.L.Push(entry.fn)
+	e.L.Push(fn)
 	if err := e.L.PCall(0, 0, nil); err != nil {
 		e.CallHook("error", "timer: "+err.Error())
 	}
 
-	// Handle one-shot vs repeating
-	if entry.interval == 0 {
-		delete(e.timers, id)
-		return
-	}
-
-	// Repeating: reschedule only if not cancelled during callback
-	if _, still := e.timers[id]; still {
-		e.host.ScheduleTimer(id, entry.interval)
+	// Clean up one-shot timer callbacks
+	if !repeating {
+		delete(e.callbacks, id)
 	}
 }
 
