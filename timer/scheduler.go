@@ -16,7 +16,11 @@ func New(out chan<- func()) *Scheduler {
 // Schedule asks to run 'job' after duration 'd'. Returns a cancel function.
 func (s *Scheduler) Schedule(d time.Duration, job func()) (cancel func()) {
 	t := time.AfterFunc(d, func() {
-		s.out <- job
+		select {
+		case s.out <- job:
+		default:
+			// Receiver shutting down or buffer full
+		}
 	})
 	return func() { t.Stop() }
 }

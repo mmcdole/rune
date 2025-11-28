@@ -6,10 +6,10 @@ import (
 	"os"
 
 	"github.com/drake/rune/config"
-	"github.com/drake/rune/internal/session"
 	"github.com/drake/rune/lua"
 	"github.com/drake/rune/mud"
 	"github.com/drake/rune/network"
+	"github.com/drake/rune/session"
 	"github.com/drake/rune/ui"
 )
 

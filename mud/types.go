@@ -21,7 +21,7 @@ const (
 	ActionConnect    = "connect"
 	ActionDisconnect = "disconnect"
 	ActionReload     = "reload"
-	ActionLoad       = "load"
+	ActionLoadScript = "load_script"
 )
 
 // ControlOp contains control operation details

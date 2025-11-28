@@ -30,7 +30,7 @@ Rune is a MUD (Multi-User Dungeon) client built with Go for system-level operati
 
 ```
 cmd/rune/main.go              - Bootstrap: creates Session and runs UI
-internal/session/session.go   - Session: orchestrates event loop, implements lua.Host
+session/session.go            - Session: orchestrates event loop, implements lua.Host
 lua/                          - Lua runtime package
   engine.go                   - Engine: wraps gopher-lua, manages VM lifecycle
   api_*.go                    - Go→Lua bindings (core, timer, regex, ui)

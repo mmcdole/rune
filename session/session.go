@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/drake/rune/internal/timer"
 	"github.com/drake/rune/lua"
 	"github.com/drake/rune/mud"
+	"github.com/drake/rune/timer"
 )
 
 // Config holds session configuration
@@ -72,42 +72,6 @@ func New(net mud.Network, ui mud.UI, cfg Config) *Session {
 func (s *Session) Run() error {
 	defer s.engine.Close()
 
-	// Network -> Events
-	go func() {
-		for {
-			select {
-			case <-s.done:
-				return
-			case evt := <-s.net.Output():
-				s.events <- evt
-			}
-		}
-	}()
-
-	// UI -> Events
-	go func() {
-		for {
-			select {
-			case <-s.done:
-				return
-			case line := <-s.ui.Input():
-				s.events <- mud.Event{Type: mud.EventUserInput, Payload: line}
-			}
-		}
-	}()
-
-	// Timer -> Events
-	go func() {
-		for {
-			select {
-			case <-s.done:
-				return
-			case cb := <-s.timerOut:
-				s.events <- mud.Event{Type: mud.EventTimer, Callback: cb}
-			}
-		}
-	}()
-
 	// Boot the system
 	if err := s.boot(); err != nil {
 		s.ui.Render(fmt.Sprintf("\033[31m[System] Boot Error: %v\033[0m", err))
@@ -130,61 +94,72 @@ func (s *Session) processEvents() {
 		case <-s.done:
 			return
 		case event := <-s.events:
-			switch event.Type {
-			case mud.EventNetLine:
-				if modified, show := s.engine.OnOutput(event.Payload); show {
-					s.ui.RenderDisplayLine(modified)
-				}
-				// A server line ends the overlay prompt
-				s.lastPrompt = ""
-				s.ui.RenderPrompt("")
-
-			case mud.EventNetPrompt:
-				// Commit previous prompt to scrollback before showing new one
-				if s.lastPrompt != "" {
-					s.ui.RenderDisplayLine(s.lastPrompt)
-				}
-				modified := s.engine.OnPrompt(event.Payload)
-				s.lastPrompt = modified
-				s.ui.RenderPrompt(modified)
-
-			case mud.EventDisplayLine:
-				s.ui.RenderDisplayLine(event.Payload)
-
-			case mud.EventDisplayEcho:
-				s.ui.RenderEcho(event.Payload)
-
-			case mud.EventDisplayPrompt:
-				s.ui.RenderPrompt(event.Payload)
-				s.lastPrompt = event.Payload
-
-			case mud.EventUserInput:
-				// Commit current prompt to history before sending input
-				if s.lastPrompt != "" {
-					s.ui.RenderDisplayLine(s.lastPrompt)
-					s.lastPrompt = ""
-					s.ui.RenderPrompt("")
-				}
-				s.engine.OnInput(event.Payload)
-				// Local echo to scrollback (styled in UI)
-				if le, ok := s.net.(interface{ LocalEchoEnabled() bool }); !ok || le.LocalEchoEnabled() {
-					s.events <- mud.Event{Type: mud.EventDisplayEcho, Payload: event.Payload}
-				}
-
-			case mud.EventTimer:
-				if event.Callback != nil {
-					event.Callback()
-				}
-
-			case mud.EventAsyncResult:
-				if event.Callback != nil {
-					event.Callback()
-				}
-
-			case mud.EventSystemControl:
-				s.handleControl(event.Control)
-			}
+			s.handleEvent(event)
+		case event := <-s.net.Output():
+			s.handleEvent(event)
+		case line := <-s.ui.Input():
+			s.handleEvent(mud.Event{Type: mud.EventUserInput, Payload: line})
+		case cb := <-s.timerOut:
+			s.handleEvent(mud.Event{Type: mud.EventTimer, Callback: cb})
 		}
+	}
+}
+
+// handleEvent executes a single event on the session loop.
+func (s *Session) handleEvent(event mud.Event) {
+	switch event.Type {
+	case mud.EventNetLine:
+		if modified, show := s.engine.OnOutput(event.Payload); show {
+			s.ui.RenderDisplayLine(modified)
+		}
+		// A server line ends the overlay prompt
+		s.lastPrompt = ""
+		s.ui.RenderPrompt("")
+
+	case mud.EventNetPrompt:
+		// Commit previous prompt to scrollback before showing new one
+		if s.lastPrompt != "" {
+			s.ui.RenderDisplayLine(s.lastPrompt)
+		}
+		modified := s.engine.OnPrompt(event.Payload)
+		s.lastPrompt = modified
+		s.ui.RenderPrompt(modified)
+
+	case mud.EventDisplayLine:
+		s.ui.RenderDisplayLine(event.Payload)
+
+	case mud.EventDisplayEcho:
+		s.ui.RenderEcho(event.Payload)
+
+	case mud.EventDisplayPrompt:
+		s.ui.RenderPrompt(event.Payload)
+		s.lastPrompt = event.Payload
+
+	case mud.EventUserInput:
+		// Commit current prompt to history before sending input
+		if s.lastPrompt != "" {
+			s.ui.RenderDisplayLine(s.lastPrompt)
+			s.lastPrompt = ""
+			s.ui.RenderPrompt("")
+		}
+		s.engine.OnInput(event.Payload)
+		// Local echo to scrollback (styled in UI)
+		if le, ok := s.net.(interface{ LocalEchoEnabled() bool }); !ok || le.LocalEchoEnabled() {
+			s.ui.RenderEcho(event.Payload)
+		}
+
+	case mud.EventTimer:
+		if event.Callback != nil {
+			event.Callback()
+		}
+
+	case mud.EventAsyncResult:
+		if event.Callback != nil {
+			event.Callback()
+		}
+
+	case mud.EventSystemControl:
+		s.handleControl(event.Control)
 	}
 }
 
@@ -254,6 +229,8 @@ func (s *Session) handleControl(ctrl mud.ControlOp) {
 		s.Disconnect()
 	case mud.ActionReload:
 		s.Reload()
+	case mud.ActionLoadScript:
+		s.loadScript(ctrl.ScriptPath)
 	}
 }
 
@@ -289,6 +266,17 @@ func (s *Session) Disconnect() {
 	s.engine.CallHook("disconnected")
 }
 
+// Load enqueues a request to load a Lua script on the session loop.
+func (s *Session) Load(path string) {
+	s.events <- mud.Event{
+		Type: mud.EventSystemControl,
+		Control: mud.ControlOp{
+			Action:     mud.ActionLoadScript,
+			ScriptPath: path,
+		},
+	}
+}
+
 func (s *Session) Reload() {
 	s.engine.CallHook("reloading")
 	s.events <- mud.Event{
@@ -301,6 +289,21 @@ func (s *Session) Reload() {
 			}
 		},
 	}
+}
+
+// loadScript loads a Lua script file and notifies hooks. Runs on the session goroutine.
+func (s *Session) loadScript(path string) {
+	if path == "" {
+		s.ui.Render("\033[31mLoad Failed: empty path\033[0m")
+		return
+	}
+
+	if err := s.engine.DoFile(path); err != nil {
+		s.ui.Render(fmt.Sprintf("\033[31mLoad Failed (%s): %v\033[0m", path, err))
+		return
+	}
+
+	s.engine.CallHook("loaded", path)
 }
 
 // shutdown attempts a coordinated shutdown of goroutines, timers, network, and UI.
@@ -335,10 +338,12 @@ func (s *Session) Pane(op, name, data string) {
 // ScheduleTimer schedules a timer wake-up call.
 func (s *Session) ScheduleTimer(id int, d time.Duration) {
 	cancel := s.scheduler.Schedule(d, func() {
-		delete(s.timerCancels, id) // Clean up - cancel func is now useless
 		s.events <- mud.Event{
-			Type:     mud.EventTimer,
-			Callback: func() { s.engine.OnTimer(id) },
+			Type: mud.EventTimer,
+			Callback: func() {
+				delete(s.timerCancels, id) // Clean up on session goroutine
+				s.engine.OnTimer(id)
+			},
 		}
 	})
 	s.timerCancels[id] = cancel
