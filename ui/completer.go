@@ -55,7 +55,9 @@ func (wc *WordCache) AddInput(input string) {
 }
 
 // addWord adds a single word to the cache, moving it to end if it exists.
+// Words are stored lowercase for consistent matching.
 func (wc *WordCache) addWord(word string) {
+	word = strings.ToLower(word)
 	if pos, exists := wc.index[word]; exists {
 		// Remove from current position
 		wc.words = append(wc.words[:pos], wc.words[pos+1:]...)
@@ -82,7 +84,7 @@ func (wc *WordCache) addWord(word string) {
 }
 
 // FindMatches returns words matching the prefix, newest first.
-// Matching is case-insensitive but preserves original case.
+// All words are stored and returned lowercase.
 func (wc *WordCache) FindMatches(prefix string) []string {
 	if prefix == "" {
 		return nil
@@ -94,7 +96,7 @@ func (wc *WordCache) FindMatches(prefix string) []string {
 	// Iterate backwards (newest first)
 	for i := len(wc.words) - 1; i >= 0; i-- {
 		word := wc.words[i]
-		if strings.HasPrefix(strings.ToLower(word), prefixLower) {
+		if strings.HasPrefix(word, prefixLower) {
 			matches = append(matches, word)
 		}
 	}

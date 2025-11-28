@@ -79,6 +79,16 @@ func (m *InputModel) SetValue(s string) {
 	m.textinput.SetValue(s)
 }
 
+// CursorEnd moves the cursor to the end of the input.
+func (m *InputModel) CursorEnd() {
+	m.textinput.CursorEnd()
+}
+
+// ClearSuggestions clears the autocomplete suggestions.
+func (m *InputModel) ClearSuggestions() {
+	m.textinput.SetSuggestions(nil)
+}
+
 // Reset clears the input and resets history navigation.
 func (m *InputModel) Reset() {
 	m.textinput.SetValue("")
@@ -104,6 +114,7 @@ func (m *InputModel) AddToHistory(cmd string) {
 }
 
 // HistoryUp moves up through history, preserving draft on first move.
+// If there's a prefix typed, searches for history matching that prefix.
 func (m *InputModel) HistoryUp() {
 	if len(m.history) == 0 {
 		return
@@ -112,6 +123,28 @@ func (m *InputModel) HistoryUp() {
 	if m.historyIndex == -1 {
 		// Save current input as draft before entering history
 		m.draft = m.textinput.Value()
+	}
+
+	// If we have a prefix (draft), search for matching history
+	if m.draft != "" {
+		start := m.historyIndex - 1
+		if m.historyIndex == -1 {
+			start = len(m.history) - 1
+		}
+		for i := start; i >= 0; i-- {
+			if strings.HasPrefix(m.history[i], m.draft) {
+				m.historyIndex = i
+				m.textinput.SetValue(m.history[i])
+				m.textinput.CursorEnd()
+				return
+			}
+		}
+		// No match found, stay where we are
+		return
+	}
+
+	// No prefix - cycle through all history
+	if m.historyIndex == -1 {
 		m.historyIndex = len(m.history) - 1
 	} else if m.historyIndex > 0 {
 		m.historyIndex--
@@ -122,11 +155,30 @@ func (m *InputModel) HistoryUp() {
 }
 
 // HistoryDown moves down through history, restoring draft at bottom.
+// If there's a prefix typed, searches for history matching that prefix.
 func (m *InputModel) HistoryDown() {
 	if m.historyIndex == -1 {
 		return // Already at draft
 	}
 
+	// If we have a prefix (draft), search for matching history
+	if m.draft != "" {
+		for i := m.historyIndex + 1; i < len(m.history); i++ {
+			if strings.HasPrefix(m.history[i], m.draft) {
+				m.historyIndex = i
+				m.textinput.SetValue(m.history[i])
+				m.textinput.CursorEnd()
+				return
+			}
+		}
+		// No more matches - return to draft
+		m.historyIndex = -1
+		m.textinput.SetValue(m.draft)
+		m.textinput.CursorEnd()
+		return
+	}
+
+	// No prefix - cycle through all history
 	if m.historyIndex < len(m.history)-1 {
 		m.historyIndex++
 		m.textinput.SetValue(m.history[m.historyIndex])
@@ -164,9 +216,11 @@ func (m *InputModel) Update(msg tea.Msg) (*InputModel, tea.Cmd) {
 		switch msg.Type {
 		case tea.KeyUp:
 			m.HistoryUp()
+			m.updateSuggestions()
 			return m, nil
 		case tea.KeyDown:
 			m.HistoryDown()
+			m.updateSuggestions()
 			return m, nil
 		case tea.KeyCtrlU:
 			m.textinput.SetValue("")

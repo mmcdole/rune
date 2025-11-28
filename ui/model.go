@@ -309,9 +309,11 @@ func (m Model) handleSlashKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyTab:
-		// Insert command name
+		// Insert command name and position cursor at end
 		if cmdName := m.slashPicker.SelectedCommand(); cmdName != "" {
 			m.input.SetValue("/" + cmdName + " ")
+			m.input.CursorEnd()
+			m.input.ClearSuggestions()
 		}
 		m.input.SetMode(ModeNormal)
 		m.slashPicker.Reset()

@@ -59,9 +59,30 @@ func (p *SlashPicker) Filter(query string) {
 		}
 	}
 
-	if p.selected >= len(p.filtered) {
-		p.selected = max(0, len(p.filtered)-1)
+	// Find the best match: prefer exact command match, then prefix match
+	bestIdx := 0
+	bestScore := 0
+	for i, line := range p.filtered {
+		// Extract command name (e.g., "/lua" from "/lua - Execute Lua code")
+		cmd := strings.TrimPrefix(line, "/")
+		if idx := strings.IndexAny(cmd, " -"); idx > 0 {
+			cmd = cmd[:idx]
+		}
+		cmdLower := strings.ToLower(cmd)
+
+		// Exact match is best
+		if cmdLower == queryLower {
+			bestIdx = i
+			break
+		}
+		// Prefix match is good
+		if strings.HasPrefix(cmdLower, queryLower) && bestScore < 2 {
+			bestIdx = i
+			bestScore = 2
+		}
 	}
+
+	p.selected = bestIdx
 	p.adjustScroll()
 }
 

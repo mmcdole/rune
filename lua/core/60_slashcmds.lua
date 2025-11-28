@@ -45,13 +45,12 @@ rune.command.add("connect", function(args)
     end
 end, "Connect to a MUD server")
 
--- /disconnect or /dc - Disconnect from server
+-- /disconnect - Disconnect from server
 rune.command.add("disconnect", function(args)
     rune.disconnect()
 end, "Disconnect from server")
-rune.command.add("dc", rune.command.get("disconnect"), "Disconnect (alias)")
 
--- /reconnect or /rc - Reconnect to last server
+-- /reconnect - Reconnect to last server
 rune.command.add("reconnect", function(args)
     if last_host and last_port then
         rune.connect(last_host .. ":" .. last_port)
@@ -59,7 +58,6 @@ rune.command.add("reconnect", function(args)
         rune.print("[Error] No previous connection")
     end
 end, "Reconnect to last server")
-rune.command.add("rc", rune.command.get("reconnect"), "Reconnect (alias)")
 
 -- /load <path> - Load a Lua script
 rune.command.add("load", function(args)
@@ -139,19 +137,18 @@ rune.command.add("rmtrigger", function(args)
     end
 end, "Remove a trigger by ID or pattern")
 
--- /quit or /q - Exit the client
+-- /quit - Exit the client
 rune.command.add("quit", function(args)
     rune.print("[System] Goodbye!")
     rune.quit()
 end, "Exit the client")
-rune.command.add("q", rune.command.get("quit"), "Exit (alias)")
 
 -- /help - Show available commands
 rune.command.add("help", function(args)
     rune.print("[Connection]")
     rune.print("  /connect <host> <port>  - Connect to server")
-    rune.print("  /disconnect, /dc        - Disconnect")
-    rune.print("  /reconnect, /rc         - Reconnect to last server")
+    rune.print("  /disconnect             - Disconnect")
+    rune.print("  /reconnect              - Reconnect to last server")
     rune.print("")
     rune.print("[Scripts]")
     rune.print("  /load <path>            - Load Lua script")
@@ -165,7 +162,7 @@ rune.command.add("help", function(args)
     rune.print("  /test <line>            - Test triggers")
     rune.print("")
     rune.print("[Other]")
-    rune.print("  /quit, /q               - Exit")
+    rune.print("  /quit                   - Exit")
     rune.print("  /help                   - Show this help")
     rune.print("")
     rune.print("[Lua API]")
