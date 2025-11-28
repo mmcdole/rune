@@ -29,6 +29,10 @@ function rune.trigger.add(pattern, action, options)
         raw = options.raw or false,          -- Match on raw line with ANSI (default: clean)
     }
     table.insert(order, id)
+
+    local action_desc = type(action) == "function" and "(function)" or tostring(action)
+    rune.dbg("trigger.add: #" .. id .. " /" .. pattern .. "/ -> " .. action_desc)
+
     return id
 end
 
@@ -56,9 +60,7 @@ function rune.trigger.remove(id_or_pattern)
                 break
             end
         end
-        rune.print("[Trigger] Removed #" .. id .. ": " .. pattern)
-    else
-        rune.print("[Trigger] Not found: " .. tostring(id_or_pattern))
+        rune.dbg("trigger.remove: #" .. id .. " /" .. pattern .. "/")
     end
 end
 

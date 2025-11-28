@@ -5,14 +5,17 @@ local storage = {}  -- Private storage
 
 function rune.alias.add(key, value)
     storage[key] = value
+    if type(value) == "function" then
+        rune.dbg("alias.add: " .. key .. " -> (function)")
+    else
+        rune.dbg("alias.add: " .. key .. " -> " .. tostring(value))
+    end
 end
 
 function rune.alias.remove(key)
     if storage[key] then
         storage[key] = nil
-        rune.print("[Alias] Removed: " .. key)
-    else
-        rune.print("[Alias] Not found: " .. key)
+        rune.dbg("alias.remove: " .. key)
     end
 end
 
