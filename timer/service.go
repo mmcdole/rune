@@ -114,3 +114,15 @@ func (s *Service) CancelAll() {
 	}
 	s.timers = make(map[int]*entry)
 }
+
+// Stats holds timer service statistics for monitoring.
+type Stats struct {
+	ActiveTimers int
+}
+
+// Stats returns current timer statistics.
+func (s *Service) Stats() Stats {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return Stats{ActiveTimers: len(s.timers)}
+}

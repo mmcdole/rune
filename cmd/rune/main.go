@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/drake/rune/config"
+	"github.com/drake/rune/debug"
 	"github.com/drake/rune/lua"
 	"github.com/drake/rune/mud"
 	"github.com/drake/rune/network"
@@ -29,12 +30,17 @@ func main() {
 		tui = ui.NewBubbleTeaUI()
 	}
 
-	// Create and run session
+	// Create session
 	sess := session.New(tcpClient, tui, session.Config{
 		CoreScripts: lua.CoreScripts,
 		ConfigDir:   config.Dir(),
 		UserScripts: flag.Args(),
 	})
+
+	// Start debug monitor if RUNE_DEBUG=1
+	monitor := debug.NewMonitor(sess)
+	monitor.Start()
+	defer monitor.Stop()
 
 	if err := sess.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)

@@ -6,12 +6,15 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/drake/rune/lua"
 	"github.com/drake/rune/mud"
+	"github.com/drake/rune/network"
 	"github.com/drake/rune/timer"
 )
 
@@ -46,18 +49,21 @@ type Session struct {
 	// Shutdown coordination
 	done      chan struct{}
 	closeOnce sync.Once
+
+	// Stats (atomic for lock-free reads)
+	eventsProcessed atomic.Uint64
 }
 
 // New creates a new Session. It is passive - no goroutines start here.
 func New(net mud.Network, ui mud.UI, cfg Config) *Session {
-	timerEvents := make(chan timer.Event, 1024)
+	timerEvents := make(chan timer.Event, 256)
 
 	s := &Session{
 		net:         net,
 		ui:          ui,
 		timer:       timer.NewService(timerEvents),
 		timerEvents: timerEvents,
-		events:      make(chan mud.Event, 4096),
+		events:      make(chan mud.Event, 256),
 		config:      cfg,
 		done:        make(chan struct{}),
 	}
@@ -65,6 +71,39 @@ func New(net mud.Network, ui mud.UI, cfg Config) *Session {
 	s.engine = lua.NewEngine(s)
 
 	return s
+}
+
+// Stats holds session statistics for monitoring.
+type Stats struct {
+	EventsProcessed uint64
+	EventQueueLen   int
+	EventQueueCap   int
+	TimerQueueLen   int
+	TimerQueueCap   int
+	Goroutines      int
+	Lua             lua.Stats
+	Timer           timer.Stats
+	Network         network.Stats
+}
+
+// Stats returns current session and component statistics.
+func (s *Session) Stats() Stats {
+	var netStats network.Stats
+	if tc, ok := s.net.(*network.TCPClient); ok {
+		netStats = tc.Stats()
+	}
+
+	return Stats{
+		EventsProcessed: s.eventsProcessed.Load(),
+		EventQueueLen:   len(s.events),
+		EventQueueCap:   cap(s.events),
+		TimerQueueLen:   len(s.timerEvents),
+		TimerQueueCap:   cap(s.timerEvents),
+		Goroutines:      runtime.NumGoroutine(),
+		Lua:             s.engine.Stats(),
+		Timer:           s.timer.Stats(),
+		Network:         netStats,
+	}
 }
 
 // Run starts the session and blocks until exit.
@@ -93,12 +132,16 @@ func (s *Session) processEvents() {
 		case <-s.done:
 			return
 		case event := <-s.events:
+			s.eventsProcessed.Add(1)
 			s.handleEvent(event)
 		case event := <-s.net.Output():
+			s.eventsProcessed.Add(1)
 			s.handleEvent(event)
 		case line := <-s.ui.Input():
+			s.eventsProcessed.Add(1)
 			s.handleEvent(mud.Event{Type: mud.EventUserInput, Payload: line})
 		case evt := <-s.timerEvents:
+			s.eventsProcessed.Add(1)
 			s.engine.OnTimer(evt.ID, evt.Repeating)
 		}
 	}

@@ -37,6 +37,26 @@ func NewEngine(host Host) *Engine {
 	}
 }
 
+// Stats holds Lua engine statistics for monitoring.
+type Stats struct {
+	StackSize      int
+	TimerCallbacks int
+	RegexCacheSize int
+}
+
+// Stats returns current Lua engine statistics.
+func (e *Engine) Stats() Stats {
+	stack := 0
+	if e.L != nil {
+		stack = e.L.GetTop()
+	}
+	return Stats{
+		StackSize:      stack,
+		TimerCallbacks: len(e.callbacks),
+		RegexCacheSize: e.regexCache.Len(),
+	}
+}
+
 // --- Lifecycle ---
 
 // Init initializes (or re-initializes) the Lua VM with fresh state.
