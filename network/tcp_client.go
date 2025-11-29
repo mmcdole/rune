@@ -45,7 +45,14 @@ type TCPClient struct {
 // It is created on Connect() and discarded on Disconnect().
 type connection struct {
 	conn   net.Conn
-	telnet *TelnetBuffer
+	parser *Parser
+	output *OutputBuffer
+
+	// Telnet mode tracking - separate flags allow proper reversion
+	willEOR atomic.Bool // Server indicated WILL EOR
+	willSGA atomic.Bool // Server indicated WILL SGA (Suppress Go Ahead)
+
+	localEcho atomic.Bool
 
 	// Buffered queue for outgoing data specific to this connection
 	sendQueue chan string
@@ -124,10 +131,13 @@ func (c *TCPClient) Connect(address string) error {
 	// Create the new connection object
 	cx := &connection{
 		conn:      conn,
-		telnet:    NewTelnetBuffer(),
+		parser:    NewParser(defaultCompatibility()),
+		output:    NewOutputBuffer(TelnetModeUnterminated),
 		sendQueue: make(chan string, 256),
 		done:      make(chan struct{}),
 	}
+	cx.localEcho.Store(true)
+	// willEOR and willSGA default to false (unterminated prompt mode)
 
 	// Set as current and start workers
 	c.current = cx
@@ -185,7 +195,7 @@ func (c *TCPClient) LocalEchoEnabled() bool {
 	if cx == nil {
 		return true
 	}
-	return cx.telnet.LocalEchoEnabled()
+	return cx.localEcho.Load()
 }
 
 // --- Worker Routines ---
@@ -229,37 +239,65 @@ func (c *TCPClient) readLoop(cx *connection) {
 		c.bytesRead.Add(uint64(n))
 		c.lastReadTime.Store(time.Now().UnixNano())
 
-		// Protocol processing
-		responses := cx.telnet.ProcessBytes(buf[:n])
-		if len(responses) > 0 {
-			cx.conn.SetWriteDeadline(time.Now().Add(time.Second))
-			cx.conn.Write(responses)
-			cx.conn.SetWriteDeadline(time.Time{})
-		}
+		for _, ev := range cx.parser.Receive(buf[:n]) {
+			switch ev.Kind {
+			case TelnetEventDataSend:
+				cx.conn.SetWriteDeadline(time.Now().Add(time.Second))
+				written, werr := cx.conn.Write(ev.Data)
+				cx.conn.SetWriteDeadline(time.Time{})
+				if werr != nil {
+					return
+				}
+				c.bytesWritten.Add(uint64(written))
 
-		// Emit Lines - blocking send to outputChan
-		for _, line := range cx.telnet.ExtractLines() {
-			c.linesEmitted.Add(1)
-			select {
-			case c.outputChan <- mud.Event{Type: mud.EventNetLine, Payload: line}:
-			case <-cx.done:
-				return
-			}
-		}
+			case TelnetEventDataReceive:
+				lines := cx.output.Receive(ev.Data)
+				for _, line := range lines {
+					c.linesEmitted.Add(1)
+					select {
+					case c.outputChan <- mud.Event{Type: mud.EventNetLine, Payload: string(line)}:
+					case <-cx.done:
+						return
+					}
+				}
+				if cx.telnetMode() == TelnetModeUnterminated {
+					prompt := cx.output.Prompt(false)
+					if prompt != "" {
+						select {
+						case c.outputChan <- mud.Event{Type: mud.EventNetPrompt, Payload: prompt}:
+						case <-cx.done:
+							return
+						}
+					}
+				}
 
-		// Emit Prompts
-		pending := cx.telnet.GetPending(false)
-		if len(pending) > 0 {
-			payload := pending
-			if cx.telnet.HasSignal() {
-				payload = cx.telnet.GetPending(true)
-			} else {
-				cx.telnet.GetPending(true)
-			}
-			select {
-			case c.outputChan <- mud.Event{Type: mud.EventNetPrompt, Payload: payload}:
-			case <-cx.done:
-				return
+			case TelnetEventIAC:
+				if ev.Command == CmdGA || ev.Command == CmdEOR {
+					// GA/EOR commands indicate prompt termination for this message,
+					// but don't change the negotiated mode (that's done via WILL/WONT)
+					if cx.output.HasNewData() {
+						prompt := cx.output.Prompt(true)
+						if prompt != "" {
+							select {
+							case c.outputChan <- mud.Event{Type: mud.EventNetPrompt, Payload: prompt}:
+							case <-cx.done:
+								return
+							}
+						}
+					} else {
+						// Just flush even if no new data
+						cx.output.Prompt(true)
+					}
+				}
+
+			case TelnetEventNegotiation:
+				cx.applyNegotiation(ev.Command, ev.Option)
+
+			case TelnetEventSubnegotiation:
+				// No-op for now; surface via prompt when applicable
+
+			case TelnetEventDecompressImmediate:
+				// Compression not supported yet; ignore payload for now
 			}
 		}
 	}
@@ -272,11 +310,17 @@ func (c *TCPClient) writeLoop(cx *connection) {
 		case <-cx.done:
 			return
 		case data := <-cx.sendQueue:
+			// Clear prompt buffer before sending - in unterminated mode,
+			// the server will reprint the prompt after echoing our input
+			cx.output.InputSent()
+
 			cx.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 			n, err := cx.conn.Write([]byte(data + "\r\n"))
 			cx.conn.SetWriteDeadline(time.Time{})
 
 			if err != nil {
+				// Write failed - close the connection to trigger readLoop cleanup
+				cx.conn.Close()
 				return
 			}
 			c.bytesWritten.Add(uint64(n))
@@ -295,4 +339,50 @@ func (cx *connection) shutdown() {
 	cx.closeOnce.Do(func() {
 		close(cx.done)
 	})
+}
+
+// applyNegotiation updates local state based on telnet negotiation events.
+func (cx *connection) applyNegotiation(cmd, opt byte) {
+	switch opt {
+	case OptEcho:
+		switch cmd {
+		case CmdWILL:
+			// Server will echo - disable local echo
+			cx.localEcho.Store(false)
+		case CmdWONT, CmdDONT, CmdDO:
+			// Server won't echo or wants us to echo - enable local echo
+			cx.localEcho.Store(true)
+		}
+	case OptEOR:
+		switch cmd {
+		case CmdWILL, CmdDO:
+			cx.willEOR.Store(true)
+			cx.updateTelnetMode()
+		case CmdWONT, CmdDONT:
+			cx.willEOR.Store(false)
+			cx.updateTelnetMode()
+		}
+	case OptSGA:
+		switch cmd {
+		case CmdWILL, CmdDO:
+			cx.willSGA.Store(true)
+			cx.updateTelnetMode()
+		case CmdWONT, CmdDONT:
+			cx.willSGA.Store(false)
+			cx.updateTelnetMode()
+		}
+	}
+}
+
+// telnetMode returns the current telnet mode based on negotiation state.
+func (cx *connection) telnetMode() TelnetMode {
+	if cx.willEOR.Load() || cx.willSGA.Load() {
+		return TelnetModeTerminatedPrompt
+	}
+	return TelnetModeUnterminated
+}
+
+// updateTelnetMode recalculates and applies the telnet mode to the output buffer.
+func (cx *connection) updateTelnetMode() {
+	cx.output.SetMode(cx.telnetMode())
 }
