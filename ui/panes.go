@@ -14,10 +14,11 @@ type Pane struct {
 
 // PaneManager handles multiple named panes
 type PaneManager struct {
-	panes    map[string]*Pane
-	keyBinds map[string]string // key -> pane name
-	styles   Styles
-	width    int
+	panes      map[string]*Pane
+	paneOrder  []string          // Ordered list of pane names for deterministic rendering
+	keyBinds   map[string]string // key -> pane name
+	styles     Styles
+	width      int
 }
 
 // NewPaneManager creates a new pane manager
@@ -45,6 +46,7 @@ func (pm *PaneManager) Create(name string) {
 		Visible: false,
 		Height:  10, // Default height
 	}
+	pm.paneOrder = append(pm.paneOrder, name)
 }
 
 // Write appends a line to the named pane
@@ -147,7 +149,8 @@ func (pm *PaneManager) VisibleHeight() int {
 func (pm *PaneManager) View() string {
 	var parts []string
 
-	for _, pane := range pm.panes {
+	for _, name := range pm.paneOrder {
+		pane := pm.panes[name]
 		if !pane.Visible {
 			continue
 		}

@@ -390,8 +390,8 @@ func (m *Model) appendLines(lines []string) {
 }
 
 func (m *Model) updateDimensions() {
-	// Reserve: 1 for prompt, 1 for input, 1 for status
-	reserved := 3
+	// Reserve: 1 for infobar, 1 for separator, 1 for input, 1 for status
+	reserved := 4
 
 	// Account for visible panes at top
 	paneHeight := m.panes.VisibleHeight()

@@ -170,12 +170,26 @@ func (v *ScrollbackViewport) View() string {
 	var b strings.Builder
 	b.Grow(v.height * (v.width + 1)) // Pre-allocate approximate size
 
+	// Determine if we need to reserve a line for the prompt
+	hasPrompt := v.mode == ModeLive && v.prompt != ""
+	contentHeight := v.height
+	if hasPrompt {
+		contentHeight-- // Reserve one line for the prompt
+	}
+
 	if v.buffer.Count() == 0 {
 		// No content - just return empty lines to fill the space
-		for i := 0; i < v.height; i++ {
+		for i := 0; i < contentHeight; i++ {
 			if i > 0 {
 				b.WriteByte('\n')
 			}
+		}
+		// Add prompt line if present
+		if hasPrompt {
+			if contentHeight > 0 {
+				b.WriteByte('\n')
+			}
+			b.WriteString(v.prompt)
 		}
 		v.cachedView = b.String()
 		v.cacheValid = true
@@ -193,7 +207,7 @@ func (v *ScrollbackViewport) View() string {
 	}
 
 	// startIdx is the first visible line
-	startIdx := endIdx - v.height
+	startIdx := endIdx - contentHeight
 	if startIdx < 0 {
 		startIdx = 0
 	}
@@ -203,7 +217,7 @@ func (v *ScrollbackViewport) View() string {
 
 	// Pad with empty lines at the TOP if we don't have enough content
 	// This pushes content to the bottom of the viewport
-	emptyLines := v.height - len(visibleLines)
+	emptyLines := contentHeight - len(visibleLines)
 	for i := 0; i < emptyLines; i++ {
 		if i > 0 {
 			b.WriteByte('\n')
@@ -219,7 +233,8 @@ func (v *ScrollbackViewport) View() string {
 	}
 
 	// Append server prompt (partial line) at the end in live mode
-	if v.mode == ModeLive && v.prompt != "" {
+	// This uses the reserved line, keeping total output at exactly height lines
+	if hasPrompt {
 		b.WriteByte('\n')
 		b.WriteString(v.prompt)
 	}
