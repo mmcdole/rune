@@ -69,6 +69,37 @@ function rune.trigger.clear()
     storage = {}
     order = {}
     next_id = 1
+    named = {}
+end
+
+-- Named trigger registry
+local named = {}  -- { name = id }
+
+-- Add or replace a trigger by name (upsert)
+-- If a trigger with this name exists, remove it first
+-- Returns: trigger ID
+function rune.trigger.set(name, pattern, action, options)
+    if named[name] then
+        rune.trigger.remove(named[name])
+    end
+    local id = rune.trigger.add(pattern, action, options)
+    named[name] = id
+    rune.dbg("trigger.set: '" .. name .. "' -> #" .. id)
+    return id
+end
+
+-- Remove a trigger by name
+function rune.trigger.unset(name)
+    if named[name] then
+        rune.trigger.remove(named[name])
+        rune.dbg("trigger.unset: '" .. name .. "'")
+        named[name] = nil
+    end
+end
+
+-- Get a trigger ID by name
+function rune.trigger.get_named(name)
+    return named[name]
 end
 
 -- Count triggers
