@@ -5,8 +5,6 @@
 local _current_server = nil
 
 rune.hooks.register("ready", function()
-    rune.print("Rune MUD Client")
-    rune.print("Type /help for commands")
     rune.status.set("\027[90m● Disconnected\027[0m")
 end, { priority = 100 })
 

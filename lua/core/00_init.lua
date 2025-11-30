@@ -154,3 +154,10 @@ rune.infobar = {}
 function rune.infobar.set(text)
     rune._infobar.set(text)
 end
+
+-- =============================================================================
+-- STARTUP BANNER
+-- =============================================================================
+
+rune.print("Rune MUD Client")
+rune.print("Type /help for commands")

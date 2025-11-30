@@ -1,9 +1,7 @@
 package ui
 
 import (
-	"sort"
 	"strings"
-	"unicode"
 )
 
 // SlashPicker is the overlay for selecting slash commands.
@@ -40,49 +38,20 @@ func (p *SlashPicker) SetWidth(w int) {
 	p.width = w
 }
 
-// Filter updates the filtered list based on query.
+// Filter updates the filtered list based on query using fuzzy matching.
 func (p *SlashPicker) Filter(query string) {
 	p.query = query
-	if query == "" {
-		p.filtered = p.lines
-		p.selected = 0
-		p.scrollOff = 0
-		return
+
+	// Use fuzzy filter - returns matches sorted by score (best first)
+	matches := FuzzyFilter(query, p.lines)
+
+	p.filtered = make([]string, len(matches))
+	for i, m := range matches {
+		p.filtered[i] = m.Text
 	}
 
-	queryLower := strings.ToLower(query)
-	p.filtered = make([]string, 0)
-
-	for _, line := range p.lines {
-		if strings.Contains(strings.ToLower(line), queryLower) {
-			p.filtered = append(p.filtered, line)
-		}
-	}
-
-	// Find the best match: prefer exact command match, then prefix match
-	bestIdx := 0
-	bestScore := 0
-	for i, line := range p.filtered {
-		// Extract command name (e.g., "/lua" from "/lua - Execute Lua code")
-		cmd := strings.TrimPrefix(line, "/")
-		if idx := strings.IndexAny(cmd, " -"); idx > 0 {
-			cmd = cmd[:idx]
-		}
-		cmdLower := strings.ToLower(cmd)
-
-		// Exact match is best
-		if cmdLower == queryLower {
-			bestIdx = i
-			break
-		}
-		// Prefix match is good
-		if strings.HasPrefix(cmdLower, queryLower) && bestScore < 2 {
-			bestIdx = i
-			bestScore = 2
-		}
-	}
-
-	p.selected = bestIdx
+	p.selected = 0 // Best match is already first
+	p.scrollOff = 0
 	p.adjustScroll()
 }
 
@@ -246,7 +215,7 @@ func (f *FuzzySearch) Search(query string) {
 	f.matches = make([]HistoryMatch, 0)
 
 	if query == "" {
-		// Show recent history
+		// Show recent history (most recent first)
 		for i := len(f.history) - 1; i >= 0 && len(f.matches) < 50; i-- {
 			f.matches = append(f.matches, HistoryMatch{
 				Index:   i,
@@ -255,29 +224,19 @@ func (f *FuzzySearch) Search(query string) {
 			})
 		}
 	} else {
-		// Fuzzy match
-		for i, cmd := range f.history {
-			if matched, score, positions := FuzzyMatch(query, cmd); matched {
-				f.matches = append(f.matches, HistoryMatch{
-					Index:     i,
-					Command:   cmd,
-					Score:     score,
-					Positions: positions,
-				})
-			}
-		}
+		// Use FuzzyFilter for consistent matching
+		fuzzyMatches := FuzzyFilter(query, f.history)
 
-		// Sort by score (higher is better), then by recency
-		sort.Slice(f.matches, func(i, j int) bool {
-			if f.matches[i].Score != f.matches[j].Score {
-				return f.matches[i].Score > f.matches[j].Score
+		for _, m := range fuzzyMatches {
+			if len(f.matches) >= 50 {
+				break
 			}
-			return f.matches[i].Index > f.matches[j].Index
-		})
-
-		// Limit results
-		if len(f.matches) > 50 {
-			f.matches = f.matches[:50]
+			f.matches = append(f.matches, HistoryMatch{
+				Index:     m.Index,
+				Command:   m.Text,
+				Score:     m.Score,
+				Positions: m.Positions,
+			})
 		}
 	}
 
@@ -399,44 +358,3 @@ func (f *FuzzySearch) highlightMatch(match HistoryMatch) string {
 	return result.String()
 }
 
-// FuzzyMatch performs fuzzy matching and returns match status, score, and positions.
-func FuzzyMatch(pattern, text string) (bool, int, []int) {
-	if pattern == "" {
-		return true, 0, nil
-	}
-
-	patternLower := strings.ToLower(pattern)
-	textLower := strings.ToLower(text)
-
-	var positions []int
-	score := 0
-	pIdx := 0
-
-	for i, c := range textLower {
-		if pIdx < len(patternLower) && byte(c) == patternLower[pIdx] {
-			positions = append(positions, i)
-
-			// Score bonuses
-			if i == 0 {
-				score += 10 // Start of string
-			} else if i > 0 && (text[i-1] == ' ' || text[i-1] == '/' || text[i-1] == '_' || text[i-1] == '-') {
-				score += 8 // Start of word
-			} else if unicode.IsUpper(rune(text[i])) {
-				score += 6 // CamelCase boundary
-			} else if len(positions) > 1 && positions[len(positions)-2] == i-1 {
-				score += 4 // Consecutive match
-			}
-
-			pIdx++
-		}
-	}
-
-	if pIdx < len(patternLower) {
-		return false, 0, nil
-	}
-
-	// Prefer shorter matches
-	score -= len(text) - len(pattern)
-
-	return true, score, positions
-}
