@@ -17,11 +17,15 @@ type Model struct {
 	styles     Styles
 
 	// Overlays
-	slashPicker SlashPicker
-	fuzzySearch FuzzySearch
+	slashPicker   SlashPicker
+	historyPicker HistoryPicker
+	aliasPicker   AliasPicker
 
 	// Tab completion
 	wordCache *WordCache
+
+	// Data provider (set by session)
+	provider DataProvider
 
 	// State
 	lastPrompt  string // For deduplication
@@ -37,23 +41,25 @@ type Model struct {
 }
 
 // NewModel creates a new TUI model.
-func NewModel(inputChan chan<- string) Model {
+func NewModel(inputChan chan<- string, provider DataProvider) Model {
 	styles := DefaultStyles()
 	scrollback := NewScrollbackBuffer(100000)
 	viewport := NewScrollbackViewport(scrollback)
 	wordCache := NewWordCache(5000) // Remember last 5000 unique words
 
 	return Model{
-		scrollback:  scrollback,
-		viewport:    viewport,
-		input:       NewInputModel(wordCache),
-		status:      NewStatusBar(styles),
-		panes:       NewPaneManager(styles),
-		styles:      styles,
-		slashPicker: NewSlashPicker(styles),
-		fuzzySearch: NewFuzzySearch(styles),
-		wordCache:   wordCache,
-		inputChan:   inputChan,
+		scrollback:    scrollback,
+		viewport:      viewport,
+		input:         NewInputModel(wordCache),
+		status:        NewStatusBar(styles),
+		panes:         NewPaneManager(styles),
+		styles:        styles,
+		slashPicker:   NewSlashPicker(styles),
+		historyPicker: NewHistoryPicker(styles),
+		aliasPicker:   NewAliasPicker(styles),
+		wordCache:     wordCache,
+		inputChan:     inputChan,
+		provider:      provider,
 	}
 }
 
@@ -180,7 +186,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.input.Mode() != ModeNormal {
 			m.input.SetMode(ModeNormal)
 			m.slashPicker.Reset()
-			m.fuzzySearch.Reset()
+			m.historyPicker.Reset()
 			return m, nil
 		}
 		m.input.Reset()
@@ -190,7 +196,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.input.Mode() != ModeNormal {
 			m.input.SetMode(ModeNormal)
 			m.slashPicker.Reset()
-			m.fuzzySearch.Reset()
+			m.historyPicker.Reset()
 			return m, nil
 		}
 		m.input.Reset()
@@ -201,8 +207,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.input.Mode() {
 	case ModeSlash:
 		return m.handleSlashKey(msg)
-	case ModeFuzzy:
-		return m.handleFuzzyKey(msg)
+	case ModeHistory:
+		return m.handleHistoryKey(msg)
+	case ModeAlias:
+		return m.handleAliasKey(msg)
 	default:
 		return m.handleNormalKey(msg)
 	}
@@ -236,9 +244,17 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyCtrlR:
-		m.input.SetMode(ModeFuzzy)
-		m.fuzzySearch.SetHistory(m.input.History())
-		m.fuzzySearch.Search("")
+		m.input.SetMode(ModeHistory)
+		m.historyPicker.SetHistory(m.input.History())
+		m.historyPicker.Search("")
+		return m, nil
+
+	case tea.KeyCtrlT:
+		m.input.SetMode(ModeAlias)
+		if m.provider != nil {
+			m.aliasPicker.SetAliases(m.provider.Aliases())
+		}
+		m.aliasPicker.Search("")
 		return m, nil
 
 	case tea.KeyPgUp:
@@ -265,8 +281,10 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Check for "/" at start of empty input
 		if len(msg.Runes) == 1 && msg.Runes[0] == '/' && m.input.Value() == "" {
 			m.input.SetMode(ModeSlash)
-			// Load command lines from the "commands" pane
-			m.slashPicker.SetLines(m.panes.GetLines("commands"))
+			// Load commands via provider
+			if m.provider != nil {
+				m.slashPicker.SetCommands(m.provider.Commands())
+			}
 			m.slashPicker.Filter("")
 		}
 	}
@@ -359,44 +377,95 @@ func (m Model) handleSlashKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m Model) handleFuzzyKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) handleHistoryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyUp:
-		m.fuzzySearch.SelectUp()
+		m.historyPicker.SelectUp()
 		return m, nil
 
 	case tea.KeyDown:
-		m.fuzzySearch.SelectDown()
+		m.historyPicker.SelectDown()
 		return m, nil
 
 	case tea.KeyEnter, tea.KeyTab:
 		// Insert selection
-		if match := m.fuzzySearch.Selected(); match != nil {
+		if match := m.historyPicker.Selected(); match != nil {
 			m.input.SetValue(match.Command)
 		}
 		m.input.SetMode(ModeNormal)
-		m.fuzzySearch.Reset()
+		m.historyPicker.Reset()
 		return m, nil
 
 	case tea.KeyCtrlR:
 		// Toggle off
 		m.input.SetMode(ModeNormal)
-		m.fuzzySearch.Reset()
+		m.historyPicker.Reset()
 		return m, nil
 
 	case tea.KeyRunes:
 		// Add to search query
-		m.fuzzySearch.Search(m.fuzzySearch.query + string(msg.Runes))
+		m.historyPicker.Search(m.historyPicker.query + string(msg.Runes))
 		return m, nil
 
 	case tea.KeySpace:
 		// Add space to search query
-		m.fuzzySearch.Search(m.fuzzySearch.query + " ")
+		m.historyPicker.Search(m.historyPicker.query + " ")
 		return m, nil
 
 	case tea.KeyBackspace:
-		if len(m.fuzzySearch.query) > 0 {
-			m.fuzzySearch.Search(m.fuzzySearch.query[:len(m.fuzzySearch.query)-1])
+		if len(m.historyPicker.query) > 0 {
+			m.historyPicker.Search(m.historyPicker.query[:len(m.historyPicker.query)-1])
+		}
+		return m, nil
+	}
+
+	return m, nil
+}
+
+func (m Model) handleAliasKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyUp:
+		m.aliasPicker.SelectUp()
+		return m, nil
+
+	case tea.KeyDown:
+		m.aliasPicker.SelectDown()
+		return m, nil
+
+	case tea.KeyEnter, tea.KeyTab:
+		// Insert selected alias name
+		if name := m.aliasPicker.SelectedAlias(); name != "" {
+			m.input.SetValue(name)
+			m.input.CursorEnd()
+		}
+		m.input.SetMode(ModeNormal)
+		m.aliasPicker.Reset()
+		return m, nil
+
+	case tea.KeyCtrlT:
+		// Toggle off
+		m.input.SetMode(ModeNormal)
+		m.aliasPicker.Reset()
+		return m, nil
+
+	case tea.KeyEsc:
+		m.input.SetMode(ModeNormal)
+		m.aliasPicker.Reset()
+		return m, nil
+
+	case tea.KeyRunes:
+		// Add to search query
+		m.aliasPicker.Search(m.aliasPicker.query + string(msg.Runes))
+		return m, nil
+
+	case tea.KeySpace:
+		// Add space to search query
+		m.aliasPicker.Search(m.aliasPicker.query + " ")
+		return m, nil
+
+	case tea.KeyBackspace:
+		if len(m.aliasPicker.query) > 0 {
+			m.aliasPicker.Search(m.aliasPicker.query[:len(m.aliasPicker.query)-1])
 		}
 		return m, nil
 	}
@@ -430,7 +499,8 @@ func (m *Model) updateDimensions() {
 	m.status.SetWidth(m.width)
 	m.panes.SetWidth(m.width)
 	m.slashPicker.SetWidth(m.width)
-	m.fuzzySearch.SetWidth(m.width)
+	m.historyPicker.SetWidth(m.width)
+	m.aliasPicker.SetWidth(m.width)
 }
 
 // View implements tea.Model.
@@ -467,8 +537,10 @@ func (m Model) View() string {
 	switch m.input.Mode() {
 	case ModeSlash:
 		result += "\n" + m.slashPicker.View()
-	case ModeFuzzy:
-		result += "\n" + m.fuzzySearch.View()
+	case ModeHistory:
+		result += "\n" + m.historyPicker.View()
+	case ModeAlias:
+		result += "\n" + m.aliasPicker.View()
 	}
 
 	// Add infobar, separator, input, status at bottom

@@ -37,6 +37,11 @@ func main() {
 		UserScripts: flag.Args(),
 	})
 
+	// Set data provider for TUI overlays (commands, aliases)
+	if btui, ok := tui.(*ui.BubbleTeaUI); ok {
+		btui.SetDataProvider(sess)
+	}
+
 	// Start debug monitor if RUNE_DEBUG=1
 	monitor := debug.NewMonitor(sess)
 	monitor.Start()

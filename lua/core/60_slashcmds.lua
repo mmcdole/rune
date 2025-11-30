@@ -180,22 +180,3 @@ rune.command.add("help", function(args)
     rune.print("  rune.timer.every(seconds, func)")
 end, "Show available commands")
 
--- Populate the "commands" pane for the slash picker
--- This function writes all commands to a hidden pane that the TUI filters
-local function populate_commands_pane()
-    rune.pane.create("commands")
-    rune.pane.clear("commands")
-    for _, cmd in ipairs(rune.command.list()) do
-        local line = "/" .. cmd.name
-        if cmd.description and cmd.description ~= "" then
-            line = line .. " - " .. cmd.description
-        end
-        rune.pane.write("commands", line)
-    end
-end
-
--- Register to populate commands on ready (after all scripts loaded)
-rune.hooks.register("ready", populate_commands_pane, { priority = 50 })
-
--- Also repopulate after reload
-rune.hooks.register("reloaded", populate_commands_pane, { priority = 50 })

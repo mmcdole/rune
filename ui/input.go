@@ -11,9 +11,10 @@ import (
 type InputMode int
 
 const (
-	ModeNormal InputMode = iota
-	ModeSlash  // Slash command picker active
-	ModeFuzzy  // Ctrl+R fuzzy search active
+	ModeNormal  InputMode = iota
+	ModeSlash   // Slash command picker active
+	ModeHistory // Ctrl+R history search active
+	ModeAlias   // Ctrl+T alias search active
 )
 
 // InputModel handles text input with history and mode management.

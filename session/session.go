@@ -16,10 +16,14 @@ import (
 	"github.com/drake/rune/mud"
 	"github.com/drake/rune/network"
 	"github.com/drake/rune/timer"
+	"github.com/drake/rune/ui"
 )
 
 // Ensure Session implements lua.Host at compile time
 var _ lua.Host = (*Session)(nil)
+
+// Ensure Session implements ui.DataProvider at compile time
+var _ ui.DataProvider = (*Session)(nil)
 
 // Config holds session configuration
 type Config struct {
@@ -382,4 +386,26 @@ func (s *Session) TimerCancel(id int) {
 // TimerCancelAll cancels all timers.
 func (s *Session) TimerCancelAll() {
 	s.timer.CancelAll()
+}
+
+// --- DataProvider Implementation ---
+
+// Commands returns all slash commands for the UI.
+func (s *Session) Commands() []ui.CommandInfo {
+	cmds := s.engine.GetCommands()
+	result := make([]ui.CommandInfo, len(cmds))
+	for i, c := range cmds {
+		result[i] = ui.CommandInfo{Name: c.Name, Description: c.Description}
+	}
+	return result
+}
+
+// Aliases returns all aliases for the UI.
+func (s *Session) Aliases() []ui.AliasInfo {
+	aliases := s.engine.GetAliases()
+	result := make([]ui.AliasInfo, len(aliases))
+	for i, a := range aliases {
+		result[i] = ui.AliasInfo{Name: a.Name, Value: a.Value}
+	}
+	return result
 }

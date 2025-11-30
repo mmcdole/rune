@@ -62,6 +62,18 @@ function rune.alias.count()
     return count
 end
 
+-- Returns all aliases as array of {name, value}
+-- Value is the expansion string or "(function)" for function aliases
+function rune.alias.all()
+    local result = {}
+    for k, v in pairs(storage) do
+        local val = type(v) == "function" and "(function)" or tostring(v)
+        table.insert(result, {name = k, value = val})
+    end
+    table.sort(result, function(a, b) return a.name < b.name end)
+    return result
+end
+
 -- Run an alias programmatically (for calling aliases from other aliases)
 function rune.alias.run(name, args)
     local value = storage[name]
