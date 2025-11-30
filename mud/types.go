@@ -9,10 +9,7 @@ const (
 	EventNetPrompt           // A partial line/prompt (no \n, possibly GA/EOR terminated)
 	EventTimer
 	EventSystemControl
-	EventAsyncResult   // Async work completion dispatched onto the session loop
-	EventDisplayLine   // Append a line to scrollback (server output or prompt commit)
-	EventDisplayEcho   // Append a local echo line (e.g., "> cmd")
-	EventDisplayPrompt // Set/update the live prompt overlay
+	EventAsyncResult // Async work completion dispatched onto the session loop
 )
 
 // Control action constants

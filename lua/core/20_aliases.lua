@@ -38,7 +38,7 @@ function rune.alias.list()
         if type(v) == "function" then
             rune.print("  " .. k .. " -> (function)")
         else
-            rune.print("  " .. k .. " -> " .. v)
+            rune.print("  " .. k .. " -> " .. tostring(v))
         end
     end
 end

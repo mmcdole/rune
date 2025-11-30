@@ -167,16 +167,6 @@ func (s *Session) handleEvent(event mud.Event) {
 		s.lastPrompt = modified
 		s.ui.RenderPrompt(modified)
 
-	case mud.EventDisplayLine:
-		s.ui.RenderDisplayLine(event.Payload)
-
-	case mud.EventDisplayEcho:
-		s.ui.RenderEcho(event.Payload)
-
-	case mud.EventDisplayPrompt:
-		s.ui.RenderPrompt(event.Payload)
-		s.lastPrompt = event.Payload
-
 	case mud.EventUserInput:
 		// Commit current prompt to history before sending input
 		if s.lastPrompt != "" {
@@ -274,7 +264,9 @@ func (s *Session) handleControl(ctrl mud.ControlOp) {
 // --- Host Implementation ---
 
 func (s *Session) Print(text string) {
-	s.events <- mud.Event{Type: mud.EventDisplayLine, Payload: text}
+	// Print is called synchronously from Lua (within the event loop),
+	// so render directly instead of going through the channel to avoid deadlock.
+	s.ui.RenderDisplayLine(text)
 }
 func (s *Session) Send(data string) { s.net.Send(data) }
 
@@ -303,20 +295,17 @@ func (s *Session) Disconnect() {
 	s.engine.CallHook("disconnected")
 }
 
-// Load enqueues a request to load a Lua script on the session loop.
+// Load loads a Lua script synchronously. Called from Lua, so executes directly.
 func (s *Session) Load(path string) {
-	s.events <- mud.Event{
-		Type: mud.EventSystemControl,
-		Control: mud.ControlOp{
-			Action:     mud.ActionLoadScript,
-			ScriptPath: path,
-		},
-	}
+	s.loadScript(path)
 }
 
+// Reload schedules VM reinitialization. Must be deferred because it destroys the
+// currently executing Lua state. Uses non-blocking send to avoid deadlock.
 func (s *Session) Reload() {
 	s.engine.CallHook("reloading")
-	s.events <- mud.Event{
+	select {
+	case s.events <- mud.Event{
 		Type: mud.EventAsyncResult,
 		Callback: func() {
 			if err := s.boot(); err != nil {
@@ -325,6 +314,9 @@ func (s *Session) Reload() {
 				s.engine.CallHook("reloaded")
 			}
 		},
+	}:
+	default:
+		s.ui.Render("\033[31mReload Failed: event queue full\033[0m")
 	}
 }
 
