@@ -294,8 +294,19 @@ func (m Model) handleSlashKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyEnter:
-		// Execute selected command
-		if cmdName := m.slashPicker.SelectedCommand(); cmdName != "" {
+		// Get current input text
+		text := m.input.Value()
+
+		// Check if user has typed arguments (space after command)
+		if strings.Contains(text, " ") {
+			// User typed full command with args - submit as-is
+			m.input.AddToHistory(text)
+			select {
+			case m.inputChan <- text:
+			default:
+			}
+		} else if cmdName := m.slashPicker.SelectedCommand(); cmdName != "" {
+			// No args - use selected command from picker
 			fullCmd := "/" + cmdName
 			m.input.AddToHistory(fullCmd)
 			select {
@@ -326,6 +337,18 @@ func (m Model) handleSlashKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.slashPicker.Reset()
 			return m, nil
 		}
+
+	case tea.KeySpace:
+		// Space commits to the selected command and exits picker mode
+		// User can then type arguments freely
+		if cmdName := m.slashPicker.SelectedCommand(); cmdName != "" {
+			m.input.SetValue("/" + cmdName + " ")
+			m.input.CursorEnd()
+			m.input.ClearSuggestions()
+		}
+		m.input.SetMode(ModeNormal)
+		m.slashPicker.Reset()
+		return m, nil
 	}
 
 	// Forward to input and update filter

@@ -65,7 +65,12 @@ rune.command.add("load", function(args)
         rune.print("[Usage] /load <path>")
         return
     end
-    rune.load(args)
+    local err = rune.load(args)
+    if err then
+        rune.print("[Error] " .. err)
+    else
+        rune.print("[Loaded] " .. args)
+    end
 end, "Load a Lua script file")
 
 -- /reload - Clear state and reload init.lua

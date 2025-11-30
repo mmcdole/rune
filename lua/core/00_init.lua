@@ -56,8 +56,9 @@ function rune.reload()
 end
 
 -- rune.load(path): Load a Lua script
+-- Returns: nil on success, error string on failure
 function rune.load(path)
-    rune._load(path)
+    return rune._load(path)
 end
 
 -- =============================================================================
