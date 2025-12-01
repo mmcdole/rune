@@ -127,3 +127,34 @@ type ScrollStateChangedMsg struct {
 
 // BarContent is an alias for layout.BarContent for convenience.
 type BarContent = layout.BarContent
+
+// --- Picker Messages (Session -> UI) ---
+
+// ShowPickerMsg requests the UI to display a picker overlay.
+// Sent from Session to UI when Lua calls rune.ui.picker.show().
+type ShowPickerMsg struct {
+	Title      string        // Optional title/header for the picker
+	Items      []GenericItem // Items to display
+	CallbackID string        // Opaque ID to track which Lua callback to run
+	// FilterPrefix enables "linked" mode where the picker filters based on input line content.
+	// When set, the picker doesn't trap keys - it observes the input field instead.
+	// The filter text is the input value minus this prefix (e.g., "/" for slash commands).
+	FilterPrefix string
+}
+
+// SetInputMsg sets the input line content.
+// Sent from Session when Lua calls rune.input.set().
+type SetInputMsg string
+
+// UpdateHistoryMsg pushes input history from Session to UI.
+// UI uses this for Up/Down arrow navigation.
+type UpdateHistoryMsg []string
+
+// --- Picker Messages (UI -> Session) ---
+
+// PickerSelectMsg is sent from UI back to Session when user interacts with picker.
+type PickerSelectMsg struct {
+	CallbackID string // The callback ID from ShowPickerMsg
+	Value      string // The GenericItem.Value of the selection
+	Accepted   bool   // True if user pressed Enter, false if Esc/cancel
+}

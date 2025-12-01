@@ -24,9 +24,6 @@ type BubbleTeaUI struct {
 	// Shutdown coordination
 	done     chan struct{}
 	doneOnce sync.Once
-
-	// Data provider for UI overlays (set before Run)
-	provider DataProvider
 }
 
 // NewBubbleTeaUI creates a new Bubble Tea-based UI.
@@ -77,15 +74,9 @@ func (b *BubbleTeaUI) Input() <-chan string {
 	return b.inputChan
 }
 
-// SetDataProvider sets the data provider for commands and aliases.
-// Must be called before Run().
-func (b *BubbleTeaUI) SetDataProvider(p DataProvider) {
-	b.provider = p
-}
-
 // Run implements mud.UI - starts the TUI and blocks until exit.
 func (b *BubbleTeaUI) Run() error {
-	model := NewModel(b.inputChan, b.outbound, b.provider)
+	model := NewModel(b.inputChan, b.outbound)
 
 	b.program = tea.NewProgram(
 		model,
@@ -192,6 +183,22 @@ func (b *BubbleTeaUI) UpdateBinds(keys map[string]bool) {
 // UpdateLayout sends layout configuration from Session to UI.
 func (b *BubbleTeaUI) UpdateLayout(top, bottom []string) {
 	b.send(UpdateLayoutMsg{Top: top, Bottom: bottom})
+}
+
+// UpdateHistory sends input history from Session to UI.
+func (b *BubbleTeaUI) UpdateHistory(history []string) {
+	b.send(UpdateHistoryMsg(history))
+}
+
+// ShowPicker displays a picker overlay with items.
+// filterPrefix enables "linked" mode: picker filters based on input line minus prefix.
+func (b *BubbleTeaUI) ShowPicker(title string, items []GenericItem, callbackID string, filterPrefix string) {
+	b.send(ShowPickerMsg{Title: title, Items: items, CallbackID: callbackID, FilterPrefix: filterPrefix})
+}
+
+// SetInput sets the input line content.
+func (b *BubbleTeaUI) SetInput(text string) {
+	b.send(SetInputMsg(text))
 }
 
 // --- Outbound messages from UI to Session ---

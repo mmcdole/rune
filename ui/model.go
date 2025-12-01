@@ -25,147 +25,6 @@ func filterClearSequences(line string) string {
 	return line
 }
 
-// OverlayMode represents the current input overlay state.
-type OverlayMode int
-
-const (
-	ModeNormal  OverlayMode = iota
-	ModeSlash               // Slash command picker active
-	ModeHistory             // Ctrl+R history search active
-	ModeAlias               // Ctrl+T alias search active
-)
-
-// Item types for pickers (moved from overlay.go)
-
-// commandItem wraps CommandInfo for picker use.
-type commandItem struct {
-	info CommandInfo
-}
-
-func (c commandItem) FilterValue() string {
-	return c.info.Name + " " + c.info.Description
-}
-
-func (c commandItem) Render(width int, selected bool, matches []int, s style.Styles) string {
-	prefix := "  "
-	if selected {
-		prefix = "> "
-	}
-
-	// Highlight matched characters in name and description
-	name := highlightText(c.info.Name, matches, 0, s)
-	desc := ""
-	if c.info.Description != "" {
-		// Description starts at len(name)+1 (after the space)
-		desc = " - " + highlightText(c.info.Description, matches, len(c.info.Name)+1, s)
-	}
-
-	line := "/" + name + desc
-
-	if selected {
-		return s.OverlaySelected.Render(prefix) + line
-	}
-	return s.OverlayNormal.Render(prefix) + line
-}
-
-// aliasItem wraps AliasInfo for picker use.
-type aliasItem struct {
-	info AliasInfo
-}
-
-func (a aliasItem) FilterValue() string {
-	return a.info.Name
-}
-
-func (a aliasItem) Render(width int, selected bool, matches []int, s style.Styles) string {
-	prefix := "  "
-	if selected {
-		prefix = "> "
-	}
-
-	// Highlight matched characters in name
-	name := highlightText(a.info.Name, matches, 0, s)
-
-	// Format: name → value, truncated to fit
-	// Arrow " → " is 3 visual chars
-	nameLen := len([]rune(a.info.Name))
-	arrowLen := 3
-	availableForValue := width - nameLen - arrowLen - 4 // margin
-
-	value := a.info.Value
-	if availableForValue > 3 {
-		valueRunes := []rune(value)
-		if len(valueRunes) > availableForValue {
-			value = string(valueRunes[:availableForValue-1]) + "…"
-		}
-	} else {
-		value = "…"
-	}
-
-	line := name + " → " + value
-
-	if selected {
-		return s.OverlaySelected.Render(prefix) + line
-	}
-	return s.OverlayNormal.Render(prefix) + line
-}
-
-// historyItem wraps a history command for picker use.
-type historyItem struct {
-	command string
-}
-
-func (h historyItem) FilterValue() string {
-	return h.command
-}
-
-func (h historyItem) Render(width int, selected bool, matches []int, s style.Styles) string {
-	prefix := "  "
-	if selected {
-		prefix = "> "
-	}
-
-	// Highlight matched characters
-	line := highlightText(h.command, matches, 0, s)
-
-	if selected {
-		return s.OverlaySelected.Render(prefix + line)
-	}
-	return s.OverlayNormal.Render(prefix) + line
-}
-
-// highlightText highlights matched positions in text, with offset adjustment.
-func highlightText(text string, positions []int, offset int, s style.Styles) string {
-	if len(positions) == 0 {
-		return text
-	}
-
-	textRunes := []rune(text)
-
-	// Build set of positions relative to this text segment
-	posSet := make(map[int]bool)
-	for _, pos := range positions {
-		relPos := pos - offset
-		if relPos >= 0 && relPos < len(textRunes) {
-			posSet[relPos] = true
-		}
-	}
-
-	if len(posSet) == 0 {
-		return text
-	}
-
-	var result strings.Builder
-	for i, r := range textRunes {
-		if posSet[i] {
-			result.WriteString(s.OverlayMatch.Render(string(r)))
-		} else {
-			result.WriteRune(r)
-		}
-	}
-	return result.String()
-}
-
 // Model is the main Bubble Tea model for the TUI.
 type Model struct {
 	// Display components
@@ -176,23 +35,20 @@ type Model struct {
 	panes      *panes.Manager
 	styles     style.Styles
 
-	// Overlay state - Model owns mode and pickers directly
-	overlayMode   OverlayMode
-	slashPicker   *picker.Model[commandItem]
-	historyPicker *picker.Model[historyItem]
-	aliasPicker   *picker.Model[aliasItem]
+	// Generic picker (replaces slashPicker, historyPicker, aliasPicker)
+	picker       *picker.Model[GenericItem]
+	pickerActive bool
+	pickerCB     string // Current callback ID for picker selection
+	pickerLinked bool   // True if picker is "linked" to input (filters based on input content)
+	pickerPrefix string // Prefix for linked mode (e.g., "/" for slash commands)
 
-	// History state - Model owns history directly
+	// History state - pushed from Session
 	history      []string
 	historyIndex int    // -1 = draft, 0..n = history position
-	historyLimit int    // Max history entries
 	historyDraft string // Preserved when browsing history
 
 	// Tab completion
 	wordCache *util.CompletionEngine
-
-	// Data provider (set by session)
-	provider DataProvider
 
 	// Layout provider (set by session, optional - used for Go-defined bars/panes)
 	layoutProvider layout.Provider
@@ -220,7 +76,7 @@ type Model struct {
 }
 
 // NewModel creates a new TUI model.
-func NewModel(inputChan chan<- string, outbound chan<- any, provider DataProvider) Model {
+func NewModel(inputChan chan<- string, outbound chan<- any) Model {
 	styles := style.DefaultStyles()
 	scrollback := viewport.NewScrollbackBuffer(100000)
 	vp := viewport.New(scrollback)
@@ -233,28 +89,16 @@ func NewModel(inputChan chan<- string, outbound chan<- any, provider DataProvide
 		status:     status.New(styles),
 		panes:      panes.NewManager(styles),
 		styles:     styles,
-		// Use generic pickers directly - no wrapper structs
-		slashPicker: picker.New[commandItem](picker.Config{
-			MaxVisible: 8,
-			EmptyText:  "No matching commands",
-		}, styles),
-		historyPicker: picker.New[historyItem](picker.Config{
+		// Single generic picker
+		picker: picker.New[GenericItem](picker.Config{
 			MaxVisible: 10,
-			Header:     "History: ",
-			EmptyText:  "No matches",
-		}, styles),
-		aliasPicker: picker.New[aliasItem](picker.Config{
-			MaxVisible: 10,
-			Header:     "Alias: ",
 			EmptyText:  "No matches",
 		}, styles),
 		history:      make([]string, 0, 1000),
 		historyIndex: -1,
-		historyLimit: 10000,
 		wordCache:    wordCache,
 		inputChan:    inputChan,
 		outbound:     outbound,
-		provider:     provider,
 	}
 }
 
@@ -305,6 +149,39 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.luaLayout.Top = msg.Top
 		m.luaLayout.Bottom = msg.Bottom
 		m.updateDimensions()
+		return m, nil
+
+	case UpdateHistoryMsg:
+		m.history = msg
+		m.historyIndex = -1 // Reset navigation
+		return m, nil
+
+	case ShowPickerMsg:
+		m.picker.SetItems(msg.Items)
+		m.pickerCB = msg.CallbackID
+		m.pickerActive = true
+
+		// Check for linked mode (picker filters based on input content)
+		if msg.FilterPrefix != "" {
+			m.pickerLinked = true
+			m.pickerPrefix = msg.FilterPrefix
+			// Filter immediately based on current input (minus prefix)
+			val := m.input.Value()
+			if strings.HasPrefix(val, m.pickerPrefix) {
+				m.picker.Filter(val[len(m.pickerPrefix):])
+			} else {
+				m.picker.Filter("")
+			}
+		} else {
+			m.pickerLinked = false
+			m.pickerPrefix = ""
+			m.picker.Filter("") // Reset filter for modal mode
+		}
+		return m, nil
+
+	case SetInputMsg:
+		m.input.SetValue(string(msg))
+		m.input.CursorEnd()
 		return m, nil
 
 	// Batched lines from aggregator
@@ -394,16 +271,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Global keys
 	switch msg.Type {
 	case tea.KeyCtrlC:
-		if m.input.Value() == "" && m.overlayMode == ModeNormal {
+		if m.input.Value() == "" && !m.pickerActive {
 			m.quitting = true
 			return m, tea.Quit
 		}
-		// Clear input or cancel overlay
-		if m.overlayMode != ModeNormal {
-			m.overlayMode = ModeNormal
-			m.slashPicker.Reset()
-			m.historyPicker.Reset()
-			m.aliasPicker.Reset()
+		// Clear input or cancel picker
+		if m.pickerActive {
+			m.pickerActive = false
+			m.picker.Reset()
+			m.sendOutbound(PickerSelectMsg{CallbackID: m.pickerCB, Accepted: false})
 			return m, nil
 		}
 		m.input.Reset()
@@ -412,11 +288,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyEsc:
-		if m.overlayMode != ModeNormal {
-			m.overlayMode = ModeNormal
-			m.slashPicker.Reset()
-			m.historyPicker.Reset()
-			m.aliasPicker.Reset()
+		if m.pickerActive {
+			m.pickerActive = false
+			m.picker.Reset()
+			m.sendOutbound(PickerSelectMsg{CallbackID: m.pickerCB, Accepted: false})
 			return m, nil
 		}
 		m.input.Reset()
@@ -425,17 +300,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Mode-specific handling
-	switch m.overlayMode {
-	case ModeSlash:
-		return m.handleSlashKey(msg)
-	case ModeHistory:
-		return m.handleHistoryKey(msg)
-	case ModeAlias:
-		return m.handleAliasKey(msg)
-	default:
-		return m.handleNormalKey(msg)
+	// Modal picker handling (non-linked mode traps all keys)
+	if m.pickerActive && !m.pickerLinked {
+		return m.handlePickerKey(msg)
 	}
+
+	// Normal input (includes linked picker mode)
+	return m.handleNormalKey(msg)
 }
 
 func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -456,11 +327,50 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// Linked picker mode: Up/Down navigate picker, Tab completes
+	if m.pickerActive && m.pickerLinked {
+		switch msg.Type {
+		case tea.KeyUp:
+			m.picker.SelectUp()
+			return m, nil
+		case tea.KeyDown:
+			m.picker.SelectDown()
+			return m, nil
+		case tea.KeyTab:
+			// Tab auto-completes the selection
+			if item, ok := m.picker.Selected(); ok {
+				m.input.SetValue(m.pickerPrefix + item.Value + " ")
+				m.input.CursorEnd()
+				m.sendOutbound(PickerSelectMsg{
+					CallbackID: m.pickerCB,
+					Value:      item.Value,
+					Accepted:   true,
+				})
+			}
+			m.pickerActive = false
+			m.pickerLinked = false
+			m.picker.Reset()
+			return m, nil
+		case tea.KeyEnter:
+			// Enter accepts selection OR submits current input
+			if item, ok := m.picker.Selected(); ok {
+				m.sendOutbound(PickerSelectMsg{
+					CallbackID: m.pickerCB,
+					Value:      item.Value,
+					Accepted:   true,
+				})
+			}
+			m.pickerActive = false
+			m.pickerLinked = false
+			m.picker.Reset()
+			// Fall through to normal Enter handling below
+		}
+	}
+
 	switch msg.Type {
 	case tea.KeyEnter:
 		text := m.input.Value()
 		if text != "" {
-			m.addToHistory(text)
 			m.wordCache.AddInput(text) // Feed user input to completion cache (preserves punctuation)
 		}
 		// Send to orchestrator (including empty string for blank enter)
@@ -487,24 +397,12 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyCtrlU:
 		m.input.SetValue("")
+		m.updateLinkedPicker()
 		return m, nil
 
 	case tea.KeyCtrlW:
 		m.deleteWord()
-		return m, nil
-
-	case tea.KeyCtrlR:
-		m.overlayMode = ModeHistory
-		m.setHistoryPickerItems()
-		m.historyPicker.Filter("")
-		return m, nil
-
-	case tea.KeyCtrlT:
-		m.overlayMode = ModeAlias
-		if m.provider != nil {
-			m.setAliasPickerItems(m.provider.Aliases())
-		}
-		m.aliasPicker.Filter("")
+		m.updateLinkedPicker()
 		return m, nil
 
 	case tea.KeyPgUp:
@@ -526,149 +424,83 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.viewport.GotoTop()
 		m.updateScrollState()
 		return m, nil
-
-	case tea.KeyRunes:
-		// Check for "/" at start of empty input
-		if len(msg.Runes) == 1 && msg.Runes[0] == '/' && m.input.Value() == "" {
-			m.overlayMode = ModeSlash
-			// Load commands via provider
-			if m.provider != nil {
-				m.setSlashPickerItems(m.provider.Commands())
-			}
-			m.slashPicker.Filter("")
-		}
 	}
 
 	// Forward to input
 	newInput, cmd := m.input.Update(msg)
 	m.input = *newInput
 
-	// Update suggestions and slash filter
+	// Update linked picker filter based on new input content
+	m.updateLinkedPicker()
+
+	// Update suggestions
 	m.updateSuggestions()
-	if m.overlayMode == ModeSlash {
-		m.slashPicker.Filter(m.getSlashQuery())
-	}
 
 	return m, cmd
 }
 
-func (m Model) handleSlashKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.Type {
-	case tea.KeyUp:
-		m.slashPicker.SelectUp()
-		return m, nil
-
-	case tea.KeyDown:
-		m.slashPicker.SelectDown()
-		return m, nil
-
-	case tea.KeyEnter:
-		// Get current input text
-		text := m.input.Value()
-
-		// Check if user has typed arguments (space after command)
-		if strings.Contains(text, " ") {
-			// User typed full command with args - submit as-is
-			m.addToHistory(text)
-			select {
-			case m.inputChan <- text:
-			default:
-			}
-		} else if item, ok := m.slashPicker.Selected(); ok {
-			// No args - use selected command from picker
-			fullCmd := "/" + item.info.Name
-			m.addToHistory(fullCmd)
-			select {
-			case m.inputChan <- fullCmd:
-			default:
-			}
-		}
-		m.input.Reset()
-		m.historyIndex = -1
-		m.historyDraft = ""
-		m.overlayMode = ModeNormal
-		m.slashPicker.Reset()
-		return m, nil
-
-	case tea.KeyTab:
-		// Insert command name and position cursor at end
-		if item, ok := m.slashPicker.Selected(); ok {
-			m.input.SetValue("/" + item.info.Name + " ")
-			m.input.CursorEnd()
-			m.input.ClearSuggestions()
-		}
-		m.overlayMode = ModeNormal
-		m.slashPicker.Reset()
-		return m, nil
-
-	case tea.KeyBackspace:
-		if m.input.Value() == "/" || m.input.Value() == "" {
-			m.input.Reset()
-			m.overlayMode = ModeNormal
-			m.slashPicker.Reset()
-			return m, nil
-		}
-
-	case tea.KeySpace:
-		// Space commits to the selected command and exits picker mode
-		// User can then type arguments freely
-		if item, ok := m.slashPicker.Selected(); ok {
-			m.input.SetValue("/" + item.info.Name + " ")
-			m.input.CursorEnd()
-			m.input.ClearSuggestions()
-		}
-		m.overlayMode = ModeNormal
-		m.slashPicker.Reset()
-		return m, nil
+// updateLinkedPicker updates the linked picker filter based on input content.
+// Closes the picker if the prefix is deleted.
+func (m *Model) updateLinkedPicker() {
+	if !m.pickerActive || !m.pickerLinked {
+		return
 	}
 
-	// Forward to input and update filter
-	newInput, cmd := m.input.Update(msg)
-	m.input = *newInput
-	m.slashPicker.Filter(m.getSlashQuery())
+	val := m.input.Value()
 
-	return m, cmd
+	// If user backspaced past the prefix, close picker
+	if !strings.HasPrefix(val, m.pickerPrefix) {
+		m.pickerActive = false
+		m.pickerLinked = false
+		m.sendOutbound(PickerSelectMsg{CallbackID: m.pickerCB, Accepted: false})
+		m.picker.Reset()
+		return
+	}
+
+	// Update filter based on input content minus prefix
+	filterText := val[len(m.pickerPrefix):]
+	m.picker.Filter(filterText)
 }
 
-func (m Model) handleHistoryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyUp:
-		m.historyPicker.SelectUp()
+		m.picker.SelectUp()
 		return m, nil
 
 	case tea.KeyDown:
-		m.historyPicker.SelectDown()
+		m.picker.SelectDown()
 		return m, nil
 
 	case tea.KeyEnter, tea.KeyTab:
-		// Insert selection
-		if item, ok := m.historyPicker.Selected(); ok {
-			m.input.SetValue(item.command)
+		// Accept selection
+		if item, ok := m.picker.Selected(); ok {
+			m.sendOutbound(PickerSelectMsg{
+				CallbackID: m.pickerCB,
+				Value:      item.Value,
+				Accepted:   true,
+			})
+		} else {
+			m.sendOutbound(PickerSelectMsg{CallbackID: m.pickerCB, Accepted: false})
 		}
-		m.overlayMode = ModeNormal
-		m.historyPicker.Reset()
-		return m, nil
-
-	case tea.KeyCtrlR:
-		// Toggle off
-		m.overlayMode = ModeNormal
-		m.historyPicker.Reset()
+		m.pickerActive = false
+		m.picker.Reset()
 		return m, nil
 
 	case tea.KeyRunes:
 		// Add to search query
-		m.historyPicker.Filter(m.historyPicker.Query() + string(msg.Runes))
+		m.picker.Filter(m.picker.Query() + string(msg.Runes))
 		return m, nil
 
 	case tea.KeySpace:
 		// Add space to search query
-		m.historyPicker.Filter(m.historyPicker.Query() + " ")
+		m.picker.Filter(m.picker.Query() + " ")
 		return m, nil
 
 	case tea.KeyBackspace:
-		query := m.historyPicker.Query()
+		query := m.picker.Query()
 		if len(query) > 0 {
-			m.historyPicker.Filter(query[:len(query)-1])
+			m.picker.Filter(query[:len(query)-1])
 		}
 		return m, nil
 	}
@@ -676,74 +508,7 @@ func (m Model) handleHistoryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) handleAliasKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.Type {
-	case tea.KeyUp:
-		m.aliasPicker.SelectUp()
-		return m, nil
-
-	case tea.KeyDown:
-		m.aliasPicker.SelectDown()
-		return m, nil
-
-	case tea.KeyEnter, tea.KeyTab:
-		// Insert selected alias name
-		if item, ok := m.aliasPicker.Selected(); ok {
-			m.input.SetValue(item.info.Name)
-			m.input.CursorEnd()
-		}
-		m.overlayMode = ModeNormal
-		m.aliasPicker.Reset()
-		return m, nil
-
-	case tea.KeyCtrlT:
-		// Toggle off
-		m.overlayMode = ModeNormal
-		m.aliasPicker.Reset()
-		return m, nil
-
-	case tea.KeyEsc:
-		m.overlayMode = ModeNormal
-		m.aliasPicker.Reset()
-		return m, nil
-
-	case tea.KeyRunes:
-		// Add to search query
-		m.aliasPicker.Filter(m.aliasPicker.Query() + string(msg.Runes))
-		return m, nil
-
-	case tea.KeySpace:
-		// Add space to search query
-		m.aliasPicker.Filter(m.aliasPicker.Query() + " ")
-		return m, nil
-
-	case tea.KeyBackspace:
-		query := m.aliasPicker.Query()
-		if len(query) > 0 {
-			m.aliasPicker.Filter(query[:len(query)-1])
-		}
-		return m, nil
-	}
-
-	return m, nil
-}
-
-// History management (moved from input.go)
-
-func (m *Model) addToHistory(cmd string) {
-	if cmd == "" {
-		return
-	}
-	// Don't add duplicates of the last command
-	if len(m.history) > 0 && m.history[len(m.history)-1] == cmd {
-		return
-	}
-	m.history = append(m.history, cmd)
-	// Trim if over limit
-	if len(m.history) > m.historyLimit {
-		m.history = m.history[len(m.history)-m.historyLimit:]
-	}
-}
+// History management
 
 func (m *Model) historyUp() {
 	if len(m.history) == 0 {
@@ -818,7 +583,7 @@ func (m *Model) historyDown() {
 	m.input.CursorEnd()
 }
 
-// Completion and suggestions (moved from input.go)
+// Completion and suggestions
 
 func (m *Model) updateSuggestions() {
 	if m.wordCache == nil {
@@ -882,49 +647,6 @@ func (m *Model) deleteWord() {
 	}
 }
 
-// Picker helpers
-
-func (m *Model) setSlashPickerItems(commands []CommandInfo) {
-	items := make([]commandItem, len(commands))
-	for i, cmd := range commands {
-		items[i] = commandItem{info: cmd}
-	}
-	m.slashPicker.SetItems(items)
-}
-
-func (m *Model) setHistoryPickerItems() {
-	// Deduplicate: keep only most recent occurrence of each command
-	seen := make(map[string]bool)
-	deduped := make([]historyItem, 0, len(m.history))
-
-	// Iterate backwards (most recent first)
-	for i := len(m.history) - 1; i >= 0; i-- {
-		cmd := m.history[i]
-		if !seen[cmd] {
-			seen[cmd] = true
-			deduped = append(deduped, historyItem{command: cmd})
-		}
-	}
-
-	m.historyPicker.SetItems(deduped)
-}
-
-func (m *Model) setAliasPickerItems(aliases []AliasInfo) {
-	items := make([]aliasItem, len(aliases))
-	for i, alias := range aliases {
-		items[i] = aliasItem{info: alias}
-	}
-	m.aliasPicker.SetItems(items)
-}
-
-func (m *Model) getSlashQuery() string {
-	val := m.input.Value()
-	if strings.HasPrefix(val, "/") {
-		return val[1:]
-	}
-	return ""
-}
-
 func (m *Model) appendLines(lines []string) {
 	for _, line := range lines {
 		m.scrollback.Append(line)
@@ -984,9 +706,7 @@ func (m *Model) updateDimensions() {
 	m.input.SetWidth(m.width)
 	m.status.SetWidth(m.width)
 	m.panes.SetWidth(m.width)
-	m.slashPicker.SetWidth(m.width)
-	m.historyPicker.SetWidth(m.width)
-	m.aliasPicker.SetWidth(m.width)
+	m.picker.SetWidth(m.width)
 }
 
 // getLayout returns the current layout configuration.
@@ -1025,15 +745,10 @@ func (m *Model) componentHeight(name string) int {
 	// Built-in components
 	switch name {
 	case "input":
-		// separator + input + separator, plus overlay when active
+		// separator + input + separator, plus picker overlay when active
 		h := 3 // top separator + input + bottom separator
-		switch m.overlayMode {
-		case ModeSlash:
-			h += m.slashPicker.Height()
-		case ModeHistory:
-			h += m.historyPicker.Height()
-		case ModeAlias:
-			h += m.aliasPicker.Height()
+		if m.pickerActive {
+			h += m.picker.Height()
 		}
 		return h
 	case "status":
@@ -1091,7 +806,7 @@ func (m Model) View() string {
 		return ""
 	}
 
-	// Recalculate viewport height (overlay is part of input component)
+	// Recalculate viewport height (picker is part of input component)
 	layoutCfg := m.getLayout()
 	topHeight := m.dockHeight(layoutCfg.Top)
 	bottomHeight := m.dockHeight(layoutCfg.Bottom)
@@ -1113,7 +828,7 @@ func (m Model) View() string {
 	// 2. Main viewport (scrollback)
 	parts = append(parts, m.viewport.View())
 
-	// 3. Bottom dock components (overlay renders as part of "input")
+	// 3. Bottom dock components (picker renders as part of "input")
 	for _, name := range layoutCfg.Bottom {
 		if rendered := m.renderComponent(name); rendered != "" {
 			parts = append(parts, rendered)
@@ -1133,15 +848,10 @@ func (m Model) renderComponent(name string) string {
 	// Built-in components (fallback if no Lua bar defined)
 	switch name {
 	case "input":
-		// Overlay (if active) > separator > input > separator
+		// Picker overlay (if active) > separator > input > separator
 		var parts []string
-		switch m.overlayMode {
-		case ModeSlash:
-			parts = append(parts, m.slashPicker.View())
-		case ModeHistory:
-			parts = append(parts, m.historyPicker.View())
-		case ModeAlias:
-			parts = append(parts, m.aliasPicker.View())
+		if m.pickerActive {
+			parts = append(parts, m.picker.View())
 		}
 		parts = append(parts, m.borderLine())
 		parts = append(parts, m.input.View())
@@ -1231,7 +941,6 @@ func (m Model) renderBarContent(content layout.BarContent) string {
 	}
 	return left + strings.Repeat(" ", pad) + right
 }
-
 
 // renderPane renders a pane with optional title and borders.
 func (m Model) renderPane(name string, pane *layout.PaneDef) string {

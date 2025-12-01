@@ -20,7 +20,8 @@ func main() {
 	setupScenario(provider, *scenario)
 
 	inputChan := make(chan string, 256)
-	model := ui.NewModel(inputChan, nil, provider) // nil outbound - layout-test doesn't need it
+	outboundChan := make(chan any, 256)
+	model := ui.NewModel(inputChan, outboundChan)
 	model.SetLayoutProvider(provider)
 
 	program := tea.NewProgram(
@@ -40,6 +41,13 @@ func main() {
 		}
 	}()
 
+	// Drain outbound messages (we don't use them in layout-test)
+	go func() {
+		for range outboundChan {
+			// Discard
+		}
+	}()
+
 	// Send welcome message
 	go func() {
 		time.Sleep(100 * time.Millisecond)
@@ -49,8 +57,8 @@ func main() {
 			fmt.Sprintf("Current scenario: \033[33m%s\033[0m", *scenario),
 			"",
 			"Type /quit to exit",
-			"Press / for slash command picker",
-			"Press Ctrl+R for history search",
+			"Press Ctrl+R for history search (via Lua bindings)",
+			"Press Ctrl+T for alias search (via Lua bindings)",
 		}
 		for _, line := range lines {
 			program.Send(ui.DisplayLineMsg(line))
@@ -65,15 +73,6 @@ func main() {
 }
 
 func setupScenario(p *MockProvider, scenario string) {
-	// Register test commands
-	p.commands = []ui.CommandInfo{
-		{Name: "connect", Description: "Connect to a server"},
-		{Name: "disconnect", Description: "Disconnect from server"},
-		{Name: "quit", Description: "Exit the client"},
-		{Name: "reload", Description: "Reload scripts"},
-		{Name: "help", Description: "Show help"},
-	}
-
 	switch scenario {
 	case "default":
 		// Explicit default layout (input includes separator above it)
@@ -143,14 +142,13 @@ func setupScenario(p *MockProvider, scenario string) {
 	}
 }
 
-// MockProvider implements layout.Provider and ui.DataProvider for testing.
+// MockProvider implements layout.Provider for testing.
 type MockProvider struct {
 	layout    layout.Config
 	bars      map[string]*layout.BarDef
 	panes     map[string]*layout.PaneDef
 	paneLines map[string][]string
 	state     layout.ClientState
-	commands  []ui.CommandInfo
 }
 
 func NewMockProvider() *MockProvider {
@@ -171,7 +169,3 @@ func (m *MockProvider) Bar(name string) *layout.BarDef   { return m.bars[name] }
 func (m *MockProvider) Pane(name string) *layout.PaneDef { return m.panes[name] }
 func (m *MockProvider) PaneLines(name string) []string   { return m.paneLines[name] }
 func (m *MockProvider) State() layout.ClientState        { return m.state }
-
-// DataProvider implementation
-func (m *MockProvider) Commands() []ui.CommandInfo { return m.commands }
-func (m *MockProvider) Aliases() []ui.AliasInfo    { return nil }

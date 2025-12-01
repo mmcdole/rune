@@ -23,9 +23,6 @@ import (
 // Ensure Session implements lua.Host at compile time
 var _ lua.Host = (*Session)(nil)
 
-// Ensure Session implements ui.DataProvider at compile time
-var _ ui.DataProvider = (*Session)(nil)
-
 // Ensure Session implements layout.Provider at compile time
 var _ layout.Provider = (*Session)(nil)
 
@@ -65,6 +62,14 @@ type Session struct {
 
 	// Client state (for Lua rune.state access)
 	clientState lua.ClientState
+
+	// Input history (owned by Session, pushed to UI for Up/Down navigation)
+	history      []string
+	historyLimit int
+
+	// Picker callback registry
+	pickerCallbacks map[string]func(string)
+	nextPickerID    int
 }
 
 // New creates a new Session. It is passive - no goroutines start here.
@@ -72,13 +77,16 @@ func New(net mud.Network, uiInstance mud.UI, cfg Config) *Session {
 	timerEvents := make(chan timer.Event, 256)
 
 	s := &Session{
-		net:         net,
-		ui:          uiInstance,
-		timer:       timer.NewService(timerEvents),
-		timerEvents: timerEvents,
-		events:      make(chan mud.Event, 256),
-		config:      cfg,
-		done:        make(chan struct{}),
+		net:             net,
+		ui:              uiInstance,
+		timer:           timer.NewService(timerEvents),
+		timerEvents:     timerEvents,
+		events:          make(chan mud.Event, 256),
+		config:          cfg,
+		done:            make(chan struct{}),
+		history:         make([]string, 0, 1000),
+		historyLimit:    10000,
+		pickerCallbacks: make(map[string]func(string)),
 	}
 
 	// Check if UI supports push-based updates
@@ -215,6 +223,10 @@ func (s *Session) handleEvent(event mud.Event) {
 			s.lastPrompt = ""
 			s.ui.RenderPrompt("")
 		}
+		// Add non-empty input to history
+		if event.Payload != "" {
+			s.AddToHistory(event.Payload)
+		}
 		s.engine.OnInput(event.Payload)
 		// Local echo to scrollback (styled in UI)
 		if le, ok := s.net.(interface{ LocalEchoEnabled() bool }); !ok || le.LocalEchoEnabled() {
@@ -284,8 +296,9 @@ func (s *Session) boot() error {
 
 	s.engine.CallHook("ready")
 
-	// Push initial binds and layout to UI after all scripts loaded
+	// Push initial state to UI after all scripts loaded
 	s.pushBindsAndLayout()
+	s.pushHistory()
 
 	return nil
 }
@@ -431,6 +444,67 @@ func (s *Session) PaneOp(op, name, data string) {
 	}
 }
 
+// ShowPicker displays a generic picker overlay.
+// Called from Lua via rune.ui.picker.show().
+// filterPrefix enables "linked" mode where picker filters based on input content.
+func (s *Session) ShowPicker(title string, items []lua.PickerItem, onSelect func(string), filterPrefix string) {
+	if s.pushUI == nil {
+		return
+	}
+
+	// Generate unique callback ID
+	s.nextPickerID++
+	id := fmt.Sprintf("p%d", s.nextPickerID)
+
+	// Store callback
+	s.pickerCallbacks[id] = onSelect
+
+	// Convert lua.PickerItem to ui.GenericItem
+	uiItems := make([]ui.GenericItem, len(items))
+	for i, item := range items {
+		uiItems[i] = ui.GenericItem{
+			Text:        item.Text,
+			Description: item.Description,
+			Value:       item.Value,
+		}
+	}
+
+	// Push to UI
+	s.pushUI.ShowPicker(title, uiItems, id, filterPrefix)
+}
+
+// GetHistory returns the input history for Lua.
+func (s *Session) GetHistory() []string {
+	// Return a copy to prevent modification
+	result := make([]string, len(s.history))
+	copy(result, s.history)
+	return result
+}
+
+// AddToHistory adds a command to history.
+func (s *Session) AddToHistory(cmd string) {
+	if cmd == "" {
+		return
+	}
+	// Don't add duplicates of the last command
+	if len(s.history) > 0 && s.history[len(s.history)-1] == cmd {
+		return
+	}
+	s.history = append(s.history, cmd)
+	// Trim if over limit
+	if len(s.history) > s.historyLimit {
+		s.history = s.history[len(s.history)-s.historyLimit:]
+	}
+	s.pushHistory()
+}
+
+// SetInput sets the input line content.
+func (s *Session) SetInput(text string) {
+	if s.pushUI != nil {
+		s.pushUI.SetInput(text)
+	}
+}
+
 // TimerAfter schedules a one-shot timer. Returns the timer ID.
 func (s *Session) TimerAfter(d time.Duration) int {
 	return s.timer.After(d)
@@ -454,28 +528,6 @@ func (s *Session) TimerCancelAll() {
 // GetClientState returns the current client state for Lua.
 func (s *Session) GetClientState() lua.ClientState {
 	return s.clientState
-}
-
-// --- DataProvider Implementation ---
-
-// Commands returns all slash commands for the UI.
-func (s *Session) Commands() []ui.CommandInfo {
-	cmds := s.engine.GetCommands()
-	result := make([]ui.CommandInfo, len(cmds))
-	for i, c := range cmds {
-		result[i] = ui.CommandInfo{Name: c.Name, Description: c.Description}
-	}
-	return result
-}
-
-// Aliases returns all aliases for the UI.
-func (s *Session) Aliases() []ui.AliasInfo {
-	aliases := s.engine.GetAliases()
-	result := make([]ui.AliasInfo, len(aliases))
-	for i, a := range aliases {
-		result[i] = ui.AliasInfo{Name: a.Name, Value: a.Value}
-	}
-	return result
 }
 
 // --- LayoutProvider Implementation ---
@@ -585,6 +637,13 @@ func (s *Session) pushBindsAndLayout() {
 	}
 }
 
+// pushHistory pushes input history to UI for Up/Down navigation.
+func (s *Session) pushHistory() {
+	if s.pushUI != nil {
+		s.pushUI.UpdateHistory(s.history)
+	}
+}
+
 // handleUIMessage processes messages from the UI.
 // Called when UI sends ExecuteBindMsg, WindowSizeChangedMsg, etc.
 func (s *Session) handleUIMessage(msg any) {
@@ -603,5 +662,13 @@ func (s *Session) handleUIMessage(msg any) {
 		s.engine.UpdateState(s.clientState)
 		// Immediately re-render bars to show scroll state
 		s.pushBarUpdates()
+	case ui.PickerSelectMsg:
+		// Look up and execute the callback
+		if cb, ok := s.pickerCallbacks[m.CallbackID]; ok {
+			delete(s.pickerCallbacks, m.CallbackID) // One-shot
+			if m.Accepted && cb != nil {
+				cb(m.Value)
+			}
+		}
 	}
 }

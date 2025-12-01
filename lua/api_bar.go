@@ -112,9 +112,9 @@ func (e *Engine) RenderBar(name string, width int) (BarData, bool) {
 		return BarData{Left: string(v)}, true
 	case *glua.LTable:
 		return BarData{
-			Left:   e.L.GetField(v, "left").String(),
-			Center: e.L.GetField(v, "center").String(),
-			Right:  e.L.GetField(v, "right").String(),
+			Left:   luaStringOrEmpty(e.L.GetField(v, "left")),
+			Center: luaStringOrEmpty(e.L.GetField(v, "center")),
+			Right:  luaStringOrEmpty(e.L.GetField(v, "right")),
 		}, true
 	default:
 		return BarData{}, false
@@ -139,4 +139,12 @@ func (e *Engine) HasBar(name string) bool {
 // GetLayout returns the current Lua-defined layout configuration.
 func (e *Engine) GetLayout() LayoutConfig {
 	return e.bars.layout
+}
+
+// luaStringOrEmpty returns the string value of a Lua value, or empty string if nil.
+func luaStringOrEmpty(v glua.LValue) string {
+	if v == glua.LNil {
+		return ""
+	}
+	return v.String()
 }

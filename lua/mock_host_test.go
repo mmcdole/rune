@@ -104,6 +104,22 @@ func (m *MockHost) OnConfigChange() {
 	// No-op for tests - config change notifications not tracked
 }
 
+func (m *MockHost) ShowPicker(title string, items []PickerItem, onSelect func(string), filterPrefix string) {
+	// No-op for tests
+}
+
+func (m *MockHost) GetHistory() []string {
+	return nil
+}
+
+func (m *MockHost) AddToHistory(cmd string) {
+	// No-op for tests
+}
+
+func (m *MockHost) SetInput(text string) {
+	// No-op for tests
+}
+
 func (m *MockHost) TimerAfter(d time.Duration) int {
 	m.mu.Lock()
 	defer m.mu.Unlock()

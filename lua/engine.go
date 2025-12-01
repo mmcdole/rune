@@ -377,6 +377,9 @@ func (e *Engine) registerAPIs() {
 	e.registerStateFuncs()
 	e.registerBarFuncs()
 	e.registerBindFuncs()
+	e.registerPickerFuncs()
+	e.registerHistoryFuncs()
+	e.registerInputFuncs()
 }
 
 // getHooksCall returns the rune.hooks.call function.
