@@ -66,7 +66,7 @@ The UI layer (built with Bubble Tea) is deliberately "dumb."
 
 A wrapper around gopher-lua.
 
-- **Host Interface:** The Engine interacts with the rest of the app via the `Host` interface, keeping the Lua implementation decoupled from the specific infrastructure.
+- **Segregated Interfaces (ISP):** The Engine depends on six focused service interfaces rather than a monolithic host: `UIService`, `NetworkService`, `TimerService`, `SystemService`, `HistoryService`, and `StateService`. This keeps the Lua implementation decoupled and testable.
 - **Reactivity:** The Engine updates a global `rune.state` table whenever system state changes (connection, scroll position), allowing scripts to reactively render UI elements.
 
 ## 3. UI Architecture: The "Push" Model

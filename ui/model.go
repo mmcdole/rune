@@ -44,9 +44,6 @@ type Model struct {
 	// Tab completion
 	wordCache *util.CompletionEngine
 
-	// Layout provider (set by session, optional - used for Go-defined bars/panes)
-	layoutProvider layout.Provider
-
 	// Push-based state from Session (thread-safe local caches)
 	boundKeys  map[string]bool       // Keys bound in Lua
 	barContent map[string]BarContent // Rendered bar content from Lua
@@ -551,10 +548,6 @@ func (m *Model) appendLines(lines []string) {
 	m.updateScrollState()
 }
 
-// SetLayoutProvider sets the layout provider for custom layouts.
-func (m *Model) SetLayoutProvider(lp layout.Provider) {
-	m.layoutProvider = lp
-}
 
 // sendOutbound sends a message to Session via the outbound channel.
 // Non-blocking - drops message if channel is full.
@@ -606,18 +599,13 @@ func (m *Model) updateDimensions() {
 }
 
 // getLayout returns the current layout configuration.
-// Uses Lua layout if set, otherwise falls back to provider or default.
+// Uses pushed layout if set, otherwise falls back to default.
 func (m *Model) getLayout() layout.Config {
-	// Prefer Lua-pushed layout
 	if len(m.luaLayout.Top) > 0 || len(m.luaLayout.Bottom) > 0 {
 		return layout.Config{
 			Top:    m.luaLayout.Top,
 			Bottom: m.luaLayout.Bottom,
 		}
-	}
-	// Fall back to provider (for Go-defined layouts)
-	if m.layoutProvider != nil {
-		return m.layoutProvider.Layout()
 	}
 	return layout.DefaultConfig()
 }
@@ -638,7 +626,6 @@ func (m *Model) dockHeight(components []string) int {
 
 // componentHeight returns the height of a single component.
 func (m *Model) componentHeight(name string) int {
-	// Built-in components
 	switch name {
 	case "input":
 		// separator + input + separator, plus picker overlay when active
@@ -651,40 +638,13 @@ func (m *Model) componentHeight(name string) int {
 		return 1
 	case "separator":
 		return 1
-	}
-
-	// Custom bar
-	if m.layoutProvider != nil {
-		if bar := m.layoutProvider.Bar(name); bar != nil {
-			h := 1 // bar content
-			switch bar.Border {
-			case layout.BorderTop, layout.BorderBottom:
-				h += 1
-			case layout.BorderBoth:
-				h += 2
-			}
-			return h
+	default:
+		// Custom Lua bar (all bars are 1 line)
+		if _, ok := m.barContent[name]; ok {
+			return 1
 		}
+		return 0
 	}
-
-	// Custom pane
-	if m.layoutProvider != nil {
-		if pane := m.layoutProvider.Pane(name); pane != nil && pane.Visible {
-			h := pane.Height
-			if pane.Title {
-				h += 1
-			}
-			switch pane.Border {
-			case layout.BorderTop, layout.BorderBottom:
-				h += 1
-			case layout.BorderBoth:
-				h += 2
-			}
-			return h
-		}
-	}
-
-	return 0
 }
 
 // View implements tea.Model.
@@ -731,12 +691,12 @@ func (m Model) View() string {
 
 // renderComponent renders a component by name.
 func (m Model) renderComponent(name string) string {
-	// Check Lua-defined bars first (allows overriding built-ins like "status")
+	// Check pushed bar content first (allows overriding built-ins like "status")
 	if content, ok := m.barContent[name]; ok {
 		return m.renderBarContent(content)
 	}
 
-	// Built-in components (fallback if no Lua bar defined)
+	// Built-in components (fallback if no bar defined)
 	switch name {
 	case "input":
 		// Picker overlay (if active) > separator > input > separator
@@ -754,46 +714,7 @@ func (m Model) renderComponent(name string) string {
 		return m.borderLine()
 	}
 
-	// Go-defined custom bar (legacy)
-	if m.layoutProvider != nil {
-		if bar := m.layoutProvider.Bar(name); bar != nil {
-			return m.renderBar(bar)
-		}
-	}
-
-	// Custom pane
-	if m.layoutProvider != nil {
-		if pane := m.layoutProvider.Pane(name); pane != nil && pane.Visible {
-			return m.renderPane(name, pane)
-		}
-	}
-
 	return ""
-}
-
-// renderBar renders a single bar with optional borders.
-func (m Model) renderBar(bar *layout.BarDef) string {
-	var parts []string
-
-	// Top border
-	if bar.Border == layout.BorderTop || bar.Border == layout.BorderBoth {
-		parts = append(parts, m.borderLine())
-	}
-
-	// Bar content
-	state := layout.ClientState{}
-	if m.layoutProvider != nil {
-		state = m.layoutProvider.State()
-	}
-	content := bar.Render(state, m.width)
-	parts = append(parts, m.renderBarContent(content))
-
-	// Bottom border
-	if bar.Border == layout.BorderBottom || bar.Border == layout.BorderBoth {
-		parts = append(parts, m.borderLine())
-	}
-
-	return strings.Join(parts, "\n")
 }
 
 // renderBarContent renders BarContent with left/center/right alignment.
@@ -826,49 +747,6 @@ func (m Model) renderBarContent(content layout.BarContent) string {
 		pad = 1
 	}
 	return left + strings.Repeat(" ", pad) + right
-}
-
-// renderPane renders a pane with optional title and borders.
-func (m Model) renderPane(name string, pane *layout.PaneDef) string {
-	var parts []string
-
-	// Top border
-	if pane.Border == layout.BorderTop || pane.Border == layout.BorderBoth {
-		parts = append(parts, m.borderLine())
-	}
-
-	// Title
-	if pane.Title {
-		title := m.styles.PaneHeader.Render(" " + name + " ")
-		titlePad := m.width - visibleLen(title)
-		if titlePad > 0 {
-			title += "\x1b[90m" + strings.Repeat("─", titlePad) + "\x1b[0m"
-		}
-		parts = append(parts, title)
-	}
-
-	// Content - show last N lines
-	lines := m.layoutProvider.PaneLines(name)
-	height := pane.Height
-	if len(lines) > height {
-		lines = lines[len(lines)-height:]
-	}
-
-	// Pad or fill to exact height
-	for i := 0; i < height; i++ {
-		if i < len(lines) {
-			parts = append(parts, lines[i])
-		} else {
-			parts = append(parts, "")
-		}
-	}
-
-	// Bottom border
-	if pane.Border == layout.BorderBottom || pane.Border == layout.BorderBoth {
-		parts = append(parts, m.borderLine())
-	}
-
-	return strings.Join(parts, "\n")
 }
 
 // visibleLen returns string length ignoring ANSI escape codes.

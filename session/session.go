@@ -20,8 +20,6 @@ import (
 	"github.com/drake/rune/ui/layout"
 )
 
-// Ensure Session implements layout.Provider at compile time
-var _ layout.Provider = (*Session)(nil)
 
 // Config holds session configuration
 type Config struct {
@@ -407,43 +405,6 @@ func (s *Session) shutdown() {
 		s.net.Disconnect()
 		s.ui.Quit()
 	})
-}
-
-// --- LayoutProvider Implementation ---
-
-// Layout returns the current layout configuration from Lua.
-func (s *Session) Layout() layout.Config {
-	luaLayout := s.engine.GetLayout()
-	return layout.Config{
-		Top:    luaLayout.Top,
-		Bottom: luaLayout.Bottom,
-	}
-}
-
-// Bar returns the bar definition for a name, or nil if not found.
-// Returns nil - Lua bars are rendered via RenderBars() instead.
-func (s *Session) Bar(name string) *layout.BarDef {
-	return nil
-}
-
-// Pane returns the pane definition for a name, or nil if not found.
-func (s *Session) Pane(name string) *layout.PaneDef {
-	return nil
-}
-
-// PaneLines returns the current buffer contents for a pane.
-func (s *Session) PaneLines(name string) []string {
-	return nil
-}
-
-// State returns the current client state for bar rendering.
-func (s *Session) State() layout.ClientState {
-	return layout.ClientState{
-		Connected:   s.clientState.Connected,
-		Address:     s.clientState.Address,
-		ScrollMode:  s.clientState.ScrollMode,
-		ScrollLines: s.clientState.ScrollLines,
-	}
 }
 
 // renderBars calls all Lua bar renderers and returns their content.
