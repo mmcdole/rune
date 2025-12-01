@@ -4,6 +4,8 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/drake/rune/ui/components/status"
 )
 
 // ServerLineMsg represents a line from the MUD server.
@@ -25,31 +27,18 @@ type PromptMsg string
 
 // ConnectionStateMsg notifies the TUI of connection state changes.
 type ConnectionStateMsg struct {
-	State   ConnectionState
+	State   status.ConnectionState
 	Address string
 }
 
-// ConnectionState represents the network connection status.
-type ConnectionState int
+// ConnectionState type aliases for external use.
+type ConnectionState = status.ConnectionState
 
 const (
-	StateDisconnected ConnectionState = iota
-	StateConnecting
-	StateConnected
+	StateDisconnected = status.StateDisconnected
+	StateConnecting   = status.StateConnecting
+	StateConnected    = status.StateConnected
 )
-
-func (s ConnectionState) String() string {
-	switch s {
-	case StateDisconnected:
-		return "Disconnected"
-	case StateConnecting:
-		return "Connecting"
-	case StateConnected:
-		return "Connected"
-	default:
-		return "Unknown"
-	}
-}
 
 // tickMsg is used for periodic updates (line batching, clock refresh).
 type tickMsg time.Time
