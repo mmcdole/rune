@@ -144,10 +144,6 @@ function rune.pane.clear(name)
     rune._pane.clear(name)
 end
 
-function rune.pane.bind(key, name)
-    rune._pane.bind(key, name)
-end
-
 -- Info bar
 rune.infobar = {}
 

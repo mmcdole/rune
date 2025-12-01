@@ -88,10 +88,28 @@ func (m *MockHost) SetInfobar(text string) {
 	m.InfobarCalls = append(m.InfobarCalls, text)
 }
 
-func (m *MockHost) PaneOp(op, name, data string) {
+func (m *MockHost) PaneCreate(name string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.PaneCalls = append(m.PaneCalls, struct{ Op, Name, Data string }{op, name, data})
+	m.PaneCalls = append(m.PaneCalls, struct{ Op, Name, Data string }{"create", name, ""})
+}
+
+func (m *MockHost) PaneWrite(name, text string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.PaneCalls = append(m.PaneCalls, struct{ Op, Name, Data string }{"write", name, text})
+}
+
+func (m *MockHost) PaneToggle(name string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.PaneCalls = append(m.PaneCalls, struct{ Op, Name, Data string }{"toggle", name, ""})
+}
+
+func (m *MockHost) PaneClear(name string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.PaneCalls = append(m.PaneCalls, struct{ Op, Name, Data string }{"clear", name, ""})
 }
 
 func (m *MockHost) GetClientState() ClientState {
@@ -104,7 +122,7 @@ func (m *MockHost) OnConfigChange() {
 	// No-op for tests - config change notifications not tracked
 }
 
-func (m *MockHost) ShowPicker(title string, items []PickerItem, onSelect func(string), filterPrefix string) {
+func (m *MockHost) ShowPicker(title string, items []PickerItem, onSelect func(string), inline bool) {
 	// No-op for tests
 }
 

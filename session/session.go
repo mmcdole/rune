@@ -429,20 +429,10 @@ func (s *Session) shutdown() {
 func (s *Session) SetStatus(text string)  { s.ui.SetStatus(text) }
 func (s *Session) SetInfobar(text string) { s.ui.SetInfobar(text) }
 
-func (s *Session) PaneOp(op, name, data string) {
-	switch op {
-	case "create":
-		s.ui.CreatePane(name)
-	case "write":
-		s.ui.WritePane(name, data)
-	case "toggle":
-		s.ui.TogglePane(name)
-	case "clear":
-		s.ui.ClearPane(name)
-	case "bind":
-		s.ui.BindPaneKey(data, name)
-	}
-}
+func (s *Session) PaneCreate(name string)      { s.ui.CreatePane(name) }
+func (s *Session) PaneWrite(name, text string) { s.ui.WritePane(name, text) }
+func (s *Session) PaneToggle(name string)      { s.ui.TogglePane(name) }
+func (s *Session) PaneClear(name string)       { s.ui.ClearPane(name) }
 
 // ShowPicker displays a generic picker overlay.
 // Called from Lua via rune.ui.picker.show().

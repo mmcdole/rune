@@ -90,7 +90,7 @@ Go provides internal primitives (`rune._*`), wrapped by Lua for the public API:
 
 **UI:**
 - `rune.status.set(text)` - Set status bar
-- `rune.pane.create(name)`, `rune.pane.write(name, text)`, `rune.pane.toggle(name)`, `rune.pane.clear(name)`, `rune.pane.bind(key, name)`
+- `rune.pane.create(name)`, `rune.pane.write(name, text)`, `rune.pane.toggle(name)`, `rune.pane.clear(name)`
 - `rune.infobar.set(text)` - Set info bar
 
 **Config:**

@@ -29,7 +29,12 @@ type Host interface {
 	// UI
 	SetStatus(text string)
 	SetInfobar(text string)
-	PaneOp(op, name, data string)
+
+	// Pane operations
+	PaneCreate(name string)
+	PaneWrite(name, text string)
+	PaneToggle(name string)
+	PaneClear(name string)
 
 	// Picker - Generic picker overlay for Lua-driven selection UI
 	// inline: if true, picker filters based on input; if false, picker captures keyboard
