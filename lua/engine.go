@@ -20,8 +20,14 @@ type Engine struct {
 	// Cached table reference
 	runeTable *glua.LTable
 
-	// Host interface for communication with the rest of the system
-	host Host
+	// Segregated service interfaces (Interface Segregation Principle)
+	// Each API file uses only the services it needs
+	ui      UIService
+	net     NetworkService
+	timer   TimerService
+	sys     SystemService
+	history HistoryService
+	state   StateService
 
 	// Timer callbacks - Engine owns callbacks, Timer service owns IDs and scheduling
 	callbacks map[int]*glua.LFunction
@@ -33,12 +39,19 @@ type Engine struct {
 	binds *bindRegistry
 }
 
-// NewEngine creates an Engine with the given Host.
-func NewEngine(host Host) *Engine {
+// NewEngine creates an Engine with segregated service interfaces.
+// In production, pass a single adapter that implements all interfaces.
+// In tests, pass minimal mocks for only the services being tested.
+func NewEngine(ui UIService, net NetworkService, timer TimerService, sys SystemService, history HistoryService, state StateService) *Engine {
 	cache, _ := lru.New[string, *regexp.Regexp](100)
 	return &Engine{
 		regexCache: cache,
-		host:       host,
+		ui:         ui,
+		net:        net,
+		timer:      timer,
+		sys:        sys,
+		history:    history,
+		state:      state,
 		callbacks:  make(map[int]*glua.LFunction),
 		bars:       newBarRegistry(),
 		binds:      newBindRegistry(),
@@ -95,7 +108,7 @@ func (e *Engine) Init() error {
 	e.regexCache = cache
 
 	// Cancel all pending timers and clear callback map
-	e.host.TimerCancelAll()
+	e.timer.TimerCancelAll()
 	e.callbacks = make(map[int]*glua.LFunction)
 
 	// Reset bar registry
@@ -115,7 +128,7 @@ func (e *Engine) Init() error {
 
 // Close cleans up the Lua state.
 func (e *Engine) Close() {
-	e.host.TimerCancelAll()
+	e.timer.TimerCancelAll()
 	e.callbacks = nil
 	if e.L != nil {
 		e.L.Close()

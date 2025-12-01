@@ -41,11 +41,6 @@ type Model struct {
 	pickerCB     string // Current callback ID for picker selection
 	pickerInline bool   // True if picker is in inline mode (filters based on input content)
 
-	// History state - pushed from Session
-	history      []string
-	historyIndex int    // -1 = draft, 0..n = history position
-	historyDraft string // Preserved when browsing history
-
 	// Tab completion
 	wordCache *util.CompletionEngine
 
@@ -93,9 +88,7 @@ func NewModel(inputChan chan<- string, outbound chan<- any) Model {
 			MaxVisible: 10,
 			EmptyText:  "No matches",
 		}, styles),
-		history:      make([]string, 0, 1000),
-		historyIndex: -1,
-		wordCache:    wordCache,
+		wordCache: wordCache,
 		inputChan:    inputChan,
 		outbound:     outbound,
 	}
@@ -148,11 +141,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.luaLayout.Top = msg.Top
 		m.luaLayout.Bottom = msg.Bottom
 		m.updateDimensions()
-		return m, nil
-
-	case UpdateHistoryMsg:
-		m.history = msg
-		m.historyIndex = -1 // Reset navigation
 		return m, nil
 
 	case ShowPickerMsg:
@@ -283,8 +271,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.input.Reset()
-		m.historyIndex = -1
-		m.historyDraft = ""
 		return m, nil
 
 	case tea.KeyEsc:
@@ -295,8 +281,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.input.Reset()
-		m.historyIndex = -1
-		m.historyDraft = ""
 		return m, nil
 	}
 
@@ -313,9 +297,14 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Check Lua key bindings (using local cache - thread-safe)
 	keyStr := keyToString(msg)
 	if keyStr != "" && m.boundKeys[keyStr] {
-		// Key is bound in Lua - send to Session for execution
-		m.sendOutbound(ExecuteBindMsg(keyStr))
-		return m, nil
+		// Don't intercept Up/Down when inline picker is active - let picker handle them
+		if m.pickerActive && m.pickerInline && (keyStr == "up" || keyStr == "down") {
+			// Fall through to picker handling below
+		} else {
+			// Key is bound in Lua - send to Session for execution
+			m.sendOutbound(ExecuteBindMsg(keyStr))
+			return m, nil
+		}
 	}
 
 	// Check for bound pane toggle keys (only when input is empty)
@@ -381,18 +370,6 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.scrollback.Append("\033[31m[WARNING] Input dropped - engine lagging\033[0m")
 		}
 		m.input.Reset()
-		m.historyIndex = -1
-		m.historyDraft = ""
-		return m, nil
-
-	case tea.KeyUp:
-		m.historyUp()
-		m.updateSuggestions()
-		return m, nil
-
-	case tea.KeyDown:
-		m.historyDown()
-		m.updateSuggestions()
 		return m, nil
 
 	case tea.KeyCtrlU:
@@ -427,8 +404,14 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Forward to input
+	oldValue := m.input.Value()
 	newInput, cmd := m.input.Update(msg)
 	m.input = *newInput
+
+	// Notify Session if input content changed (for rune.input.get())
+	if newValue := m.input.Value(); newValue != oldValue {
+		m.sendOutbound(InputChangedMsg(newValue))
+	}
 
 	// Update linked picker filter based on new input content
 	m.updateInlinePicker()
@@ -505,81 +488,6 @@ func (m Model) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
-}
-
-// History management
-
-func (m *Model) historyUp() {
-	if len(m.history) == 0 {
-		return
-	}
-
-	if m.historyIndex == -1 {
-		// Save current input as draft before entering history
-		m.historyDraft = m.input.Value()
-	}
-
-	// If we have a prefix (draft), search for matching history
-	if m.historyDraft != "" {
-		start := m.historyIndex - 1
-		if m.historyIndex == -1 {
-			start = len(m.history) - 1
-		}
-		for i := start; i >= 0; i-- {
-			if strings.HasPrefix(m.history[i], m.historyDraft) {
-				m.historyIndex = i
-				m.input.SetValue(m.history[i])
-				m.input.CursorEnd()
-				return
-			}
-		}
-		// No match found, stay where we are
-		return
-	}
-
-	// No prefix - cycle through all history
-	if m.historyIndex == -1 {
-		m.historyIndex = len(m.history) - 1
-	} else if m.historyIndex > 0 {
-		m.historyIndex--
-	}
-
-	m.input.SetValue(m.history[m.historyIndex])
-	m.input.CursorEnd()
-}
-
-func (m *Model) historyDown() {
-	if m.historyIndex == -1 {
-		return // Already at draft
-	}
-
-	// If we have a prefix (draft), search for matching history
-	if m.historyDraft != "" {
-		for i := m.historyIndex + 1; i < len(m.history); i++ {
-			if strings.HasPrefix(m.history[i], m.historyDraft) {
-				m.historyIndex = i
-				m.input.SetValue(m.history[i])
-				m.input.CursorEnd()
-				return
-			}
-		}
-		// No more matches - return to draft
-		m.historyIndex = -1
-		m.input.SetValue(m.historyDraft)
-		m.input.CursorEnd()
-		return
-	}
-
-	// No prefix - cycle through all history
-	if m.historyIndex < len(m.history)-1 {
-		m.historyIndex++
-		m.input.SetValue(m.history[m.historyIndex])
-	} else {
-		// Return to draft
-		m.historyIndex = -1
-		m.input.SetValue(m.historyDraft)
-	}
-	m.input.CursorEnd()
 }
 
 // Completion and suggestions
@@ -922,7 +830,7 @@ func (m Model) renderBarContent(content layout.BarContent) string {
 	// Calculate spacing
 	if center != "" {
 		// Three-part layout: left ... center ... right
-		leftPad := (m.width - centerLen) / 2 - leftLen
+		leftPad := (m.width-centerLen)/2 - leftLen
 		if leftPad < 1 {
 			leftPad = 1
 		}
@@ -1074,6 +982,10 @@ func keyToString(msg tea.KeyMsg) string {
 		return "f11"
 	case tea.KeyF12:
 		return "f12"
+	case tea.KeyUp:
+		return "up"
+	case tea.KeyDown:
+		return "down"
 	default:
 		return ""
 	}

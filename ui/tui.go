@@ -185,11 +185,6 @@ func (b *BubbleTeaUI) UpdateLayout(top, bottom []string) {
 	b.send(UpdateLayoutMsg{Top: top, Bottom: bottom})
 }
 
-// UpdateHistory sends input history from Session to UI.
-func (b *BubbleTeaUI) UpdateHistory(history []string) {
-	b.send(UpdateHistoryMsg(history))
-}
-
 // ShowPicker displays a picker overlay with items.
 // inline: if true, picker filters based on input; if false, picker captures keyboard.
 func (b *BubbleTeaUI) ShowPicker(title string, items []GenericItem, callbackID string, inline bool) {

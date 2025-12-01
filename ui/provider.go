@@ -13,9 +13,6 @@ type PushUI interface {
 	// UpdateLayout pushes layout configuration from Session.
 	UpdateLayout(top, bottom []string)
 
-	// UpdateHistory pushes input history from Session (for Up/Down navigation).
-	UpdateHistory(history []string)
-
 	// ShowPicker displays the picker overlay with items.
 	// inline: if true, picker filters based on input; if false, picker captures keyboard.
 	ShowPicker(title string, items []GenericItem, callbackID string, inline bool)

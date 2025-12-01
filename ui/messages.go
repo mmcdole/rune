@@ -125,6 +125,10 @@ type ScrollStateChangedMsg struct {
 	NewLines int    // Lines behind live (when scrolled)
 }
 
+// InputChangedMsg notifies Session of input content changes.
+// Session tracks this so Lua can query current input via rune.input.get().
+type InputChangedMsg string
+
 // BarContent is an alias for layout.BarContent for convenience.
 type BarContent = layout.BarContent
 
@@ -144,10 +148,6 @@ type ShowPickerMsg struct {
 // SetInputMsg sets the input line content.
 // Sent from Session when Lua calls rune.input.set().
 type SetInputMsg string
-
-// UpdateHistoryMsg pushes input history from Session to UI.
-// UI uses this for Up/Down arrow navigation.
-type UpdateHistoryMsg []string
 
 // --- Picker Messages (UI -> Session) ---
 

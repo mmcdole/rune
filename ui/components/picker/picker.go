@@ -16,15 +16,15 @@ type Config struct {
 
 // Model is a generic fuzzy-filtering selector.
 type Model[T Item] struct {
-	items      []T
-	filtered   []T
-	matches    []util.Match
-	query      string
-	selected   int
-	scrollOff  int
-	config     Config
-	styles     style.Styles
-	width      int
+	items     []T
+	filtered  []T
+	matches   []util.Match
+	query     string
+	selected  int
+	scrollOff int
+	config    Config
+	styles    style.Styles
+	width     int
 }
 
 // New creates a new picker with the given configuration.

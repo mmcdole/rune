@@ -7,10 +7,16 @@ func (e *Engine) registerInputFuncs() {
 	inp := e.L.NewTable()
 	e.L.SetField(e.runeTable, "input", inp)
 
+	// rune.input.get() - Get the current input line content
+	e.L.SetField(inp, "get", e.L.NewFunction(func(L *glua.LState) int {
+		L.Push(glua.LString(e.ui.GetInput()))
+		return 1
+	}))
+
 	// rune.input.set(text) - Set the input line content
 	e.L.SetField(inp, "set", e.L.NewFunction(func(L *glua.LState) int {
 		text := L.CheckString(1)
-		e.host.SetInput(text)
+		e.ui.SetInput(text)
 		return 0
 	}))
 }

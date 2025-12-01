@@ -74,8 +74,8 @@ func (e *Engine) registerPickerFuncs() {
 			}
 		}
 
-		// Call host to show the picker
-		e.host.ShowPicker(title, items, onSelect, inline)
+		// Call UI service to show the picker
+		e.ui.ShowPicker(title, items, onSelect, inline)
 		return 0
 	}))
 }

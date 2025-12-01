@@ -27,7 +27,7 @@ func setupTest(t *testing.T) (*Engine, *MockHost, func()) {
 	t.Helper()
 
 	host := NewMockHost()
-	engine := NewEngine(host)
+	engine := NewEngine(host, host, host, host, host, host)
 
 	// Initialize the VM
 	if err := engine.Init(); err != nil {

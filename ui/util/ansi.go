@@ -31,9 +31,9 @@ func VisibleLen(s string) int {
 // MUD clients typically ignore these to prevent server-side screen wipes.
 func FilterClearSequences(line string) string {
 	// Filter clear screen sequences
-	line = strings.ReplaceAll(line, "\x1b[2J", "")    // Clear entire screen
-	line = strings.ReplaceAll(line, "\x1b[H", "")     // Move cursor to home
-	line = strings.ReplaceAll(line, "\x1b[0;0H", "")  // Move cursor to 0,0
-	line = strings.ReplaceAll(line, "\x1b[1;1H", "")  // Move cursor to 1,1
+	line = strings.ReplaceAll(line, "\x1b[2J", "")   // Clear entire screen
+	line = strings.ReplaceAll(line, "\x1b[H", "")    // Move cursor to home
+	line = strings.ReplaceAll(line, "\x1b[0;0H", "") // Move cursor to 0,0
+	line = strings.ReplaceAll(line, "\x1b[1;1H", "") // Move cursor to 1,1
 	return line
 }

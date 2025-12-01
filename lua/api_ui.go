@@ -17,7 +17,7 @@ func (e *Engine) registerStatusFuncs() {
 	// rune._status.set(text): Set the status bar text
 	e.L.SetField(statusTable, "set", e.L.NewFunction(func(L *glua.LState) int {
 		text := L.CheckString(1)
-		e.host.SetStatus(text)
+		e.ui.SetStatus(text)
 		return 0
 	}))
 }
@@ -30,7 +30,7 @@ func (e *Engine) registerPaneFuncs() {
 	// rune._pane.create(name): Create a named pane
 	e.L.SetField(paneTable, "create", e.L.NewFunction(func(L *glua.LState) int {
 		name := L.CheckString(1)
-		e.host.PaneCreate(name)
+		e.ui.PaneCreate(name)
 		return 0
 	}))
 
@@ -38,21 +38,21 @@ func (e *Engine) registerPaneFuncs() {
 	e.L.SetField(paneTable, "write", e.L.NewFunction(func(L *glua.LState) int {
 		name := L.CheckString(1)
 		text := L.CheckString(2)
-		e.host.PaneWrite(name, text)
+		e.ui.PaneWrite(name, text)
 		return 0
 	}))
 
 	// rune._pane.toggle(name): Toggle pane visibility
 	e.L.SetField(paneTable, "toggle", e.L.NewFunction(func(L *glua.LState) int {
 		name := L.CheckString(1)
-		e.host.PaneToggle(name)
+		e.ui.PaneToggle(name)
 		return 0
 	}))
 
 	// rune._pane.clear(name): Clear pane contents
 	e.L.SetField(paneTable, "clear", e.L.NewFunction(func(L *glua.LState) int {
 		name := L.CheckString(1)
-		e.host.PaneClear(name)
+		e.ui.PaneClear(name)
 		return 0
 	}))
 }
@@ -65,7 +65,7 @@ func (e *Engine) registerInfobarFuncs() {
 	// rune._infobar.set(text): Set the info bar from Lua
 	e.L.SetField(infobarTable, "set", e.L.NewFunction(func(L *glua.LState) int {
 		text := L.CheckString(1)
-		e.host.SetInfobar(text)
+		e.ui.SetInfobar(text)
 		return 0
 	}))
 }

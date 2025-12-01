@@ -5,7 +5,17 @@ import (
 	"time"
 )
 
-// MockHost implements Host for testing.
+// Compile-time checks that MockHost implements all segregated interfaces
+var (
+	_ UIService      = (*MockHost)(nil)
+	_ NetworkService = (*MockHost)(nil)
+	_ TimerService   = (*MockHost)(nil)
+	_ SystemService  = (*MockHost)(nil)
+	_ HistoryService = (*MockHost)(nil)
+	_ StateService   = (*MockHost)(nil)
+)
+
+// MockHost implements all service interfaces for testing.
 type MockHost struct {
 	mu sync.Mutex
 
@@ -132,6 +142,10 @@ func (m *MockHost) GetHistory() []string {
 
 func (m *MockHost) AddToHistory(cmd string) {
 	// No-op for tests
+}
+
+func (m *MockHost) GetInput() string {
+	return "" // Return empty for tests
 }
 
 func (m *MockHost) SetInput(text string) {
