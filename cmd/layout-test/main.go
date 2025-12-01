@@ -171,6 +171,8 @@ func (m *MockProvider) Bar(name string) *layout.BarDef { return m.bars[name] }
 func (m *MockProvider) Pane(name string) *layout.PaneDef { return m.panes[name] }
 func (m *MockProvider) PaneLines(name string) []string { return m.paneLines[name] }
 func (m *MockProvider) State() layout.ClientState      { return m.state }
+func (m *MockProvider) RenderBars(width int) map[string]layout.BarContent { return nil }
+func (m *MockProvider) HandleKeyBind(key string) bool { return false }
 
 // DataProvider implementation
 func (m *MockProvider) Commands() []ui.CommandInfo { return m.commands }

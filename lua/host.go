@@ -20,11 +20,14 @@ type Host interface {
 	// UI
 	SetStatus(text string)
 	SetInfobar(text string)
-	Pane(op, name, data string)
+	PaneOp(op, name, data string)
 
 	// Timers - Timer service owns IDs, scheduling, and cancellation
 	TimerAfter(d time.Duration) int
 	TimerEvery(d time.Duration) int
 	TimerCancel(id int)
 	TimerCancelAll()
+
+	// State - Get current client state for Lua
+	GetClientState() ClientState
 }

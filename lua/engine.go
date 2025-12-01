@@ -25,6 +25,12 @@ type Engine struct {
 
 	// Timer callbacks - Engine owns callbacks, Timer service owns IDs and scheduling
 	callbacks map[int]*glua.LFunction
+
+	// Lua-defined bar renderers
+	bars *barRegistry
+
+	// Lua-defined key bindings
+	binds *bindRegistry
 }
 
 // NewEngine creates an Engine with the given Host.
@@ -34,6 +40,8 @@ func NewEngine(host Host) *Engine {
 		regexCache: cache,
 		host:       host,
 		callbacks:  make(map[int]*glua.LFunction),
+		bars:       newBarRegistry(),
+		binds:      newBindRegistry(),
 	}
 }
 
@@ -89,6 +97,12 @@ func (e *Engine) Init() error {
 	// Cancel all pending timers and clear callback map
 	e.host.TimerCancelAll()
 	e.callbacks = make(map[int]*glua.LFunction)
+
+	// Reset bar registry
+	e.bars = newBarRegistry()
+
+	// Reset key bindings
+	e.binds = newBindRegistry()
 
 	// Register custom types
 	registerLineType(e.L)
@@ -360,6 +374,9 @@ func (e *Engine) registerAPIs() {
 	e.registerTimerFuncs()
 	e.registerRegexFuncs()
 	e.registerUIFuncs()
+	e.registerStateFuncs()
+	e.registerBarFuncs()
+	e.registerBindFuncs()
 }
 
 // getHooksCall returns the rune.hooks.call function.

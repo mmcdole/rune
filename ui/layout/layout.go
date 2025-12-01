@@ -82,4 +82,12 @@ type Provider interface {
 
 	// State returns the current client state for bar rendering.
 	State() ClientState
+
+	// RenderBars calls all Lua bar renderers and returns their content.
+	// Called on tick from Update(), results are cached for View().
+	RenderBars(width int) map[string]BarContent
+
+	// HandleKeyBind checks if a key has a Lua binding and executes it.
+	// Returns true if the key was handled by Lua.
+	HandleKeyBind(key string) bool
 }

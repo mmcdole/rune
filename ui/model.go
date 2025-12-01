@@ -197,6 +197,9 @@ type Model struct {
 	// Layout provider (set by session, optional)
 	layoutProvider layout.Provider
 
+	// Cached Lua bar content (updated on tick)
+	barCache map[string]layout.BarContent
+
 	// State
 	lastPrompt  string // For deduplication
 	infobar     string // Lua-controlled info bar (above input)
@@ -277,7 +280,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.appendLines(m.pendingLines)
 			m.pendingLines = nil
 		}
-		// Update status bar clock
+		// Update Lua bar cache
+		if m.layoutProvider != nil {
+			m.barCache = m.layoutProvider.RenderBars(m.width)
+		}
 		return m, doTick()
 
 	// Batched lines from aggregator
@@ -412,7 +418,17 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Check for bound pane toggle keys first (only when input is empty)
+	// Check Lua key bindings first
+	// Note: This is called synchronously but Lua execution happens on Session goroutine.
+	// For now we trust the provider to handle threading correctly.
+	if m.layoutProvider != nil {
+		keyStr := keyToString(msg)
+		if keyStr != "" && m.layoutProvider.HandleKeyBind(keyStr) {
+			return m, nil
+		}
+	}
+
+	// Check for bound pane toggle keys (only when input is empty)
 	if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 && m.input.Value() == "" {
 		key := string(msg.Runes)
 		if m.panes.HandleKey(key) {
@@ -1080,7 +1096,12 @@ func (m Model) renderComponent(name string) string {
 		return "" // Hidden when empty
 	}
 
-	// Custom bar
+	// Lua-defined bar (from cache)
+	if content, ok := m.barCache[name]; ok {
+		return m.renderBarContent(content)
+	}
+
+	// Go-defined custom bar (legacy)
 	if m.layoutProvider != nil {
 		if bar := m.layoutProvider.Bar(name); bar != nil {
 			return m.renderBar(bar)
@@ -1200,4 +1221,89 @@ func (m Model) renderPane(name string, pane *layout.PaneDef) string {
 // visibleLen returns string length ignoring ANSI escape codes.
 func visibleLen(s string) int {
 	return util.VisibleLen(s)
+}
+
+// keyToString converts a Bubble Tea key message to a normalized string.
+// Returns empty string for keys we don't want to expose to Lua.
+func keyToString(msg tea.KeyMsg) string {
+	switch msg.Type {
+	case tea.KeyCtrlA:
+		return "ctrl+a"
+	case tea.KeyCtrlB:
+		return "ctrl+b"
+	case tea.KeyCtrlC:
+		return "ctrl+c"
+	case tea.KeyCtrlD:
+		return "ctrl+d"
+	case tea.KeyCtrlE:
+		return "ctrl+e"
+	case tea.KeyCtrlF:
+		return "ctrl+f"
+	case tea.KeyCtrlG:
+		return "ctrl+g"
+	case tea.KeyCtrlH:
+		return "ctrl+h"
+	case tea.KeyCtrlI:
+		return "ctrl+i"
+	case tea.KeyCtrlJ:
+		return "ctrl+j"
+	case tea.KeyCtrlK:
+		return "ctrl+k"
+	case tea.KeyCtrlL:
+		return "ctrl+l"
+	case tea.KeyCtrlM:
+		return "ctrl+m"
+	case tea.KeyCtrlN:
+		return "ctrl+n"
+	case tea.KeyCtrlO:
+		return "ctrl+o"
+	case tea.KeyCtrlP:
+		return "ctrl+p"
+	case tea.KeyCtrlQ:
+		return "ctrl+q"
+	case tea.KeyCtrlR:
+		return "ctrl+r"
+	case tea.KeyCtrlS:
+		return "ctrl+s"
+	case tea.KeyCtrlT:
+		return "ctrl+t"
+	case tea.KeyCtrlU:
+		return "ctrl+u"
+	case tea.KeyCtrlV:
+		return "ctrl+v"
+	case tea.KeyCtrlW:
+		return "ctrl+w"
+	case tea.KeyCtrlX:
+		return "ctrl+x"
+	case tea.KeyCtrlY:
+		return "ctrl+y"
+	case tea.KeyCtrlZ:
+		return "ctrl+z"
+	case tea.KeyF1:
+		return "f1"
+	case tea.KeyF2:
+		return "f2"
+	case tea.KeyF3:
+		return "f3"
+	case tea.KeyF4:
+		return "f4"
+	case tea.KeyF5:
+		return "f5"
+	case tea.KeyF6:
+		return "f6"
+	case tea.KeyF7:
+		return "f7"
+	case tea.KeyF8:
+		return "f8"
+	case tea.KeyF9:
+		return "f9"
+	case tea.KeyF10:
+		return "f10"
+	case tea.KeyF11:
+		return "f11"
+	case tea.KeyF12:
+		return "f12"
+	default:
+		return ""
+	}
 }

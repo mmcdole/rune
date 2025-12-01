@@ -17,6 +17,7 @@ import (
 	"github.com/drake/rune/network"
 	"github.com/drake/rune/timer"
 	"github.com/drake/rune/ui"
+	"github.com/drake/rune/ui/layout"
 )
 
 // Ensure Session implements lua.Host at compile time
@@ -24,6 +25,9 @@ var _ lua.Host = (*Session)(nil)
 
 // Ensure Session implements ui.DataProvider at compile time
 var _ ui.DataProvider = (*Session)(nil)
+
+// Ensure Session implements layout.Provider at compile time
+var _ layout.Provider = (*Session)(nil)
 
 // Config holds session configuration
 type Config struct {
@@ -56,6 +60,9 @@ type Session struct {
 
 	// Stats (atomic for lock-free reads)
 	eventsProcessed atomic.Uint64
+
+	// Client state (for Lua rune.state access)
+	clientState lua.ClientState
 }
 
 // New creates a new Session. It is passive - no goroutines start here.
@@ -73,6 +80,9 @@ func New(net mud.Network, ui mud.UI, cfg Config) *Session {
 	}
 
 	s.engine = lua.NewEngine(s)
+
+	// Initialize client state defaults
+	s.clientState.ScrollMode = "live"
 
 	return s
 }
@@ -284,8 +294,14 @@ func (s *Session) Connect(addr string) {
 			Type: mud.EventAsyncResult,
 			Callback: func() {
 				if err != nil {
+					s.clientState.Connected = false
+					s.clientState.Address = ""
+					s.engine.UpdateState(s.clientState)
 					s.engine.CallHook("error", err.Error())
 				} else {
+					s.clientState.Connected = true
+					s.clientState.Address = addr
+					s.engine.UpdateState(s.clientState)
 					s.engine.CallHook("connected", addr)
 				}
 			},
@@ -296,6 +312,9 @@ func (s *Session) Connect(addr string) {
 func (s *Session) Disconnect() {
 	s.engine.CallHook("disconnecting")
 	s.net.Disconnect()
+	s.clientState.Connected = false
+	s.clientState.Address = ""
+	s.engine.UpdateState(s.clientState)
 	s.engine.CallHook("disconnected")
 }
 
@@ -353,7 +372,7 @@ func (s *Session) shutdown() {
 func (s *Session) SetStatus(text string)  { s.ui.SetStatus(text) }
 func (s *Session) SetInfobar(text string) { s.ui.SetInfobar(text) }
 
-func (s *Session) Pane(op, name, data string) {
+func (s *Session) PaneOp(op, name, data string) {
 	switch op {
 	case "create":
 		s.ui.CreatePane(name)
@@ -388,6 +407,11 @@ func (s *Session) TimerCancelAll() {
 	s.timer.CancelAll()
 }
 
+// GetClientState returns the current client state for Lua.
+func (s *Session) GetClientState() lua.ClientState {
+	return s.clientState
+}
+
 // --- DataProvider Implementation ---
 
 // Commands returns all slash commands for the UI.
@@ -408,4 +432,66 @@ func (s *Session) Aliases() []ui.AliasInfo {
 		result[i] = ui.AliasInfo{Name: a.Name, Value: a.Value}
 	}
 	return result
+}
+
+// --- LayoutProvider Implementation ---
+
+// Layout returns the current layout configuration from Lua.
+func (s *Session) Layout() layout.Config {
+	luaLayout := s.engine.GetLayout()
+	return layout.Config{
+		Top:    luaLayout.Top,
+		Bottom: luaLayout.Bottom,
+	}
+}
+
+// Bar returns the bar definition for a name, or nil if not found.
+// Returns nil - Lua bars are rendered via RenderBars() instead.
+func (s *Session) Bar(name string) *layout.BarDef {
+	return nil
+}
+
+// Pane returns the pane definition for a name, or nil if not found.
+func (s *Session) Pane(name string) *layout.PaneDef {
+	return nil
+}
+
+// PaneLines returns the current buffer contents for a pane.
+func (s *Session) PaneLines(name string) []string {
+	return nil
+}
+
+// State returns the current client state for bar rendering.
+func (s *Session) State() layout.ClientState {
+	return layout.ClientState{
+		Connected:   s.clientState.Connected,
+		Address:     s.clientState.Address,
+		ScrollMode:  s.clientState.ScrollMode,
+		ScrollLines: s.clientState.ScrollLines,
+	}
+}
+
+// RenderBars calls all Lua bar renderers and returns their content.
+func (s *Session) RenderBars(width int) map[string]layout.BarContent {
+	names := s.engine.GetBarNames()
+	if len(names) == 0 {
+		return nil
+	}
+
+	result := make(map[string]layout.BarContent, len(names))
+	for _, name := range names {
+		if content, ok := s.engine.RenderBar(name, width); ok {
+			result[name] = layout.BarContent{
+				Left:   content.Left,
+				Center: content.Center,
+				Right:  content.Right,
+			}
+		}
+	}
+	return result
+}
+
+// HandleKeyBind checks if a key has a Lua binding and executes it.
+func (s *Session) HandleKeyBind(key string) bool {
+	return s.engine.HandleKeyBind(key)
 }
