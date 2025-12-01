@@ -2,8 +2,9 @@ package lua
 
 import glua "github.com/yuin/gopher-lua"
 
-// BarContent holds the rendered content of a bar.
-type BarContent struct {
+// BarData represents the raw strings returned by a Lua bar renderer.
+// Pure data with no UI dependencies - Session converts this to layout.BarContent.
+type BarData struct {
 	Left   string
 	Center string
 	Right  string
@@ -70,6 +71,7 @@ func (e *Engine) registerBarFuncs() {
 			e.bars.layout.Bottom = nil
 		}
 
+		e.host.OnConfigChange() // Notify Session to push layout update to UI
 		return 0
 	}))
 }
@@ -87,10 +89,10 @@ func tableToStrings(L *glua.LState, tbl *glua.LTable) []string {
 
 // RenderBar calls a Lua bar render function and returns the content.
 // Called from Session on tick to update bar cache.
-func (e *Engine) RenderBar(name string, width int) (BarContent, bool) {
+func (e *Engine) RenderBar(name string, width int) (BarData, bool) {
 	fn, ok := e.bars.funcs[name]
 	if !ok {
-		return BarContent{}, false
+		return BarData{}, false
 	}
 
 	// Call the Lua function with width
@@ -98,7 +100,7 @@ func (e *Engine) RenderBar(name string, width int) (BarContent, bool) {
 	e.L.Push(glua.LNumber(width))
 	if err := e.L.PCall(1, 1, nil); err != nil {
 		e.CallHook("error", "bar render: "+err.Error())
-		return BarContent{}, false
+		return BarData{}, false
 	}
 
 	result := e.L.Get(-1)
@@ -107,15 +109,15 @@ func (e *Engine) RenderBar(name string, width int) (BarContent, bool) {
 	// Handle return value - can be string or table {left, center, right}
 	switch v := result.(type) {
 	case glua.LString:
-		return BarContent{Left: string(v)}, true
+		return BarData{Left: string(v)}, true
 	case *glua.LTable:
-		return BarContent{
+		return BarData{
 			Left:   e.L.GetField(v, "left").String(),
 			Center: e.L.GetField(v, "center").String(),
 			Right:  e.L.GetField(v, "right").String(),
 		}, true
 	default:
-		return BarContent{}, false
+		return BarData{}, false
 	}
 }
 

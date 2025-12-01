@@ -41,12 +41,14 @@ type Session struct {
 	// Components
 	net    mud.Network
 	ui     mud.UI
+	pushUI ui.PushUI // Optional push-capable UI (nil for ConsoleUI)
 	engine *lua.Engine
 	timer  *timer.Service
 
 	// Channels
 	events      chan mud.Event
 	timerEvents chan timer.Event
+	barTicker   *time.Ticker // Periodic bar re-render ticker
 
 	// Track last prompt overlay to commit to history when replaced
 	lastPrompt string
@@ -66,17 +68,22 @@ type Session struct {
 }
 
 // New creates a new Session. It is passive - no goroutines start here.
-func New(net mud.Network, ui mud.UI, cfg Config) *Session {
+func New(net mud.Network, uiInstance mud.UI, cfg Config) *Session {
 	timerEvents := make(chan timer.Event, 256)
 
 	s := &Session{
 		net:         net,
-		ui:          ui,
+		ui:          uiInstance,
 		timer:       timer.NewService(timerEvents),
 		timerEvents: timerEvents,
 		events:      make(chan mud.Event, 256),
 		config:      cfg,
 		done:        make(chan struct{}),
+	}
+
+	// Check if UI supports push-based updates
+	if p, ok := uiInstance.(ui.PushUI); ok {
+		s.pushUI = p
 	}
 
 	s.engine = lua.NewEngine(s)
@@ -129,6 +136,12 @@ func (s *Session) Run() error {
 		s.ui.Render(fmt.Sprintf("\033[31m[System] Boot Error: %v\033[0m", err))
 	}
 
+	// Start bar re-render ticker if UI supports push updates
+	// 250ms provides responsive updates while limiting CPU usage
+	if s.pushUI != nil {
+		s.barTicker = time.NewTicker(250 * time.Millisecond)
+	}
+
 	// Start event loop
 	go s.processEvents()
 
@@ -141,6 +154,16 @@ func (s *Session) Run() error {
 
 // processEvents is the main event loop.
 func (s *Session) processEvents() {
+	// Get channels for push-capable UI (may be nil)
+	var barTickerC <-chan time.Time
+	var outboundC <-chan any
+	if s.pushUI != nil {
+		if s.barTicker != nil {
+			barTickerC = s.barTicker.C
+		}
+		outboundC = s.pushUI.Outbound()
+	}
+
 	for {
 		select {
 		case <-s.done:
@@ -157,6 +180,10 @@ func (s *Session) processEvents() {
 		case evt := <-s.timerEvents:
 			s.eventsProcessed.Add(1)
 			s.engine.OnTimer(evt.ID, evt.Repeating)
+		case <-barTickerC:
+			s.pushBarUpdates()
+		case msg := <-outboundC:
+			s.handleUIMessage(msg)
 		}
 	}
 }
@@ -256,6 +283,10 @@ func (s *Session) boot() error {
 	}
 
 	s.engine.CallHook("ready")
+
+	// Push initial binds and layout to UI after all scripts loaded
+	s.pushBindsAndLayout()
+
 	return nil
 }
 
@@ -284,6 +315,13 @@ func (s *Session) Print(text string) {
 }
 func (s *Session) Send(data string) { s.net.Send(data) }
 
+// OnConfigChange is called by Engine when binds or layout change.
+// Called synchronously from Lua, so we can safely push updates.
+func (s *Session) OnConfigChange() {
+	s.pushBindsAndLayout()
+	s.pushBarUpdates() // Render new bars immediately
+}
+
 func (s *Session) Quit() { s.shutdown() }
 
 func (s *Session) Connect(addr string) {
@@ -304,6 +342,7 @@ func (s *Session) Connect(addr string) {
 					s.engine.UpdateState(s.clientState)
 					s.engine.CallHook("connected", addr)
 				}
+				s.pushBarUpdates() // Immediate UI update
 			},
 		}
 	}()
@@ -316,6 +355,7 @@ func (s *Session) Disconnect() {
 	s.clientState.Address = ""
 	s.engine.UpdateState(s.clientState)
 	s.engine.CallHook("disconnected")
+	s.pushBarUpdates() // Immediate UI update
 }
 
 // Load loads a Lua script synchronously. Called from Lua, so executes directly.
@@ -362,6 +402,10 @@ func (s *Session) loadScript(path string) {
 func (s *Session) shutdown() {
 	s.closeOnce.Do(func() {
 		close(s.done)
+		// Stop bar ticker if running
+		if s.barTicker != nil {
+			s.barTicker.Stop()
+		}
 		// Stop timers and network; request UI exit.
 		s.timer.CancelAll()
 		s.net.Disconnect()
@@ -471,8 +515,10 @@ func (s *Session) State() layout.ClientState {
 	}
 }
 
-// RenderBars calls all Lua bar renderers and returns their content.
-func (s *Session) RenderBars(width int) map[string]layout.BarContent {
+// renderBars calls all Lua bar renderers and returns their content.
+// Must be called from Session goroutine (thread-safe Lua access).
+// Converts lua.BarData to layout.BarContent (decoupling lua from ui).
+func (s *Session) renderBars(width int) map[string]layout.BarContent {
 	names := s.engine.GetBarNames()
 	if len(names) == 0 {
 		return nil
@@ -480,18 +526,82 @@ func (s *Session) RenderBars(width int) map[string]layout.BarContent {
 
 	result := make(map[string]layout.BarContent, len(names))
 	for _, name := range names {
-		if content, ok := s.engine.RenderBar(name, width); ok {
+		if data, ok := s.engine.RenderBar(name, width); ok {
 			result[name] = layout.BarContent{
-				Left:   content.Left,
-				Center: content.Center,
-				Right:  content.Right,
+				Left:   data.Left,
+				Center: data.Center,
+				Right:  data.Right,
 			}
 		}
 	}
 	return result
 }
 
-// HandleKeyBind checks if a key has a Lua binding and executes it.
-func (s *Session) HandleKeyBind(key string) bool {
-	return s.engine.HandleKeyBind(key)
+// handleKeyBind executes a Lua key binding.
+// Must be called from Session goroutine (thread-safe Lua access).
+func (s *Session) handleKeyBind(key string) {
+	s.engine.HandleKeyBind(key)
+}
+
+// pushBarUpdates renders all Lua bars and pushes to UI.
+// Called periodically by the bar ticker.
+func (s *Session) pushBarUpdates() {
+	if s.pushUI == nil {
+		return
+	}
+
+	// Get current width from client state
+	width := s.clientState.Width
+	if width <= 0 {
+		width = 80 // Default width until first resize
+	}
+
+	// Render bars and push to UI
+	content := s.renderBars(width)
+	if content != nil {
+		s.pushUI.UpdateBars(content)
+	}
+}
+
+// pushBindsAndLayout pushes current bindings and layout config to UI.
+// Called after scripts load or reload.
+func (s *Session) pushBindsAndLayout() {
+	if s.pushUI == nil {
+		return
+	}
+
+	// Push bound keys
+	keys := s.engine.GetBoundKeys()
+	bindsMap := make(map[string]bool, len(keys))
+	for _, key := range keys {
+		bindsMap[key] = true
+	}
+	s.pushUI.UpdateBinds(bindsMap)
+
+	// Push layout configuration
+	luaLayout := s.engine.GetLayout()
+	if len(luaLayout.Top) > 0 || len(luaLayout.Bottom) > 0 {
+		s.pushUI.UpdateLayout(luaLayout.Top, luaLayout.Bottom)
+	}
+}
+
+// handleUIMessage processes messages from the UI.
+// Called when UI sends ExecuteBindMsg, WindowSizeChangedMsg, etc.
+func (s *Session) handleUIMessage(msg any) {
+	switch m := msg.(type) {
+	case ui.ExecuteBindMsg:
+		s.handleKeyBind(string(m))
+	case ui.WindowSizeChangedMsg:
+		s.clientState.Width = m.Width
+		s.clientState.Height = m.Height
+		s.engine.UpdateState(s.clientState)
+		// Immediately re-render bars with new width
+		s.pushBarUpdates()
+	case ui.ScrollStateChangedMsg:
+		s.clientState.ScrollMode = m.Mode
+		s.clientState.ScrollLines = m.NewLines
+		s.engine.UpdateState(s.clientState)
+		// Immediately re-render bars to show scroll state
+		s.pushBarUpdates()
+	}
 }

@@ -16,12 +16,13 @@ func newBindRegistry() *bindRegistry {
 // registerBindFuncs registers the rune.bind API.
 func (e *Engine) registerBindFuncs() {
 	// rune.bind(key, callback) - Register a key binding
-	// key is a string like "ctrl+r", "ctrl+t", "f1", etc.
+	// key is a string like "ctrl+r", "ctrl+t", "f1", "j", etc.
 	// callback receives no arguments
 	e.L.SetField(e.runeTable, "bind", e.L.NewFunction(func(L *glua.LState) int {
 		key := L.CheckString(1)
 		fn := L.CheckFunction(2)
 		e.binds.binds[key] = fn
+		e.host.OnConfigChange() // Notify Session to push update to UI
 		return 0
 	}))
 
@@ -29,6 +30,7 @@ func (e *Engine) registerBindFuncs() {
 	e.L.SetField(e.runeTable, "unbind", e.L.NewFunction(func(L *glua.LState) int {
 		key := L.CheckString(1)
 		delete(e.binds.binds, key)
+		e.host.OnConfigChange() // Notify Session to push update to UI
 		return 0
 	}))
 }

@@ -17,6 +17,10 @@ type BubbleTeaUI struct {
 	// This decouples callers from tea.Program.Send() which can block.
 	msgQueue chan tea.Msg
 
+	// Outbound messages from UI to Session (e.g., ExecuteBindMsg, WindowSizeChangedMsg)
+	// Session reads from this channel in its event loop.
+	outbound chan any
+
 	// Shutdown coordination
 	done     chan struct{}
 	doneOnce sync.Once
@@ -30,6 +34,7 @@ func NewBubbleTeaUI() *BubbleTeaUI {
 	return &BubbleTeaUI{
 		inputChan: make(chan string, 2048),
 		msgQueue:  make(chan tea.Msg, 4096),
+		outbound:  make(chan any, 256),
 		done:      make(chan struct{}),
 	}
 }
@@ -80,7 +85,7 @@ func (b *BubbleTeaUI) SetDataProvider(p DataProvider) {
 
 // Run implements mud.UI - starts the TUI and blocks until exit.
 func (b *BubbleTeaUI) Run() error {
-	model := NewModel(b.inputChan, b.provider)
+	model := NewModel(b.inputChan, b.outbound, b.provider)
 
 	b.program = tea.NewProgram(
 		model,
@@ -170,4 +175,29 @@ func (b *BubbleTeaUI) ClearPane(name string) {
 // BindPaneKey binds a key to toggle a pane.
 func (b *BubbleTeaUI) BindPaneKey(key, name string) {
 	b.send(PaneBindMsg{Key: key, Name: name})
+}
+
+// --- Push-based messages from Session to UI ---
+
+// UpdateBars sends rendered bar content from Session to UI.
+func (b *BubbleTeaUI) UpdateBars(content map[string]BarContent) {
+	b.send(UpdateBarsMsg(content))
+}
+
+// UpdateBinds sends the current set of bound keys from Session to UI.
+func (b *BubbleTeaUI) UpdateBinds(keys map[string]bool) {
+	b.send(UpdateBindsMsg(keys))
+}
+
+// UpdateLayout sends layout configuration from Session to UI.
+func (b *BubbleTeaUI) UpdateLayout(top, bottom []string) {
+	b.send(UpdateLayoutMsg{Top: top, Bottom: bottom})
+}
+
+// --- Outbound messages from UI to Session ---
+
+// Outbound returns a channel of messages from UI to Session.
+// Session should read from this channel in its event loop.
+func (b *BubbleTeaUI) Outbound() <-chan any {
+	return b.outbound
 }

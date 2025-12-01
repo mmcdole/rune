@@ -30,4 +30,9 @@ type Host interface {
 
 	// State - Get current client state for Lua
 	GetClientState() ClientState
+
+	// OnConfigChange notifies the host that binds or layout have changed.
+	// Called synchronously from Lua when rune.bind, rune.unbind, or
+	// rune.ui.layout is called, allowing the host to push updates to the UI.
+	OnConfigChange()
 }

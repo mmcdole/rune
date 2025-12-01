@@ -20,7 +20,7 @@ func main() {
 	setupScenario(provider, *scenario)
 
 	inputChan := make(chan string, 256)
-	model := ui.NewModel(inputChan, provider)
+	model := ui.NewModel(inputChan, nil, provider) // nil outbound - layout-test doesn't need it
 	model.SetLayoutProvider(provider)
 
 	program := tea.NewProgram(
@@ -166,13 +166,11 @@ func NewMockProvider() *MockProvider {
 }
 
 // LayoutProvider implementation
-func (m *MockProvider) Layout() layout.Config          { return m.layout }
-func (m *MockProvider) Bar(name string) *layout.BarDef { return m.bars[name] }
+func (m *MockProvider) Layout() layout.Config            { return m.layout }
+func (m *MockProvider) Bar(name string) *layout.BarDef   { return m.bars[name] }
 func (m *MockProvider) Pane(name string) *layout.PaneDef { return m.panes[name] }
-func (m *MockProvider) PaneLines(name string) []string { return m.paneLines[name] }
-func (m *MockProvider) State() layout.ClientState      { return m.state }
-func (m *MockProvider) RenderBars(width int) map[string]layout.BarContent { return nil }
-func (m *MockProvider) HandleKeyBind(key string) bool { return false }
+func (m *MockProvider) PaneLines(name string) []string   { return m.paneLines[name] }
+func (m *MockProvider) State() layout.ClientState        { return m.state }
 
 // DataProvider implementation
 func (m *MockProvider) Commands() []ui.CommandInfo { return m.commands }

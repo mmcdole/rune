@@ -6,6 +6,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/drake/rune/ui/components/status"
+	"github.com/drake/rune/ui/layout"
 )
 
 // ServerLineMsg represents a line from the MUD server.
@@ -87,3 +88,42 @@ type PaneBindMsg struct {
 	Key  string
 	Name string
 }
+
+// --- Push-based UI Messages (Session -> UI) ---
+
+// UpdateBindsMsg pushes the current set of bound keys from Session to UI.
+// UI uses this to check if a key should be sent to Session for execution.
+type UpdateBindsMsg map[string]bool
+
+// UpdateBarsMsg pushes rendered bar content from Session to UI.
+// Session runs Lua bar renderers and sends the result; UI just displays it.
+type UpdateBarsMsg map[string]layout.BarContent
+
+// UpdateLayoutMsg pushes layout configuration from Session to UI.
+type UpdateLayoutMsg struct {
+	Top    []string
+	Bottom []string
+}
+
+// --- Push-based UI Messages (UI -> Session) ---
+
+// ExecuteBindMsg requests Session to execute a Lua key binding.
+// Sent when UI detects a key that's in the boundKeys map.
+type ExecuteBindMsg string
+
+// WindowSizeMsg notifies Session of window size changes.
+// Session uses this to update rune.state.width/height.
+type WindowSizeChangedMsg struct {
+	Width  int
+	Height int
+}
+
+// ScrollStateChangedMsg notifies Session of scroll state changes.
+// Session uses this to update rune.state.scroll_mode/scroll_lines.
+type ScrollStateChangedMsg struct {
+	Mode     string // "live" or "scrolled"
+	NewLines int    // Lines behind live (when scrolled)
+}
+
+// BarContent is an alias for layout.BarContent for convenience.
+type BarContent = layout.BarContent

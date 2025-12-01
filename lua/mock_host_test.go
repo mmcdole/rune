@@ -88,10 +88,20 @@ func (m *MockHost) SetInfobar(text string) {
 	m.InfobarCalls = append(m.InfobarCalls, text)
 }
 
-func (m *MockHost) Pane(op, name, data string) {
+func (m *MockHost) PaneOp(op, name, data string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.PaneCalls = append(m.PaneCalls, struct{ Op, Name, Data string }{op, name, data})
+}
+
+func (m *MockHost) GetClientState() ClientState {
+	return ClientState{
+		ScrollMode: "live",
+	}
+}
+
+func (m *MockHost) OnConfigChange() {
+	// No-op for tests - config change notifications not tracked
 }
 
 func (m *MockHost) TimerAfter(d time.Duration) int {

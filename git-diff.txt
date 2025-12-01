@@ -1,0 +1,888 @@
+diff --git a/cmd/layout-test/main.go b/cmd/layout-test/main.go
+index 2e6a0ad..104180b 100644
+--- a/cmd/layout-test/main.go
++++ b/cmd/layout-test/main.go
+@@ -20,7 +20,7 @@ func main() {
+ 	setupScenario(provider, *scenario)
+ 
+ 	inputChan := make(chan string, 256)
+-	model := ui.NewModel(inputChan, provider)
++	model := ui.NewModel(inputChan, nil, provider) // nil outbound - layout-test doesn't need it
+ 	model.SetLayoutProvider(provider)
+ 
+ 	program := tea.NewProgram(
+@@ -166,13 +166,11 @@ func NewMockProvider() *MockProvider {
+ }
+ 
+ // LayoutProvider implementation
+-func (m *MockProvider) Layout() layout.Config          { return m.layout }
+-func (m *MockProvider) Bar(name string) *layout.BarDef { return m.bars[name] }
++func (m *MockProvider) Layout() layout.Config            { return m.layout }
++func (m *MockProvider) Bar(name string) *layout.BarDef   { return m.bars[name] }
+ func (m *MockProvider) Pane(name string) *layout.PaneDef { return m.panes[name] }
+-func (m *MockProvider) PaneLines(name string) []string { return m.paneLines[name] }
+-func (m *MockProvider) State() layout.ClientState      { return m.state }
+-func (m *MockProvider) RenderBars(width int) map[string]layout.BarContent { return nil }
+-func (m *MockProvider) HandleKeyBind(key string) bool { return false }
++func (m *MockProvider) PaneLines(name string) []string   { return m.paneLines[name] }
++func (m *MockProvider) State() layout.ClientState        { return m.state }
+ 
+ // DataProvider implementation
+ func (m *MockProvider) Commands() []ui.CommandInfo { return m.commands }
+diff --git a/lua/api_bar.go b/lua/api_bar.go
+index 3f68e0b..b669eb0 100644
+--- a/lua/api_bar.go
++++ b/lua/api_bar.go
+@@ -2,8 +2,9 @@ package lua
+ 
+ import glua "github.com/yuin/gopher-lua"
+ 
+-// BarContent holds the rendered content of a bar.
+-type BarContent struct {
++// BarData represents the raw strings returned by a Lua bar renderer.
++// Pure data with no UI dependencies - Session converts this to layout.BarContent.
++type BarData struct {
+ 	Left   string
+ 	Center string
+ 	Right  string
+@@ -70,6 +71,7 @@ func (e *Engine) registerBarFuncs() {
+ 			e.bars.layout.Bottom = nil
+ 		}
+ 
++		e.host.OnConfigChange() // Notify Session to push layout update to UI
+ 		return 0
+ 	}))
+ }
+@@ -87,10 +89,10 @@ func tableToStrings(L *glua.LState, tbl *glua.LTable) []string {
+ 
+ // RenderBar calls a Lua bar render function and returns the content.
+ // Called from Session on tick to update bar cache.
+-func (e *Engine) RenderBar(name string, width int) (BarContent, bool) {
++func (e *Engine) RenderBar(name string, width int) (BarData, bool) {
+ 	fn, ok := e.bars.funcs[name]
+ 	if !ok {
+-		return BarContent{}, false
++		return BarData{}, false
+ 	}
+ 
+ 	// Call the Lua function with width
+@@ -98,7 +100,7 @@ func (e *Engine) RenderBar(name string, width int) (BarContent, bool) {
+ 	e.L.Push(glua.LNumber(width))
+ 	if err := e.L.PCall(1, 1, nil); err != nil {
+ 		e.CallHook("error", "bar render: "+err.Error())
+-		return BarContent{}, false
++		return BarData{}, false
+ 	}
+ 
+ 	result := e.L.Get(-1)
+@@ -107,15 +109,15 @@ func (e *Engine) RenderBar(name string, width int) (BarContent, bool) {
+ 	// Handle return value - can be string or table {left, center, right}
+ 	switch v := result.(type) {
+ 	case glua.LString:
+-		return BarContent{Left: string(v)}, true
++		return BarData{Left: string(v)}, true
+ 	case *glua.LTable:
+-		return BarContent{
++		return BarData{
+ 			Left:   e.L.GetField(v, "left").String(),
+ 			Center: e.L.GetField(v, "center").String(),
+ 			Right:  e.L.GetField(v, "right").String(),
+ 		}, true
+ 	default:
+-		return BarContent{}, false
++		return BarData{}, false
+ 	}
+ }
+ 
+diff --git a/lua/api_bind.go b/lua/api_bind.go
+index 9e3ae0b..4c7952a 100644
+--- a/lua/api_bind.go
++++ b/lua/api_bind.go
+@@ -16,12 +16,13 @@ func newBindRegistry() *bindRegistry {
+ // registerBindFuncs registers the rune.bind API.
+ func (e *Engine) registerBindFuncs() {
+ 	// rune.bind(key, callback) - Register a key binding
+-	// key is a string like "ctrl+r", "ctrl+t", "f1", etc.
++	// key is a string like "ctrl+r", "ctrl+t", "f1", "j", etc.
+ 	// callback receives no arguments
+ 	e.L.SetField(e.runeTable, "bind", e.L.NewFunction(func(L *glua.LState) int {
+ 		key := L.CheckString(1)
+ 		fn := L.CheckFunction(2)
+ 		e.binds.binds[key] = fn
++		e.host.OnConfigChange() // Notify Session to push update to UI
+ 		return 0
+ 	}))
+ 
+@@ -29,6 +30,7 @@ func (e *Engine) registerBindFuncs() {
+ 	e.L.SetField(e.runeTable, "unbind", e.L.NewFunction(func(L *glua.LState) int {
+ 		key := L.CheckString(1)
+ 		delete(e.binds.binds, key)
++		e.host.OnConfigChange() // Notify Session to push update to UI
+ 		return 0
+ 	}))
+ }
+diff --git a/lua/api_state.go b/lua/api_state.go
+index 3530d51..ef7457e 100644
+--- a/lua/api_state.go
++++ b/lua/api_state.go
+@@ -8,6 +8,8 @@ type ClientState struct {
+ 	Address     string
+ 	ScrollMode  string // "live" or "scrolled"
+ 	ScrollLines int    // Lines behind live (when scrolled)
++	Width       int    // Terminal width
++	Height      int    // Terminal height
+ }
+ 
+ // registerStateFuncs creates the rune.state table.
+@@ -21,6 +23,8 @@ func (e *Engine) registerStateFuncs() {
+ 	e.L.SetField(stateTable, "address", glua.LString(""))
+ 	e.L.SetField(stateTable, "scroll_mode", glua.LString("live"))
+ 	e.L.SetField(stateTable, "scroll_lines", glua.LNumber(0))
++	e.L.SetField(stateTable, "width", glua.LNumber(0))
++	e.L.SetField(stateTable, "height", glua.LNumber(0))
+ }
+ 
+ // UpdateState pushes new client state to the Lua rune.state table.
+@@ -40,4 +44,6 @@ func (e *Engine) UpdateState(state ClientState) {
+ 	e.L.SetField(t, "address", glua.LString(state.Address))
+ 	e.L.SetField(t, "scroll_mode", glua.LString(state.ScrollMode))
+ 	e.L.SetField(t, "scroll_lines", glua.LNumber(state.ScrollLines))
++	e.L.SetField(t, "width", glua.LNumber(state.Width))
++	e.L.SetField(t, "height", glua.LNumber(state.Height))
+ }
+diff --git a/lua/core/50_events.lua b/lua/core/50_events.lua
+index 8a578a7..a94371c 100644
+--- a/lua/core/50_events.lua
++++ b/lua/core/50_events.lua
+@@ -1,34 +1,27 @@
+ -- Default System Event Handlers
+ -- Users can register additional handlers or override with lower priority
+ 
+--- Track current connection for status bar
+-local _current_server = nil
++-- Note: Status bar is now handled reactively by 70_status_bar.lua
++-- It reads rune.state directly, so we don't need to call rune.status.set() here.
+ 
+ rune.hooks.register("ready", function()
+-    rune.status.set("\027[90m● Disconnected\027[0m")
++    -- Status bar renders from rune.state automatically
+ end, { priority = 100 })
+ 
+ rune.hooks.register("connecting", function(addr)
+     rune.print("[System] Connecting to " .. addr .. "...")
+-    rune.status.set("\027[33m● Connecting to " .. addr .. "...\027[0m")
+ end, { priority = 100 })
+ 
+ rune.hooks.register("connected", function(addr)
+-    _current_server = addr
+     rune.print("[System] Connected to " .. addr)
+-    -- Green dot, subdued gray text for address
+-    rune.status.set("\027[32m●\027[0m \027[90m" .. addr .. "\027[0m")
+ end, { priority = 100 })
+ 
+ rune.hooks.register("disconnecting", function()
+     rune.print("[System] Disconnecting...")
+-    rune.status.set("\027[33m● Disconnecting...\027[0m")
+ end, { priority = 100 })
+ 
+ rune.hooks.register("disconnected", function()
+-    _current_server = nil
+     rune.print("[System] Disconnected")
+-    rune.status.set("\027[90m● Disconnected\027[0m")
+ end, { priority = 100 })
+ 
+ rune.hooks.register("reloading", function()
+diff --git a/lua/host.go b/lua/host.go
+index f0cb5f0..0a05f6c 100644
+--- a/lua/host.go
++++ b/lua/host.go
+@@ -30,4 +30,9 @@ type Host interface {
+ 
+ 	// State - Get current client state for Lua
+ 	GetClientState() ClientState
++
++	// OnConfigChange notifies the host that binds or layout have changed.
++	// Called synchronously from Lua when rune.bind, rune.unbind, or
++	// rune.ui.layout is called, allowing the host to push updates to the UI.
++	OnConfigChange()
+ }
+diff --git a/lua/mock_host_test.go b/lua/mock_host_test.go
+index fb81111..e7fa21c 100644
+--- a/lua/mock_host_test.go
++++ b/lua/mock_host_test.go
+@@ -88,12 +88,22 @@ func (m *MockHost) SetInfobar(text string) {
+ 	m.InfobarCalls = append(m.InfobarCalls, text)
+ }
+ 
+-func (m *MockHost) Pane(op, name, data string) {
++func (m *MockHost) PaneOp(op, name, data string) {
+ 	m.mu.Lock()
+ 	defer m.mu.Unlock()
+ 	m.PaneCalls = append(m.PaneCalls, struct{ Op, Name, Data string }{op, name, data})
+ }
+ 
++func (m *MockHost) GetClientState() ClientState {
++	return ClientState{
++		ScrollMode: "live",
++	}
++}
++
++func (m *MockHost) OnConfigChange() {
++	// No-op for tests - config change notifications not tracked
++}
++
+ func (m *MockHost) TimerAfter(d time.Duration) int {
+ 	m.mu.Lock()
+ 	defer m.mu.Unlock()
+diff --git a/session/session.go b/session/session.go
+index 45899c1..21f1f57 100644
+--- a/session/session.go
++++ b/session/session.go
+@@ -41,12 +41,14 @@ type Session struct {
+ 	// Components
+ 	net    mud.Network
+ 	ui     mud.UI
++	pushUI ui.PushUI // Optional push-capable UI (nil for ConsoleUI)
+ 	engine *lua.Engine
+ 	timer  *timer.Service
+ 
+ 	// Channels
+ 	events      chan mud.Event
+ 	timerEvents chan timer.Event
++	barTicker   *time.Ticker // Periodic bar re-render ticker
+ 
+ 	// Track last prompt overlay to commit to history when replaced
+ 	lastPrompt string
+@@ -66,12 +68,12 @@ type Session struct {
+ }
+ 
+ // New creates a new Session. It is passive - no goroutines start here.
+-func New(net mud.Network, ui mud.UI, cfg Config) *Session {
++func New(net mud.Network, uiInstance mud.UI, cfg Config) *Session {
+ 	timerEvents := make(chan timer.Event, 256)
+ 
+ 	s := &Session{
+ 		net:         net,
+-		ui:          ui,
++		ui:          uiInstance,
+ 		timer:       timer.NewService(timerEvents),
+ 		timerEvents: timerEvents,
+ 		events:      make(chan mud.Event, 256),
+@@ -79,6 +81,11 @@ func New(net mud.Network, ui mud.UI, cfg Config) *Session {
+ 		done:        make(chan struct{}),
+ 	}
+ 
++	// Check if UI supports push-based updates
++	if p, ok := uiInstance.(ui.PushUI); ok {
++		s.pushUI = p
++	}
++
+ 	s.engine = lua.NewEngine(s)
+ 
+ 	// Initialize client state defaults
+@@ -129,6 +136,12 @@ func (s *Session) Run() error {
+ 		s.ui.Render(fmt.Sprintf("\033[31m[System] Boot Error: %v\033[0m", err))
+ 	}
+ 
++	// Start bar re-render ticker if UI supports push updates
++	// 250ms provides responsive updates while limiting CPU usage
++	if s.pushUI != nil {
++		s.barTicker = time.NewTicker(250 * time.Millisecond)
++	}
++
+ 	// Start event loop
+ 	go s.processEvents()
+ 
+@@ -141,6 +154,16 @@ func (s *Session) Run() error {
+ 
+ // processEvents is the main event loop.
+ func (s *Session) processEvents() {
++	// Get channels for push-capable UI (may be nil)
++	var barTickerC <-chan time.Time
++	var outboundC <-chan any
++	if s.pushUI != nil {
++		if s.barTicker != nil {
++			barTickerC = s.barTicker.C
++		}
++		outboundC = s.pushUI.Outbound()
++	}
++
+ 	for {
+ 		select {
+ 		case <-s.done:
+@@ -157,6 +180,10 @@ func (s *Session) processEvents() {
+ 		case evt := <-s.timerEvents:
+ 			s.eventsProcessed.Add(1)
+ 			s.engine.OnTimer(evt.ID, evt.Repeating)
++		case <-barTickerC:
++			s.pushBarUpdates()
++		case msg := <-outboundC:
++			s.handleUIMessage(msg)
+ 		}
+ 	}
+ }
+@@ -256,6 +283,10 @@ func (s *Session) boot() error {
+ 	}
+ 
+ 	s.engine.CallHook("ready")
++
++	// Push initial binds and layout to UI after all scripts loaded
++	s.pushBindsAndLayout()
++
+ 	return nil
+ }
+ 
+@@ -284,6 +315,12 @@ func (s *Session) Print(text string) {
+ }
+ func (s *Session) Send(data string) { s.net.Send(data) }
+ 
++// OnConfigChange is called by Engine when binds or layout change.
++// Called synchronously from Lua, so we can safely push updates.
++func (s *Session) OnConfigChange() {
++	s.pushBindsAndLayout()
++}
++
+ func (s *Session) Quit() { s.shutdown() }
+ 
+ func (s *Session) Connect(addr string) {
+@@ -362,6 +399,10 @@ func (s *Session) loadScript(path string) {
+ func (s *Session) shutdown() {
+ 	s.closeOnce.Do(func() {
+ 		close(s.done)
++		// Stop bar ticker if running
++		if s.barTicker != nil {
++			s.barTicker.Stop()
++		}
+ 		// Stop timers and network; request UI exit.
+ 		s.timer.CancelAll()
+ 		s.net.Disconnect()
+@@ -471,8 +512,10 @@ func (s *Session) State() layout.ClientState {
+ 	}
+ }
+ 
+-// RenderBars calls all Lua bar renderers and returns their content.
+-func (s *Session) RenderBars(width int) map[string]layout.BarContent {
++// renderBars calls all Lua bar renderers and returns their content.
++// Must be called from Session goroutine (thread-safe Lua access).
++// Converts lua.BarData to layout.BarContent (decoupling lua from ui).
++func (s *Session) renderBars(width int) map[string]layout.BarContent {
+ 	names := s.engine.GetBarNames()
+ 	if len(names) == 0 {
+ 		return nil
+@@ -480,18 +523,82 @@ func (s *Session) RenderBars(width int) map[string]layout.BarContent {
+ 
+ 	result := make(map[string]layout.BarContent, len(names))
+ 	for _, name := range names {
+-		if content, ok := s.engine.RenderBar(name, width); ok {
++		if data, ok := s.engine.RenderBar(name, width); ok {
+ 			result[name] = layout.BarContent{
+-				Left:   content.Left,
+-				Center: content.Center,
+-				Right:  content.Right,
++				Left:   data.Left,
++				Center: data.Center,
++				Right:  data.Right,
+ 			}
+ 		}
+ 	}
+ 	return result
+ }
+ 
+-// HandleKeyBind checks if a key has a Lua binding and executes it.
+-func (s *Session) HandleKeyBind(key string) bool {
+-	return s.engine.HandleKeyBind(key)
++// handleKeyBind executes a Lua key binding.
++// Must be called from Session goroutine (thread-safe Lua access).
++func (s *Session) handleKeyBind(key string) {
++	s.engine.HandleKeyBind(key)
++}
++
++// pushBarUpdates renders all Lua bars and pushes to UI.
++// Called periodically by the bar ticker.
++func (s *Session) pushBarUpdates() {
++	if s.pushUI == nil {
++		return
++	}
++
++	// Get current width from client state
++	width := s.clientState.Width
++	if width <= 0 {
++		width = 80 // Default width until first resize
++	}
++
++	// Render bars and push to UI
++	content := s.renderBars(width)
++	if content != nil {
++		s.pushUI.UpdateBars(content)
++	}
++}
++
++// pushBindsAndLayout pushes current bindings and layout config to UI.
++// Called after scripts load or reload.
++func (s *Session) pushBindsAndLayout() {
++	if s.pushUI == nil {
++		return
++	}
++
++	// Push bound keys
++	keys := s.engine.GetBoundKeys()
++	bindsMap := make(map[string]bool, len(keys))
++	for _, key := range keys {
++		bindsMap[key] = true
++	}
++	s.pushUI.UpdateBinds(bindsMap)
++
++	// Push layout configuration
++	luaLayout := s.engine.GetLayout()
++	if len(luaLayout.Top) > 0 || len(luaLayout.Bottom) > 0 {
++		s.pushUI.UpdateLayout(luaLayout.Top, luaLayout.Bottom)
++	}
++}
++
++// handleUIMessage processes messages from the UI.
++// Called when UI sends ExecuteBindMsg, WindowSizeChangedMsg, etc.
++func (s *Session) handleUIMessage(msg any) {
++	switch m := msg.(type) {
++	case ui.ExecuteBindMsg:
++		s.handleKeyBind(string(m))
++	case ui.WindowSizeChangedMsg:
++		s.clientState.Width = m.Width
++		s.clientState.Height = m.Height
++		s.engine.UpdateState(s.clientState)
++		// Immediately re-render bars with new width
++		s.pushBarUpdates()
++	case ui.ScrollStateChangedMsg:
++		s.clientState.ScrollMode = m.Mode
++		s.clientState.ScrollLines = m.NewLines
++		s.engine.UpdateState(s.clientState)
++		// Immediately re-render bars to show scroll state
++		s.pushBarUpdates()
++	}
+ }
+diff --git a/ui/layout/layout.go b/ui/layout/layout.go
+index 17138e4..a1e6a4a 100644
+--- a/ui/layout/layout.go
++++ b/ui/layout/layout.go
+@@ -67,6 +67,8 @@ type ClientState struct {
+ }
+ 
+ // Provider is the interface the UI uses to get layout information.
++// Note: This is for Go-defined bars/panes. Lua-driven UI uses push-based
++// messages (UpdateBarsMsg, UpdateBindsMsg, etc.) instead of this interface.
+ type Provider interface {
+ 	// Layout returns the current layout configuration.
+ 	Layout() Config
+@@ -82,12 +84,4 @@ type Provider interface {
+ 
+ 	// State returns the current client state for bar rendering.
+ 	State() ClientState
+-
+-	// RenderBars calls all Lua bar renderers and returns their content.
+-	// Called on tick from Update(), results are cached for View().
+-	RenderBars(width int) map[string]BarContent
+-
+-	// HandleKeyBind checks if a key has a Lua binding and executes it.
+-	// Returns true if the key was handled by Lua.
+-	HandleKeyBind(key string) bool
+ }
+diff --git a/ui/messages.go b/ui/messages.go
+index ef4fc22..7305a13 100644
+--- a/ui/messages.go
++++ b/ui/messages.go
+@@ -6,6 +6,7 @@ import (
+ 	tea "github.com/charmbracelet/bubbletea"
+ 
+ 	"github.com/drake/rune/ui/components/status"
++	"github.com/drake/rune/ui/layout"
+ )
+ 
+ // ServerLineMsg represents a line from the MUD server.
+@@ -87,3 +88,53 @@ type PaneBindMsg struct {
+ 	Key  string
+ 	Name string
+ }
++
++// --- Push-based UI Messages (Session -> UI) ---
++
++// UpdateBindsMsg pushes the current set of bound keys from Session to UI.
++// UI uses this to check if a key should be sent to Session for execution.
++type UpdateBindsMsg map[string]bool
++
++// UpdateBarsMsg pushes rendered bar content from Session to UI.
++// Session runs Lua bar renderers and sends the result; UI just displays it.
++type UpdateBarsMsg map[string]layout.BarContent
++
++// UpdateLayoutMsg pushes layout configuration from Session to UI.
++type UpdateLayoutMsg struct {
++	Top    []string
++	Bottom []string
++}
++
++// UpdateStateMsg pushes client state snapshot from Session to UI.
++// Used for status bar rendering and other state-dependent UI.
++type UpdateStateMsg struct {
++	Connected   bool
++	Address     string
++	ScrollMode  string
++	ScrollLines int
++	Width       int
++	Height      int
++}
++
++// --- Push-based UI Messages (UI -> Session) ---
++
++// ExecuteBindMsg requests Session to execute a Lua key binding.
++// Sent when UI detects a key that's in the boundKeys map.
++type ExecuteBindMsg string
++
++// WindowSizeMsg notifies Session of window size changes.
++// Session uses this to update rune.state.width/height.
++type WindowSizeChangedMsg struct {
++	Width  int
++	Height int
++}
++
++// ScrollStateChangedMsg notifies Session of scroll state changes.
++// Session uses this to update rune.state.scroll_mode/scroll_lines.
++type ScrollStateChangedMsg struct {
++	Mode     string // "live" or "scrolled"
++	NewLines int    // Lines behind live (when scrolled)
++}
++
++// BarContent is an alias for layout.BarContent for convenience.
++type BarContent = layout.BarContent
+diff --git a/ui/model.go b/ui/model.go
+index d4e4c99..f10a864 100644
+--- a/ui/model.go
++++ b/ui/model.go
+@@ -194,11 +194,16 @@ type Model struct {
+ 	// Data provider (set by session)
+ 	provider DataProvider
+ 
+-	// Layout provider (set by session, optional)
++	// Layout provider (set by session, optional - used for Go-defined bars/panes)
+ 	layoutProvider layout.Provider
+ 
+-	// Cached Lua bar content (updated on tick)
+-	barCache map[string]layout.BarContent
++	// Push-based state from Session (thread-safe local caches)
++	boundKeys  map[string]bool       // Keys bound in Lua
++	barContent map[string]BarContent // Rendered bar content from Lua
++	luaLayout  struct {              // Layout configuration from Lua
++		Top    []string
++		Bottom []string
++	}
+ 
+ 	// State
+ 	lastPrompt  string // For deduplication
+@@ -206,6 +211,7 @@ type Model struct {
+ 	width       int
+ 	height      int
+ 	inputChan   chan<- string
++	outbound    chan<- any // Messages from UI to Session
+ 	quitting    bool
+ 	initialized bool
+ 
+@@ -214,7 +220,7 @@ type Model struct {
+ }
+ 
+ // NewModel creates a new TUI model.
+-func NewModel(inputChan chan<- string, provider DataProvider) Model {
++func NewModel(inputChan chan<- string, outbound chan<- any, provider DataProvider) Model {
+ 	styles := style.DefaultStyles()
+ 	scrollback := viewport.NewScrollbackBuffer(100000)
+ 	vp := viewport.New(scrollback)
+@@ -247,6 +253,7 @@ func NewModel(inputChan chan<- string, provider DataProvider) Model {
+ 		historyLimit: 10000,
+ 		wordCache:    wordCache,
+ 		inputChan:    inputChan,
++		outbound:     outbound,
+ 		provider:     provider,
+ 	}
+ }
+@@ -271,6 +278,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+ 		m.height = msg.Height
+ 		m.updateDimensions()
+ 		m.initialized = true
++		// Notify Session of size change (for rune.state.width/height)
++		m.sendOutbound(WindowSizeChangedMsg{Width: msg.Width, Height: msg.Height})
+ 		return m, nil
+ 
+ 	// Tick for batching and clock updates
+@@ -280,12 +289,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+ 			m.appendLines(m.pendingLines)
+ 			m.pendingLines = nil
+ 		}
+-		// Update Lua bar cache
+-		if m.layoutProvider != nil {
+-			m.barCache = m.layoutProvider.RenderBars(m.width)
+-		}
++		// Note: Bar content is now pushed by Session via UpdateBarsMsg
+ 		return m, doTick()
+ 
++	// Push-based updates from Session (thread-safe)
++	case UpdateBindsMsg:
++		m.boundKeys = msg
++		return m, nil
++
++	case UpdateBarsMsg:
++		m.barContent = msg
++		return m, nil
++
++	case UpdateLayoutMsg:
++		m.luaLayout.Top = msg.Top
++		m.luaLayout.Bottom = msg.Bottom
++		m.updateDimensions()
++		return m, nil
++
+ 	// Batched lines from aggregator
+ 	case flushLinesMsg:
+ 		cleanLines := make([]string, len(msg.Lines))
+@@ -418,14 +439,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+ }
+ 
+ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+-	// Check Lua key bindings first
+-	// Note: This is called synchronously but Lua execution happens on Session goroutine.
+-	// For now we trust the provider to handle threading correctly.
+-	if m.layoutProvider != nil {
+-		keyStr := keyToString(msg)
+-		if keyStr != "" && m.layoutProvider.HandleKeyBind(keyStr) {
+-			return m, nil
+-		}
++	// Check Lua key bindings (using local cache - thread-safe)
++	keyStr := keyToString(msg)
++	if keyStr != "" && m.boundKeys[keyStr] {
++		// Key is bound in Lua - send to Session for execution
++		m.sendOutbound(ExecuteBindMsg(keyStr))
++		return m, nil
+ 	}
+ 
+ 	// Check for bound pane toggle keys (only when input is empty)
+@@ -490,22 +509,22 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+ 
+ 	case tea.KeyPgUp:
+ 		m.viewport.PageUp()
+-		m.status.SetScrollMode(m.viewport.Mode(), m.viewport.NewLineCount())
++		m.updateScrollState()
+ 		return m, nil
+ 
+ 	case tea.KeyPgDown:
+ 		m.viewport.PageDown()
+-		m.status.SetScrollMode(m.viewport.Mode(), m.viewport.NewLineCount())
++		m.updateScrollState()
+ 		return m, nil
+ 
+ 	case tea.KeyEnd:
+ 		m.viewport.GotoBottom()
+-		m.status.SetScrollMode(m.viewport.Mode(), m.viewport.NewLineCount())
++		m.updateScrollState()
+ 		return m, nil
+ 
+ 	case tea.KeyHome:
+ 		m.viewport.GotoTop()
+-		m.status.SetScrollMode(m.viewport.Mode(), m.viewport.NewLineCount())
++		m.updateScrollState()
+ 		return m, nil
+ 
+ 	case tea.KeyRunes:
+@@ -911,7 +930,7 @@ func (m *Model) appendLines(lines []string) {
+ 		m.scrollback.Append(line)
+ 	}
+ 	m.viewport.OnNewLines(len(lines))
+-	m.status.SetScrollMode(m.viewport.Mode(), m.viewport.NewLineCount())
++	m.updateScrollState()
+ }
+ 
+ // SetLayoutProvider sets the layout provider for custom layouts.
+@@ -919,6 +938,35 @@ func (m *Model) SetLayoutProvider(lp layout.Provider) {
+ 	m.layoutProvider = lp
+ }
+ 
++// sendOutbound sends a message to Session via the outbound channel.
++// Non-blocking - drops message if channel is full.
++func (m *Model) sendOutbound(msg any) {
++	if m.outbound == nil {
++		return
++	}
++	select {
++	case m.outbound <- msg:
++	default:
++		// Drop rather than block UI
++	}
++}
++
++// updateScrollState updates the local status bar and notifies Session.
++func (m *Model) updateScrollState() {
++	mode := m.viewport.Mode()
++	newLines := m.viewport.NewLineCount()
++
++	// Update local status component (fallback)
++	m.status.SetScrollMode(mode, newLines)
++
++	// Notify Session to update rune.state
++	modeStr := "live"
++	if mode != 0 { // ModeScrolled
++		modeStr = "scrolled"
++	}
++	m.sendOutbound(ScrollStateChangedMsg{Mode: modeStr, NewLines: newLines})
++}
++
+ func (m *Model) updateDimensions() {
+ 	layoutCfg := m.getLayout()
+ 
+@@ -941,8 +989,17 @@ func (m *Model) updateDimensions() {
+ 	m.aliasPicker.SetWidth(m.width)
+ }
+ 
+-// getLayout returns the current layout, using default if no provider.
++// getLayout returns the current layout configuration.
++// Uses Lua layout if set, otherwise falls back to provider or default.
+ func (m *Model) getLayout() layout.Config {
++	// Prefer Lua-pushed layout
++	if len(m.luaLayout.Top) > 0 || len(m.luaLayout.Bottom) > 0 {
++		return layout.Config{
++			Top:    m.luaLayout.Top,
++			Bottom: m.luaLayout.Bottom,
++		}
++	}
++	// Fall back to provider (for Go-defined layouts)
+ 	if m.layoutProvider != nil {
+ 		return m.layoutProvider.Layout()
+ 	}
+@@ -1068,7 +1125,12 @@ func (m Model) View() string {
+ 
+ // renderComponent renders a component by name.
+ func (m Model) renderComponent(name string) string {
+-	// Built-in components
++	// Check Lua-defined bars first (allows overriding built-ins like "status")
++	if content, ok := m.barContent[name]; ok {
++		return m.renderBarContent(content)
++	}
++
++	// Built-in components (fallback if no Lua bar defined)
+ 	switch name {
+ 	case "input":
+ 		// Overlay (if active) > separator > input > separator
+@@ -1096,11 +1158,6 @@ func (m Model) renderComponent(name string) string {
+ 		return "" // Hidden when empty
+ 	}
+ 
+-	// Lua-defined bar (from cache)
+-	if content, ok := m.barCache[name]; ok {
+-		return m.renderBarContent(content)
+-	}
+-
+ 	// Go-defined custom bar (legacy)
+ 	if m.layoutProvider != nil {
+ 		if bar := m.layoutProvider.Bar(name); bar != nil {
+@@ -1175,6 +1232,7 @@ func (m Model) renderBarContent(content layout.BarContent) string {
+ 	return left + strings.Repeat(" ", pad) + right
+ }
+ 
++
+ // renderPane renders a pane with optional title and borders.
+ func (m Model) renderPane(name string, pane *layout.PaneDef) string {
+ 	var parts []string
+@@ -1226,6 +1284,11 @@ func visibleLen(s string) int {
+ // keyToString converts a Bubble Tea key message to a normalized string.
+ // Returns empty string for keys we don't want to expose to Lua.
+ func keyToString(msg tea.KeyMsg) string {
++	// Handle regular character keys (e.g., "j", "G", "?")
++	if msg.Type == tea.KeyRunes && len(msg.Runes) > 0 {
++		return string(msg.Runes)
++	}
++
+ 	switch msg.Type {
+ 	case tea.KeyCtrlA:
+ 		return "ctrl+a"
+diff --git a/ui/provider.go b/ui/provider.go
+index 6eb8fa3..69497f4 100644
+--- a/ui/provider.go
++++ b/ui/provider.go
+@@ -7,6 +7,24 @@ type DataProvider interface {
+ 	Aliases() []AliasInfo
+ }
+ 
++// PushUI extends mud.UI with push-based methods for Lua-driven UI.
++// Session uses this interface to push updates to the UI without the UI
++// needing to call back into Session (which would be thread-unsafe).
++type PushUI interface {
++	// UpdateBars pushes rendered bar content from Session.
++	UpdateBars(content map[string]BarContent)
++
++	// UpdateBinds pushes the set of bound keys from Session.
++	UpdateBinds(keys map[string]bool)
++
++	// UpdateLayout pushes layout configuration from Session.
++	UpdateLayout(top, bottom []string)
++
++	// Outbound returns a channel of messages from UI to Session.
++	// Session reads ExecuteBindMsg, WindowSizeChangedMsg, etc.
++	Outbound() <-chan any
++}
++
+ // CommandInfo represents a slash command for the UI.
+ type CommandInfo struct {
+ 	Name        string
+diff --git a/ui/tui.go b/ui/tui.go
+index 5de1208..102ed53 100644
+--- a/ui/tui.go
++++ b/ui/tui.go
+@@ -17,6 +17,10 @@ type BubbleTeaUI struct {
+ 	// This decouples callers from tea.Program.Send() which can block.
+ 	msgQueue chan tea.Msg
+ 
++	// Outbound messages from UI to Session (e.g., ExecuteBindMsg, WindowSizeChangedMsg)
++	// Session reads from this channel in its event loop.
++	outbound chan any
++
+ 	// Shutdown coordination
+ 	done     chan struct{}
+ 	doneOnce sync.Once
+@@ -30,6 +34,7 @@ func NewBubbleTeaUI() *BubbleTeaUI {
+ 	return &BubbleTeaUI{
+ 		inputChan: make(chan string, 2048),
+ 		msgQueue:  make(chan tea.Msg, 4096),
++		outbound:  make(chan any, 256),
+ 		done:      make(chan struct{}),
+ 	}
+ }
+@@ -80,7 +85,7 @@ func (b *BubbleTeaUI) SetDataProvider(p DataProvider) {
+ 
+ // Run implements mud.UI - starts the TUI and blocks until exit.
+ func (b *BubbleTeaUI) Run() error {
+-	model := NewModel(b.inputChan, b.provider)
++	model := NewModel(b.inputChan, b.outbound, b.provider)
+ 
+ 	b.program = tea.NewProgram(
+ 		model,
+@@ -171,3 +176,28 @@ func (b *BubbleTeaUI) ClearPane(name string) {
+ func (b *BubbleTeaUI) BindPaneKey(key, name string) {
+ 	b.send(PaneBindMsg{Key: key, Name: name})
+ }
++
++// --- Push-based messages from Session to UI ---
++
++// UpdateBars sends rendered bar content from Session to UI.
++func (b *BubbleTeaUI) UpdateBars(content map[string]BarContent) {
++	b.send(UpdateBarsMsg(content))
++}
++
++// UpdateBinds sends the current set of bound keys from Session to UI.
++func (b *BubbleTeaUI) UpdateBinds(keys map[string]bool) {
++	b.send(UpdateBindsMsg(keys))
++}
++
++// UpdateLayout sends layout configuration from Session to UI.
++func (b *BubbleTeaUI) UpdateLayout(top, bottom []string) {
++	b.send(UpdateLayoutMsg{Top: top, Bottom: bottom})
++}
++
++// --- Outbound messages from UI to Session ---
++
++// Outbound returns a channel of messages from UI to Session.
++// Session should read from this channel in its event loop.
++func (b *BubbleTeaUI) Outbound() <-chan any {
++	return b.outbound
++}
