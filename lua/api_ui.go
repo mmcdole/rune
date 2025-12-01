@@ -4,22 +4,7 @@ import glua "github.com/yuin/gopher-lua"
 
 // registerUIFuncs registers all UI-related API functions
 func (e *Engine) registerUIFuncs() {
-	e.registerStatusFuncs()
 	e.registerPaneFuncs()
-	e.registerInfobarFuncs()
-}
-
-// registerStatusFuncs registers internal rune._status.* primitives (wrapped by Lua)
-func (e *Engine) registerStatusFuncs() {
-	statusTable := e.L.NewTable()
-	e.L.SetField(e.runeTable, "_status", statusTable)
-
-	// rune._status.set(text): Set the status bar text
-	e.L.SetField(statusTable, "set", e.L.NewFunction(func(L *glua.LState) int {
-		text := L.CheckString(1)
-		e.ui.SetStatus(text)
-		return 0
-	}))
 }
 
 // registerPaneFuncs registers internal rune._pane.* primitives (wrapped by Lua)
@@ -53,19 +38,6 @@ func (e *Engine) registerPaneFuncs() {
 	e.L.SetField(paneTable, "clear", e.L.NewFunction(func(L *glua.LState) int {
 		name := L.CheckString(1)
 		e.ui.PaneClear(name)
-		return 0
-	}))
-}
-
-// registerInfobarFuncs registers internal rune._infobar.* primitives (wrapped by Lua)
-func (e *Engine) registerInfobarFuncs() {
-	infobarTable := e.L.NewTable()
-	e.L.SetField(e.runeTable, "_infobar", infobarTable)
-
-	// rune._infobar.set(text): Set the info bar from Lua
-	e.L.SetField(infobarTable, "set", e.L.NewFunction(func(L *glua.LState) int {
-		text := L.CheckString(1)
-		e.ui.SetInfobar(text)
 		return 0
 	}))
 }

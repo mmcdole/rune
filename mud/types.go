@@ -57,8 +57,6 @@ type UI interface {
 	Quit()                 // Request UI to exit
 
 	// Controller methods (no-op for ConsoleUI)
-	SetStatus(text string)
-	SetInfobar(text string)
 	CreatePane(name string)
 	WritePane(name, text string)
 	TogglePane(name string)

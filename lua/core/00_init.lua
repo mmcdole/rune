@@ -118,13 +118,6 @@ end
 -- UI
 -- =============================================================================
 
--- Status bar
-rune.status = {}
-
-function rune.status.set(text)
-    rune._status.set(text)
-end
-
 -- Panes
 rune.pane = {}
 
@@ -142,13 +135,6 @@ end
 
 function rune.pane.clear(name)
     rune._pane.clear(name)
-end
-
--- Info bar
-rune.infobar = {}
-
-function rune.infobar.set(text)
-    rune._infobar.set(text)
 end
 
 -- =============================================================================

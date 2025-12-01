@@ -21,8 +21,6 @@ type NetworkService interface {
 // UIService handles visual elements.
 type UIService interface {
 	Print(text string)
-	SetStatus(text string)
-	SetInfobar(text string)
 
 	// Pane operations
 	PaneCreate(name string)

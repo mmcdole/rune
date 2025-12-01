@@ -26,10 +26,8 @@ type MockHost struct {
 	ConnectCalls    []string
 	DisconnectCalls int
 	ReloadCalls     int
-	LoadCalls       []string
-	StatusCalls     []string
-	InfobarCalls    []string
-	PaneCalls       []struct{ Op, Name, Data string }
+	LoadCalls []string
+	PaneCalls []struct{ Op, Name, Data string }
 	ScheduledTimers []struct {
 		ID       int
 		Duration time.Duration
@@ -84,18 +82,6 @@ func (m *MockHost) Load(path string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.LoadCalls = append(m.LoadCalls, path)
-}
-
-func (m *MockHost) SetStatus(text string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.StatusCalls = append(m.StatusCalls, text)
-}
-
-func (m *MockHost) SetInfobar(text string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.InfobarCalls = append(m.InfobarCalls, text)
 }
 
 func (m *MockHost) PaneCreate(name string) {

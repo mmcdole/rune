@@ -5,9 +5,8 @@ package layout
 //
 // Built-in component names:
 //   - "input": the input line (1 line)
-//   - "status": the status bar (1 line)
+//   - "status": the status bar (1 line, fallback if no Lua bar registered)
 //   - "separator": a horizontal line (1 line)
-//   - "infobar": Lua-controlled info line, only shown if set (0-1 lines)
 //
 // If no layout provider is set, the default layout is:
 //

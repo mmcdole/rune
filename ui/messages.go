@@ -56,12 +56,6 @@ func doTick() tea.Cmd {
 	})
 }
 
-// StatusTextMsg updates the status bar text from Lua.
-type StatusTextMsg string
-
-// InfobarMsg updates the info bar (above input line) from Lua.
-type InfobarMsg string
-
 // PaneWriteMsg appends a line to a named pane.
 type PaneWriteMsg struct {
 	Name string

@@ -133,16 +133,6 @@ func (b *BubbleTeaUI) SetConnectionState(state ConnectionState, addr string) {
 	b.send(ConnectionStateMsg{State: state, Address: addr})
 }
 
-// SetStatus sets the status bar text (called from Lua via rune.status.set).
-func (b *BubbleTeaUI) SetStatus(text string) {
-	b.send(StatusTextMsg(text))
-}
-
-// SetInfobar sets the info bar text (called from Lua via rune.infobar.set).
-func (b *BubbleTeaUI) SetInfobar(text string) {
-	b.send(InfobarMsg(text))
-}
-
 // CreatePane creates a new named pane.
 func (b *BubbleTeaUI) CreatePane(name string) {
 	b.send(PaneCreateMsg{Name: name})

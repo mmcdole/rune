@@ -69,14 +69,6 @@ func (a *LuaAdapter) Print(text string) {
 	a.ui.RenderDisplayLine(text)
 }
 
-func (a *LuaAdapter) SetStatus(text string) {
-	a.ui.SetStatus(text)
-}
-
-func (a *LuaAdapter) SetInfobar(text string) {
-	a.ui.SetInfobar(text)
-}
-
 func (a *LuaAdapter) PaneCreate(name string) {
 	a.ui.CreatePane(name)
 }

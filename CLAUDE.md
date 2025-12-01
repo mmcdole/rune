@@ -89,9 +89,9 @@ Go provides internal primitives (`rune._*`), wrapped by Lua for the public API:
 - `rune.regex.match(pattern, text)` - Match using Go's regexp (cached)
 
 **UI:**
-- `rune.status.set(text)` - Set status bar
 - `rune.pane.create(name)`, `rune.pane.write(name, text)`, `rune.pane.toggle(name)`, `rune.pane.clear(name)`
-- `rune.infobar.set(text)` - Set info bar
+- `rune.ui.bar(name, render_fn)` - Register a reactive bar renderer
+- `rune.ui.layout({top=..., bottom=...})` - Set layout configuration
 
 **Config:**
 - `rune.config_dir` - Path to ~/.config/rune

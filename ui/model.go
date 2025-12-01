@@ -56,9 +56,8 @@ type Model struct {
 	}
 
 	// State
-	lastPrompt  string // For deduplication
-	infobar     string // Lua-controlled info bar (above input)
-	width       int
+	lastPrompt string // For deduplication
+	width      int
 	height      int
 	inputChan   chan<- string
 	outbound    chan<- any // Messages from UI to Session
@@ -213,16 +212,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Connection state
 	case ConnectionStateMsg:
 		m.status.SetConnectionState(status.ConnectionState(msg.State), msg.Address)
-		return m, nil
-
-	// Status text from Lua
-	case StatusTextMsg:
-		m.status.SetText(string(msg))
-		return m, nil
-
-	// Info bar from Lua
-	case InfobarMsg:
-		m.infobar = string(msg)
 		return m, nil
 
 	// Pane operations from Lua
@@ -662,11 +651,6 @@ func (m *Model) componentHeight(name string) int {
 		return 1
 	case "separator":
 		return 1
-	case "infobar":
-		if m.infobar != "" {
-			return 1
-		}
-		return 0 // Hidden when empty
 	}
 
 	// Custom bar
@@ -768,11 +752,6 @@ func (m Model) renderComponent(name string) string {
 		return m.status.View()
 	case "separator":
 		return m.borderLine()
-	case "infobar":
-		if m.infobar != "" {
-			return m.infobar
-		}
-		return "" // Hidden when empty
 	}
 
 	// Go-defined custom bar (legacy)
