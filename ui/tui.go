@@ -153,11 +153,6 @@ func (b *BubbleTeaUI) ClearPane(name string) {
 	b.send(PaneClearMsg{Name: name})
 }
 
-// BindPaneKey binds a key to toggle a pane.
-func (b *BubbleTeaUI) BindPaneKey(key, name string) {
-	b.send(PaneBindMsg{Key: key, Name: name})
-}
-
 // --- Push-based messages from Session to UI ---
 
 // UpdateBars sends rendered bar content from Session to UI.

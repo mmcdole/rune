@@ -229,10 +229,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.panes.Clear(msg.Name)
 		return m, nil
 
-	case PaneBindMsg:
-		m.panes.BindKey(msg.Key, msg.Name)
-		return m, nil
-
 	// Key handling
 	case tea.KeyMsg:
 		return m.handleKey(msg)
@@ -289,15 +285,6 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		} else {
 			// Key is bound in Lua - send to Session for execution
 			m.sendOutbound(ExecuteBindMsg(keyStr))
-			return m, nil
-		}
-	}
-
-	// Check for bound pane toggle keys (only when input is empty)
-	if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 && m.input.Value() == "" {
-		key := string(msg.Runes)
-		if m.panes.HandleKey(key) {
-			m.updateDimensions()
 			return m, nil
 		}
 	}

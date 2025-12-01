@@ -77,12 +77,6 @@ type PaneClearMsg struct {
 	Name string
 }
 
-// PaneBindMsg binds a key to toggle a pane.
-type PaneBindMsg struct {
-	Key  string
-	Name string
-}
-
 // --- Push-based UI Messages (Session -> UI) ---
 
 // UpdateBindsMsg pushes the current set of bound keys from Session to UI.

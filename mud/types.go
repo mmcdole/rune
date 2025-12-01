@@ -61,5 +61,4 @@ type UI interface {
 	WritePane(name, text string)
 	TogglePane(name string)
 	ClearPane(name string)
-	BindPaneKey(key, name string)
 }

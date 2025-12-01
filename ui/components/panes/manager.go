@@ -10,8 +10,7 @@ import (
 // Manager handles multiple named panes
 type Manager struct {
 	panes     map[string]*Pane
-	paneOrder []string          // Ordered list of pane names for deterministic rendering
-	keyBinds  map[string]string // key -> pane name
+	paneOrder []string // Ordered list of pane names for deterministic rendering
 	styles    style.Styles
 	width     int
 }
@@ -19,9 +18,8 @@ type Manager struct {
 // NewManager creates a new pane manager
 func NewManager(styles style.Styles) *Manager {
 	return &Manager{
-		panes:    make(map[string]*Pane),
-		keyBinds: make(map[string]string),
-		styles:   styles,
+		panes:  make(map[string]*Pane),
+		styles: styles,
 	}
 }
 
@@ -77,34 +75,6 @@ func (pm *Manager) Clear(name string) {
 		return
 	}
 	pane.Lines = pane.Lines[:0]
-}
-
-// BindKey binds a key to toggle a pane
-func (pm *Manager) BindKey(key, name string) {
-	pm.keyBinds[key] = name
-}
-
-// HandleKey checks if a key is bound and toggles the pane
-// Returns true if the key was handled
-func (pm *Manager) HandleKey(key string) bool {
-	name, exists := pm.keyBinds[key]
-	if !exists {
-		return false
-	}
-	pm.Toggle(name)
-	return true
-}
-
-// DebugBindings returns a string showing all key bindings (for debugging)
-func (pm *Manager) DebugBindings() string {
-	if len(pm.keyBinds) == 0 {
-		return "No key bindings"
-	}
-	result := "Key bindings: "
-	for k, v := range pm.keyBinds {
-		result += "[" + k + "]=" + v + " "
-	}
-	return result
 }
 
 // GetLines returns a copy of the lines from a named pane.
