@@ -136,11 +136,9 @@ type ShowPickerMsg struct {
 	Title      string        // Optional title/header for the picker (modal mode only)
 	Items      []GenericItem // Items to display
 	CallbackID string        // Opaque ID to track which Lua callback to run
-	// Prefix enables inline mode where the picker filters based on input line content.
-	// When set, the picker doesn't trap keys - it observes the input field instead.
-	// The filter text is the input value minus this prefix (e.g., "/" for slash commands).
-	// When empty, picker runs in modal mode and captures keyboard input.
-	Prefix string
+	// Inline mode: picker filters based on input content, doesn't trap keys.
+	// Modal mode (default): picker captures keyboard and has its own search field.
+	Inline bool
 }
 
 // SetInputMsg sets the input line content.

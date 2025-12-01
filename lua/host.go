@@ -32,8 +32,8 @@ type Host interface {
 	PaneOp(op, name, data string)
 
 	// Picker - Generic picker overlay for Lua-driven selection UI
-	// prefix enables inline mode: picker filters based on input line minus prefix
-	ShowPicker(title string, items []PickerItem, onSelect func(value string), prefix string)
+	// inline: if true, picker filters based on input; if false, picker captures keyboard
+	ShowPicker(title string, items []PickerItem, onSelect func(value string), inline bool)
 
 	// History - Get/Add input history
 	GetHistory() []string

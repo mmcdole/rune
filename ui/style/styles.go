@@ -26,10 +26,11 @@ type Styles struct {
 	InputCursor lipgloss.Style
 
 	// Overlay
-	OverlayBorder   lipgloss.Style
-	OverlaySelected lipgloss.Style
-	OverlayNormal   lipgloss.Style
-	OverlayMatch    lipgloss.Style
+	OverlayBorder        lipgloss.Style
+	OverlaySelected      lipgloss.Style
+	OverlayNormal        lipgloss.Style
+	OverlayMatch         lipgloss.Style
+	OverlayMatchSelected lipgloss.Style // Match highlighting on selected row
 
 	// Panes
 	PaneHeader lipgloss.Style
@@ -86,6 +87,10 @@ func DefaultStyles() Styles {
 			Foreground(lipgloss.Color("252")),
 		OverlayMatch: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("212")). // Magenta for matched chars
+			Bold(true),
+		OverlayMatchSelected: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("212")). // Magenta for matched chars
+			Background(lipgloss.Color("62")).  // Same background as OverlaySelected
 			Bold(true),
 
 		// Panes

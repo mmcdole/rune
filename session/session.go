@@ -446,8 +446,8 @@ func (s *Session) PaneOp(op, name, data string) {
 
 // ShowPicker displays a generic picker overlay.
 // Called from Lua via rune.ui.picker.show().
-// prefix enables inline mode where picker filters based on input content.
-func (s *Session) ShowPicker(title string, items []lua.PickerItem, onSelect func(string), prefix string) {
+// inline: if true, picker filters based on input; if false, picker captures keyboard.
+func (s *Session) ShowPicker(title string, items []lua.PickerItem, onSelect func(string), inline bool) {
 	if s.pushUI == nil {
 		return
 	}
@@ -471,7 +471,7 @@ func (s *Session) ShowPicker(title string, items []lua.PickerItem, onSelect func
 	}
 
 	// Push to UI
-	s.pushUI.ShowPicker(title, uiItems, id, prefix)
+	s.pushUI.ShowPicker(title, uiItems, id, inline)
 }
 
 // GetHistory returns the input history for Lua.

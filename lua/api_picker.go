@@ -21,12 +21,11 @@ func (e *Engine) registerPickerFuncs() {
 	//   title = "History",                  -- optional title (modal mode only)
 	//   items = {"item1", "item2"} or {{text="...", value="...", desc="..."}},
 	//   on_select = function(value) end     -- called with selected value
-	//   prefix = "/"                        -- optional: enables inline mode (filter = input minus prefix)
+	//   mode = "inline"                     -- optional: "inline" or "modal" (default)
 	//   match_description = true            -- optional: include description in fuzzy matching
 	// }
-	// If prefix is set, picker runs in inline mode: user types in main input,
-	// picker passively filters based on input content after the prefix.
-	// If prefix is not set, picker runs in modal mode: picker captures keyboard.
+	// Modal mode: picker captures keyboard and has its own search field.
+	// Inline mode: user types in main input, picker filters based on input content.
 	e.L.SetField(picker, "show", e.L.NewFunction(func(L *glua.LState) int {
 		opts := L.CheckTable(1)
 
@@ -36,10 +35,10 @@ func (e *Engine) registerPickerFuncs() {
 			title = titleVal.String()
 		}
 
-		// Parse prefix (optional - if set, enables inline mode)
-		prefix := ""
-		if prefixVal := L.GetField(opts, "prefix"); prefixVal != glua.LNil {
-			prefix = prefixVal.String()
+		// Parse mode (optional - "inline" or "modal", default "modal")
+		inline := false
+		if modeVal := L.GetField(opts, "mode"); modeVal != glua.LNil {
+			inline = modeVal.String() == "inline"
 		}
 
 		// Parse match_description (optional - include description in fuzzy matching)
@@ -76,7 +75,7 @@ func (e *Engine) registerPickerFuncs() {
 		}
 
 		// Call host to show the picker
-		e.host.ShowPicker(title, items, onSelect, prefix)
+		e.host.ShowPicker(title, items, onSelect, inline)
 		return 0
 	}))
 }

@@ -39,7 +39,9 @@ func (i GenericItem) Render(width int, selected bool, matches []int, s style.Sty
 	// Render Text portion with highlights (positions 0..len(Text)-1)
 	for idx, r := range i.Text {
 		ch := string(r)
-		if matchSet[idx] {
+		if matchSet[idx] && selected {
+			result.WriteString(s.OverlayMatchSelected.Render(ch))
+		} else if matchSet[idx] {
 			result.WriteString(s.OverlayMatch.Render(ch))
 		} else if selected {
 			result.WriteString(s.OverlaySelected.Render(ch))
@@ -63,7 +65,10 @@ func (i GenericItem) Render(width int, selected bool, matches []int, s style.Sty
 		descOffset := len(i.Text) + 1
 		for idx, r := range i.Description {
 			ch := string(r)
-			if i.MatchDesc && matchSet[descOffset+idx] {
+			isMatch := i.MatchDesc && matchSet[descOffset+idx]
+			if isMatch && selected {
+				result.WriteString(s.OverlayMatchSelected.Render(ch))
+			} else if isMatch {
 				result.WriteString(s.OverlayMatch.Render(ch))
 			} else if selected {
 				result.WriteString(s.OverlaySelected.Render(ch))

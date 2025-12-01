@@ -17,8 +17,8 @@ type PushUI interface {
 	UpdateHistory(history []string)
 
 	// ShowPicker displays the picker overlay with items.
-	// prefix enables inline mode: picker filters based on input line minus prefix.
-	ShowPicker(title string, items []GenericItem, callbackID string, prefix string)
+	// inline: if true, picker filters based on input; if false, picker captures keyboard.
+	ShowPicker(title string, items []GenericItem, callbackID string, inline bool)
 
 	// SetInput sets the input line content.
 	SetInput(text string)
