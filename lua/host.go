@@ -8,6 +8,7 @@ type PickerItem struct {
 	Text        string // Display text
 	Description string // Optional description
 	Value       string // Value returned on selection (defaults to Text if empty)
+	MatchDesc   bool   // If true, include Description in fuzzy matching
 }
 
 // Host provides the bridge between Engine and the rest of the system.
@@ -31,8 +32,8 @@ type Host interface {
 	PaneOp(op, name, data string)
 
 	// Picker - Generic picker overlay for Lua-driven selection UI
-	// filterPrefix enables "linked" mode: picker filters based on input line minus prefix
-	ShowPicker(title string, items []PickerItem, onSelect func(value string), filterPrefix string)
+	// prefix enables inline mode: picker filters based on input line minus prefix
+	ShowPicker(title string, items []PickerItem, onSelect func(value string), prefix string)
 
 	// History - Get/Add input history
 	GetHistory() []string

@@ -18,26 +18,34 @@ func (e *Engine) registerPickerFuncs() {
 
 	// rune.ui.picker.show(opts) - Show a picker overlay
 	// opts = {
-	//   title = "History",                -- optional title
+	//   title = "History",                  -- optional title (modal mode only)
 	//   items = {"item1", "item2"} or {{text="...", value="...", desc="..."}},
-	//   on_select = function(value) end   -- called with selected value
-	//   filter_prefix = "/"               -- optional: enables "linked" mode
+	//   on_select = function(value) end     -- called with selected value
+	//   prefix = "/"                        -- optional: enables inline mode (filter = input minus prefix)
+	//   match_description = true            -- optional: include description in fuzzy matching
 	// }
-	// In linked mode, the picker filters based on input line content minus the prefix.
-	// Keys pass through to the input field instead of being trapped by the picker.
+	// If prefix is set, picker runs in inline mode: user types in main input,
+	// picker passively filters based on input content after the prefix.
+	// If prefix is not set, picker runs in modal mode: picker captures keyboard.
 	e.L.SetField(picker, "show", e.L.NewFunction(func(L *glua.LState) int {
 		opts := L.CheckTable(1)
 
-		// Parse title (optional)
+		// Parse title (optional - used in modal mode header)
 		title := ""
 		if titleVal := L.GetField(opts, "title"); titleVal != glua.LNil {
 			title = titleVal.String()
 		}
 
-		// Parse filter_prefix (optional - enables linked mode)
-		filterPrefix := ""
-		if prefixVal := L.GetField(opts, "filter_prefix"); prefixVal != glua.LNil {
-			filterPrefix = prefixVal.String()
+		// Parse prefix (optional - if set, enables inline mode)
+		prefix := ""
+		if prefixVal := L.GetField(opts, "prefix"); prefixVal != glua.LNil {
+			prefix = prefixVal.String()
+		}
+
+		// Parse match_description (optional - include description in fuzzy matching)
+		matchDesc := false
+		if mdVal := L.GetField(opts, "match_description"); mdVal != glua.LNil {
+			matchDesc = glua.LVAsBool(mdVal)
 		}
 
 		// Parse items
@@ -47,7 +55,7 @@ func (e *Engine) registerPickerFuncs() {
 			L.RaiseError("picker: items must be a table")
 			return 0
 		}
-		items := parsePickerItems(L, itemsTbl)
+		items := parsePickerItems(L, itemsTbl, matchDesc)
 
 		// Parse on_select callback
 		onSelectVal := L.GetField(opts, "on_select")
@@ -68,21 +76,21 @@ func (e *Engine) registerPickerFuncs() {
 		}
 
 		// Call host to show the picker
-		e.host.ShowPicker(title, items, onSelect, filterPrefix)
+		e.host.ShowPicker(title, items, onSelect, prefix)
 		return 0
 	}))
 }
 
 // parsePickerItems parses a Lua table into []PickerItem.
 // Supports both simple strings and tables with text/value/desc fields.
-func parsePickerItems(L *glua.LState, tbl *glua.LTable) []PickerItem {
+func parsePickerItems(L *glua.LState, tbl *glua.LTable, matchDesc bool) []PickerItem {
 	var items []PickerItem
 	tbl.ForEach(func(k, v glua.LValue) {
 		switch item := v.(type) {
 		case glua.LString:
 			// Simple string: text and value are the same
 			s := string(item)
-			items = append(items, PickerItem{Text: s, Value: s})
+			items = append(items, PickerItem{Text: s, Value: s, MatchDesc: matchDesc})
 		case *glua.LTable:
 			// Table with text, value, desc fields
 			text := L.GetField(item, "text").String()
@@ -95,7 +103,7 @@ func parsePickerItems(L *glua.LState, tbl *glua.LTable) []PickerItem {
 			if value == "" {
 				value = text
 			}
-			items = append(items, PickerItem{Text: text, Description: desc, Value: value})
+			items = append(items, PickerItem{Text: text, Description: desc, Value: value, MatchDesc: matchDesc})
 		}
 	})
 	return items

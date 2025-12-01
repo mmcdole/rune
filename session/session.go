@@ -446,8 +446,8 @@ func (s *Session) PaneOp(op, name, data string) {
 
 // ShowPicker displays a generic picker overlay.
 // Called from Lua via rune.ui.picker.show().
-// filterPrefix enables "linked" mode where picker filters based on input content.
-func (s *Session) ShowPicker(title string, items []lua.PickerItem, onSelect func(string), filterPrefix string) {
+// prefix enables inline mode where picker filters based on input content.
+func (s *Session) ShowPicker(title string, items []lua.PickerItem, onSelect func(string), prefix string) {
 	if s.pushUI == nil {
 		return
 	}
@@ -466,11 +466,12 @@ func (s *Session) ShowPicker(title string, items []lua.PickerItem, onSelect func
 			Text:        item.Text,
 			Description: item.Description,
 			Value:       item.Value,
+			MatchDesc:   item.MatchDesc,
 		}
 	}
 
 	// Push to UI
-	s.pushUI.ShowPicker(title, uiItems, id, filterPrefix)
+	s.pushUI.ShowPicker(title, uiItems, id, prefix)
 }
 
 // GetHistory returns the input history for Lua.

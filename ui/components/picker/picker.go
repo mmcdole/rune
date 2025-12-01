@@ -52,6 +52,12 @@ func (m *Model[T]) SetWidth(w int) {
 	m.width = w
 }
 
+// SetHeader updates the picker's header text.
+// If empty, the header row (and query input visualization) is hidden.
+func (m *Model[T]) SetHeader(header string) {
+	m.config.Header = header
+}
+
 // Width returns the current width.
 func (m *Model[T]) Width() int {
 	return m.width

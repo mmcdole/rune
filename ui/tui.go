@@ -191,9 +191,9 @@ func (b *BubbleTeaUI) UpdateHistory(history []string) {
 }
 
 // ShowPicker displays a picker overlay with items.
-// filterPrefix enables "linked" mode: picker filters based on input line minus prefix.
-func (b *BubbleTeaUI) ShowPicker(title string, items []GenericItem, callbackID string, filterPrefix string) {
-	b.send(ShowPickerMsg{Title: title, Items: items, CallbackID: callbackID, FilterPrefix: filterPrefix})
+// prefix enables inline mode: picker filters based on input line minus prefix.
+func (b *BubbleTeaUI) ShowPicker(title string, items []GenericItem, callbackID string, prefix string) {
+	b.send(ShowPickerMsg{Title: title, Items: items, CallbackID: callbackID, Prefix: prefix})
 }
 
 // SetInput sets the input line content.

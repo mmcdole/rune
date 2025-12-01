@@ -19,11 +19,12 @@ rune.bind("/", function()
         })
     end
 
-    -- Open picker in linked mode
+    -- Open picker in inline mode
     -- The picker filters based on input content after "/"
     rune.ui.picker.show({
         items = items,
-        filter_prefix = "/",
+        prefix = "/",
+        match_description = true,  -- Include description in fuzzy matching
         on_select = function(val)
             -- Selection completes - the UI already set input to "/command "
             -- No action needed here

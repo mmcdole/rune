@@ -133,13 +133,14 @@ type BarContent = layout.BarContent
 // ShowPickerMsg requests the UI to display a picker overlay.
 // Sent from Session to UI when Lua calls rune.ui.picker.show().
 type ShowPickerMsg struct {
-	Title      string        // Optional title/header for the picker
+	Title      string        // Optional title/header for the picker (modal mode only)
 	Items      []GenericItem // Items to display
 	CallbackID string        // Opaque ID to track which Lua callback to run
-	// FilterPrefix enables "linked" mode where the picker filters based on input line content.
+	// Prefix enables inline mode where the picker filters based on input line content.
 	// When set, the picker doesn't trap keys - it observes the input field instead.
 	// The filter text is the input value minus this prefix (e.g., "/" for slash commands).
-	FilterPrefix string
+	// When empty, picker runs in modal mode and captures keyboard input.
+	Prefix string
 }
 
 // SetInputMsg sets the input line content.

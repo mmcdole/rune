@@ -39,8 +39,8 @@ type Model struct {
 	picker       *picker.Model[GenericItem]
 	pickerActive bool
 	pickerCB     string // Current callback ID for picker selection
-	pickerLinked bool   // True if picker is "linked" to input (filters based on input content)
-	pickerPrefix string // Prefix for linked mode (e.g., "/" for slash commands)
+	pickerInline bool   // True if picker is in inline mode (filters based on input content)
+	pickerPrefix string // Prefix for inline mode (e.g., "/" for slash commands)
 
 	// History state - pushed from Session
 	history      []string
@@ -161,10 +161,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pickerCB = msg.CallbackID
 		m.pickerActive = true
 
-		// Check for linked mode (picker filters based on input content)
-		if msg.FilterPrefix != "" {
-			m.pickerLinked = true
-			m.pickerPrefix = msg.FilterPrefix
+		// Check for inline mode (picker filters based on input content)
+		if msg.Prefix != "" {
+			// Inline mode: User types in main input, picker filters passively.
+			// Hide the picker's internal header to avoid duplicate search UI.
+			m.picker.SetHeader("")
+			m.pickerInline = true
+			m.pickerPrefix = msg.Prefix
 			// Filter immediately based on current input (minus prefix)
 			val := m.input.Value()
 			if strings.HasPrefix(val, m.pickerPrefix) {
@@ -173,7 +176,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.picker.Filter("")
 			}
 		} else {
-			m.pickerLinked = false
+			// Modal mode: Picker traps keys and shows its own search header.
+			// Add ": " suffix for the search prompt display (e.g., "History: query█")
+			header := msg.Title
+			if header != "" {
+				header += ": "
+			}
+			m.picker.SetHeader(header)
+			m.pickerInline = false
 			m.pickerPrefix = ""
 			m.picker.Filter("") // Reset filter for modal mode
 		}
@@ -301,7 +311,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Modal picker handling (non-linked mode traps all keys)
-	if m.pickerActive && !m.pickerLinked {
+	if m.pickerActive && !m.pickerInline {
 		return m.handlePickerKey(msg)
 	}
 
@@ -328,7 +338,7 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Linked picker mode: Up/Down navigate picker, Tab completes
-	if m.pickerActive && m.pickerLinked {
+	if m.pickerActive && m.pickerInline {
 		switch msg.Type {
 		case tea.KeyUp:
 			m.picker.SelectUp()
@@ -348,7 +358,7 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				})
 			}
 			m.pickerActive = false
-			m.pickerLinked = false
+			m.pickerInline = false
 			m.picker.Reset()
 			return m, nil
 		case tea.KeyEnter:
@@ -361,7 +371,7 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				})
 			}
 			m.pickerActive = false
-			m.pickerLinked = false
+			m.pickerInline = false
 			m.picker.Reset()
 			// Fall through to normal Enter handling below
 		}
@@ -442,7 +452,7 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // updateLinkedPicker updates the linked picker filter based on input content.
 // Closes the picker if the prefix is deleted.
 func (m *Model) updateLinkedPicker() {
-	if !m.pickerActive || !m.pickerLinked {
+	if !m.pickerActive || !m.pickerInline {
 		return
 	}
 
@@ -451,7 +461,7 @@ func (m *Model) updateLinkedPicker() {
 	// If user backspaced past the prefix, close picker
 	if !strings.HasPrefix(val, m.pickerPrefix) {
 		m.pickerActive = false
-		m.pickerLinked = false
+		m.pickerInline = false
 		m.sendOutbound(PickerSelectMsg{CallbackID: m.pickerCB, Accepted: false})
 		m.picker.Reset()
 		return
