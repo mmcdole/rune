@@ -694,32 +694,37 @@ func (m *Model) dockHeight(components []string) int {
 	return height
 }
 
-// componentHeight returns the height of a single component.
-func (m *Model) componentHeight(name string) int {
+// getComponent returns a Component adapter for the given name.
+// Returns nil if the name is unknown.
+func (m *Model) getComponent(name string) Component {
+	// Check bars first (allows overriding built-ins like "status")
+	if _, ok := m.barContent[name]; ok {
+		return &BarComponent{name: name, content: &m.barContent, width: &m.width}
+	}
+
+	// Built-in components
 	switch name {
 	case "input":
-		// separator + input + separator, plus picker overlay when active
-		h := 3 // top separator + input + bottom separator
-		if m.pickerActive() {
-			h += m.picker.Height()
-		}
-		return h
+		return &InputComponent{m: m}
 	case "status":
-		return 1
+		return &StatusComponent{status: &m.status}
 	case "separator":
-		return 1
+		return &SeparatorComponent{width: &m.width}
 	}
 
 	// Check pane manager
-	if h := m.panes.GetHeight(name); h > 0 {
-		return h
+	if m.panes.Exists(name) {
+		return &PaneComponent{manager: m.panes, name: name}
 	}
 
-	// Custom Lua bar (all bars are 1 line)
-	if _, ok := m.barContent[name]; ok {
-		return 1
-	}
+	return nil
+}
 
+// componentHeight returns the height of a single component.
+func (m *Model) componentHeight(name string) int {
+	if comp := m.getComponent(name); comp != nil {
+		return comp.Height()
+	}
 	return 0
 }
 
@@ -733,7 +738,7 @@ func (m Model) View() string {
 		return ""
 	}
 
-	// Recalculate viewport height (picker is part of input component)
+	// Recalculate viewport height
 	layoutCfg := m.getLayout()
 	topHeight := m.dockHeight(layoutCfg.Top)
 	bottomHeight := m.dockHeight(layoutCfg.Bottom)
@@ -745,94 +750,24 @@ func (m Model) View() string {
 
 	var parts []string
 
-	// 1. Top dock components
+	// Top dock components
 	for _, name := range layoutCfg.Top {
-		if rendered := m.renderComponent(name); rendered != "" {
-			parts = append(parts, rendered)
+		if comp := m.getComponent(name); comp != nil && comp.Height() > 0 {
+			parts = append(parts, comp.Render(m.width))
 		}
 	}
 
-	// 2. Main viewport (scrollback)
+	// Main viewport (scrollback)
 	parts = append(parts, m.viewport.View())
 
-	// 3. Bottom dock components (picker renders as part of "input")
+	// Bottom dock components
 	for _, name := range layoutCfg.Bottom {
-		if rendered := m.renderComponent(name); rendered != "" {
-			parts = append(parts, rendered)
+		if comp := m.getComponent(name); comp != nil && comp.Height() > 0 {
+			parts = append(parts, comp.Render(m.width))
 		}
 	}
 
 	return strings.Join(parts, "\n")
-}
-
-// renderComponent renders a component by name.
-func (m Model) renderComponent(name string) string {
-	// Check pushed bar content first (allows overriding built-ins like "status")
-	if content, ok := m.barContent[name]; ok {
-		return m.renderBarContent(content)
-	}
-
-	// Built-in components (fallback if no bar defined)
-	switch name {
-	case "input":
-		// Picker overlay (if active) > separator > input > separator
-		var parts []string
-		if m.pickerActive() {
-			parts = append(parts, m.picker.View())
-		}
-		parts = append(parts, m.borderLine())
-		parts = append(parts, m.input.View())
-		parts = append(parts, m.borderLine())
-		return strings.Join(parts, "\n")
-	case "status":
-		return m.status.View()
-	case "separator":
-		return m.borderLine()
-	}
-
-	// Check pane manager
-	if rendered := m.panes.RenderPane(name, m.width); rendered != "" {
-		return rendered
-	}
-
-	return ""
-}
-
-// renderBarContent renders BarContent with left/center/right alignment.
-func (m Model) renderBarContent(content ui.BarContent) string {
-	left := content.Left
-	center := content.Center
-	right := content.Right
-
-	leftLen := visibleLen(left)
-	centerLen := visibleLen(center)
-	rightLen := visibleLen(right)
-
-	// Calculate spacing
-	if center != "" {
-		// Three-part layout: left ... center ... right
-		leftPad := (m.width-centerLen)/2 - leftLen
-		if leftPad < 1 {
-			leftPad = 1
-		}
-		rightPad := m.width - leftLen - leftPad - centerLen - rightLen
-		if rightPad < 1 {
-			rightPad = 1
-		}
-		return left + strings.Repeat(" ", leftPad) + center + strings.Repeat(" ", rightPad) + right
-	}
-
-	// Two-part layout: left ... right
-	pad := m.width - leftLen - rightLen
-	if pad < 1 {
-		pad = 1
-	}
-	return left + strings.Repeat(" ", pad) + right
-}
-
-// visibleLen returns string length ignoring ANSI escape codes.
-func visibleLen(s string) int {
-	return util.VisibleLen(s)
 }
 
 // keyToString converts a Bubble Tea key message to a normalized string.

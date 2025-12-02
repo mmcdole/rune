@@ -69,6 +69,12 @@ func (pm *Manager) Clear(name string) {
 	pane.Lines = pane.Lines[:0]
 }
 
+// Exists returns true if a pane with the given name exists.
+func (pm *Manager) Exists(name string) bool {
+	_, ok := pm.panes[name]
+	return ok
+}
+
 // GetHeight returns the render height of a specific pane (if visible).
 // Returns 0 if pane doesn't exist or is hidden.
 func (pm *Manager) GetHeight(name string) int {
