@@ -1,4 +1,4 @@
-package mud
+package interfaces
 
 // EventType identifies the source of the message
 type EventType int

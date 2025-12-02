@@ -6,22 +6,22 @@ import (
 	"github.com/drake/rune/ui/style"
 )
 
-// GenericItem is a general purpose picker item for Lua-driven lists.
-type GenericItem struct {
+// PickerItem is a general purpose picker item for Lua-driven lists.
+type PickerItem struct {
 	Text        string
 	Description string
 	Value       string // ID or Value passed back to Lua
 	MatchDesc   bool   // If true, include Description in fuzzy matching
 }
 
-func (i GenericItem) FilterValue() string {
+func (i PickerItem) FilterValue() string {
 	if i.MatchDesc && i.Description != "" {
 		return i.Text + " " + i.Description
 	}
 	return i.Text
 }
 
-func (i GenericItem) Render(width int, selected bool, matches []int, s style.Styles) string {
+func (i PickerItem) Render(width int, selected bool, matches []int, s style.Styles) string {
 	prefix := "  "
 	if selected {
 		prefix = "> "

@@ -36,7 +36,7 @@ type Model struct {
 	styles     style.Styles
 
 	// Generic picker (replaces slashPicker, historyPicker, aliasPicker)
-	picker       *picker.Model[GenericItem]
+	picker       *picker.Model[PickerItem]
 	pickerActive bool
 	pickerCB     string // Current callback ID for picker selection
 	pickerInline bool   // True if picker is in inline mode (filters based on input content)
@@ -80,7 +80,7 @@ func NewModel(inputChan chan<- string, outbound chan<- any) Model {
 		panes:      panes.NewManager(styles),
 		styles:     styles,
 		// Single generic picker
-		picker: picker.New[GenericItem](picker.Config{
+		picker: picker.New[PickerItem](picker.Config{
 			MaxVisible: 10,
 			EmptyText:  "No matches",
 		}, styles),
@@ -581,7 +581,6 @@ func (m *Model) updateDimensions() {
 	m.viewport.SetDimensions(m.width, viewportHeight)
 	m.input.SetWidth(m.width)
 	m.status.SetWidth(m.width)
-	m.panes.SetWidth(m.width)
 	m.picker.SetWidth(m.width)
 }
 
@@ -625,13 +624,19 @@ func (m *Model) componentHeight(name string) int {
 		return 1
 	case "separator":
 		return 1
-	default:
-		// Custom Lua bar (all bars are 1 line)
-		if _, ok := m.barContent[name]; ok {
-			return 1
-		}
-		return 0
 	}
+
+	// Check pane manager
+	if h := m.panes.GetHeight(name); h > 0 {
+		return h
+	}
+
+	// Custom Lua bar (all bars are 1 line)
+	if _, ok := m.barContent[name]; ok {
+		return 1
+	}
+
+	return 0
 }
 
 // View implements tea.Model.
@@ -699,6 +704,11 @@ func (m Model) renderComponent(name string) string {
 		return m.status.View()
 	case "separator":
 		return m.borderLine()
+	}
+
+	// Check pane manager
+	if rendered := m.panes.RenderPane(name, m.width); rendered != "" {
+		return rendered
 	}
 
 	return ""

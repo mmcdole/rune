@@ -33,14 +33,11 @@ func (s ConnectionState) String() string {
 }
 
 // Bar displays connection state, scroll mode, and other indicators.
+// This is the default system status bar, used when Lua doesn't define
+// a bar named "status" via rune.ui.bar("status", fn).
 type Bar struct {
-	// Lua-driven text (if set, overrides connection display)
-	luaText string
-
-	// Fallback connection state (used if luaText is empty)
 	connState  ConnectionState
 	serverAddr string
-
 	scrollMode viewport.ScrollMode
 	newLines   int
 	width      int
@@ -60,12 +57,7 @@ func (s *Bar) SetWidth(w int) {
 	s.width = w
 }
 
-// SetText sets the status bar text from Lua (overrides connection display).
-func (s *Bar) SetText(text string) {
-	s.luaText = text
-}
-
-// SetConnectionState updates the connection status (fallback if no Lua text).
+// SetConnectionState updates the connection status.
 func (s *Bar) SetConnectionState(state ConnectionState, addr string) {
 	s.connState = state
 	s.serverAddr = addr
@@ -77,22 +69,17 @@ func (s *Bar) SetScrollMode(mode viewport.ScrollMode, newLines int) {
 	s.newLines = newLines
 }
 
-// View renders the status bar.
+// View renders the default system status bar.
 func (s *Bar) View() string {
-	// Left section: Lua text or connection status
+	// Left section: Connection state
 	var left string
-	if s.luaText != "" {
-		left = s.luaText
-	} else {
-		// Fallback to connection state
-		switch s.connState {
-		case StateConnected:
-			left = s.styles.StatusConnected.Render("● " + s.serverAddr)
-		case StateConnecting:
-			left = s.styles.StatusConnecting.Render("● Connecting...")
-		case StateDisconnected:
-			left = s.styles.StatusDisconnected.Render("● Disconnected")
-		}
+	switch s.connState {
+	case StateConnected:
+		left = s.styles.StatusConnected.Render("● " + s.serverAddr)
+	case StateConnecting:
+		left = s.styles.StatusConnecting.Render("● Connecting...")
+	case StateDisconnected:
+		left = s.styles.StatusDisconnected.Render("● Disconnected")
 	}
 
 	// Right section: scroll mode

@@ -172,7 +172,7 @@ func (b *BubbleTeaUI) UpdateLayout(top, bottom []string) {
 
 // ShowPicker displays a picker overlay with items.
 // inline: if true, picker filters based on input; if false, picker captures keyboard.
-func (b *BubbleTeaUI) ShowPicker(title string, items []GenericItem, callbackID string, inline bool) {
+func (b *BubbleTeaUI) ShowPicker(title string, items []PickerItem, callbackID string, inline bool) {
 	b.send(ShowPickerMsg{Title: title, Items: items, CallbackID: callbackID, Inline: inline})
 }
 

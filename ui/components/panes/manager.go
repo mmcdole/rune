@@ -9,10 +9,8 @@ import (
 
 // Manager handles multiple named panes
 type Manager struct {
-	panes     map[string]*Pane
-	paneOrder []string // Ordered list of pane names for deterministic rendering
-	styles    style.Styles
-	width     int
+	panes  map[string]*Pane
+	styles style.Styles
 }
 
 // NewManager creates a new pane manager
@@ -21,11 +19,6 @@ func NewManager(styles style.Styles) *Manager {
 		panes:  make(map[string]*Pane),
 		styles: styles,
 	}
-}
-
-// SetWidth updates the rendering width
-func (pm *Manager) SetWidth(w int) {
-	pm.width = w
 }
 
 // Create creates a new pane with the given name
@@ -39,7 +32,6 @@ func (pm *Manager) Create(name string) {
 		Visible: false,
 		Height:  10, // Default height
 	}
-	pm.paneOrder = append(pm.paneOrder, name)
 }
 
 // Write appends a line to the named pane
@@ -77,83 +69,55 @@ func (pm *Manager) Clear(name string) {
 	pane.Lines = pane.Lines[:0]
 }
 
-// GetLines returns a copy of the lines from a named pane.
-func (pm *Manager) GetLines(name string) []string {
-	pane, exists := pm.panes[name]
-	if !exists {
-		return nil
+// GetHeight returns the render height of a specific pane (if visible).
+// Returns 0 if pane doesn't exist or is hidden.
+func (pm *Manager) GetHeight(name string) int {
+	pane, ok := pm.panes[name]
+	if !ok || !pane.Visible {
+		return 0
 	}
-	// Return a copy
-	result := make([]string, len(pane.Lines))
-	copy(result, pane.Lines)
-	return result
+	// Height + 1 (Header) + 1 (Bottom Border)
+	return pane.Height + 2
 }
 
-// HasVisiblePane returns true if any pane is visible
-func (pm *Manager) HasVisiblePane() bool {
-	for _, pane := range pm.panes {
-		if pane.Visible {
-			return true
-		}
+// RenderPane returns the rendered string for a single pane.
+// Returns empty string if pane doesn't exist or is hidden.
+func (pm *Manager) RenderPane(name string, width int) string {
+	pane, ok := pm.panes[name]
+	if !ok || !pane.Visible {
+		return ""
 	}
-	return false
-}
 
-// VisibleHeight returns the total height of all visible panes
-func (pm *Manager) VisibleHeight() int {
-	height := 0
-	for _, pane := range pm.panes {
-		if pane.Visible {
-			height += pane.Height + 2 // +1 for header, +1 for bottom border
-		}
-	}
-	return height
-}
-
-// View renders all visible panes
-func (pm *Manager) View() string {
 	var parts []string
 
-	for _, name := range pm.paneOrder {
-		pane := pm.panes[name]
-		if !pane.Visible {
-			continue
-		}
-
-		// Header line with box drawing
-		header := pm.styles.PaneHeader.Render(" " + pane.Name + " ")
-		headerPad := pm.width - util.VisibleLen(header)
-		if headerPad > 0 {
-			header += pm.styles.PaneBorder.Render(strings.Repeat("─", headerPad))
-		}
-		parts = append(parts, header)
-
-		// Content - show last N lines
-		startIdx := 0
-		if len(pane.Lines) > pane.Height {
-			startIdx = len(pane.Lines) - pane.Height
-		}
-
-		linesShown := 0
-		for i := startIdx; i < len(pane.Lines); i++ {
-			parts = append(parts, pane.Lines[i])
-			linesShown++
-		}
-
-		// Show "(empty)" if pane has no content
-		if len(pane.Lines) == 0 {
-			parts = append(parts, pm.styles.Muted.Render("  (empty)"))
-			linesShown++
-		}
-
-		// Pad if not enough lines
-		for i := linesShown; i < pane.Height; i++ {
-			parts = append(parts, "")
-		}
-
-		// Bottom border
-		parts = append(parts, pm.styles.PaneBorder.Render(strings.Repeat("─", pm.width)))
+	// 1. Header
+	title := pm.styles.PaneHeader.Render(" " + pane.Name + " ")
+	titlePad := width - util.VisibleLen(title)
+	if titlePad > 0 {
+		title += pm.styles.PaneBorder.Render(strings.Repeat("─", titlePad))
 	}
+	parts = append(parts, title)
+
+	// 2. Content (last N lines)
+	lines := pane.Lines
+	height := pane.Height
+
+	start := 0
+	if len(lines) > height {
+		start = len(lines) - height
+	}
+
+	for i := 0; i < height; i++ {
+		lineIdx := start + i
+		if lineIdx < len(lines) {
+			parts = append(parts, lines[lineIdx])
+		} else {
+			parts = append(parts, "") // Empty padding
+		}
+	}
+
+	// 3. Bottom border
+	parts = append(parts, pm.styles.PaneBorder.Render(strings.Repeat("─", width)))
 
 	return strings.Join(parts, "\n")
 }

@@ -1,6 +1,6 @@
 package ui
 
-import "github.com/drake/rune/mud"
+import "github.com/drake/rune/interfaces"
 
 // UIMode specifies which UI implementation to use.
 type UIMode int
@@ -13,7 +13,7 @@ const (
 )
 
 // New creates a new UI based on the specified mode.
-func New(mode UIMode) mud.UI {
+func New(mode UIMode) interfaces.UI {
 	switch mode {
 	case ModeConsole:
 		return NewConsoleUI()
@@ -26,6 +26,6 @@ func New(mode UIMode) mud.UI {
 
 // NewWithDefault creates a TUI by default, with fallback to console
 // if the terminal doesn't support alt screen.
-func NewWithDefault() mud.UI {
+func NewWithDefault() interfaces.UI {
 	return NewBubbleTeaUI()
 }

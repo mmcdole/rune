@@ -7,8 +7,8 @@ import (
 
 	"github.com/drake/rune/config"
 	"github.com/drake/rune/debug"
+	"github.com/drake/rune/interfaces"
 	"github.com/drake/rune/lua"
-	"github.com/drake/rune/mud"
 	"github.com/drake/rune/network"
 	"github.com/drake/rune/session"
 	"github.com/drake/rune/ui"
@@ -23,7 +23,7 @@ func main() {
 	tcpClient := network.NewTCPClient()
 
 	// Select UI mode
-	var tui mud.UI
+	var tui interfaces.UI
 	if *simpleUI {
 		tui = ui.NewConsoleUI()
 	} else {

@@ -126,7 +126,7 @@ type BarContent = layout.BarContent
 // Sent from Session to UI when Lua calls rune.ui.picker.show().
 type ShowPickerMsg struct {
 	Title      string        // Optional title/header for the picker (modal mode only)
-	Items      []GenericItem // Items to display
+	Items      []PickerItem // Items to display
 	CallbackID string        // Opaque ID to track which Lua callback to run
 	// Inline mode: picker filters based on input content, doesn't trap keys.
 	// Modal mode (default): picker captures keyboard and has its own search field.
@@ -142,6 +142,6 @@ type SetInputMsg string
 // PickerSelectMsg is sent from UI back to Session when user interacts with picker.
 type PickerSelectMsg struct {
 	CallbackID string // The callback ID from ShowPickerMsg
-	Value      string // The GenericItem.Value of the selection
+	Value      string // The PickerItem.Value of the selection
 	Accepted   bool   // True if user pressed Enter, false if Esc/cancel
 }

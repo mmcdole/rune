@@ -3,7 +3,7 @@ package lua
 import "time"
 
 // PickerItem represents an item for the picker API.
-// Session converts this to ui.GenericItem (decoupling lua from ui).
+// Session converts this to ui.PickerItem (decoupling lua from ui).
 type PickerItem struct {
 	Text        string // Display text
 	Description string // Optional description

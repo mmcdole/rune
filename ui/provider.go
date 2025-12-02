@@ -15,7 +15,7 @@ type PushUI interface {
 
 	// ShowPicker displays the picker overlay with items.
 	// inline: if true, picker filters based on input; if false, picker captures keyboard.
-	ShowPicker(title string, items []GenericItem, callbackID string, inline bool)
+	ShowPicker(title string, items []PickerItem, callbackID string, inline bool)
 
 	// SetInput sets the input line content.
 	SetInput(text string)

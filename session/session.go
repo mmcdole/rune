@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/drake/rune/lua"
-	"github.com/drake/rune/mud"
+	"github.com/drake/rune/interfaces"
 	"github.com/drake/rune/network"
 	"github.com/drake/rune/timer"
 	"github.com/drake/rune/ui"
@@ -31,8 +31,8 @@ type Config struct {
 // Session orchestrates the MUD client components.
 type Session struct {
 	// Infrastructure
-	net    mud.Network
-	ui     mud.UI
+	net    interfaces.Network
+	ui     interfaces.UI
 	pushUI ui.PushUI // Optional push-capable UI (nil for ConsoleUI)
 	timer  *timer.Service
 
@@ -45,7 +45,7 @@ type Session struct {
 	callbacks *CallbackManager
 
 	// Channels
-	events      chan mud.Event
+	events      chan interfaces.Event
 	timerEvents chan timer.Event
 	barTicker   *time.Ticker // Periodic bar re-render ticker
 
@@ -70,7 +70,7 @@ type Session struct {
 }
 
 // New creates a new Session. It is passive - no goroutines start here.
-func New(net mud.Network, uiInstance mud.UI, cfg Config) *Session {
+func New(net interfaces.Network, uiInstance interfaces.UI, cfg Config) *Session {
 	timerEvents := make(chan timer.Event, 256)
 
 	s := &Session{
@@ -78,7 +78,7 @@ func New(net mud.Network, uiInstance mud.UI, cfg Config) *Session {
 		ui:          uiInstance,
 		timer:       timer.NewService(timerEvents),
 		timerEvents: timerEvents,
-		events:      make(chan mud.Event, 256),
+		events:      make(chan interfaces.Event, 256),
 		config:      cfg,
 		done:        make(chan struct{}),
 		history:     NewHistoryManager(10000),
@@ -185,7 +185,7 @@ func (s *Session) processEvents() {
 			s.handleEvent(event)
 		case line := <-s.ui.Input():
 			s.eventsProcessed.Add(1)
-			s.handleEvent(mud.Event{Type: mud.EventUserInput, Payload: line})
+			s.handleEvent(interfaces.Event{Type: interfaces.EventUserInput, Payload: line})
 		case evt := <-s.timerEvents:
 			s.eventsProcessed.Add(1)
 			s.engine.OnTimer(evt.ID, evt.Repeating)
@@ -198,9 +198,9 @@ func (s *Session) processEvents() {
 }
 
 // handleEvent executes a single event on the session loop.
-func (s *Session) handleEvent(event mud.Event) {
+func (s *Session) handleEvent(event interfaces.Event) {
 	switch event.Type {
-	case mud.EventNetLine:
+	case interfaces.EventNetLine:
 		if modified, show := s.engine.OnOutput(event.Payload); show {
 			s.ui.RenderDisplayLine(modified)
 		}
@@ -208,7 +208,7 @@ func (s *Session) handleEvent(event mud.Event) {
 		s.lastPrompt = ""
 		s.ui.RenderPrompt("")
 
-	case mud.EventNetPrompt:
+	case interfaces.EventNetPrompt:
 		// Commit previous prompt to scrollback before showing new one
 		if s.lastPrompt != "" {
 			s.ui.RenderDisplayLine(s.lastPrompt)
@@ -217,7 +217,7 @@ func (s *Session) handleEvent(event mud.Event) {
 		s.lastPrompt = modified
 		s.ui.RenderPrompt(modified)
 
-	case mud.EventUserInput:
+	case interfaces.EventUserInput:
 		// Commit current prompt to history before sending input
 		if s.lastPrompt != "" {
 			s.ui.RenderDisplayLine(s.lastPrompt)
@@ -234,12 +234,12 @@ func (s *Session) handleEvent(event mud.Event) {
 			s.ui.RenderEcho(event.Payload)
 		}
 
-	case mud.EventAsyncResult:
+	case interfaces.EventAsyncResult:
 		if event.Callback != nil {
 			event.Callback()
 		}
 
-	case mud.EventSystemControl:
+	case interfaces.EventSystemControl:
 		s.handleControl(event.Control)
 	}
 }
@@ -304,17 +304,17 @@ func (s *Session) boot() error {
 }
 
 // handleControl processes system control events.
-func (s *Session) handleControl(ctrl mud.ControlOp) {
+func (s *Session) handleControl(ctrl interfaces.ControlOp) {
 	switch ctrl.Action {
-	case mud.ActionQuit:
+	case interfaces.ActionQuit:
 		s.shutdown()
-	case mud.ActionConnect:
+	case interfaces.ActionConnect:
 		s.connect(ctrl.Address)
-	case mud.ActionDisconnect:
+	case interfaces.ActionDisconnect:
 		s.disconnect()
-	case mud.ActionReload:
+	case interfaces.ActionReload:
 		s.reload()
-	case mud.ActionLoadScript:
+	case interfaces.ActionLoadScript:
 		s.loadScript(ctrl.ScriptPath)
 	}
 }
@@ -326,8 +326,8 @@ func (s *Session) connect(addr string) {
 	s.engine.CallHook("connecting", addr)
 	go func() {
 		err := s.net.Connect(addr)
-		s.events <- mud.Event{
-			Type: mud.EventAsyncResult,
+		s.events <- interfaces.Event{
+			Type: interfaces.EventAsyncResult,
 			Callback: func() {
 				if err != nil {
 					s.clientState.Connected = false
@@ -362,8 +362,8 @@ func (s *Session) disconnect() {
 func (s *Session) reload() {
 	s.engine.CallHook("reloading")
 	select {
-	case s.events <- mud.Event{
-		Type: mud.EventAsyncResult,
+	case s.events <- interfaces.Event{
+		Type: interfaces.EventAsyncResult,
 		Callback: func() {
 			if err := s.boot(); err != nil {
 				s.ui.Render(fmt.Sprintf("\033[31mReload Failed: %v\033[0m", err))
