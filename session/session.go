@@ -235,8 +235,20 @@ func (s *Session) handleEvent(ev event.Event) {
 			ev.Callback()
 		}
 
-	case event.SystemControl:
-		s.handleControl(ev.Control)
+	case event.SysQuit:
+		s.shutdown()
+
+	case event.SysConnect:
+		s.connect(ev.Payload)
+
+	case event.SysDisconnect:
+		s.disconnect()
+
+	case event.SysReload:
+		s.reload()
+
+	case event.SysLoadScript:
+		s.loadScript(ev.Payload)
 	}
 }
 
@@ -299,25 +311,9 @@ func (s *Session) boot() error {
 	return nil
 }
 
-// handleControl processes system control events.
-func (s *Session) handleControl(ctrl event.ControlOp) {
-	switch ctrl.Action {
-	case event.ActionQuit:
-		s.shutdown()
-	case event.ActionConnect:
-		s.connect(ctrl.Address)
-	case event.ActionDisconnect:
-		s.disconnect()
-	case event.ActionReload:
-		s.reload()
-	case event.ActionLoadScript:
-		s.loadScript(ctrl.ScriptPath)
-	}
-}
-
 // --- Internal helpers for LuaAdapter ---
 
-// connect handles connection logic (called by adapter and handleControl).
+// connect handles connection logic (called by adapter and event handler).
 func (s *Session) connect(addr string) {
 	s.engine.CallHook("connecting", addr)
 	go func() {
@@ -342,7 +338,7 @@ func (s *Session) connect(addr string) {
 	}()
 }
 
-// disconnect handles disconnection logic (called by adapter and handleControl).
+// disconnect handles disconnection logic (called by adapter and event handler).
 func (s *Session) disconnect() {
 	s.engine.CallHook("disconnecting")
 	s.net.Disconnect()
@@ -353,7 +349,7 @@ func (s *Session) disconnect() {
 	s.pushBarUpdates() // Immediate UI update
 }
 
-// reload schedules VM reinitialization (called by adapter and handleControl).
+// reload schedules VM reinitialization (called by adapter and event handler).
 // Must be deferred because it destroys the currently executing Lua state.
 func (s *Session) reload() {
 	s.engine.CallHook("reloading")

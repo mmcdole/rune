@@ -54,15 +54,16 @@ Control -> EventChan -> Orchestrator -> CallHook() -> Lua on_sys_*()
 
 ### Event Types
 
-- `EventUserInput` - User typed input
-- `EventServerLine` - Complete line from server (ended with \n)
-- `EventServerPrompt` - Partial line/prompt (no \n, possibly GA/EOR terminated)
-- `EventTimer` - Timer callback
-- `EventSystemControl` - Control operations (quit, connect, disconnect, reload, load)
-
-### Action Constants
-
-Use `mud.Action*` constants instead of string literals: `ActionQuit`, `ActionConnect`, `ActionDisconnect`, `ActionReload`, `ActionLoad`
+- `UserInput` - User typed input
+- `NetLine` - Complete line from server (ended with \n)
+- `NetPrompt` - Partial line/prompt (no \n, possibly GA/EOR terminated)
+- `SysQuit` - Quit the client
+- `SysConnect` - Connect to server (Payload = address)
+- `SysDisconnect` - Disconnect from server
+- `SysReload` - Reload all scripts
+- `SysLoadScript` - Load a script (Payload = path)
+- `Timer` - Timer callback
+- `AsyncResult` - Async work completion
 
 ### Lua API (rune namespace)
 

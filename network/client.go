@@ -220,10 +220,7 @@ func (c *TCPClient) readLoop(cx *connection) {
 			if isCurrent {
 				// Send disconnect event - this may block briefly, that's OK
 				select {
-				case c.outputChan <- event.Event{
-					Type:    event.SystemControl,
-					Control: event.ControlOp{Action: event.ActionDisconnect},
-				}:
+				case c.outputChan <- event.Event{Type: event.SysDisconnect}:
 				case <-cx.done:
 				}
 				cx.shutdown()

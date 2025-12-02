@@ -1,37 +1,29 @@
 package event
 
-// Type identifies the source of the message
+// Type identifies the kind of event sent to the Orchestrator
 type Type int
 
 const (
+	// Data events
 	UserInput Type = iota
-	NetLine        // A complete line from server (ended with \n)
-	NetPrompt      // A partial line/prompt (no \n, possibly GA/EOR terminated)
+	NetLine   // A complete line from server (ended with \n)
+	NetPrompt // A partial line/prompt (no \n, possibly GA/EOR terminated)
+
+	// Control events (promoted to top level for type safety)
+	SysQuit
+	SysConnect    // Payload = "address:port"
+	SysDisconnect
+	SysReload
+	SysLoadScript // Payload = "path/to/script.lua"
+
+	// Internal
 	Timer
-	SystemControl
 	AsyncResult // Async work completion dispatched onto the session loop
 )
-
-// Control action constants
-const (
-	ActionQuit       = "quit"
-	ActionConnect    = "connect"
-	ActionDisconnect = "disconnect"
-	ActionReload     = "reload"
-	ActionLoadScript = "load_script"
-)
-
-// ControlOp contains control operation details
-type ControlOp struct {
-	Action     string // Use Action* constants
-	Address    string
-	ScriptPath string
-}
 
 // Event is the universal packet sent to the Orchestrator
 type Event struct {
 	Type     Type
-	Payload  string    // For User/Server text
-	Callback func()    // For Timers (Lua Closures)
-	Control  ControlOp // For SystemControl events
+	Payload  string // For User/Server text, or control event data
+	Callback func() // For Timers (Lua Closures)
 }
