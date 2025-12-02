@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/drake/rune/config"
 	"github.com/drake/rune/debug"
@@ -15,6 +18,10 @@ import (
 
 func main() {
 	flag.Parse()
+
+	// Create root context that listens for OS signals
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
 
 	// Create network
 	tcpClient := network.NewTCPClient()
@@ -30,11 +37,10 @@ func main() {
 	})
 
 	// Start debug monitor if RUNE_DEBUG=1
-	monitor := debug.NewMonitor(sess)
+	monitor := debug.NewMonitor(ctx, sess)
 	monitor.Start()
-	defer monitor.Stop()
 
-	if err := sess.Run(); err != nil {
+	if err := sess.Run(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

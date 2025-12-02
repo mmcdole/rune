@@ -1,6 +1,7 @@
 package network
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"sync"
@@ -102,7 +103,7 @@ func (c *TCPClient) Stats() Stats {
 
 // Connect establishes a new connection.
 // If a connection already exists, it is cleanly closed and replaced.
-func (c *TCPClient) Connect(address string) error {
+func (c *TCPClient) Connect(ctx context.Context, address string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -117,8 +118,9 @@ func (c *TCPClient) Connect(address string) error {
 	c.linesEmitted.Store(0)
 	c.lastReadTime.Store(0)
 
-	// Dial new connection
-	conn, err := net.DialTimeout("tcp", address, 10*time.Second)
+	// Dial with context to respect app shutdown during connection attempts
+	var d net.Dialer
+	conn, err := d.DialContext(ctx, "tcp", address)
 	if err != nil {
 		return err
 	}

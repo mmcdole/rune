@@ -2,6 +2,7 @@
 package debug
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -16,17 +17,16 @@ func Enabled() bool {
 }
 
 // Monitor periodically logs session statistics when debug mode is enabled.
-// It runs until the done channel is closed.
 type Monitor struct {
 	session  *session.Session
 	interval time.Duration
-	done     chan struct{}
+	ctx      context.Context
 	logger   *log.Logger
 }
 
 // NewMonitor creates a new monitor for the given session.
 // If debug mode is not enabled, returns nil.
-func NewMonitor(s *session.Session) *Monitor {
+func NewMonitor(ctx context.Context, s *session.Session) *Monitor {
 	if !Enabled() {
 		return nil
 	}
@@ -34,7 +34,7 @@ func NewMonitor(s *session.Session) *Monitor {
 	return &Monitor{
 		session:  s,
 		interval: 5 * time.Second,
-		done:     make(chan struct{}),
+		ctx:      ctx,
 		logger:   log.New(os.Stderr, "", log.LstdFlags),
 	}
 }
@@ -47,14 +47,6 @@ func (m *Monitor) Start() {
 	go m.run()
 }
 
-// Stop terminates the monitoring loop.
-func (m *Monitor) Stop() {
-	if m == nil {
-		return
-	}
-	close(m.done)
-}
-
 func (m *Monitor) run() {
 	ticker := time.NewTicker(m.interval)
 	defer ticker.Stop()
@@ -63,7 +55,7 @@ func (m *Monitor) run() {
 
 	for {
 		select {
-		case <-m.done:
+		case <-m.ctx.Done():
 			m.logger.Println("[DEBUG] Monitor stopped")
 			return
 		case <-ticker.C:

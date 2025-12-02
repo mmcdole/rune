@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"embed"
 	"fmt"
 	"io/fs"
@@ -8,7 +9,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -22,11 +22,21 @@ import (
 
 // Network defines the TCP/Telnet layer.
 type Network interface {
-	Connect(address string) error
+	Connect(ctx context.Context, address string) error
 	Disconnect()
 	Send(data string) error
 	Output() <-chan event.Event
 }
+
+// Compile-time interface checks - Session implements all Lua service interfaces
+var (
+	_ lua.NetworkService = (*Session)(nil)
+	_ lua.UIService      = (*Session)(nil)
+	_ lua.TimerService   = (*Session)(nil)
+	_ lua.SystemService  = (*Session)(nil)
+	_ lua.HistoryService = (*Session)(nil)
+	_ lua.StateService   = (*Session)(nil)
+)
 
 // UI is imported from the ui package.
 // See ui/interface.go for the full interface definition.
@@ -47,8 +57,7 @@ type Session struct {
 	timer *timer.Service
 
 	// Scripting
-	engine  *lua.Engine
-	adapter *LuaAdapter
+	engine *lua.Engine
 
 	// Managers
 	history   *HistoryManager
@@ -66,8 +75,7 @@ type Session struct {
 	config Config
 
 	// Shutdown coordination
-	done      chan struct{}
-	closeOnce sync.Once
+	cancel context.CancelFunc
 
 	// Stats (atomic for lock-free reads)
 	eventsProcessed atomic.Uint64
@@ -90,18 +98,13 @@ func New(net Network, uiInstance ui.UI, cfg Config) *Session {
 		timerEvents: timerEvents,
 		events:      make(chan event.Event, 256),
 		config:      cfg,
-		done:        make(chan struct{}),
 		history:     NewHistoryManager(10000),
 		callbacks:   NewCallbackManager(),
 	}
 
 
-	// Create adapter (bridges Lua services to Session infrastructure)
-	s.adapter = NewLuaAdapter(s)
-
-	// Create engine with segregated service interfaces
-	// LuaAdapter implements all 6 interfaces, so we pass it for each
-	s.engine = lua.NewEngine(s.adapter, s.adapter, s.adapter, s.adapter, s.adapter, s.adapter)
+	// Create engine with Session as all service interfaces
+	s.engine = lua.NewEngine(s, s, s, s, s, s)
 
 	// Initialize client state defaults
 	s.clientState.ScrollMode = "live"
@@ -143,8 +146,22 @@ func (s *Session) Stats() Stats {
 }
 
 // Run starts the session and blocks until exit.
-func (s *Session) Run() error {
-	defer s.engine.Close()
+func (s *Session) Run(ctx context.Context) error {
+	// Derive a cancellable context for internal shutdown (rune.quit)
+	ctx, cancel := context.WithCancel(ctx)
+	s.cancel = cancel
+
+	// Ensure cleanup runs when context ends
+	defer func() {
+		cancel()
+		s.engine.Close()
+		if s.barTicker != nil {
+			s.barTicker.Stop()
+		}
+		s.timer.CancelAll()
+		s.net.Disconnect()
+		s.ui.Quit()
+	}()
 
 	// Boot the system
 	if err := s.boot(); err != nil {
@@ -156,20 +173,17 @@ func (s *Session) Run() error {
 	s.barTicker = time.NewTicker(250 * time.Millisecond)
 
 	// Start event loop
-	go s.processEvents()
+	go s.processEvents(ctx)
 
 	// Block on UI
-	err := s.ui.Run()
-	// Ensure shutdown of goroutines/resources when UI exits
-	s.shutdown()
-	return err
+	return s.ui.Run()
 }
 
 // processEvents is the main event loop.
-func (s *Session) processEvents() {
+func (s *Session) processEvents(ctx context.Context) {
 	for {
 		select {
-		case <-s.done:
+		case <-ctx.Done():
 			return
 		case event := <-s.events:
 			s.eventsProcessed.Add(1)
@@ -236,19 +250,19 @@ func (s *Session) handleEvent(ev event.Event) {
 		}
 
 	case event.SysQuit:
-		s.shutdown()
+		s.Quit()
 
 	case event.SysConnect:
-		s.connect(ev.Payload)
+		s.Connect(ev.Payload)
 
 	case event.SysDisconnect:
-		s.disconnect()
+		s.Disconnect()
 
 	case event.SysReload:
-		s.reload()
+		s.Reload()
 
 	case event.SysLoadScript:
-		s.loadScript(ev.Payload)
+		s.Load(ev.Payload)
 	}
 }
 
@@ -309,94 +323,6 @@ func (s *Session) boot() error {
 	s.pushBindsAndLayout()
 
 	return nil
-}
-
-// --- Internal helpers for LuaAdapter ---
-
-// connect handles connection logic (called by adapter and event handler).
-func (s *Session) connect(addr string) {
-	s.engine.CallHook("connecting", addr)
-	go func() {
-		err := s.net.Connect(addr)
-		s.events <- event.Event{
-			Type: event.AsyncResult,
-			Callback: func() {
-				if err != nil {
-					s.clientState.Connected = false
-					s.clientState.Address = ""
-					s.engine.UpdateState(s.clientState)
-					s.engine.CallHook("error", err.Error())
-				} else {
-					s.clientState.Connected = true
-					s.clientState.Address = addr
-					s.engine.UpdateState(s.clientState)
-					s.engine.CallHook("connected", addr)
-				}
-				s.pushBarUpdates() // Immediate UI update
-			},
-		}
-	}()
-}
-
-// disconnect handles disconnection logic (called by adapter and event handler).
-func (s *Session) disconnect() {
-	s.engine.CallHook("disconnecting")
-	s.net.Disconnect()
-	s.clientState.Connected = false
-	s.clientState.Address = ""
-	s.engine.UpdateState(s.clientState)
-	s.engine.CallHook("disconnected")
-	s.pushBarUpdates() // Immediate UI update
-}
-
-// reload schedules VM reinitialization (called by adapter and event handler).
-// Must be deferred because it destroys the currently executing Lua state.
-func (s *Session) reload() {
-	s.engine.CallHook("reloading")
-	select {
-	case s.events <- event.Event{
-		Type: event.AsyncResult,
-		Callback: func() {
-			if err := s.boot(); err != nil {
-				s.ui.Print(fmt.Sprintf("\033[31mReload Failed: %v\033[0m", err))
-			} else {
-				s.engine.CallHook("reloaded")
-			}
-		},
-	}:
-	default:
-		s.ui.Print("\033[31mReload Failed: event queue full\033[0m")
-	}
-}
-
-// loadScript loads a Lua script file and notifies hooks (called by adapter).
-func (s *Session) loadScript(path string) {
-	if path == "" {
-		s.ui.Print("\033[31mLoad Failed: empty path\033[0m")
-		return
-	}
-
-	if err := s.engine.DoFile(path); err != nil {
-		s.ui.Print(fmt.Sprintf("\033[31mLoad Failed (%s): %v\033[0m", path, err))
-		return
-	}
-
-	s.engine.CallHook("loaded", path)
-}
-
-// shutdown attempts a coordinated shutdown of goroutines, timers, network, and UI.
-func (s *Session) shutdown() {
-	s.closeOnce.Do(func() {
-		close(s.done)
-		// Stop bar ticker if running
-		if s.barTicker != nil {
-			s.barTicker.Stop()
-		}
-		// Stop timers and network; request UI exit.
-		s.timer.CancelAll()
-		s.net.Disconnect()
-		s.ui.Quit()
-	})
 }
 
 // renderBars calls all Lua bar renderers and returns their content.
