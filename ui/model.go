@@ -16,6 +16,15 @@ import (
 	"github.com/drake/rune/ui/util"
 )
 
+// InputMode represents the current input handling mode.
+type InputMode int
+
+const (
+	ModeNormal       InputMode = iota // Standard text input
+	ModePickerModal                   // Modal picker traps all keys
+	ModePickerInline                  // Inline picker filters based on input
+)
+
 // filterClearSequences removes ANSI sequences that would clear the screen.
 // MUD clients typically ignore these to prevent server-side screen wipes.
 func filterClearSequences(line string) string {
@@ -37,10 +46,9 @@ type Model struct {
 	styles     style.Styles
 
 	// Generic picker (replaces slashPicker, historyPicker, aliasPicker)
-	picker       *picker.Model[mud.PickerItem]
-	pickerActive bool
-	pickerCB     string // Current callback ID for picker selection
-	pickerInline bool   // True if picker is in inline mode (filters based on input content)
+	picker    *picker.Model[mud.PickerItem]
+	pickerCB  string    // Current callback ID for picker selection
+	inputMode InputMode // Current input handling mode
 
 	// Tab completion
 	wordCache *util.CompletionEngine
@@ -86,9 +94,14 @@ func NewModel(inputChan chan<- string, outbound chan<- any) Model {
 			EmptyText:  "No matches",
 		}, styles),
 		wordCache: wordCache,
-		inputChan:    inputChan,
-		outbound:     outbound,
+		inputChan: inputChan,
+		outbound:  outbound,
 	}
+}
+
+// pickerActive returns true if the picker is currently visible.
+func (m *Model) pickerActive() bool {
+	return m.inputMode != ModeNormal
 }
 
 // Init implements tea.Model.
@@ -144,16 +157,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Pass mud.PickerItem directly (no wrapper needed)
 		m.picker.SetItems(msg.Items)
 		m.pickerCB = msg.CallbackID
-		m.pickerActive = true
-		m.pickerInline = msg.Inline
 
 		if msg.Inline {
+			m.inputMode = ModePickerInline
 			// Inline mode: User types in main input, picker filters passively.
 			// Hide the picker's internal header to avoid duplicate search UI.
 			m.picker.SetHeader("")
 			// Filter immediately based on current input
 			m.picker.Filter(m.input.Value())
 		} else {
+			m.inputMode = ModePickerModal
 			// Modal mode: Picker traps keys and shows its own search header.
 			// Add ": " suffix for the search prompt display (e.g., "History: query█")
 			header := msg.Title
@@ -233,16 +246,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Global keys
+	// Global keys (work in any mode)
 	switch msg.Type {
 	case tea.KeyCtrlC:
-		if m.input.Value() == "" && !m.pickerActive {
+		if m.input.Value() == "" && m.inputMode == ModeNormal {
 			m.quitting = true
 			return m, tea.Quit
 		}
-		// Clear input or cancel picker
-		if m.pickerActive {
-			m.pickerActive = false
+		// Cancel picker or clear input
+		if m.inputMode != ModeNormal {
+			m.inputMode = ModeNormal
 			m.picker.Reset()
 			m.sendOutbound(PickerSelectMsg{CallbackID: m.pickerCB, Accepted: false})
 			return m, nil
@@ -251,8 +264,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyEsc:
-		if m.pickerActive {
-			m.pickerActive = false
+		if m.inputMode != ModeNormal {
+			m.inputMode = ModeNormal
 			m.picker.Reset()
 			m.sendOutbound(PickerSelectMsg{CallbackID: m.pickerCB, Accepted: false})
 			return m, nil
@@ -261,66 +274,27 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Modal picker handling (non-linked mode traps all keys)
-	if m.pickerActive && !m.pickerInline {
+	// Dispatch based on input mode
+	switch m.inputMode {
+	case ModePickerModal:
 		return m.handlePickerKey(msg)
+	case ModePickerInline:
+		return m.handleInlinePickerKey(msg)
+	default:
+		return m.handleNormalKey(msg)
 	}
-
-	// Normal input (includes linked picker mode)
-	return m.handleNormalKey(msg)
 }
 
 func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Check Lua key bindings (using local cache - thread-safe)
+	// For printable characters, only trigger bindings when input is empty
+	// (otherwise "/" would never be typeable mid-input)
 	keyStr := keyToString(msg)
 	if keyStr != "" && m.boundKeys[keyStr] {
-		// Don't intercept Up/Down when inline picker is active - let picker handle them
-		if m.pickerActive && m.pickerInline && (keyStr == "up" || keyStr == "down") {
-			// Fall through to picker handling below
-		} else {
-			// Key is bound in Lua - send to Session for execution
+		isPrintable := msg.Type == tea.KeyRunes
+		if !isPrintable || m.input.Value() == "" {
 			m.sendOutbound(ExecuteBindMsg(keyStr))
 			return m, nil
-		}
-	}
-
-	// Linked picker mode: Up/Down navigate picker, Tab completes
-	if m.pickerActive && m.pickerInline {
-		switch msg.Type {
-		case tea.KeyUp:
-			m.picker.SelectUp()
-			return m, nil
-		case tea.KeyDown:
-			m.picker.SelectDown()
-			return m, nil
-		case tea.KeyTab:
-			// Tab auto-completes the selection
-			if item, ok := m.picker.Selected(); ok {
-				m.input.SetValue(item.GetValue() + " ")
-				m.input.CursorEnd()
-				m.sendOutbound(PickerSelectMsg{
-					CallbackID: m.pickerCB,
-					Value:      item.GetValue(),
-					Accepted:   true,
-				})
-			}
-			m.pickerActive = false
-			m.pickerInline = false
-			m.picker.Reset()
-			return m, nil
-		case tea.KeyEnter:
-			// Enter accepts selection OR submits current input
-			if item, ok := m.picker.Selected(); ok {
-				m.sendOutbound(PickerSelectMsg{
-					CallbackID: m.pickerCB,
-					Value:      item.GetValue(),
-					Accepted:   true,
-				})
-			}
-			m.pickerActive = false
-			m.pickerInline = false
-			m.picker.Reset()
-			// Fall through to normal Enter handling below
 		}
 	}
 
@@ -342,12 +316,10 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyCtrlU:
 		m.input.SetValue("")
-		m.updateInlinePicker()
 		return m, nil
 
 	case tea.KeyCtrlW:
 		m.deleteWord()
-		m.updateInlinePicker()
 		return m, nil
 
 	case tea.KeyPgUp:
@@ -381,37 +353,139 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.sendOutbound(InputChangedMsg(newValue))
 	}
 
-	// Update linked picker filter based on new input content
-	m.updateInlinePicker()
-
 	// Update suggestions
 	m.updateSuggestions()
 
 	return m, cmd
 }
 
-// updateInlinePicker updates the inline picker filter based on input content.
-// Closes the picker if input becomes empty.
-func (m *Model) updateInlinePicker() {
-	if !m.pickerActive || !m.pickerInline {
-		return
+// handleInlinePickerKey handles keys in ModePickerInline.
+// The picker filters based on the input field content; Up/Down navigate.
+func (m Model) handleInlinePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Check Lua key bindings, but let Up/Down fall through to picker
+	keyStr := keyToString(msg)
+	if keyStr != "" && m.boundKeys[keyStr] && keyStr != "up" && keyStr != "down" {
+		m.sendOutbound(ExecuteBindMsg(keyStr))
+		return m, nil
 	}
 
-	val := m.input.Value()
+	switch msg.Type {
+	case tea.KeyUp:
+		m.picker.SelectUp()
+		return m, nil
 
-	// If input is empty, close picker
-	if val == "" {
-		m.pickerActive = false
-		m.pickerInline = false
-		m.sendOutbound(PickerSelectMsg{CallbackID: m.pickerCB, Accepted: false})
+	case tea.KeyDown:
+		m.picker.SelectDown()
+		return m, nil
+
+	case tea.KeyTab:
+		// Tab auto-completes the selection
+		if item, ok := m.picker.Selected(); ok {
+			m.input.SetValue(item.GetValue() + " ")
+			m.input.CursorEnd()
+			m.sendOutbound(PickerSelectMsg{
+				CallbackID: m.pickerCB,
+				Value:      item.GetValue(),
+				Accepted:   true,
+			})
+		}
+		m.inputMode = ModeNormal
 		m.picker.Reset()
-		return
+		return m, nil
+
+	case tea.KeyEnter:
+		// Enter accepts selection then submits input
+		if item, ok := m.picker.Selected(); ok {
+			m.sendOutbound(PickerSelectMsg{
+				CallbackID: m.pickerCB,
+				Value:      item.GetValue(),
+				Accepted:   true,
+			})
+		}
+		m.inputMode = ModeNormal
+		m.picker.Reset()
+		// Fall through to submit input
+		return m.submitInput()
+
+	case tea.KeyCtrlU:
+		m.input.SetValue("")
+		m.closeInlinePicker()
+		return m, nil
+
+	case tea.KeyCtrlW:
+		m.deleteWord()
+		m.updateInlinePickerFilter()
+		return m, nil
+
+	case tea.KeyPgUp:
+		m.viewport.PageUp()
+		m.updateScrollState()
+		return m, nil
+
+	case tea.KeyPgDown:
+		m.viewport.PageDown()
+		m.updateScrollState()
+		return m, nil
+
+	case tea.KeyEnd:
+		m.viewport.GotoBottom()
+		m.updateScrollState()
+		return m, nil
+
+	case tea.KeyHome:
+		m.viewport.GotoTop()
+		m.updateScrollState()
+		return m, nil
 	}
 
-	// Update filter based on full input content
+	// Forward to input and update filter
+	oldValue := m.input.Value()
+	newInput, cmd := m.input.Update(msg)
+	m.input = *newInput
+
+	if newValue := m.input.Value(); newValue != oldValue {
+		m.sendOutbound(InputChangedMsg(newValue))
+		m.updateInlinePickerFilter()
+	}
+
+	m.updateSuggestions()
+	return m, cmd
+}
+
+// submitInput sends the current input to the orchestrator and resets.
+func (m Model) submitInput() (tea.Model, tea.Cmd) {
+	text := m.input.Value()
+	if text != "" {
+		m.wordCache.AddInput(text)
+	}
+	select {
+	case m.inputChan <- text:
+	default:
+		m.scrollback.Append("\033[31m[WARNING] Input dropped - engine lagging\033[0m")
+	}
+	m.input.Reset()
+	return m, nil
+}
+
+// updateInlinePickerFilter updates the filter and closes picker if input is empty.
+func (m *Model) updateInlinePickerFilter() {
+	val := m.input.Value()
+	if val == "" {
+		m.closeInlinePicker()
+		return
+	}
 	m.picker.Filter(val)
 }
 
+// closeInlinePicker closes the inline picker and notifies the session.
+func (m *Model) closeInlinePicker() {
+	m.inputMode = ModeNormal
+	m.sendOutbound(PickerSelectMsg{CallbackID: m.pickerCB, Accepted: false})
+	m.picker.Reset()
+}
+
+// handlePickerKey handles keys in ModePickerModal.
+// The picker traps all keys and has its own search field.
 func (m Model) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyUp:
@@ -433,7 +507,7 @@ func (m Model) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		} else {
 			m.sendOutbound(PickerSelectMsg{CallbackID: m.pickerCB, Accepted: false})
 		}
-		m.pickerActive = false
+		m.inputMode = ModeNormal
 		m.picker.Reset()
 		return m, nil
 
@@ -611,7 +685,7 @@ func (m *Model) componentHeight(name string) int {
 	case "input":
 		// separator + input + separator, plus picker overlay when active
 		h := 3 // top separator + input + bottom separator
-		if m.pickerActive {
+		if m.pickerActive() {
 			h += m.picker.Height()
 		}
 		return h
@@ -688,7 +762,7 @@ func (m Model) renderComponent(name string) string {
 	case "input":
 		// Picker overlay (if active) > separator > input > separator
 		var parts []string
-		if m.pickerActive {
+		if m.pickerActive() {
 			parts = append(parts, m.picker.View())
 		}
 		parts = append(parts, m.borderLine())
