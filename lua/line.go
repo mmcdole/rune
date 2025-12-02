@@ -1,7 +1,7 @@
 package lua
 
 import (
-	"github.com/drake/rune/mud"
+	"github.com/drake/rune/text"
 	glua "github.com/yuin/gopher-lua"
 )
 
@@ -14,18 +14,18 @@ func registerLineType(L *glua.LState) {
 	L.SetField(mt, "__index", L.SetFuncs(L.NewTable(), lineMethods))
 }
 
-// newLine creates a Line userdata from a mud.Line and pushes it onto the Lua stack.
-func newLine(L *glua.LState, line mud.Line) *glua.LUserData {
+// newLine creates a Line userdata from a text.Line and pushes it onto the Lua stack.
+func newLine(L *glua.LState, line text.Line) *glua.LUserData {
 	ud := L.NewUserData()
 	ud.Value = &line
 	L.SetMetatable(ud, L.GetTypeMetatable(luaLineTypeName))
 	return ud
 }
 
-// checkLine retrieves a mud.Line from Lua userdata at the given stack position.
-func checkLine(L *glua.LState, n int) *mud.Line {
+// checkLine retrieves a text.Line from Lua userdata at the given stack position.
+func checkLine(L *glua.LState, n int) *text.Line {
 	ud := L.CheckUserData(n)
-	if v, ok := ud.Value.(*mud.Line); ok {
+	if v, ok := ud.Value.(*text.Line); ok {
 		return v
 	}
 	L.ArgError(n, "line expected")

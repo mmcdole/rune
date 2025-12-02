@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/drake/rune/mud"
+	"github.com/drake/rune/event"
 )
 
 // Stats holds network statistics for monitoring.
@@ -28,7 +28,7 @@ type Stats struct {
 type TCPClient struct {
 	// Stable channel that Session reads from. Never closes.
 	// Small buffer allows TCP backpressure to work naturally.
-	outputChan chan mud.Event
+	outputChan chan event.Event
 
 	// State protection
 	mu      sync.Mutex
@@ -66,7 +66,7 @@ type connection struct {
 func NewTCPClient() *TCPClient {
 	return &TCPClient{
 		// Small buffer - let TCP backpressure handle flow control
-		outputChan: make(chan mud.Event, 256),
+		outputChan: make(chan event.Event, 256),
 	}
 }
 
@@ -175,7 +175,7 @@ func (c *TCPClient) Send(data string) {
 }
 
 // Output returns the stable event channel.
-func (c *TCPClient) Output() <-chan mud.Event {
+func (c *TCPClient) Output() <-chan event.Event {
 	return c.outputChan
 }
 
@@ -220,9 +220,9 @@ func (c *TCPClient) readLoop(cx *connection) {
 			if isCurrent {
 				// Send disconnect event - this may block briefly, that's OK
 				select {
-				case c.outputChan <- mud.Event{
-					Type:    mud.EventSystemControl,
-					Control: mud.ControlOp{Action: mud.ActionDisconnect},
+				case c.outputChan <- event.Event{
+					Type:    event.SystemControl,
+					Control: event.ControlOp{Action: event.ActionDisconnect},
 				}:
 				case <-cx.done:
 				}
@@ -255,7 +255,7 @@ func (c *TCPClient) readLoop(cx *connection) {
 				for _, line := range lines {
 					c.linesEmitted.Add(1)
 					select {
-					case c.outputChan <- mud.Event{Type: mud.EventNetLine, Payload: string(line)}:
+					case c.outputChan <- event.Event{Type: event.NetLine, Payload: string(line)}:
 					case <-cx.done:
 						return
 					}
@@ -264,7 +264,7 @@ func (c *TCPClient) readLoop(cx *connection) {
 					prompt := cx.output.Prompt(false)
 					if prompt != "" {
 						select {
-						case c.outputChan <- mud.Event{Type: mud.EventNetPrompt, Payload: prompt}:
+						case c.outputChan <- event.Event{Type: event.NetPrompt, Payload: prompt}:
 						case <-cx.done:
 							return
 						}
@@ -279,7 +279,7 @@ func (c *TCPClient) readLoop(cx *connection) {
 						prompt := cx.output.Prompt(true)
 						if prompt != "" {
 							select {
-							case c.outputChan <- mud.Event{Type: mud.EventNetPrompt, Payload: prompt}:
+							case c.outputChan <- event.Event{Type: event.NetPrompt, Payload: prompt}:
 							case <-cx.done:
 								return
 							}

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/drake/rune/mud"
+	"github.com/drake/rune/text"
 )
 
 // testCase represents a single test case from JSON
@@ -124,7 +124,7 @@ func executeTest(t *testing.T, feature string, tt testCase) {
 
 		if tt.Output != "" {
 			// Process server output through on_output hook
-			engine.OnOutput(mud.NewLine(tt.Output))
+			engine.OnOutput(text.NewLine(tt.Output))
 		}
 
 		if tt.ExpectedCommands != nil {

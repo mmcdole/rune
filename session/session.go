@@ -12,9 +12,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/drake/rune/event"
 	"github.com/drake/rune/lua"
-	"github.com/drake/rune/mud"
 	"github.com/drake/rune/network"
+	"github.com/drake/rune/text"
 	"github.com/drake/rune/timer"
 	"github.com/drake/rune/ui"
 )
@@ -24,29 +25,11 @@ type Network interface {
 	Connect(address string) error
 	Disconnect()
 	Send(data string)
-	Output() <-chan mud.Event
+	Output() <-chan event.Event
 }
 
-// UI defines the Terminal layer.
-type UI interface {
-	Run() error
-	Quit()
-	Done() <-chan struct{}
-	Input() <-chan string
-	Outbound() <-chan any
-	Print(text string)
-	Echo(text string)
-	SetPrompt(text string)
-	UpdateBars(content map[string]mud.BarContent)
-	UpdateBinds(keys map[string]bool)
-	UpdateLayout(top, bottom []string)
-	SetInput(text string)
-	ShowPicker(title string, items []mud.PickerItem, callbackID string, inline bool)
-	CreatePane(name string)
-	WritePane(name, text string)
-	TogglePane(name string)
-	ClearPane(name string)
-}
+// UI is imported from the ui package.
+// See ui/interface.go for the full interface definition.
 
 
 // Config holds session configuration
@@ -60,7 +43,7 @@ type Config struct {
 type Session struct {
 	// Infrastructure
 	net   Network
-	ui    UI
+	ui    ui.UI
 	timer *timer.Service
 
 	// Scripting
@@ -72,7 +55,7 @@ type Session struct {
 	callbacks *CallbackManager
 
 	// Channels
-	events      chan mud.Event
+	events      chan event.Event
 	timerEvents chan timer.Event
 	barTicker   *time.Ticker // Periodic bar re-render ticker
 
@@ -97,7 +80,7 @@ type Session struct {
 }
 
 // New creates a new Session. It is passive - no goroutines start here.
-func New(net Network, uiInstance UI, cfg Config) *Session {
+func New(net Network, uiInstance ui.UI, cfg Config) *Session {
 	timerEvents := make(chan timer.Event, 256)
 
 	s := &Session{
@@ -105,7 +88,7 @@ func New(net Network, uiInstance UI, cfg Config) *Session {
 		ui:          uiInstance,
 		timer:       timer.NewService(timerEvents),
 		timerEvents: timerEvents,
-		events:      make(chan mud.Event, 256),
+		events:      make(chan event.Event, 256),
 		config:      cfg,
 		done:        make(chan struct{}),
 		history:     NewHistoryManager(10000),
@@ -196,7 +179,7 @@ func (s *Session) processEvents() {
 			s.handleEvent(event)
 		case line := <-s.ui.Input():
 			s.eventsProcessed.Add(1)
-			s.handleEvent(mud.Event{Type: mud.EventUserInput, Payload: line})
+			s.handleEvent(event.Event{Type: event.UserInput, Payload: line})
 		case evt := <-s.timerEvents:
 			s.eventsProcessed.Add(1)
 			s.engine.OnTimer(evt.ID, evt.Repeating)
@@ -209,10 +192,10 @@ func (s *Session) processEvents() {
 }
 
 // handleEvent executes a single event on the session loop.
-func (s *Session) handleEvent(event mud.Event) {
-	switch event.Type {
-	case mud.EventNetLine:
-		line := mud.NewLine(event.Payload)
+func (s *Session) handleEvent(ev event.Event) {
+	switch ev.Type {
+	case event.NetLine:
+		line := text.NewLine(ev.Payload)
 		if modified, show := s.engine.OnOutput(line); show {
 			s.ui.Print(modified)
 		}
@@ -220,17 +203,17 @@ func (s *Session) handleEvent(event mud.Event) {
 		s.lastPrompt = ""
 		s.ui.SetPrompt("")
 
-	case mud.EventNetPrompt:
+	case event.NetPrompt:
 		// Commit previous prompt to scrollback before showing new one
 		if s.lastPrompt != "" {
 			s.ui.Print(s.lastPrompt)
 		}
-		line := mud.NewLine(event.Payload)
+		line := text.NewLine(ev.Payload)
 		modified := s.engine.OnPrompt(line)
 		s.lastPrompt = modified
 		s.ui.SetPrompt(modified)
 
-	case mud.EventUserInput:
+	case event.UserInput:
 		// Commit current prompt to history before sending input
 		if s.lastPrompt != "" {
 			s.ui.Print(s.lastPrompt)
@@ -238,22 +221,22 @@ func (s *Session) handleEvent(event mud.Event) {
 			s.ui.SetPrompt("")
 		}
 		// Add non-empty input to history
-		if event.Payload != "" {
-			s.history.Add(event.Payload)
+		if ev.Payload != "" {
+			s.history.Add(ev.Payload)
 		}
-		s.engine.OnInput(event.Payload)
+		s.engine.OnInput(ev.Payload)
 		// Local echo to scrollback (styled in UI)
 		if le, ok := s.net.(interface{ LocalEchoEnabled() bool }); !ok || le.LocalEchoEnabled() {
-			s.ui.Echo(event.Payload)
+			s.ui.Echo(ev.Payload)
 		}
 
-	case mud.EventAsyncResult:
-		if event.Callback != nil {
-			event.Callback()
+	case event.AsyncResult:
+		if ev.Callback != nil {
+			ev.Callback()
 		}
 
-	case mud.EventSystemControl:
-		s.handleControl(event.Control)
+	case event.SystemControl:
+		s.handleControl(ev.Control)
 	}
 }
 
@@ -317,17 +300,17 @@ func (s *Session) boot() error {
 }
 
 // handleControl processes system control events.
-func (s *Session) handleControl(ctrl mud.ControlOp) {
+func (s *Session) handleControl(ctrl event.ControlOp) {
 	switch ctrl.Action {
-	case mud.ActionQuit:
+	case event.ActionQuit:
 		s.shutdown()
-	case mud.ActionConnect:
+	case event.ActionConnect:
 		s.connect(ctrl.Address)
-	case mud.ActionDisconnect:
+	case event.ActionDisconnect:
 		s.disconnect()
-	case mud.ActionReload:
+	case event.ActionReload:
 		s.reload()
-	case mud.ActionLoadScript:
+	case event.ActionLoadScript:
 		s.loadScript(ctrl.ScriptPath)
 	}
 }
@@ -339,8 +322,8 @@ func (s *Session) connect(addr string) {
 	s.engine.CallHook("connecting", addr)
 	go func() {
 		err := s.net.Connect(addr)
-		s.events <- mud.Event{
-			Type: mud.EventAsyncResult,
+		s.events <- event.Event{
+			Type: event.AsyncResult,
 			Callback: func() {
 				if err != nil {
 					s.clientState.Connected = false
@@ -375,8 +358,8 @@ func (s *Session) disconnect() {
 func (s *Session) reload() {
 	s.engine.CallHook("reloading")
 	select {
-	case s.events <- mud.Event{
-		Type: mud.EventAsyncResult,
+	case s.events <- event.Event{
+		Type: event.AsyncResult,
 		Callback: func() {
 			if err := s.boot(); err != nil {
 				s.ui.Print(fmt.Sprintf("\033[31mReload Failed: %v\033[0m", err))
@@ -422,17 +405,17 @@ func (s *Session) shutdown() {
 
 // renderBars calls all Lua bar renderers and returns their content.
 // Must be called from Session goroutine (thread-safe Lua access).
-// Converts lua.BarData to mud.BarContent (decoupling lua from ui).
-func (s *Session) renderBars(width int) map[string]mud.BarContent {
+// Converts lua.BarData to ui.BarContent (decoupling lua from ui).
+func (s *Session) renderBars(width int) map[string]ui.BarContent {
 	names := s.engine.GetBarNames()
 	if len(names) == 0 {
 		return nil
 	}
 
-	result := make(map[string]mud.BarContent, len(names))
+	result := make(map[string]ui.BarContent, len(names))
 	for _, name := range names {
 		if data, ok := s.engine.RenderBar(name, width); ok {
-			result[name] = mud.BarContent{
+			result[name] = ui.BarContent{
 				Left:   data.Left,
 				Center: data.Center,
 				Right:  data.Right,

@@ -1,4 +1,27 @@
-package mud
+package ui
+
+// ConnectionState represents the current connection status.
+type ConnectionState int
+
+const (
+	StateDisconnected ConnectionState = iota
+	StateConnecting
+	StateConnected
+)
+
+// String returns a human-readable representation of the connection state.
+func (s ConnectionState) String() string {
+	switch s {
+	case StateDisconnected:
+		return "Disconnected"
+	case StateConnecting:
+		return "Connecting"
+	case StateConnected:
+		return "Connected"
+	default:
+		return "Unknown"
+	}
+}
 
 // BarContent holds the rendered content of a bar.
 type BarContent struct {
@@ -34,39 +57,3 @@ func (p PickerItem) GetValue() string { return p.Value }
 
 // MatchesDescription returns true if description should be included in matching.
 func (p PickerItem) MatchesDescription() bool { return p.MatchDesc }
-
-// EventType identifies the source of the message
-type EventType int
-
-const (
-	EventUserInput EventType = iota
-	EventNetLine             // A complete line from server (ended with \n)
-	EventNetPrompt           // A partial line/prompt (no \n, possibly GA/EOR terminated)
-	EventTimer
-	EventSystemControl
-	EventAsyncResult // Async work completion dispatched onto the session loop
-)
-
-// Control action constants
-const (
-	ActionQuit       = "quit"
-	ActionConnect    = "connect"
-	ActionDisconnect = "disconnect"
-	ActionReload     = "reload"
-	ActionLoadScript = "load_script"
-)
-
-// ControlOp contains control operation details
-type ControlOp struct {
-	Action     string // Use Action* constants
-	Address    string
-	ScriptPath string
-}
-
-// Event is the universal packet sent to the Orchestrator
-type Event struct {
-	Type     EventType
-	Payload  string    // For User/Server text
-	Callback func()    // For Timers (Lua Closures)
-	Control  ControlOp // For SystemControl events
-}

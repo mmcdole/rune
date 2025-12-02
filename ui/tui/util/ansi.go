@@ -3,12 +3,12 @@ package util
 import (
 	"strings"
 
-	"github.com/drake/rune/mud"
+	"github.com/drake/rune/text"
 )
 
 // VisibleLen returns the visible length of a string (excluding ANSI codes).
 func VisibleLen(s string) int {
-	return len(mud.StripANSI(s))
+	return len(text.StripANSI(s))
 }
 
 // FilterClearSequences removes ANSI sequences that would clear the screen.

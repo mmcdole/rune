@@ -1,6 +1,9 @@
 package lua
 
-import glua "github.com/yuin/gopher-lua"
+import (
+	"github.com/drake/rune/ui"
+	glua "github.com/yuin/gopher-lua"
+)
 
 // registerPickerFuncs registers the rune.ui.picker API.
 func (e *Engine) registerPickerFuncs() {
@@ -80,16 +83,16 @@ func (e *Engine) registerPickerFuncs() {
 	}))
 }
 
-// parsePickerItems parses a Lua table into []PickerItem.
+// parsePickerItems parses a Lua table into []ui.PickerItem.
 // Supports both simple strings and tables with text/value/desc fields.
-func parsePickerItems(L *glua.LState, tbl *glua.LTable, matchDesc bool) []PickerItem {
-	var items []PickerItem
+func parsePickerItems(L *glua.LState, tbl *glua.LTable, matchDesc bool) []ui.PickerItem {
+	var items []ui.PickerItem
 	tbl.ForEach(func(k, v glua.LValue) {
 		switch item := v.(type) {
 		case glua.LString:
 			// Simple string: text and value are the same
 			s := string(item)
-			items = append(items, PickerItem{Text: s, Value: s, MatchDesc: matchDesc})
+			items = append(items, ui.PickerItem{Text: s, Value: s, MatchDesc: matchDesc})
 		case *glua.LTable:
 			// Table with text, value, desc fields
 			text := L.GetField(item, "text").String()
@@ -102,7 +105,7 @@ func parsePickerItems(L *glua.LState, tbl *glua.LTable, matchDesc bool) []Picker
 			if value == "" {
 				value = text
 			}
-			items = append(items, PickerItem{Text: text, Description: desc, Value: value, MatchDesc: matchDesc})
+			items = append(items, ui.PickerItem{Text: text, Description: desc, Value: value, MatchDesc: matchDesc})
 		}
 	})
 	return items

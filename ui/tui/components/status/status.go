@@ -4,39 +4,17 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/drake/rune/ui/components/viewport"
-	"github.com/drake/rune/ui/style"
-	"github.com/drake/rune/ui/util"
+	"github.com/drake/rune/ui"
+	"github.com/drake/rune/ui/tui/components/viewport"
+	"github.com/drake/rune/ui/tui/style"
+	"github.com/drake/rune/ui/tui/util"
 )
-
-// ConnectionState represents the current connection status.
-type ConnectionState int
-
-const (
-	StateDisconnected ConnectionState = iota
-	StateConnecting
-	StateConnected
-)
-
-// String returns a human-readable representation of the connection state.
-func (s ConnectionState) String() string {
-	switch s {
-	case StateDisconnected:
-		return "Disconnected"
-	case StateConnecting:
-		return "Connecting"
-	case StateConnected:
-		return "Connected"
-	default:
-		return "Unknown"
-	}
-}
 
 // Bar displays connection state, scroll mode, and other indicators.
 // This is the default system status bar, used when Lua doesn't define
 // a bar named "status" via rune.ui.bar("status", fn).
 type Bar struct {
-	connState  ConnectionState
+	connState  ui.ConnectionState
 	serverAddr string
 	scrollMode viewport.ScrollMode
 	newLines   int
@@ -47,7 +25,7 @@ type Bar struct {
 // New creates a new status bar.
 func New(styles style.Styles) Bar {
 	return Bar{
-		connState: StateDisconnected,
+		connState: ui.StateDisconnected,
 		styles:    styles,
 	}
 }
@@ -58,7 +36,7 @@ func (s *Bar) SetWidth(w int) {
 }
 
 // SetConnectionState updates the connection status.
-func (s *Bar) SetConnectionState(state ConnectionState, addr string) {
+func (s *Bar) SetConnectionState(state ui.ConnectionState, addr string) {
 	s.connState = state
 	s.serverAddr = addr
 }
@@ -74,11 +52,11 @@ func (s *Bar) View() string {
 	// Left section: Connection state
 	var left string
 	switch s.connState {
-	case StateConnected:
+	case ui.StateConnected:
 		left = s.styles.StatusConnected.Render("● " + s.serverAddr)
-	case StateConnecting:
+	case ui.StateConnecting:
 		left = s.styles.StatusConnecting.Render("● Connecting...")
-	case StateDisconnected:
+	case ui.StateDisconnected:
 		left = s.styles.StatusDisconnected.Render("● Disconnected")
 	}
 

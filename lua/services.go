@@ -1,15 +1,10 @@
 package lua
 
-import "time"
+import (
+	"time"
 
-// PickerItem represents an item for the picker API.
-// Session converts this to ui.PickerItem (decoupling lua from ui).
-type PickerItem struct {
-	Text        string // Display text
-	Description string // Optional description
-	Value       string // Value returned on selection (defaults to Text if empty)
-	MatchDesc   bool   // If true, include Description in fuzzy matching
-}
+	"github.com/drake/rune/ui"
+)
 
 // NetworkService handles connection logic.
 type NetworkService interface {
@@ -29,7 +24,7 @@ type UIService interface {
 	PaneClear(name string)
 
 	// Picker
-	ShowPicker(title string, items []PickerItem, onSelect func(value string), inline bool)
+	ShowPicker(title string, items []ui.PickerItem, onSelect func(value string), inline bool)
 
 	// Input
 	GetInput() string

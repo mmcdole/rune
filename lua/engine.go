@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/drake/rune/mud"
+	"github.com/drake/rune/text"
 	lru "github.com/hashicorp/golang-lru/v2"
 	glua "github.com/yuin/gopher-lua"
 )
@@ -221,7 +221,7 @@ func (e *Engine) OnInput(text string) bool {
 }
 
 // OnOutput handles server text.
-func (e *Engine) OnOutput(line mud.Line) (string, bool) {
+func (e *Engine) OnOutput(line text.Line) (string, bool) {
 	lineUD := newLine(e.L, line)
 
 	if err := e.L.CallByParam(glua.P{
@@ -243,7 +243,7 @@ func (e *Engine) OnOutput(line mud.Line) (string, bool) {
 }
 
 // OnPrompt handles server prompts.
-func (e *Engine) OnPrompt(line mud.Line) string {
+func (e *Engine) OnPrompt(line text.Line) string {
 	lineUD := newLine(e.L, line)
 
 	if err := e.L.CallByParam(glua.P{

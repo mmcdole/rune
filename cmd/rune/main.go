@@ -10,7 +10,7 @@ import (
 	"github.com/drake/rune/lua"
 	"github.com/drake/rune/network"
 	"github.com/drake/rune/session"
-	"github.com/drake/rune/ui"
+	"github.com/drake/rune/ui/tui"
 )
 
 func main() {
@@ -20,10 +20,10 @@ func main() {
 	tcpClient := network.NewTCPClient()
 
 	// Create UI
-	tui := ui.NewBubbleTeaUI()
+	tuiInstance := tui.NewBubbleTeaUI()
 
 	// Create session
-	sess := session.New(tcpClient, tui, session.Config{
+	sess := session.New(tcpClient, tuiInstance, session.Config{
 		CoreScripts: lua.CoreScripts,
 		ConfigDir:   config.Dir(),
 		UserScripts: flag.Args(),

@@ -3,8 +3,8 @@ package panes
 import (
 	"strings"
 
-	"github.com/drake/rune/ui/style"
-	"github.com/drake/rune/ui/util"
+	"github.com/drake/rune/ui/tui/style"
+	"github.com/drake/rune/ui/tui/util"
 )
 
 // Manager handles multiple named panes

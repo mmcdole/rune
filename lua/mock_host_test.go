@@ -3,6 +3,8 @@ package lua
 import (
 	"sync"
 	"time"
+
+	"github.com/drake/rune/ui"
 )
 
 // Compile-time checks that MockHost implements all segregated interfaces
@@ -118,7 +120,7 @@ func (m *MockHost) OnConfigChange() {
 	// No-op for tests - config change notifications not tracked
 }
 
-func (m *MockHost) ShowPicker(title string, items []PickerItem, onSelect func(string), inline bool) {
+func (m *MockHost) ShowPicker(title string, items []ui.PickerItem, onSelect func(string), inline bool) {
 	// No-op for tests
 }
 

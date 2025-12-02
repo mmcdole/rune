@@ -1,6 +1,6 @@
-package layout
+package ui
 
-// Config declares which components go in each dock.
+// LayoutConfig declares which components go in each dock.
 // Both docks can contain any mix of bars, panes, and built-in components.
 //
 // Built-in component names:
@@ -11,14 +11,14 @@ package layout
 // If no layout provider is set, the default layout is:
 //
 //	Bottom: []string{"input", "status"}
-type Config struct {
+type LayoutConfig struct {
 	Top    []string // Components for top dock (rendered above viewport)
 	Bottom []string // Components for bottom dock (rendered below viewport)
 }
 
-// DefaultConfig returns the default layout with just input and status.
-func DefaultConfig() Config {
-	return Config{
+// DefaultLayoutConfig returns the default layout with just input and status.
+func DefaultLayoutConfig() LayoutConfig {
+	return LayoutConfig{
 		Bottom: []string{"input", "status"},
 	}
 }

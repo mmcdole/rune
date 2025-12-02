@@ -4,8 +4,8 @@ import (
 	"time"
 
 	"github.com/drake/rune/lua"
-	"github.com/drake/rune/mud"
 	"github.com/drake/rune/timer"
+	"github.com/drake/rune/ui"
 )
 
 // Compile-time interface checks for segregated services
@@ -23,7 +23,7 @@ var (
 type LuaAdapter struct {
 	// Infrastructure
 	net   Network
-	ui    UI
+	ui    ui.UI
 	timer *timer.Service
 
 	// Managers
@@ -82,23 +82,12 @@ func (a *LuaAdapter) PaneClear(name string) {
 	a.ui.ClearPane(name)
 }
 
-func (a *LuaAdapter) ShowPicker(title string, items []lua.PickerItem, onSelect func(string), inline bool) {
+func (a *LuaAdapter) ShowPicker(title string, items []ui.PickerItem, onSelect func(string), inline bool) {
 	// Register callback
 	id := a.callbacks.Register(onSelect)
 
-	// Convert lua.PickerItem to mud.PickerItem
-	uiItems := make([]mud.PickerItem, len(items))
-	for i, item := range items {
-		uiItems[i] = mud.PickerItem{
-			Text:        item.Text,
-			Description: item.Description,
-			Value:       item.Value,
-			MatchDesc:   item.MatchDesc,
-		}
-	}
-
 	// Push to UI
-	a.ui.ShowPicker(title, uiItems, id, inline)
+	a.ui.ShowPicker(title, items, id, inline)
 }
 
 func (a *LuaAdapter) GetInput() string {

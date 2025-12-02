@@ -1,20 +1,35 @@
-package ui
+package tui
 
 import (
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/drake/rune/mud"
-	"github.com/drake/rune/ui/components/input"
-	"github.com/drake/rune/ui/components/panes"
-	"github.com/drake/rune/ui/components/picker"
-	"github.com/drake/rune/ui/components/status"
-	"github.com/drake/rune/ui/components/viewport"
-	"github.com/drake/rune/ui/layout"
-	"github.com/drake/rune/ui/style"
-	"github.com/drake/rune/ui/util"
+	"github.com/drake/rune/ui"
+	"github.com/drake/rune/ui/tui/components/input"
+	"github.com/drake/rune/ui/tui/components/panes"
+	"github.com/drake/rune/ui/tui/components/picker"
+	"github.com/drake/rune/ui/tui/components/status"
+	"github.com/drake/rune/ui/tui/components/viewport"
+	"github.com/drake/rune/ui/tui/style"
+	"github.com/drake/rune/ui/tui/util"
 )
+
+// tickMsg is used for periodic updates (line batching, clock refresh).
+type tickMsg time.Time
+
+// flushLinesMsg signals the model to flush pending lines.
+type flushLinesMsg struct {
+	Lines []string
+}
+
+// doTick returns a command that sends a tickMsg after the given duration.
+func doTick() tea.Cmd {
+	return tea.Tick(16*time.Millisecond, func(t time.Time) tea.Msg {
+		return tickMsg(t)
+	})
+}
 
 // InputMode represents the current input handling mode.
 type InputMode int
@@ -46,7 +61,7 @@ type Model struct {
 	styles     style.Styles
 
 	// Generic picker (replaces slashPicker, historyPicker, aliasPicker)
-	picker    *picker.Model[mud.PickerItem]
+	picker    *picker.Model[ui.PickerItem]
 	pickerCB  string    // Current callback ID for picker selection
 	inputMode InputMode // Current input handling mode
 
@@ -55,7 +70,7 @@ type Model struct {
 
 	// Push-based state from Session (thread-safe local caches)
 	boundKeys  map[string]bool            // Keys bound in Lua
-	barContent map[string]BarContent // Rendered bar content from Lua
+	barContent map[string]ui.BarContent // Rendered bar content from Lua
 	luaLayout  struct {              // Layout configuration from Lua
 		Top    []string
 		Bottom []string
@@ -89,7 +104,7 @@ func NewModel(inputChan chan<- string, outbound chan<- any) Model {
 		panes:      panes.NewManager(styles),
 		styles:     styles,
 		// Single generic picker
-		picker: picker.New[mud.PickerItem](picker.Config{
+		picker: picker.New[ui.PickerItem](picker.Config{
 			MaxVisible: 10,
 			EmptyText:  "No matches",
 		}, styles),
@@ -125,7 +140,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateDimensions()
 		m.initialized = true
 		// Notify Session of size change (for rune.state.width/height)
-		m.sendOutbound(WindowSizeChangedMsg{Width: msg.Width, Height: msg.Height})
+		m.sendOutbound(ui.WindowSizeChangedMsg{Width: msg.Width, Height: msg.Height})
 		return m, nil
 
 	// Tick for batching and clock updates
@@ -135,26 +150,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.appendLines(m.pendingLines)
 			m.pendingLines = nil
 		}
-		// Note: Bar content is now pushed by Session via UpdateBarsMsg
+		// Note: Bar content is now pushed by Session via ui.UpdateBarsMsg
 		return m, doTick()
 
 	// Push-based updates from Session (thread-safe)
-	case UpdateBindsMsg:
+	case ui.UpdateBindsMsg:
 		m.boundKeys = msg
 		return m, nil
 
-	case UpdateBarsMsg:
+	case ui.UpdateBarsMsg:
 		m.barContent = msg
 		return m, nil
 
-	case UpdateLayoutMsg:
+	case ui.UpdateLayoutMsg:
 		m.luaLayout.Top = msg.Top
 		m.luaLayout.Bottom = msg.Bottom
 		m.updateDimensions()
 		return m, nil
 
-	case ShowPickerMsg:
-		// Pass mud.PickerItem directly (no wrapper needed)
+	case ui.ShowPickerMsg:
+		// Pass ui.PickerItem directly (no wrapper needed)
 		m.picker.SetItems(msg.Items)
 		m.pickerCB = msg.CallbackID
 
@@ -178,7 +193,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case SetInputMsg:
+	case ui.SetInputMsg:
 		m.input.SetValue(string(msg))
 		m.input.CursorEnd()
 		return m, nil
@@ -194,19 +209,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	// Print line - batched through pendingLines for 16ms tick flush
-	case PrintLineMsg:
+	case ui.PrintLineMsg:
 		cleanLine := filterClearSequences(string(msg))
 		m.pendingLines = append(m.pendingLines, cleanLine)
 		m.wordCache.AddLine(cleanLine) // Feed tab completion cache
 		return m, nil
 
 	// Echo line
-	case EchoLineMsg:
+	case ui.EchoLineMsg:
 		m.appendLines([]string{string(msg)})
 		return m, nil
 
 	// Server prompt (partial line)
-	case PromptMsg:
+	case ui.PromptMsg:
 		text := string(msg)
 		if text != m.lastPrompt {
 			m.viewport.SetPrompt(text)
@@ -215,25 +230,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	// Connection state
-	case ConnectionStateMsg:
-		m.status.SetConnectionState(status.ConnectionState(msg.State), msg.Address)
+	case ui.ConnectionStateMsg:
+		m.status.SetConnectionState(msg.State, msg.Address)
 		return m, nil
 
 	// Pane operations from Lua
-	case PaneCreateMsg:
+	case ui.PaneCreateMsg:
 		m.panes.Create(msg.Name)
 		return m, nil
 
-	case PaneWriteMsg:
+	case ui.PaneWriteMsg:
 		m.panes.Write(msg.Name, msg.Text)
 		return m, nil
 
-	case PaneToggleMsg:
+	case ui.PaneToggleMsg:
 		m.panes.Toggle(msg.Name)
 		m.updateDimensions()
 		return m, nil
 
-	case PaneClearMsg:
+	case ui.PaneClearMsg:
 		m.panes.Clear(msg.Name)
 		return m, nil
 
@@ -257,7 +272,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.inputMode != ModeNormal {
 			m.inputMode = ModeNormal
 			m.picker.Reset()
-			m.sendOutbound(PickerSelectMsg{CallbackID: m.pickerCB, Accepted: false})
+			m.sendOutbound(ui.PickerSelectMsg{CallbackID: m.pickerCB, Accepted: false})
 			return m, nil
 		}
 		m.input.Reset()
@@ -267,7 +282,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.inputMode != ModeNormal {
 			m.inputMode = ModeNormal
 			m.picker.Reset()
-			m.sendOutbound(PickerSelectMsg{CallbackID: m.pickerCB, Accepted: false})
+			m.sendOutbound(ui.PickerSelectMsg{CallbackID: m.pickerCB, Accepted: false})
 			return m, nil
 		}
 		m.input.Reset()
@@ -293,7 +308,7 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if keyStr != "" && m.boundKeys[keyStr] {
 		isPrintable := msg.Type == tea.KeyRunes
 		if !isPrintable || m.input.Value() == "" {
-			m.sendOutbound(ExecuteBindMsg(keyStr))
+			m.sendOutbound(ui.ExecuteBindMsg(keyStr))
 			return m, nil
 		}
 	}
@@ -350,7 +365,7 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Notify Session if input content changed (for rune.input.get())
 	if newValue := m.input.Value(); newValue != oldValue {
-		m.sendOutbound(InputChangedMsg(newValue))
+		m.sendOutbound(ui.InputChangedMsg(newValue))
 	}
 
 	// Update suggestions
@@ -365,7 +380,7 @@ func (m Model) handleInlinePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Check Lua key bindings, but let Up/Down fall through to picker
 	keyStr := keyToString(msg)
 	if keyStr != "" && m.boundKeys[keyStr] && keyStr != "up" && keyStr != "down" {
-		m.sendOutbound(ExecuteBindMsg(keyStr))
+		m.sendOutbound(ui.ExecuteBindMsg(keyStr))
 		return m, nil
 	}
 
@@ -383,7 +398,7 @@ func (m Model) handleInlinePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if item, ok := m.picker.Selected(); ok {
 			m.input.SetValue(item.GetValue() + " ")
 			m.input.CursorEnd()
-			m.sendOutbound(PickerSelectMsg{
+			m.sendOutbound(ui.PickerSelectMsg{
 				CallbackID: m.pickerCB,
 				Value:      item.GetValue(),
 				Accepted:   true,
@@ -396,7 +411,7 @@ func (m Model) handleInlinePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyEnter:
 		// Enter accepts selection then submits input
 		if item, ok := m.picker.Selected(); ok {
-			m.sendOutbound(PickerSelectMsg{
+			m.sendOutbound(ui.PickerSelectMsg{
 				CallbackID: m.pickerCB,
 				Value:      item.GetValue(),
 				Accepted:   true,
@@ -444,7 +459,7 @@ func (m Model) handleInlinePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.input = *newInput
 
 	if newValue := m.input.Value(); newValue != oldValue {
-		m.sendOutbound(InputChangedMsg(newValue))
+		m.sendOutbound(ui.InputChangedMsg(newValue))
 		m.updateInlinePickerFilter()
 	}
 
@@ -480,7 +495,7 @@ func (m *Model) updateInlinePickerFilter() {
 // closeInlinePicker closes the inline picker and notifies the session.
 func (m *Model) closeInlinePicker() {
 	m.inputMode = ModeNormal
-	m.sendOutbound(PickerSelectMsg{CallbackID: m.pickerCB, Accepted: false})
+	m.sendOutbound(ui.PickerSelectMsg{CallbackID: m.pickerCB, Accepted: false})
 	m.picker.Reset()
 }
 
@@ -499,13 +514,13 @@ func (m Model) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyEnter, tea.KeyTab:
 		// Accept selection
 		if item, ok := m.picker.Selected(); ok {
-			m.sendOutbound(PickerSelectMsg{
+			m.sendOutbound(ui.PickerSelectMsg{
 				CallbackID: m.pickerCB,
 				Value:      item.GetValue(),
 				Accepted:   true,
 			})
 		} else {
-			m.sendOutbound(PickerSelectMsg{CallbackID: m.pickerCB, Accepted: false})
+			m.sendOutbound(ui.PickerSelectMsg{CallbackID: m.pickerCB, Accepted: false})
 		}
 		m.inputMode = ModeNormal
 		m.picker.Reset()
@@ -631,7 +646,7 @@ func (m *Model) updateScrollState() {
 	if mode != 0 { // ModeScrolled
 		modeStr = "scrolled"
 	}
-	m.sendOutbound(ScrollStateChangedMsg{Mode: modeStr, NewLines: newLines})
+	m.sendOutbound(ui.ScrollStateChangedMsg{Mode: modeStr, NewLines: newLines})
 }
 
 func (m *Model) updateDimensions() {
@@ -655,14 +670,14 @@ func (m *Model) updateDimensions() {
 
 // getLayout returns the current layout configuration.
 // Uses pushed layout if set, otherwise falls back to default.
-func (m *Model) getLayout() layout.Config {
+func (m *Model) getLayout() ui.LayoutConfig {
 	if len(m.luaLayout.Top) > 0 || len(m.luaLayout.Bottom) > 0 {
-		return layout.Config{
+		return ui.LayoutConfig{
 			Top:    m.luaLayout.Top,
 			Bottom: m.luaLayout.Bottom,
 		}
 	}
-	return layout.DefaultConfig()
+	return ui.DefaultLayoutConfig()
 }
 
 // borderLine returns a dim horizontal line spanning the full width.
@@ -784,7 +799,7 @@ func (m Model) renderComponent(name string) string {
 }
 
 // renderBarContent renders BarContent with left/center/right alignment.
-func (m Model) renderBarContent(content BarContent) string {
+func (m Model) renderBarContent(content ui.BarContent) string {
 	left := content.Left
 	center := content.Center
 	right := content.Right
