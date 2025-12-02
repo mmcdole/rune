@@ -5,23 +5,16 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/drake/rune/interfaces"
 	"github.com/drake/rune/ui/components/status"
-	"github.com/drake/rune/ui/layout"
 )
 
-// ServerLineMsg represents a line from the MUD server.
-type ServerLineMsg string
-
-// DisplayLineMsg represents a line to append to scrollback (server output or prompt commit).
-type DisplayLineMsg string
+// PrintLineMsg represents a line to append to scrollback.
+// Used for all output: server lines, Lua prints, etc.
+type PrintLineMsg string
 
 // EchoLineMsg represents a local echo (user input) to append to scrollback.
 type EchoLineMsg string
-
-// BatchedLinesMsg carries multiple lines in one message for efficient batching.
-type BatchedLinesMsg struct {
-	Lines []string
-}
 
 // PromptMsg represents a server prompt (partial line without newline).
 type PromptMsg string
@@ -85,7 +78,7 @@ type UpdateBindsMsg map[string]bool
 
 // UpdateBarsMsg pushes rendered bar content from Session to UI.
 // Session runs Lua bar renderers and sends the result; UI just displays it.
-type UpdateBarsMsg map[string]layout.BarContent
+type UpdateBarsMsg map[string]interfaces.BarContent
 
 // UpdateLayoutMsg pushes layout configuration from Session to UI.
 type UpdateLayoutMsg struct {
@@ -117,17 +110,17 @@ type ScrollStateChangedMsg struct {
 // Session tracks this so Lua can query current input via rune.input.get().
 type InputChangedMsg string
 
-// BarContent is an alias for layout.BarContent for convenience.
-type BarContent = layout.BarContent
+// BarContent is an alias for interfaces.BarContent for convenience.
+type BarContent = interfaces.BarContent
 
 // --- Picker Messages (Session -> UI) ---
 
 // ShowPickerMsg requests the UI to display a picker overlay.
 // Sent from Session to UI when Lua calls rune.ui.picker.show().
 type ShowPickerMsg struct {
-	Title      string        // Optional title/header for the picker (modal mode only)
-	Items      []PickerItem // Items to display
-	CallbackID string        // Opaque ID to track which Lua callback to run
+	Title      string                // Optional title/header for the picker (modal mode only)
+	Items      []interfaces.PickerItem // Items to display
+	CallbackID string                // Opaque ID to track which Lua callback to run
 	// Inline mode: picker filters based on input content, doesn't trap keys.
 	// Modal mode (default): picker captures keyboard and has its own search field.
 	Inline bool

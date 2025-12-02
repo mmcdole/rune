@@ -22,10 +22,3 @@ func DefaultConfig() Config {
 		Bottom: []string{"input", "status"},
 	}
 }
-
-// BarContent holds the rendered content of a bar.
-type BarContent struct {
-	Left   string
-	Center string
-	Right  string
-}

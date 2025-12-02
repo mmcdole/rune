@@ -4,9 +4,11 @@ import (
 	"sync"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/drake/rune/interfaces"
 )
 
-// BubbleTeaUI implements mud.UI using Bubble Tea.
+// BubbleTeaUI implements interfaces.UI using Bubble Tea.
 // It bridges the existing channel-based architecture with Bubble Tea's
 // model/update/view event loop.
 type BubbleTeaUI struct {
@@ -48,33 +50,29 @@ func (b *BubbleTeaUI) send(msg tea.Msg) {
 	}
 }
 
-// Render implements mud.UI - queues a line for display.
-func (b *BubbleTeaUI) Render(text string) {
-	b.send(ServerLineMsg(text))
+// Print appends text to the main scrollback buffer.
+// All output (server lines, Lua prints) goes through this single method.
+func (b *BubbleTeaUI) Print(text string) {
+	b.send(PrintLineMsg(text))
 }
 
-// RenderDisplayLine implements mud.UI - queues a display line for scrollback.
-func (b *BubbleTeaUI) RenderDisplayLine(text string) {
-	b.send(DisplayLineMsg(text))
-}
-
-// RenderEcho implements mud.UI - queues a local echo line.
-func (b *BubbleTeaUI) RenderEcho(text string) {
+// Echo appends user input to scrollback with local-echo styling.
+func (b *BubbleTeaUI) Echo(text string) {
 	styled := "\033[32m> " + text + "\033[0m"
 	b.send(EchoLineMsg(styled))
 }
 
-// RenderPrompt implements mud.UI - updates the prompt area.
-func (b *BubbleTeaUI) RenderPrompt(text string) {
+// SetPrompt updates the active server prompt (overlay at bottom).
+func (b *BubbleTeaUI) SetPrompt(text string) {
 	b.send(PromptMsg(text))
 }
 
-// Input implements mud.UI - returns channel for user input.
+// Input returns channel for user input.
 func (b *BubbleTeaUI) Input() <-chan string {
 	return b.inputChan
 }
 
-// Run implements mud.UI - starts the TUI and blocks until exit.
+// Run starts the TUI and blocks until exit.
 func (b *BubbleTeaUI) Run() error {
 	model := NewModel(b.inputChan, b.outbound)
 
@@ -156,7 +154,7 @@ func (b *BubbleTeaUI) ClearPane(name string) {
 // --- Push-based messages from Session to UI ---
 
 // UpdateBars sends rendered bar content from Session to UI.
-func (b *BubbleTeaUI) UpdateBars(content map[string]BarContent) {
+func (b *BubbleTeaUI) UpdateBars(content map[string]interfaces.BarContent) {
 	b.send(UpdateBarsMsg(content))
 }
 
@@ -172,7 +170,7 @@ func (b *BubbleTeaUI) UpdateLayout(top, bottom []string) {
 
 // ShowPicker displays a picker overlay with items.
 // inline: if true, picker filters based on input; if false, picker captures keyboard.
-func (b *BubbleTeaUI) ShowPicker(title string, items []PickerItem, callbackID string, inline bool) {
+func (b *BubbleTeaUI) ShowPicker(title string, items []interfaces.PickerItem, callbackID string, inline bool) {
 	b.send(ShowPickerMsg{Title: title, Items: items, CallbackID: callbackID, Inline: inline})
 }
 

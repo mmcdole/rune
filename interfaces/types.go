@@ -1,5 +1,20 @@
 package interfaces
 
+// BarContent holds the rendered content of a bar.
+type BarContent struct {
+	Left   string
+	Center string
+	Right  string
+}
+
+// PickerItem represents an item for picker/selection UI.
+type PickerItem struct {
+	Text        string
+	Description string
+	Value       string // ID or Value passed back to caller
+	MatchDesc   bool   // If true, include Description in fuzzy matching
+}
+
 // EventType identifies the source of the message
 type EventType int
 
@@ -44,19 +59,38 @@ type Network interface {
 	Output() <-chan Event // Stream of EventNetLine and EventNetPrompt
 }
 
-// UI defines the Terminal layer
+// UI defines the Terminal layer.
+// Single implementation: BubbleTeaUI.
 type UI interface {
-	// Core rendering
-	Render(text string)            // Render a complete line (legacy helper)
-	RenderDisplayLine(text string) // Render a line into scrollback (server output or prompt commit)
-	RenderEcho(text string)        // Render a user echo line (e.g., "> cmd")
-	RenderPrompt(text string)      // Render a prompt overlay (no newline, overwrites previous prompt)
-	Input() <-chan string          // Stream from user
+	// --- Lifecycle ---
 	Run() error
-	Done() <-chan struct{} // Signals when UI exits
-	Quit()                 // Request UI to exit
+	Quit()
+	Done() <-chan struct{}
+	Input() <-chan string
+	Outbound() <-chan any
 
-	// Controller methods (no-op for ConsoleUI)
+	// --- Main Output Stream ---
+	// Appends text to the main scrollback buffer.
+	// Implementation handles batching/performance (16ms tick).
+	Print(text string)
+
+	// --- Semantic Output ---
+	// Appends user input to scrollback with local-echo styling.
+	Echo(text string)
+
+	// Updates the active server prompt (overlay at bottom).
+	SetPrompt(text string)
+
+	// --- Reactive State (Push Architecture) ---
+	UpdateBars(content map[string]BarContent)
+	UpdateBinds(keys map[string]bool)
+	UpdateLayout(top, bottom []string)
+	SetInput(text string)
+
+	// --- Interactive Elements ---
+	ShowPicker(title string, items []PickerItem, callbackID string, inline bool)
+
+	// --- Pane Management ---
 	CreatePane(name string)
 	WritePane(name, text string)
 	TogglePane(name string)

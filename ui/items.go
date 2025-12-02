@@ -3,17 +3,23 @@ package ui
 import (
 	"strings"
 
+	"github.com/drake/rune/interfaces"
 	"github.com/drake/rune/ui/style"
 )
 
-// PickerItem is a general purpose picker item for Lua-driven lists.
+// PickerItem wraps interfaces.PickerItem and adds picker.Item methods.
+// This exists because picker.Item.Render() needs style.Styles which would
+// create an import cycle if defined on interfaces.PickerItem directly.
 type PickerItem struct {
-	Text        string
-	Description string
-	Value       string // ID or Value passed back to Lua
-	MatchDesc   bool   // If true, include Description in fuzzy matching
+	interfaces.PickerItem
 }
 
+// NewPickerItem wraps an interfaces.PickerItem for use with the picker component.
+func NewPickerItem(item interfaces.PickerItem) PickerItem {
+	return PickerItem{PickerItem: item}
+}
+
+// FilterValue implements picker.Item.
 func (i PickerItem) FilterValue() string {
 	if i.MatchDesc && i.Description != "" {
 		return i.Text + " " + i.Description
@@ -21,6 +27,7 @@ func (i PickerItem) FilterValue() string {
 	return i.Text
 }
 
+// Render implements picker.Item.
 func (i PickerItem) Render(width int, selected bool, matches []int, s style.Styles) string {
 	prefix := "  "
 	if selected {

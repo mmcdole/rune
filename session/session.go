@@ -12,12 +12,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/drake/rune/lua"
 	"github.com/drake/rune/interfaces"
+	"github.com/drake/rune/lua"
 	"github.com/drake/rune/network"
 	"github.com/drake/rune/timer"
 	"github.com/drake/rune/ui"
-	"github.com/drake/rune/ui/layout"
 )
 
 
@@ -31,9 +30,8 @@ type Config struct {
 // Session orchestrates the MUD client components.
 type Session struct {
 	// Infrastructure
-	net    interfaces.Network
-	ui     interfaces.UI
-	pushUI ui.PushUI // Optional push-capable UI (nil for ConsoleUI)
+	net interfaces.Network
+	ui  interfaces.UI
 	timer  *timer.Service
 
 	// Scripting
@@ -85,10 +83,6 @@ func New(net interfaces.Network, uiInstance interfaces.UI, cfg Config) *Session 
 		callbacks:   NewCallbackManager(),
 	}
 
-	// Check if UI supports push-based updates
-	if p, ok := uiInstance.(ui.PushUI); ok {
-		s.pushUI = p
-	}
 
 	// Create adapter (bridges Lua services to Session infrastructure)
 	s.adapter = NewLuaAdapter(s)
@@ -142,14 +136,12 @@ func (s *Session) Run() error {
 
 	// Boot the system
 	if err := s.boot(); err != nil {
-		s.ui.Render(fmt.Sprintf("\033[31m[System] Boot Error: %v\033[0m", err))
+		s.ui.Print(fmt.Sprintf("\033[31m[System] Boot Error: %v\033[0m", err))
 	}
 
-	// Start bar re-render ticker if UI supports push updates
+	// Start bar re-render ticker
 	// 250ms provides responsive updates while limiting CPU usage
-	if s.pushUI != nil {
-		s.barTicker = time.NewTicker(250 * time.Millisecond)
-	}
+	s.barTicker = time.NewTicker(250 * time.Millisecond)
 
 	// Start event loop
 	go s.processEvents()
@@ -163,16 +155,6 @@ func (s *Session) Run() error {
 
 // processEvents is the main event loop.
 func (s *Session) processEvents() {
-	// Get channels for push-capable UI (may be nil)
-	var barTickerC <-chan time.Time
-	var outboundC <-chan any
-	if s.pushUI != nil {
-		if s.barTicker != nil {
-			barTickerC = s.barTicker.C
-		}
-		outboundC = s.pushUI.Outbound()
-	}
-
 	for {
 		select {
 		case <-s.done:
@@ -189,9 +171,9 @@ func (s *Session) processEvents() {
 		case evt := <-s.timerEvents:
 			s.eventsProcessed.Add(1)
 			s.engine.OnTimer(evt.ID, evt.Repeating)
-		case <-barTickerC:
+		case <-s.barTicker.C:
 			s.pushBarUpdates()
-		case msg := <-outboundC:
+		case msg := <-s.ui.Outbound():
 			s.handleUIMessage(msg)
 		}
 	}
@@ -202,27 +184,27 @@ func (s *Session) handleEvent(event interfaces.Event) {
 	switch event.Type {
 	case interfaces.EventNetLine:
 		if modified, show := s.engine.OnOutput(event.Payload); show {
-			s.ui.RenderDisplayLine(modified)
+			s.ui.Print(modified)
 		}
 		// A server line ends the overlay prompt
 		s.lastPrompt = ""
-		s.ui.RenderPrompt("")
+		s.ui.SetPrompt("")
 
 	case interfaces.EventNetPrompt:
 		// Commit previous prompt to scrollback before showing new one
 		if s.lastPrompt != "" {
-			s.ui.RenderDisplayLine(s.lastPrompt)
+			s.ui.Print(s.lastPrompt)
 		}
 		modified := s.engine.OnPrompt(event.Payload)
 		s.lastPrompt = modified
-		s.ui.RenderPrompt(modified)
+		s.ui.SetPrompt(modified)
 
 	case interfaces.EventUserInput:
 		// Commit current prompt to history before sending input
 		if s.lastPrompt != "" {
-			s.ui.RenderDisplayLine(s.lastPrompt)
+			s.ui.Print(s.lastPrompt)
 			s.lastPrompt = ""
-			s.ui.RenderPrompt("")
+			s.ui.SetPrompt("")
 		}
 		// Add non-empty input to history
 		if event.Payload != "" {
@@ -231,7 +213,7 @@ func (s *Session) handleEvent(event interfaces.Event) {
 		s.engine.OnInput(event.Payload)
 		// Local echo to scrollback (styled in UI)
 		if le, ok := s.net.(interface{ LocalEchoEnabled() bool }); !ok || le.LocalEchoEnabled() {
-			s.ui.RenderEcho(event.Payload)
+			s.ui.Echo(event.Payload)
 		}
 
 	case interfaces.EventAsyncResult:
@@ -366,26 +348,26 @@ func (s *Session) reload() {
 		Type: interfaces.EventAsyncResult,
 		Callback: func() {
 			if err := s.boot(); err != nil {
-				s.ui.Render(fmt.Sprintf("\033[31mReload Failed: %v\033[0m", err))
+				s.ui.Print(fmt.Sprintf("\033[31mReload Failed: %v\033[0m", err))
 			} else {
 				s.engine.CallHook("reloaded")
 			}
 		},
 	}:
 	default:
-		s.ui.Render("\033[31mReload Failed: event queue full\033[0m")
+		s.ui.Print("\033[31mReload Failed: event queue full\033[0m")
 	}
 }
 
 // loadScript loads a Lua script file and notifies hooks (called by adapter).
 func (s *Session) loadScript(path string) {
 	if path == "" {
-		s.ui.Render("\033[31mLoad Failed: empty path\033[0m")
+		s.ui.Print("\033[31mLoad Failed: empty path\033[0m")
 		return
 	}
 
 	if err := s.engine.DoFile(path); err != nil {
-		s.ui.Render(fmt.Sprintf("\033[31mLoad Failed (%s): %v\033[0m", path, err))
+		s.ui.Print(fmt.Sprintf("\033[31mLoad Failed (%s): %v\033[0m", path, err))
 		return
 	}
 
@@ -409,17 +391,17 @@ func (s *Session) shutdown() {
 
 // renderBars calls all Lua bar renderers and returns their content.
 // Must be called from Session goroutine (thread-safe Lua access).
-// Converts lua.BarData to layout.BarContent (decoupling lua from ui).
-func (s *Session) renderBars(width int) map[string]layout.BarContent {
+// Converts lua.BarData to interfaces.BarContent (decoupling lua from ui).
+func (s *Session) renderBars(width int) map[string]interfaces.BarContent {
 	names := s.engine.GetBarNames()
 	if len(names) == 0 {
 		return nil
 	}
 
-	result := make(map[string]layout.BarContent, len(names))
+	result := make(map[string]interfaces.BarContent, len(names))
 	for _, name := range names {
 		if data, ok := s.engine.RenderBar(name, width); ok {
-			result[name] = layout.BarContent{
+			result[name] = interfaces.BarContent{
 				Left:   data.Left,
 				Center: data.Center,
 				Right:  data.Right,
@@ -438,10 +420,6 @@ func (s *Session) handleKeyBind(key string) {
 // pushBarUpdates renders all Lua bars and pushes to UI.
 // Called periodically by the bar ticker.
 func (s *Session) pushBarUpdates() {
-	if s.pushUI == nil {
-		return
-	}
-
 	// Get current width from client state
 	width := s.clientState.Width
 	if width <= 0 {
@@ -451,29 +429,25 @@ func (s *Session) pushBarUpdates() {
 	// Render bars and push to UI
 	content := s.renderBars(width)
 	if content != nil {
-		s.pushUI.UpdateBars(content)
+		s.ui.UpdateBars(content)
 	}
 }
 
 // pushBindsAndLayout pushes current bindings and layout config to UI.
 // Called after scripts load or reload.
 func (s *Session) pushBindsAndLayout() {
-	if s.pushUI == nil {
-		return
-	}
-
 	// Push bound keys
 	keys := s.engine.GetBoundKeys()
 	bindsMap := make(map[string]bool, len(keys))
 	for _, key := range keys {
 		bindsMap[key] = true
 	}
-	s.pushUI.UpdateBinds(bindsMap)
+	s.ui.UpdateBinds(bindsMap)
 
 	// Push layout configuration
 	luaLayout := s.engine.GetLayout()
 	if len(luaLayout.Top) > 0 || len(luaLayout.Bottom) > 0 {
-		s.pushUI.UpdateLayout(luaLayout.Top, luaLayout.Bottom)
+		s.ui.UpdateLayout(luaLayout.Top, luaLayout.Bottom)
 	}
 }
 

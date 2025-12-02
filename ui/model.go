@@ -45,7 +45,7 @@ type Model struct {
 	wordCache *util.CompletionEngine
 
 	// Push-based state from Session (thread-safe local caches)
-	boundKeys  map[string]bool       // Keys bound in Lua
+	boundKeys  map[string]bool            // Keys bound in Lua
 	barContent map[string]BarContent // Rendered bar content from Lua
 	luaLayout  struct {              // Layout configuration from Lua
 		Top    []string
@@ -140,7 +140,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case ShowPickerMsg:
-		m.picker.SetItems(msg.Items)
+		// Convert interfaces.PickerItem to ui.PickerItem (wrapper with picker.Item methods)
+		items := make([]PickerItem, len(msg.Items))
+		for i, item := range msg.Items {
+			items[i] = NewPickerItem(item)
+		}
+		m.picker.SetItems(items)
 		m.pickerCB = msg.CallbackID
 		m.pickerActive = true
 		m.pickerInline = msg.Inline
@@ -178,15 +183,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.appendLines(cleanLines)
 		return m, nil
 
-	// General display line (server output or prompt commit)
-	case DisplayLineMsg:
-		cleanLine := filterClearSequences(string(msg))
-		m.wordCache.AddLine(cleanLine)
-		m.appendLines([]string{cleanLine})
-		return m, nil
-
-	// Single server line - batch for next tick
-	case ServerLineMsg:
+	// Print line - batched through pendingLines for 16ms tick flush
+	case PrintLineMsg:
 		cleanLine := filterClearSequences(string(msg))
 		m.pendingLines = append(m.pendingLines, cleanLine)
 		m.wordCache.AddLine(cleanLine) // Feed tab completion cache
@@ -715,7 +713,7 @@ func (m Model) renderComponent(name string) string {
 }
 
 // renderBarContent renders BarContent with left/center/right alignment.
-func (m Model) renderBarContent(content layout.BarContent) string {
+func (m Model) renderBarContent(content BarContent) string {
 	left := content.Left
 	center := content.Center
 	right := content.Right

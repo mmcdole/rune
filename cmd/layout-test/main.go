@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/drake/rune/interfaces"
 	"github.com/drake/rune/ui"
 	"github.com/drake/rune/ui/layout"
 )
@@ -72,7 +73,7 @@ func main() {
 			"Type /quit to exit",
 		}
 		for _, line := range lines {
-			program.Send(ui.DisplayLineMsg(line))
+			program.Send(ui.PrintLineMsg(line))
 			time.Sleep(10 * time.Millisecond)
 		}
 	}()
@@ -118,21 +119,21 @@ func getLayout(scenario string) layout.Config {
 	}
 }
 
-func renderBars(scenario string, width int) map[string]layout.BarContent {
-	bars := make(map[string]layout.BarContent)
+func renderBars(scenario string, width int) map[string]interfaces.BarContent {
+	bars := make(map[string]interfaces.BarContent)
 
 	switch scenario {
 	case "topbar":
-		bars["title"] = layout.BarContent{
+		bars["title"] = interfaces.BarContent{
 			Left:  "\033[1;35m◆ RUNE MUD CLIENT ◆\033[0m",
 			Right: time.Now().Format("15:04:05"),
 		}
 	case "multi":
-		bars["title"] = layout.BarContent{
+		bars["title"] = interfaces.BarContent{
 			Left:  "\033[1;35m◆ MULTI-BAR LAYOUT ◆\033[0m",
 			Right: time.Now().Format("2006-01-02 15:04:05"),
 		}
-		bars["stats"] = layout.BarContent{
+		bars["stats"] = interfaces.BarContent{
 			Left:   "\033[31mHP: 100/100\033[0m",
 			Center: "\033[34mMP: 50/50\033[0m",
 			Right:  "\033[33mGold: 1234\033[0m",

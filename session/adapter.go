@@ -3,10 +3,9 @@ package session
 import (
 	"time"
 
-	"github.com/drake/rune/lua"
 	"github.com/drake/rune/interfaces"
+	"github.com/drake/rune/lua"
 	"github.com/drake/rune/timer"
-	"github.com/drake/rune/ui"
 )
 
 // Compile-time interface checks for segregated services
@@ -23,10 +22,9 @@ var (
 // It implements the segregated interfaces defined in lua/services.go.
 type LuaAdapter struct {
 	// Infrastructure
-	net    interfaces.Network
-	ui     interfaces.UI
-	pushUI ui.PushUI // May be nil for ConsoleUI
-	timer  *timer.Service
+	net   interfaces.Network
+	ui    interfaces.UI
+	timer *timer.Service
 
 	// Managers
 	history   *HistoryManager
@@ -41,7 +39,6 @@ func NewLuaAdapter(s *Session) *LuaAdapter {
 	return &LuaAdapter{
 		net:       s.net,
 		ui:        s.ui,
-		pushUI:    s.pushUI,
 		timer:     s.timer,
 		history:   s.history,
 		callbacks: s.callbacks,
@@ -66,7 +63,7 @@ func (a *LuaAdapter) Send(data string) {
 // --- UIService ---
 
 func (a *LuaAdapter) Print(text string) {
-	a.ui.RenderDisplayLine(text)
+	a.ui.Print(text)
 }
 
 func (a *LuaAdapter) PaneCreate(name string) {
@@ -86,17 +83,13 @@ func (a *LuaAdapter) PaneClear(name string) {
 }
 
 func (a *LuaAdapter) ShowPicker(title string, items []lua.PickerItem, onSelect func(string), inline bool) {
-	if a.pushUI == nil {
-		return
-	}
-
 	// Register callback
 	id := a.callbacks.Register(onSelect)
 
-	// Convert lua.PickerItem to ui.PickerItem
-	uiItems := make([]ui.PickerItem, len(items))
+	// Convert lua.PickerItem to interfaces.PickerItem
+	uiItems := make([]interfaces.PickerItem, len(items))
 	for i, item := range items {
-		uiItems[i] = ui.PickerItem{
+		uiItems[i] = interfaces.PickerItem{
 			Text:        item.Text,
 			Description: item.Description,
 			Value:       item.Value,
@@ -105,7 +98,7 @@ func (a *LuaAdapter) ShowPicker(title string, items []lua.PickerItem, onSelect f
 	}
 
 	// Push to UI
-	a.pushUI.ShowPicker(title, uiItems, id, inline)
+	a.ui.ShowPicker(title, uiItems, id, inline)
 }
 
 func (a *LuaAdapter) GetInput() string {
@@ -113,9 +106,7 @@ func (a *LuaAdapter) GetInput() string {
 }
 
 func (a *LuaAdapter) SetInput(text string) {
-	if a.pushUI != nil {
-		a.pushUI.SetInput(text)
-	}
+	a.ui.SetInput(text)
 	// Also update tracked value so GetInput() returns the new value immediately
 	a.session.currentInput = text
 }

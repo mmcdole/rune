@@ -7,7 +7,6 @@ import (
 
 	"github.com/drake/rune/config"
 	"github.com/drake/rune/debug"
-	"github.com/drake/rune/interfaces"
 	"github.com/drake/rune/lua"
 	"github.com/drake/rune/network"
 	"github.com/drake/rune/session"
@@ -15,20 +14,13 @@ import (
 )
 
 func main() {
-	// Parse flags
-	simpleUI := flag.Bool("simple", false, "Use simple console UI instead of TUI")
 	flag.Parse()
 
 	// Create network
 	tcpClient := network.NewTCPClient()
 
-	// Select UI mode
-	var tui interfaces.UI
-	if *simpleUI {
-		tui = ui.NewConsoleUI()
-	} else {
-		tui = ui.NewBubbleTeaUI()
-	}
+	// Create UI
+	tui := ui.NewBubbleTeaUI()
 
 	// Create session
 	sess := session.New(tcpClient, tui, session.Config{
