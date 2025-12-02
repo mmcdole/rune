@@ -7,6 +7,79 @@ import (
 	"github.com/drake/rune/ui/util"
 )
 
+// renderItem renders a single picker item with highlighting.
+func renderItem[T Item](item T, width int, selected bool, matches []int, s style.Styles) string {
+	prefix := "  "
+	if selected {
+		prefix = "> "
+	}
+
+	// Create match set for O(1) lookup
+	matchSet := make(map[int]bool, len(matches))
+	for _, pos := range matches {
+		matchSet[pos] = true
+	}
+
+	// Build highlighted text
+	var result strings.Builder
+
+	text := item.GetText()
+	desc := item.GetDescription()
+	matchDesc := item.MatchesDescription()
+
+	// Render Text portion with highlights (positions 0..len(Text)-1)
+	for idx, r := range text {
+		ch := string(r)
+		if matchSet[idx] && selected {
+			result.WriteString(s.OverlayMatchSelected.Render(ch))
+		} else if matchSet[idx] {
+			result.WriteString(s.OverlayMatch.Render(ch))
+		} else if selected {
+			result.WriteString(s.OverlaySelected.Render(ch))
+		} else {
+			result.WriteString(s.OverlayNormal.Render(ch))
+		}
+	}
+
+	// Add separator and Description if present
+	if desc != "" {
+		sep := " - "
+		if selected {
+			result.WriteString(s.OverlaySelected.Render(sep))
+		} else {
+			result.WriteString(s.OverlayNormal.Render(sep))
+		}
+
+		// Description highlight positions depend on MatchDesc flag
+		// If MatchDesc: positions len(Text)+1.. correspond to Description
+		// If !MatchDesc: no matches in Description (it wasn't searched)
+		descOffset := len(text) + 1
+		for idx, r := range desc {
+			ch := string(r)
+			isMatch := matchDesc && matchSet[descOffset+idx]
+			if isMatch && selected {
+				result.WriteString(s.OverlayMatchSelected.Render(ch))
+			} else if isMatch {
+				result.WriteString(s.OverlayMatch.Render(ch))
+			} else if selected {
+				result.WriteString(s.OverlaySelected.Render(ch))
+			} else {
+				result.WriteString(s.OverlayNormal.Render(ch))
+			}
+		}
+	}
+
+	// Apply prefix styling
+	var prefixStyled string
+	if selected {
+		prefixStyled = s.OverlaySelected.Render(prefix)
+	} else {
+		prefixStyled = s.OverlayNormal.Render(prefix)
+	}
+
+	return prefixStyled + result.String()
+}
+
 // Config holds picker configuration.
 type Config struct {
 	MaxVisible int    // Maximum number of visible items
@@ -225,7 +298,7 @@ func (m *Model[T]) View() string {
 			positions = m.matches[i].Positions
 		}
 
-		line := item.Render(m.width-4, selected, positions, m.styles)
+		line := renderItem(item, m.width-4, selected, positions, m.styles)
 		lines = append(lines, line)
 	}
 

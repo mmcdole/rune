@@ -4,6 +4,8 @@ import (
 	"strings"
 	"sync"
 	"unicode"
+
+	"github.com/drake/rune/mud"
 )
 
 // CompletionEngine maintains unique words in LRU order for tab completion.
@@ -29,7 +31,7 @@ func NewCompletionEngine(capacity int) *CompletionEngine {
 // Words are tokenized and punctuation is stripped.
 func (ce *CompletionEngine) AddLine(line string) {
 	// Strip ANSI codes first
-	clean := StripAnsi(line)
+	clean := mud.StripANSI(line)
 
 	// Tokenize on non-letter/digit boundaries
 	tokens := strings.FieldsFunc(clean, func(r rune) bool {

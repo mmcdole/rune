@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/drake/rune/mud"
 	lru "github.com/hashicorp/golang-lru/v2"
 	glua "github.com/yuin/gopher-lua"
 )
@@ -220,16 +221,15 @@ func (e *Engine) OnInput(text string) bool {
 }
 
 // OnOutput handles server text.
-func (e *Engine) OnOutput(text string) (string, bool) {
-	clean := stripAnsi(text)
-	lineUD := newLine(e.L, text, clean)
+func (e *Engine) OnOutput(line mud.Line) (string, bool) {
+	lineUD := newLine(e.L, line)
 
 	if err := e.L.CallByParam(glua.P{
 		Fn:      e.getHooksCall(),
 		NRet:    2,
 		Protect: true,
 	}, glua.LString("output"), lineUD); err != nil {
-		return text, true
+		return line.Raw, true
 	}
 
 	show := e.L.Get(-1)
@@ -243,16 +243,15 @@ func (e *Engine) OnOutput(text string) (string, bool) {
 }
 
 // OnPrompt handles server prompts.
-func (e *Engine) OnPrompt(text string) string {
-	clean := stripAnsi(text)
-	lineUD := newLine(e.L, text, clean)
+func (e *Engine) OnPrompt(line mud.Line) string {
+	lineUD := newLine(e.L, line)
 
 	if err := e.L.CallByParam(glua.P{
 		Fn:      e.getHooksCall(),
 		NRet:    2,
 		Protect: true,
 	}, glua.LString("prompt"), lineUD); err != nil {
-		return text
+		return line.Raw
 	}
 
 	show := e.L.Get(-1)
@@ -402,26 +401,6 @@ func (e *Engine) getHooksCall() glua.LValue {
 }
 
 // --- Private Helpers ---
-
-// stripAnsi removes ANSI escape codes from a string.
-func stripAnsi(s string) string {
-	var result strings.Builder
-	inEscape := false
-	for _, r := range s {
-		if r == '\x1b' {
-			inEscape = true
-			continue
-		}
-		if inEscape {
-			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
-				inEscape = false
-			}
-			continue
-		}
-		result.WriteRune(r)
-	}
-	return result.String()
-}
 
 // expandTilde expands ~ to home directory.
 func expandTilde(path string) string {

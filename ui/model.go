@@ -5,6 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/drake/rune/mud"
 	"github.com/drake/rune/ui/components/input"
 	"github.com/drake/rune/ui/components/panes"
 	"github.com/drake/rune/ui/components/picker"
@@ -30,13 +31,13 @@ type Model struct {
 	// Display components
 	scrollback *viewport.ScrollbackBuffer
 	viewport   *viewport.Viewport
-	input      input.CommandPrompt
+	input      input.Model
 	status     status.Bar
 	panes      *panes.Manager
 	styles     style.Styles
 
 	// Generic picker (replaces slashPicker, historyPicker, aliasPicker)
-	picker       *picker.Model[PickerItem]
+	picker       *picker.Model[mud.PickerItem]
 	pickerActive bool
 	pickerCB     string // Current callback ID for picker selection
 	pickerInline bool   // True if picker is in inline mode (filters based on input content)
@@ -80,7 +81,7 @@ func NewModel(inputChan chan<- string, outbound chan<- any) Model {
 		panes:      panes.NewManager(styles),
 		styles:     styles,
 		// Single generic picker
-		picker: picker.New[PickerItem](picker.Config{
+		picker: picker.New[mud.PickerItem](picker.Config{
 			MaxVisible: 10,
 			EmptyText:  "No matches",
 		}, styles),
@@ -140,12 +141,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case ShowPickerMsg:
-		// Convert interfaces.PickerItem to ui.PickerItem (wrapper with picker.Item methods)
-		items := make([]PickerItem, len(msg.Items))
-		for i, item := range msg.Items {
-			items[i] = NewPickerItem(item)
-		}
-		m.picker.SetItems(items)
+		// Pass mud.PickerItem directly (no wrapper needed)
+		m.picker.SetItems(msg.Items)
 		m.pickerCB = msg.CallbackID
 		m.pickerActive = true
 		m.pickerInline = msg.Inline
@@ -299,11 +296,11 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case tea.KeyTab:
 			// Tab auto-completes the selection
 			if item, ok := m.picker.Selected(); ok {
-				m.input.SetValue(item.Value + " ")
+				m.input.SetValue(item.GetValue() + " ")
 				m.input.CursorEnd()
 				m.sendOutbound(PickerSelectMsg{
 					CallbackID: m.pickerCB,
-					Value:      item.Value,
+					Value:      item.GetValue(),
 					Accepted:   true,
 				})
 			}
@@ -316,7 +313,7 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if item, ok := m.picker.Selected(); ok {
 				m.sendOutbound(PickerSelectMsg{
 					CallbackID: m.pickerCB,
-					Value:      item.Value,
+					Value:      item.GetValue(),
 					Accepted:   true,
 				})
 			}
@@ -430,7 +427,7 @@ func (m Model) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if item, ok := m.picker.Selected(); ok {
 			m.sendOutbound(PickerSelectMsg{
 				CallbackID: m.pickerCB,
-				Value:      item.Value,
+				Value:      item.GetValue(),
 				Accepted:   true,
 			})
 		} else {

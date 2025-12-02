@@ -5,16 +5,16 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// CommandPrompt handles text input.
+// Model handles text input.
 // This is a dumb text box - modes, history navigation, and completion logic
 // belong in the parent Model.
-type CommandPrompt struct {
+type Model struct {
 	textinput textinput.Model
 	width     int
 }
 
-// New creates a new command prompt.
-func New() CommandPrompt {
+// New creates a new input model.
+func New() Model {
 	ti := textinput.New()
 	ti.Placeholder = ""
 	ti.Prompt = "> "
@@ -25,76 +25,76 @@ func New() CommandPrompt {
 	// Enable native suggestions (ghost text)
 	ti.ShowSuggestions = true
 
-	return CommandPrompt{
+	return Model{
 		textinput: ti,
 	}
 }
 
 // SetWidth updates the input width.
-func (m *CommandPrompt) SetWidth(w int) {
+func (m *Model) SetWidth(w int) {
 	m.width = w
 	m.textinput.Width = w - 2 // Account for prompt
 }
 
 // Focus gives focus to the input.
-func (m *CommandPrompt) Focus() {
+func (m *Model) Focus() {
 	m.textinput.Focus()
 }
 
 // Blur removes focus from the input.
-func (m *CommandPrompt) Blur() {
+func (m *Model) Blur() {
 	m.textinput.Blur()
 }
 
 // Value returns the current input text.
-func (m *CommandPrompt) Value() string {
+func (m *Model) Value() string {
 	return m.textinput.Value()
 }
 
 // SetValue sets the input text.
-func (m *CommandPrompt) SetValue(s string) {
+func (m *Model) SetValue(s string) {
 	m.textinput.SetValue(s)
 }
 
 // CursorEnd moves the cursor to the end of the input.
-func (m *CommandPrompt) CursorEnd() {
+func (m *Model) CursorEnd() {
 	m.textinput.CursorEnd()
 }
 
 // Position returns the current cursor position.
-func (m *CommandPrompt) Position() int {
+func (m *Model) Position() int {
 	return m.textinput.Position()
 }
 
 // SetCursor sets the cursor position.
-func (m *CommandPrompt) SetCursor(pos int) {
+func (m *Model) SetCursor(pos int) {
 	m.textinput.SetCursor(pos)
 }
 
 // SetSuggestions sets the autocomplete suggestions.
-func (m *CommandPrompt) SetSuggestions(suggestions []string) {
+func (m *Model) SetSuggestions(suggestions []string) {
 	m.textinput.SetSuggestions(suggestions)
 }
 
 // ClearSuggestions clears the autocomplete suggestions.
-func (m *CommandPrompt) ClearSuggestions() {
+func (m *Model) ClearSuggestions() {
 	m.textinput.SetSuggestions(nil)
 }
 
 // Reset clears the input.
-func (m *CommandPrompt) Reset() {
+func (m *Model) Reset() {
 	m.textinput.SetValue("")
 	m.textinput.SetSuggestions(nil)
 }
 
 // Update handles tea messages for the input.
-func (m *CommandPrompt) Update(msg tea.Msg) (*CommandPrompt, tea.Cmd) {
+func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.textinput, cmd = m.textinput.Update(msg)
 	return m, cmd
 }
 
 // View renders the input line.
-func (m *CommandPrompt) View() string {
+func (m *Model) View() string {
 	return m.textinput.View()
 }

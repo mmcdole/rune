@@ -12,12 +12,41 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/drake/rune/interfaces"
 	"github.com/drake/rune/lua"
+	"github.com/drake/rune/mud"
 	"github.com/drake/rune/network"
 	"github.com/drake/rune/timer"
 	"github.com/drake/rune/ui"
 )
+
+// Network defines the TCP/Telnet layer.
+type Network interface {
+	Connect(address string) error
+	Disconnect()
+	Send(data string)
+	Output() <-chan mud.Event
+}
+
+// UI defines the Terminal layer.
+type UI interface {
+	Run() error
+	Quit()
+	Done() <-chan struct{}
+	Input() <-chan string
+	Outbound() <-chan any
+	Print(text string)
+	Echo(text string)
+	SetPrompt(text string)
+	UpdateBars(content map[string]mud.BarContent)
+	UpdateBinds(keys map[string]bool)
+	UpdateLayout(top, bottom []string)
+	SetInput(text string)
+	ShowPicker(title string, items []mud.PickerItem, callbackID string, inline bool)
+	CreatePane(name string)
+	WritePane(name, text string)
+	TogglePane(name string)
+	ClearPane(name string)
+}
 
 
 // Config holds session configuration
@@ -30,9 +59,9 @@ type Config struct {
 // Session orchestrates the MUD client components.
 type Session struct {
 	// Infrastructure
-	net interfaces.Network
-	ui  interfaces.UI
-	timer  *timer.Service
+	net   Network
+	ui    UI
+	timer *timer.Service
 
 	// Scripting
 	engine  *lua.Engine
@@ -43,7 +72,7 @@ type Session struct {
 	callbacks *CallbackManager
 
 	// Channels
-	events      chan interfaces.Event
+	events      chan mud.Event
 	timerEvents chan timer.Event
 	barTicker   *time.Ticker // Periodic bar re-render ticker
 
@@ -68,7 +97,7 @@ type Session struct {
 }
 
 // New creates a new Session. It is passive - no goroutines start here.
-func New(net interfaces.Network, uiInstance interfaces.UI, cfg Config) *Session {
+func New(net Network, uiInstance UI, cfg Config) *Session {
 	timerEvents := make(chan timer.Event, 256)
 
 	s := &Session{
@@ -76,7 +105,7 @@ func New(net interfaces.Network, uiInstance interfaces.UI, cfg Config) *Session 
 		ui:          uiInstance,
 		timer:       timer.NewService(timerEvents),
 		timerEvents: timerEvents,
-		events:      make(chan interfaces.Event, 256),
+		events:      make(chan mud.Event, 256),
 		config:      cfg,
 		done:        make(chan struct{}),
 		history:     NewHistoryManager(10000),
@@ -167,7 +196,7 @@ func (s *Session) processEvents() {
 			s.handleEvent(event)
 		case line := <-s.ui.Input():
 			s.eventsProcessed.Add(1)
-			s.handleEvent(interfaces.Event{Type: interfaces.EventUserInput, Payload: line})
+			s.handleEvent(mud.Event{Type: mud.EventUserInput, Payload: line})
 		case evt := <-s.timerEvents:
 			s.eventsProcessed.Add(1)
 			s.engine.OnTimer(evt.ID, evt.Repeating)
@@ -180,26 +209,28 @@ func (s *Session) processEvents() {
 }
 
 // handleEvent executes a single event on the session loop.
-func (s *Session) handleEvent(event interfaces.Event) {
+func (s *Session) handleEvent(event mud.Event) {
 	switch event.Type {
-	case interfaces.EventNetLine:
-		if modified, show := s.engine.OnOutput(event.Payload); show {
+	case mud.EventNetLine:
+		line := mud.NewLine(event.Payload)
+		if modified, show := s.engine.OnOutput(line); show {
 			s.ui.Print(modified)
 		}
 		// A server line ends the overlay prompt
 		s.lastPrompt = ""
 		s.ui.SetPrompt("")
 
-	case interfaces.EventNetPrompt:
+	case mud.EventNetPrompt:
 		// Commit previous prompt to scrollback before showing new one
 		if s.lastPrompt != "" {
 			s.ui.Print(s.lastPrompt)
 		}
-		modified := s.engine.OnPrompt(event.Payload)
+		line := mud.NewLine(event.Payload)
+		modified := s.engine.OnPrompt(line)
 		s.lastPrompt = modified
 		s.ui.SetPrompt(modified)
 
-	case interfaces.EventUserInput:
+	case mud.EventUserInput:
 		// Commit current prompt to history before sending input
 		if s.lastPrompt != "" {
 			s.ui.Print(s.lastPrompt)
@@ -216,12 +247,12 @@ func (s *Session) handleEvent(event interfaces.Event) {
 			s.ui.Echo(event.Payload)
 		}
 
-	case interfaces.EventAsyncResult:
+	case mud.EventAsyncResult:
 		if event.Callback != nil {
 			event.Callback()
 		}
 
-	case interfaces.EventSystemControl:
+	case mud.EventSystemControl:
 		s.handleControl(event.Control)
 	}
 }
@@ -286,17 +317,17 @@ func (s *Session) boot() error {
 }
 
 // handleControl processes system control events.
-func (s *Session) handleControl(ctrl interfaces.ControlOp) {
+func (s *Session) handleControl(ctrl mud.ControlOp) {
 	switch ctrl.Action {
-	case interfaces.ActionQuit:
+	case mud.ActionQuit:
 		s.shutdown()
-	case interfaces.ActionConnect:
+	case mud.ActionConnect:
 		s.connect(ctrl.Address)
-	case interfaces.ActionDisconnect:
+	case mud.ActionDisconnect:
 		s.disconnect()
-	case interfaces.ActionReload:
+	case mud.ActionReload:
 		s.reload()
-	case interfaces.ActionLoadScript:
+	case mud.ActionLoadScript:
 		s.loadScript(ctrl.ScriptPath)
 	}
 }
@@ -308,8 +339,8 @@ func (s *Session) connect(addr string) {
 	s.engine.CallHook("connecting", addr)
 	go func() {
 		err := s.net.Connect(addr)
-		s.events <- interfaces.Event{
-			Type: interfaces.EventAsyncResult,
+		s.events <- mud.Event{
+			Type: mud.EventAsyncResult,
 			Callback: func() {
 				if err != nil {
 					s.clientState.Connected = false
@@ -344,8 +375,8 @@ func (s *Session) disconnect() {
 func (s *Session) reload() {
 	s.engine.CallHook("reloading")
 	select {
-	case s.events <- interfaces.Event{
-		Type: interfaces.EventAsyncResult,
+	case s.events <- mud.Event{
+		Type: mud.EventAsyncResult,
 		Callback: func() {
 			if err := s.boot(); err != nil {
 				s.ui.Print(fmt.Sprintf("\033[31mReload Failed: %v\033[0m", err))
@@ -391,17 +422,17 @@ func (s *Session) shutdown() {
 
 // renderBars calls all Lua bar renderers and returns their content.
 // Must be called from Session goroutine (thread-safe Lua access).
-// Converts lua.BarData to interfaces.BarContent (decoupling lua from ui).
-func (s *Session) renderBars(width int) map[string]interfaces.BarContent {
+// Converts lua.BarData to mud.BarContent (decoupling lua from ui).
+func (s *Session) renderBars(width int) map[string]mud.BarContent {
 	names := s.engine.GetBarNames()
 	if len(names) == 0 {
 		return nil
 	}
 
-	result := make(map[string]interfaces.BarContent, len(names))
+	result := make(map[string]mud.BarContent, len(names))
 	for _, name := range names {
 		if data, ok := s.engine.RenderBar(name, width); ok {
-			result[name] = interfaces.BarContent{
+			result[name] = mud.BarContent{
 				Left:   data.Left,
 				Center: data.Center,
 				Right:  data.Right,

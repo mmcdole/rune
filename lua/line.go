@@ -1,15 +1,9 @@
 package lua
 
 import (
+	"github.com/drake/rune/mud"
 	glua "github.com/yuin/gopher-lua"
 )
-
-// Line represents a server line with both raw (ANSI) and clean (stripped) versions.
-// Exposed to Lua as a userdata type with methods.
-type Line struct {
-	Raw   string // Original line with ANSI codes
-	Clean string // ANSI-stripped version
-}
 
 const luaLineTypeName = "line"
 
@@ -20,19 +14,18 @@ func registerLineType(L *glua.LState) {
 	L.SetField(mt, "__index", L.SetFuncs(L.NewTable(), lineMethods))
 }
 
-// newLine creates a Line userdata and pushes it onto the Lua stack.
-func newLine(L *glua.LState, raw, clean string) *glua.LUserData {
-	line := &Line{Raw: raw, Clean: clean}
+// newLine creates a Line userdata from a mud.Line and pushes it onto the Lua stack.
+func newLine(L *glua.LState, line mud.Line) *glua.LUserData {
 	ud := L.NewUserData()
-	ud.Value = line
+	ud.Value = &line
 	L.SetMetatable(ud, L.GetTypeMetatable(luaLineTypeName))
 	return ud
 }
 
-// checkLine retrieves a Line from Lua userdata at the given stack position.
-func checkLine(L *glua.LState, n int) *Line {
+// checkLine retrieves a mud.Line from Lua userdata at the given stack position.
+func checkLine(L *glua.LState, n int) *mud.Line {
 	ud := L.CheckUserData(n)
-	if v, ok := ud.Value.(*Line); ok {
+	if v, ok := ud.Value.(*mud.Line); ok {
 		return v
 	}
 	L.ArgError(n, "line expected")

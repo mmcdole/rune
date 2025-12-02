@@ -1,4 +1,4 @@
-package interfaces
+package mud
 
 // BarContent holds the rendered content of a bar.
 type BarContent struct {
@@ -14,6 +14,26 @@ type PickerItem struct {
 	Value       string // ID or Value passed back to caller
 	MatchDesc   bool   // If true, include Description in fuzzy matching
 }
+
+// FilterValue returns the string used for fuzzy matching.
+func (p PickerItem) FilterValue() string {
+	if p.MatchDesc && p.Description != "" {
+		return p.Text + " " + p.Description
+	}
+	return p.Text
+}
+
+// GetText returns the item's display text.
+func (p PickerItem) GetText() string { return p.Text }
+
+// GetDescription returns the item's description.
+func (p PickerItem) GetDescription() string { return p.Description }
+
+// GetValue returns the item's value (returned on selection).
+func (p PickerItem) GetValue() string { return p.Value }
+
+// MatchesDescription returns true if description should be included in matching.
+func (p PickerItem) MatchesDescription() bool { return p.MatchDesc }
 
 // EventType identifies the source of the message
 type EventType int
@@ -49,50 +69,4 @@ type Event struct {
 	Payload  string    // For User/Server text
 	Callback func()    // For Timers (Lua Closures)
 	Control  ControlOp // For SystemControl events
-}
-
-// Network defines the TCP/Telnet layer
-type Network interface {
-	Connect(address string) error
-	Disconnect()
-	Send(data string)     // Non-blocking write
-	Output() <-chan Event // Stream of EventNetLine and EventNetPrompt
-}
-
-// UI defines the Terminal layer.
-// Single implementation: BubbleTeaUI.
-type UI interface {
-	// --- Lifecycle ---
-	Run() error
-	Quit()
-	Done() <-chan struct{}
-	Input() <-chan string
-	Outbound() <-chan any
-
-	// --- Main Output Stream ---
-	// Appends text to the main scrollback buffer.
-	// Implementation handles batching/performance (16ms tick).
-	Print(text string)
-
-	// --- Semantic Output ---
-	// Appends user input to scrollback with local-echo styling.
-	Echo(text string)
-
-	// Updates the active server prompt (overlay at bottom).
-	SetPrompt(text string)
-
-	// --- Reactive State (Push Architecture) ---
-	UpdateBars(content map[string]BarContent)
-	UpdateBinds(keys map[string]bool)
-	UpdateLayout(top, bottom []string)
-	SetInput(text string)
-
-	// --- Interactive Elements ---
-	ShowPicker(title string, items []PickerItem, callbackID string, inline bool)
-
-	// --- Pane Management ---
-	CreatePane(name string)
-	WritePane(name, text string)
-	TogglePane(name string)
-	ClearPane(name string)
 }

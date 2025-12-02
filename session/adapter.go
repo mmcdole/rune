@@ -3,8 +3,8 @@ package session
 import (
 	"time"
 
-	"github.com/drake/rune/interfaces"
 	"github.com/drake/rune/lua"
+	"github.com/drake/rune/mud"
 	"github.com/drake/rune/timer"
 )
 
@@ -22,8 +22,8 @@ var (
 // It implements the segregated interfaces defined in lua/services.go.
 type LuaAdapter struct {
 	// Infrastructure
-	net   interfaces.Network
-	ui    interfaces.UI
+	net   Network
+	ui    UI
 	timer *timer.Service
 
 	// Managers
@@ -86,10 +86,10 @@ func (a *LuaAdapter) ShowPicker(title string, items []lua.PickerItem, onSelect f
 	// Register callback
 	id := a.callbacks.Register(onSelect)
 
-	// Convert lua.PickerItem to interfaces.PickerItem
-	uiItems := make([]interfaces.PickerItem, len(items))
+	// Convert lua.PickerItem to mud.PickerItem
+	uiItems := make([]mud.PickerItem, len(items))
 	for i, item := range items {
-		uiItems[i] = interfaces.PickerItem{
+		uiItems[i] = mud.PickerItem{
 			Text:        item.Text,
 			Description: item.Description,
 			Value:       item.Value,

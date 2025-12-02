@@ -1,30 +1,14 @@
 package util
 
-import "strings"
+import (
+	"strings"
 
-// StripAnsi removes ANSI escape codes for length calculation.
-func StripAnsi(s string) string {
-	var result strings.Builder
-	inEscape := false
-	for _, r := range s {
-		if r == '\x1b' {
-			inEscape = true
-			continue
-		}
-		if inEscape {
-			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
-				inEscape = false
-			}
-			continue
-		}
-		result.WriteRune(r)
-	}
-	return result.String()
-}
+	"github.com/drake/rune/mud"
+)
 
 // VisibleLen returns the visible length of a string (excluding ANSI codes).
 func VisibleLen(s string) int {
-	return len(StripAnsi(s))
+	return len(mud.StripANSI(s))
 }
 
 // FilterClearSequences removes ANSI sequences that would clear the screen.
