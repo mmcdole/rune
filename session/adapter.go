@@ -56,8 +56,8 @@ func (a *LuaAdapter) Disconnect() {
 	a.session.disconnect()
 }
 
-func (a *LuaAdapter) Send(data string) {
-	a.net.Send(data)
+func (a *LuaAdapter) Send(data string) error {
+	return a.net.Send(data)
 }
 
 // --- UIService ---

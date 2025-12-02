@@ -7,7 +7,10 @@ func (e *Engine) registerCoreFuncs() {
 	// rune._send_raw(text): Bypasses alias processing, writes directly to socket
 	e.L.SetField(e.runeTable, "_send_raw", e.L.NewFunction(func(L *glua.LState) int {
 		cmd := L.CheckString(1)
-		e.net.Send(cmd)
+		if err := e.net.Send(cmd); err != nil {
+			L.RaiseError("%s", err.Error())
+			return 0
+		}
 		return 0
 	}))
 

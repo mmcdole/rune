@@ -24,7 +24,7 @@ import (
 type Network interface {
 	Connect(address string) error
 	Disconnect()
-	Send(data string)
+	Send(data string) error
 	Output() <-chan event.Event
 }
 

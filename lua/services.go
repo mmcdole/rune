@@ -10,7 +10,7 @@ import (
 type NetworkService interface {
 	Connect(addr string)
 	Disconnect()
-	Send(data string)
+	Send(data string) error
 }
 
 // UIService handles visual elements.

@@ -44,10 +44,11 @@ func NewMockHost() *MockHost {
 	return &MockHost{}
 }
 
-func (m *MockHost) Send(data string) {
+func (m *MockHost) Send(data string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.SendCalls = append(m.SendCalls, data)
+	return nil
 }
 
 func (m *MockHost) Print(text string) {

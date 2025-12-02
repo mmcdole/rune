@@ -1,6 +1,7 @@
 package network
 
 import (
+	"fmt"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -133,7 +134,7 @@ func (c *TCPClient) Connect(address string) error {
 		conn:      conn,
 		parser:    NewParser(defaultCompatibility()),
 		output:    NewOutputBuffer(TelnetModeUnterminated),
-		sendQueue: make(chan string, 256),
+		sendQueue: make(chan string, 4096),
 		done:      make(chan struct{}),
 	}
 	cx.localEcho.Store(true)
@@ -159,18 +160,21 @@ func (c *TCPClient) Disconnect() {
 }
 
 // Send queues data for the current connection.
-// Safe to call even if disconnected (data is dropped).
-func (c *TCPClient) Send(data string) {
+// Returns error immediately if not connected or buffer is full.
+func (c *TCPClient) Send(data string) error {
 	c.mu.Lock()
 	cx := c.current
 	c.mu.Unlock()
 
-	if cx != nil {
-		select {
-		case cx.sendQueue <- data:
-		default:
-			// Queue full - drop to avoid blocking Lua
-		}
+	if cx == nil {
+		return fmt.Errorf("not connected")
+	}
+
+	select {
+	case cx.sendQueue <- data:
+		return nil
+	default:
+		return fmt.Errorf("send buffer full (network stalled?)")
 	}
 }
 
