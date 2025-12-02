@@ -1,5 +1,12 @@
 package ui
 
+// LayoutEntry represents an item in a dock with optional height constraint.
+// Used for future enhancement where Lua can specify heights per component.
+type LayoutEntry struct {
+	Name   string
+	Height int // 0 = auto/intrinsic height
+}
+
 // LayoutConfig declares which components go in each dock.
 // Both docks can contain any mix of bars, panes, and built-in components.
 //
