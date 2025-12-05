@@ -12,6 +12,7 @@ import (
 
 	"github.com/drake/rune/event"
 	"github.com/drake/rune/lua"
+	"github.com/drake/rune/network"
 	"github.com/drake/rune/text"
 	"github.com/drake/rune/timer"
 	"github.com/drake/rune/ui"
@@ -22,7 +23,7 @@ type Network interface {
 	Connect(ctx context.Context, address string) error
 	Disconnect()
 	Send(data string) error
-	Output() <-chan event.Event
+	Output() <-chan network.Output
 }
 
 // Compile-time interface check - Session implements lua.Host
@@ -139,10 +140,10 @@ func (s *Session) processEvents(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case event := <-s.events:
-			s.handleEvent(event)
-		case event := <-s.net.Output():
-			s.handleEvent(event)
+		case ev := <-s.events:
+			s.handleEvent(ev)
+		case netOut := <-s.net.Output():
+			s.handleNetworkOutput(netOut)
 		case line := <-s.ui.Input():
 			s.handleEvent(event.Event{Type: event.UserInput, Payload: event.Line(line)})
 		case evt := <-s.timerEvents:
@@ -152,6 +153,18 @@ func (s *Session) processEvents(ctx context.Context) {
 		case msg := <-s.ui.Outbound():
 			s.handleUIMessage(msg)
 		}
+	}
+}
+
+// handleNetworkOutput converts network layer output to session events.
+func (s *Session) handleNetworkOutput(out network.Output) {
+	switch out.Kind {
+	case network.OutputLine:
+		s.handleEvent(event.Event{Type: event.NetLine, Payload: event.Line(out.Payload)})
+	case network.OutputPrompt:
+		s.handleEvent(event.Event{Type: event.NetPrompt, Payload: event.Line(out.Payload)})
+	case network.OutputDisconnect:
+		s.handleEvent(event.Event{Type: event.SysDisconnect})
 	}
 }
 

@@ -7,8 +7,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/drake/rune/event"
 )
 
 // TCPClient manages the lifecycle of TCP connections.
@@ -17,7 +15,7 @@ import (
 type TCPClient struct {
 	// Stable channel that Session reads from. Never closes.
 	// Small buffer allows TCP backpressure to work naturally.
-	outputChan chan event.Event
+	outputChan chan Output
 
 	// State protection
 	mu      sync.Mutex
@@ -49,7 +47,7 @@ type connection struct {
 func NewTCPClient() *TCPClient {
 	return &TCPClient{
 		// Small buffer - let TCP backpressure handle flow control
-		outputChan: make(chan event.Event, 256),
+		outputChan: make(chan Output, 256),
 	}
 }
 
@@ -126,8 +124,8 @@ func (c *TCPClient) Send(data string) error {
 	}
 }
 
-// Output returns the stable event channel.
-func (c *TCPClient) Output() <-chan event.Event {
+// Output returns the stable output channel.
+func (c *TCPClient) Output() <-chan Output {
 	return c.outputChan
 }
 
@@ -170,9 +168,9 @@ func (c *TCPClient) readLoop(cx *connection) {
 			c.mu.Unlock()
 
 			if isCurrent {
-				// Send disconnect event - this may block briefly, that's OK
+				// Send disconnect notification - this may block briefly, that's OK
 				select {
-				case c.outputChan <- event.Event{Type: event.SysDisconnect}:
+				case c.outputChan <- Output{Kind: OutputDisconnect}:
 				case <-cx.done:
 				}
 				cx.shutdown()
@@ -198,7 +196,7 @@ func (c *TCPClient) readLoop(cx *connection) {
 				lines := cx.output.Receive(ev.Data)
 				for _, line := range lines {
 					select {
-					case c.outputChan <- event.Event{Type: event.NetLine, Payload: event.Line(line)}:
+					case c.outputChan <- Output{Kind: OutputLine, Payload: string(line)}:
 					case <-cx.done:
 						return
 					}
@@ -207,7 +205,7 @@ func (c *TCPClient) readLoop(cx *connection) {
 					prompt := cx.output.Prompt(false)
 					if prompt != "" {
 						select {
-						case c.outputChan <- event.Event{Type: event.NetPrompt, Payload: event.Line(prompt)}:
+						case c.outputChan <- Output{Kind: OutputPrompt, Payload: prompt}:
 						case <-cx.done:
 							return
 						}
@@ -222,7 +220,7 @@ func (c *TCPClient) readLoop(cx *connection) {
 						prompt := cx.output.Prompt(true)
 						if prompt != "" {
 							select {
-							case c.outputChan <- event.Event{Type: event.NetPrompt, Payload: event.Line(prompt)}:
+							case c.outputChan <- Output{Kind: OutputPrompt, Payload: prompt}:
 							case <-cx.done:
 								return
 							}
