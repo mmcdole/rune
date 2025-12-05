@@ -51,8 +51,9 @@ type Session struct {
 	engine *lua.Engine
 
 	// Managers
-	history   *HistoryManager
-	callbacks *CallbackManager
+	history         *HistoryManager
+	pickerCallbacks map[string]func(string)
+	pickerNextID    int
 
 	// Channels
 	events      chan event.Event
@@ -80,14 +81,14 @@ func New(net Network, uiInstance ui.UI, cfg Config) *Session {
 	timerEvents := make(chan timer.Event, 256)
 
 	s := &Session{
-		net:         net,
-		ui:          uiInstance,
-		timer:       timer.NewService(timerEvents),
-		timerEvents: timerEvents,
-		events:      make(chan event.Event, 256),
-		config:      cfg,
-		history:     NewHistoryManager(10000),
-		callbacks:   NewCallbackManager(),
+		net:             net,
+		ui:              uiInstance,
+		timer:           timer.NewService(timerEvents),
+		timerEvents:     timerEvents,
+		events:          make(chan event.Event, 256),
+		config:          cfg,
+		history:         NewHistoryManager(10000),
+		pickerCallbacks: make(map[string]func(string)),
 	}
 
 
@@ -356,7 +357,7 @@ func (s *Session) handleUIMessage(msg ui.UIEvent) {
 		// Immediately re-render bars to show scroll state
 		s.pushBarUpdates()
 	case ui.PickerSelectMsg:
-		s.callbacks.Execute(m.CallbackID, m.Value, m.Accepted)
+		s.executePickerCallback(m.CallbackID, m.Value, m.Accepted)
 	case ui.InputChangedMsg:
 		s.currentInput = string(m)
 	}

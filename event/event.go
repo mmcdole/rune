@@ -1,6 +1,6 @@
 package event
 
-// Type identifies the kind of event sent to the Orchestrator
+// Type identifies the kind of event processed by Session's event loop.
 type Type int
 
 const (
@@ -10,13 +10,13 @@ const (
 	NetPrompt // A partial line/prompt (no \n, possibly GA/EOR terminated)
 
 	// Control events
-	SysDisconnect // No payload - network layer detected disconnect
+	SysDisconnect // Connection closed
 
 	// Internal
-	AsyncResult // Callback-based async work completion
+	AsyncResult // Deferred callback execution
 )
 
-// Event is the universal packet sent to the Orchestrator.
+// Event is a message processed by Session's event loop.
 // Payload is nil for events with no associated data.
 type Event struct {
 	Type    Type
