@@ -60,22 +60,14 @@ type Session struct {
 	// Channels
 	events      chan event.Event
 	timerEvents chan timer.Event
-	barTicker   *time.Ticker // Periodic bar re-render ticker
+	barTicker   *time.Ticker
 
-	// Track last prompt overlay to commit to history when replaced
-	lastPrompt string
-
-	// Config (retained for reload)
-	config Config
-
-	// Shutdown coordination
-	cancel context.CancelFunc
-
-	// Client state (for Lua rune.state access)
-	clientState lua.ClientState
-
-	// Current input content (tracked for rune.input.get())
-	currentInput string
+	// State
+	lastPrompt   string
+	config       Config
+	cancel       context.CancelFunc
+	clientState  lua.ClientState
+	currentInput string // Tracked so Lua can query via rune.input.get()
 }
 
 // New creates a new Session. It is passive - no goroutines start here.
@@ -92,11 +84,7 @@ func New(net Network, uiInstance ui.UI, cfg Config) *Session {
 		history:     NewHistoryManager(10000),
 	}
 
-
-	// Create engine with Session as Host
 	s.engine = lua.NewEngine(s)
-
-	// Initialize client state defaults
 	s.clientState.ScrollMode = "live"
 
 	return s
@@ -104,11 +92,10 @@ func New(net Network, uiInstance ui.UI, cfg Config) *Session {
 
 // Run starts the session and blocks until exit.
 func (s *Session) Run(ctx context.Context) error {
-	// Derive a cancellable context for internal shutdown (rune.quit)
+	// Derive cancellable context for internal shutdown (rune.quit)
 	ctx, cancel := context.WithCancel(ctx)
 	s.cancel = cancel
 
-	// Ensure cleanup runs when context ends
 	defer func() {
 		cancel()
 		s.engine.Close()
@@ -120,19 +107,14 @@ func (s *Session) Run(ctx context.Context) error {
 		s.ui.Quit()
 	}()
 
-	// Boot the system
 	if err := s.boot(); err != nil {
 		s.ui.Print(fmt.Sprintf("\033[31m[System] Boot Error: %v\033[0m", err))
 	}
 
-	// Start bar re-render ticker
-	// 250ms provides responsive updates while limiting CPU usage
 	s.barTicker = time.NewTicker(250 * time.Millisecond)
 
-	// Start event loop
 	go s.processEvents(ctx)
 
-	// Block on UI
 	return s.ui.Run()
 }
 
@@ -179,7 +161,7 @@ func (s *Session) handleEvent(ev event.Event) {
 		if modified, show := s.engine.OnOutput(line); show {
 			s.ui.Print(modified)
 		}
-		// A server line ends the overlay prompt
+		// Server line ends the prompt overlay
 		s.lastPrompt = ""
 		s.ui.SetPrompt("")
 
@@ -196,18 +178,16 @@ func (s *Session) handleEvent(ev event.Event) {
 
 	case event.UserInput:
 		payload := string(ev.Payload.(event.Line))
-		// Commit current prompt to history before sending input
+		// Commit prompt to scrollback before processing input
 		if s.lastPrompt != "" {
 			s.ui.Print(s.lastPrompt)
 			s.lastPrompt = ""
 			s.ui.SetPrompt("")
 		}
-		// Add non-empty input to history
 		if payload != "" {
 			s.history.Add(payload)
 		}
 		s.engine.OnInput(payload)
-		// Local echo to scrollback (styled in UI)
 		if s.net.LocalEchoEnabled() {
 			s.ui.Echo(payload)
 		}
@@ -234,7 +214,7 @@ func (s *Session) boot() error {
 		return err
 	}
 
-	// Load Core Scripts
+	// Load core scripts
 	entries, err := fs.ReadDir(s.config.CoreScripts, "core")
 	if err != nil {
 		return fmt.Errorf("reading core scripts: %w", err)
@@ -275,7 +255,6 @@ func (s *Session) boot() error {
 
 	s.engine.CallHook("ready")
 
-	// Push initial state to UI after all scripts loaded
 	s.pushBindsAndLayout()
 	s.pushBarUpdates()
 
@@ -306,15 +285,12 @@ func (s *Session) handleKeyBind(key string) {
 }
 
 // pushBarUpdates renders all Lua bars and pushes to UI.
-// Called periodically by the bar ticker.
 func (s *Session) pushBarUpdates() {
-	// Get current width from client state
 	width := s.clientState.Width
 	if width <= 0 {
-		width = 80 // Default width until first resize
+		width = 80
 	}
 
-	// Render bars and push to UI
 	content := s.renderBars(width)
 	if content != nil {
 		s.ui.UpdateBars(content)
@@ -322,9 +298,7 @@ func (s *Session) pushBarUpdates() {
 }
 
 // pushBindsAndLayout pushes current bindings and layout config to UI.
-// Called after scripts load or reload.
 func (s *Session) pushBindsAndLayout() {
-	// Push bound keys
 	keys := s.engine.GetBoundKeys()
 	bindsMap := make(map[string]bool, len(keys))
 	for _, key := range keys {
@@ -332,7 +306,6 @@ func (s *Session) pushBindsAndLayout() {
 	}
 	s.ui.UpdateBinds(bindsMap)
 
-	// Push layout configuration
 	luaLayout := s.engine.GetLayout()
 	if len(luaLayout.Top) > 0 || len(luaLayout.Bottom) > 0 {
 		s.ui.UpdateLayout(luaLayout.Top, luaLayout.Bottom)
@@ -340,7 +313,6 @@ func (s *Session) pushBindsAndLayout() {
 }
 
 // handleUIMessage processes messages from the UI.
-// Called when UI sends ExecuteBindMsg, WindowSizeChangedMsg, etc.
 func (s *Session) handleUIMessage(msg ui.UIEvent) {
 	switch m := msg.(type) {
 	case ui.ExecuteBindMsg:
@@ -349,13 +321,11 @@ func (s *Session) handleUIMessage(msg ui.UIEvent) {
 		s.clientState.Width = m.Width
 		s.clientState.Height = m.Height
 		s.engine.UpdateState(s.clientState)
-		// Immediately re-render bars with new width
 		s.pushBarUpdates()
 	case ui.ScrollStateChangedMsg:
 		s.clientState.ScrollMode = m.Mode
 		s.clientState.ScrollLines = m.NewLines
 		s.engine.UpdateState(s.clientState)
-		// Immediately re-render bars to show scroll state
 		s.pushBarUpdates()
 	case ui.PickerSelectMsg:
 		s.executePickerCallback(m.CallbackID, m.Value, m.Accepted)

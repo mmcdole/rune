@@ -1,19 +1,10 @@
 -- Core Configuration and Go Primitive Wrappers
--- This file establishes the foundation: config and all rune._* wrapper functions
-
--- =============================================================================
--- CONFIGURATION
--- =============================================================================
 
 rune.config = {
     delimiter = ";"
 }
 
--- =============================================================================
--- DEBUG
--- =============================================================================
-
-rune.debug = false  -- Set to true to enable debug output
+rune.debug = false
 
 function rune.dbg(msg)
     if rune.debug then
@@ -21,77 +12,59 @@ function rune.dbg(msg)
     end
 end
 
--- =============================================================================
--- CORE FUNCTIONS
--- =============================================================================
+-- Core function wrappers around Go primitives (rune._*)
 
--- rune.send_raw(text): Bypass alias processing, write directly to socket
 function rune.send_raw(text)
     rune._send_raw(text)
 end
 
--- rune.print(text): Output text to local display
 function rune.print(text)
     rune._print(text)
 end
 
--- rune.quit(): Exit the client
 function rune.quit()
     rune._quit()
 end
 
--- rune.connect(address): Connect to server
 function rune.connect(address)
     rune._connect(address)
 end
 
--- rune.disconnect(): Disconnect from server
 function rune.disconnect()
     rune._disconnect()
 end
 
--- rune.reload(): Reload all scripts
 function rune.reload()
     rune._reload()
 end
 
--- rune.load(path): Load a Lua script
--- Returns: nil on success, error string on failure
+-- Returns nil on success, error string on failure
 function rune.load(path)
     return rune._load(path)
 end
 
--- =============================================================================
--- TIMERS
--- =============================================================================
+-- Timer API
 
 rune.timer = {}
 
--- rune.timer.after(seconds, callback): Schedule a one-time delayed callback
 function rune.timer.after(seconds, callback)
     rune._timer.after(seconds, callback)
 end
 
--- rune.timer.every(seconds, callback): Schedule a repeating callback
--- Returns: timer ID for cancellation
+-- Returns timer ID for cancellation
 function rune.timer.every(seconds, callback)
     return rune._timer.every(seconds, callback)
 end
 
--- rune.timer.cancel(id): Cancel a repeating timer by ID
 function rune.timer.cancel(id)
     rune._timer.cancel(id)
 end
 
--- rune.timer.cancel_all(): Cancel all repeating timers
 function rune.timer.cancel_all()
     rune._timer.cancel_all()
 end
 
--- rune.delay(seconds, action): Convenience wrapper for delayed commands
--- Usage:
---   rune.delay(1.5, "kill orc")
---   rune.delay(2.0, function() rune.print("Done!") end)
+-- Convenience wrapper: rune.delay(1.5, "kill orc") or rune.delay(2.0, function() ... end)
 function rune.delay(seconds, action)
     rune.timer.after(seconds, function()
         if type(action) == "function" then
@@ -102,23 +75,17 @@ function rune.delay(seconds, action)
     end)
 end
 
--- =============================================================================
--- REGEX
--- =============================================================================
+-- Regex API
 
 rune.regex = {}
 
--- rune.regex.compile(pattern): Compile a regex pattern
--- Returns: Regex userdata with :match(text) method, or nil + error
+-- Returns Regex userdata with :match(text) method, or nil + error
 function rune.regex.compile(pattern)
     return rune._regex.compile(pattern)
 end
 
--- =============================================================================
--- UI
--- =============================================================================
+-- Pane API
 
--- Panes
 rune.pane = {}
 
 function rune.pane.create(name)
@@ -137,9 +104,7 @@ function rune.pane.clear(name)
     rune._pane.clear(name)
 end
 
--- =============================================================================
--- STARTUP BANNER
--- =============================================================================
+-- Startup
 
 rune.print("Rune MUD Client")
 rune.print("Type /help for commands")

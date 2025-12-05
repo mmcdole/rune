@@ -14,30 +14,20 @@ import (
 // It is a pure mechanism: it knows how to run Lua code and expose APIs.
 // It does NOT know about core scripts, config dirs, or boot sequences.
 type Engine struct {
-	L *glua.LState
-
-	// Cached table reference
+	L         *glua.LState
 	runeTable *glua.LTable
-
-	// Host provides all services the engine needs from the application
-	host Host
-
-	// Timer callbacks - Engine owns callbacks, Timer service owns IDs and scheduling
+	host      Host
 	callbacks map[int]*glua.LFunction
 
-	// Picker callbacks - cleared on reload to prevent stale Lua references
+	// Cleared on reload to prevent stale Lua references
 	pickerCallbacks map[string]*glua.LFunction
 	pickerNextID    int
 
-	// Lua-defined bar renderers
-	bars *barRegistry
-
-	// Lua-defined key bindings
+	bars  *barRegistry
 	binds *bindRegistry
 }
 
 // NewEngine creates an Engine with a Host interface.
-// In production, Session implements Host.
 func NewEngine(host Host) *Engine {
 	return &Engine{
 		host:            host,
@@ -60,37 +50,25 @@ type Command struct {
 	Description string
 }
 
-// --- Lifecycle ---
-
 // Init initializes (or re-initializes) the Lua VM with fresh state.
 // It registers the API but does NOT load any scripts - that's the caller's job.
 func (e *Engine) Init() error {
-	// Close old Lua state if it exists
 	if e.L != nil {
 		e.L.Close()
 	}
 
-	// Create fresh Lua state
 	e.L = glua.NewState()
 
-	// Cancel all pending timers and clear callback map
 	e.host.TimerCancelAll()
 	e.callbacks = make(map[int]*glua.LFunction)
 
-	// Clear picker callbacks (prevents stale Lua references)
 	e.pickerCallbacks = make(map[string]*glua.LFunction)
 	e.pickerNextID = 0
 
-	// Reset bar registry
 	e.bars = newBarRegistry()
-
-	// Reset key bindings
 	e.binds = newBindRegistry()
 
-	// Register custom types
 	registerLineType(e.L)
-
-	// Register API functions
 	e.registerAPIs()
 
 	return nil
@@ -107,7 +85,6 @@ func (e *Engine) Close() {
 }
 
 // OnTimer handles wake-up calls from Session.
-// This is the single entry point for all timer callback execution.
 func (e *Engine) OnTimer(id int, repeating bool) {
 	if e.L == nil {
 		return
@@ -118,13 +95,11 @@ func (e *Engine) OnTimer(id int, repeating bool) {
 		return // Cancelled, or belonged to previous Engine instance
 	}
 
-	// Execute callback with protected call
 	e.L.Push(fn)
 	if err := e.L.PCall(0, 0, nil); err != nil {
 		e.CallHook("error", "timer: "+err.Error())
 	}
 
-	// Clean up one-shot timer callbacks
 	if !repeating {
 		delete(e.callbacks, id)
 	}
@@ -159,8 +134,6 @@ func (e *Engine) CancelPickerCallback(id string) {
 	delete(e.pickerCallbacks, id)
 }
 
-// --- Execution Primitives (Mechanism) ---
-
 // DoString executes a raw string of Lua code.
 // The name parameter is used for stack traces.
 func (e *Engine) DoString(name, code string) error {
@@ -173,7 +146,7 @@ func (e *Engine) DoString(name, code string) error {
 }
 
 // DoFile executes a Lua file from the filesystem.
-// It temporarily adjusts package.path to allow local requires.
+// Temporarily adjusts package.path to allow local requires.
 func (e *Engine) DoFile(path string) error {
 	path = expandTilde(path)
 
@@ -183,7 +156,6 @@ func (e *Engine) DoFile(path string) error {
 	}
 	dir := filepath.Dir(absPath)
 
-	// Temporarily prepend script's directory to package.path
 	pkg := e.L.GetGlobal("package").(*glua.LTable)
 	oldPath := e.L.GetField(pkg, "path").String()
 	newPath := dir + "/?.lua;" + oldPath
@@ -191,13 +163,10 @@ func (e *Engine) DoFile(path string) error {
 
 	err = e.L.DoFile(absPath)
 
-	// Restore original path
 	e.L.SetField(pkg, "path", glua.LString(oldPath))
 
 	return err
 }
-
-// --- Event Handlers ---
 
 // OnInput handles user typing.
 func (e *Engine) OnInput(text string) bool {
@@ -374,8 +343,6 @@ func (e *Engine) GetCommands() []Command {
 	return commands
 }
 
-// --- API Registration ---
-
 func (e *Engine) registerAPIs() {
 	e.runeTable = e.L.NewTable()
 	e.L.SetGlobal("rune", e.runeTable)
@@ -392,15 +359,11 @@ func (e *Engine) registerAPIs() {
 	e.registerInputFuncs()
 }
 
-// getHooksCall returns the rune.hooks.call function.
 func (e *Engine) getHooksCall() glua.LValue {
 	hooksTable := e.L.GetField(e.runeTable, "hooks").(*glua.LTable)
 	return e.L.GetField(hooksTable, "call")
 }
 
-// --- Private Helpers ---
-
-// expandTilde expands ~ to home directory.
 func expandTilde(path string) string {
 	if len(path) > 0 && path[0] == '~' {
 		if home, err := os.UserHomeDir(); err == nil {

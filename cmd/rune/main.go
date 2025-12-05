@@ -18,17 +18,11 @@ import (
 func main() {
 	flag.Parse()
 
-	// Create root context that listens for OS signals
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	// Create network
 	tcpClient := network.NewTCPClient()
-
-	// Create UI
 	tuiInstance := tui.NewBubbleTeaUI()
-
-	// Create session
 	sess := session.New(tcpClient, tuiInstance, session.Config{
 		CoreScripts: lua.CoreScripts,
 		ConfigDir:   config.Dir(),
