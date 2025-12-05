@@ -1,5 +1,11 @@
 package ui
 
+// UIEvent is implemented by all messages sent from UI to Session.
+// This provides compile-time type safety for the outbound channel.
+type UIEvent interface {
+	uiEvent() // unexported marker method - only this package can implement
+}
+
 // PrintLineMsg represents a line to append to scrollback.
 // Used for all output: server lines, Lua prints, etc.
 type PrintLineMsg string
@@ -59,12 +65,16 @@ type UpdateLayoutMsg struct {
 // Sent when UI detects a key that's in the boundKeys map.
 type ExecuteBindMsg string
 
+func (ExecuteBindMsg) uiEvent() {}
+
 // WindowSizeMsg notifies Session of window size changes.
 // Session uses this to update rune.state.width/height.
 type WindowSizeChangedMsg struct {
 	Width  int
 	Height int
 }
+
+func (WindowSizeChangedMsg) uiEvent() {}
 
 // ScrollStateChangedMsg notifies Session of scroll state changes.
 // Session uses this to update rune.state.scroll_mode/scroll_lines.
@@ -73,9 +83,13 @@ type ScrollStateChangedMsg struct {
 	NewLines int    // Lines behind live (when scrolled)
 }
 
+func (ScrollStateChangedMsg) uiEvent() {}
+
 // InputChangedMsg notifies Session of input content changes.
 // Session tracks this so Lua can query current input via rune.input.get().
 type InputChangedMsg string
+
+func (InputChangedMsg) uiEvent() {}
 
 // --- Picker Messages (Session -> UI) ---
 
@@ -102,3 +116,5 @@ type PickerSelectMsg struct {
 	Value      string // The PickerItem.Value of the selection
 	Accepted   bool   // True if user pressed Enter, false if Esc/cancel
 }
+
+func (PickerSelectMsg) uiEvent() {}

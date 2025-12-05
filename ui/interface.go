@@ -9,7 +9,7 @@ type UI interface {
 
 	// Input/Output
 	Input() <-chan string
-	Outbound() <-chan any
+	Outbound() <-chan UIEvent
 	Print(text string)
 	Echo(text string)
 	SetPrompt(text string)

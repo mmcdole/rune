@@ -59,17 +59,15 @@ type Model struct {
 	width        int
 	height       int
 	inputChan    chan<- string
-	outbound     chan<- any
+	outbound     chan<- ui.UIEvent
 	quitting     bool
 	initialized  bool
 	pendingLines []string
 
-	// Cached layout state (computed in Update, used in View)
-	viewportHeight int
 }
 
 // NewModel creates a new TUI model.
-func NewModel(inputChan chan<- string, outbound chan<- any) Model {
+func NewModel(inputChan chan<- string, outbound chan<- ui.UIEvent) Model {
 	styles := style.DefaultStyles()
 	scrollback := widget.NewScrollbackBuffer(100000)
 	viewport := widget.NewViewport(scrollback)
@@ -141,7 +139,6 @@ func (m Model) handleWindowSize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	m.width = msg.Width
 	m.height = msg.Height
 	m.initialized = true
-	m.recalculateLayout()
 	m.sendOutbound(ui.WindowSizeChangedMsg{Width: msg.Width, Height: msg.Height})
 	return m, nil
 }
@@ -160,11 +157,9 @@ func (m Model) handleConfigUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.boundKeys = msg
 	case ui.UpdateBarsMsg:
 		m.syncBars(msg)
-		m.recalculateLayout()
 	case ui.UpdateLayoutMsg:
 		m.luaLayout.Top = msg.Top
 		m.luaLayout.Bottom = msg.Bottom
-		m.recalculateLayout()
 	}
 	return m, nil
 }
@@ -214,12 +209,10 @@ func (m Model) handlePaneMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case ui.PaneCreateMsg:
 		m.panes.Create(msg.Name)
-		m.recalculateLayout()
 	case ui.PaneWriteMsg:
 		m.panes.Write(msg.Name, msg.Text)
 	case ui.PaneToggleMsg:
 		m.panes.Toggle(msg.Name)
-		m.recalculateLayout()
 	case ui.PaneClearMsg:
 		m.panes.Clear(msg.Name)
 	}
@@ -233,7 +226,6 @@ func (m Model) handleShowPicker(msg ui.ShowPickerMsg) (tea.Model, tea.Cmd) {
 		m.inputMode = ModePickerModal
 	}
 	m.input.ShowPicker(msg.Items, msg.Title, msg.CallbackID, msg.Inline)
-	m.recalculateLayout()
 	return m, nil
 }
 
@@ -249,7 +241,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.inputMode = ModeNormal
 			cbID := m.input.PickerCallbackID()
 			m.input.HidePicker()
-			m.recalculateLayout()
 			m.sendOutbound(ui.PickerSelectMsg{CallbackID: cbID, Accepted: false})
 			return m, nil
 		}
@@ -261,7 +252,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.inputMode = ModeNormal
 			cbID := m.input.PickerCallbackID()
 			m.input.HidePicker()
-			m.recalculateLayout()
 			m.sendOutbound(ui.PickerSelectMsg{CallbackID: cbID, Accepted: false})
 			return m, nil
 		}
@@ -372,7 +362,6 @@ func (m Model) handleInlinePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.inputMode = ModeNormal
 		m.input.HidePicker()
-		m.recalculateLayout()
 		return m, nil
 
 	case tea.KeyEnter:
@@ -385,7 +374,6 @@ func (m Model) handleInlinePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.inputMode = ModeNormal
 		m.input.HidePicker()
-		m.recalculateLayout()
 		return m.submitInput()
 
 	case tea.KeyCtrlU:
@@ -449,7 +437,6 @@ func (m *Model) closeInlinePicker() {
 	m.inputMode = ModeNormal
 	m.sendOutbound(ui.PickerSelectMsg{CallbackID: m.input.PickerCallbackID(), Accepted: false})
 	m.input.HidePicker()
-	m.recalculateLayout()
 }
 
 func (m Model) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -474,7 +461,6 @@ func (m Model) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.inputMode = ModeNormal
 		m.input.HidePicker()
-		m.recalculateLayout()
 		return m, nil
 
 	case tea.KeyRunes:
@@ -504,7 +490,7 @@ func (m *Model) appendLines(lines []string) {
 	m.updateScrollState()
 }
 
-func (m *Model) sendOutbound(msg any) {
+func (m *Model) sendOutbound(msg ui.UIEvent) {
 	if m.outbound == nil {
 		return
 	}
@@ -548,25 +534,6 @@ func (m *Model) getWidget(name string) widget.Widget {
 	}
 
 	return nil
-}
-
-// recalculateLayout computes widget sizes based on current dimensions and layout config.
-// Called from Update handlers when window size or layout changes.
-func (m *Model) recalculateLayout() {
-	if m.width == 0 || m.height == 0 {
-		return
-	}
-
-	cfg := m.getLayout()
-
-	topHeight := m.sizeDock(cfg.Top)
-	bottomHeight := m.sizeDock(cfg.Bottom)
-
-	m.viewportHeight = m.height - topHeight - bottomHeight
-	if m.viewportHeight < 1 {
-		m.viewportHeight = 1
-	}
-	m.viewport.SetSize(m.width, m.viewportHeight)
 }
 
 // sizeDock calculates sizes for dock widgets and returns total height.
@@ -627,7 +594,7 @@ func (m *Model) renderDock(entries []ui.LayoutEntry) (string, int) {
 }
 
 // View implements tea.Model.
-// This method should be pure - no side effects. All sizing is done in Update via recalculateLayout.
+// Layout is calculated here to ensure it's always fresh when rendering.
 func (m Model) View() string {
 	if !m.initialized {
 		return "Loading..."
@@ -637,7 +604,16 @@ func (m Model) View() string {
 		return ""
 	}
 
+	// Calculate layout fresh each render - guarantees no stale dimensions
 	cfg := m.getLayout()
+	topHeight := m.sizeDock(cfg.Top)
+	bottomHeight := m.sizeDock(cfg.Bottom)
+
+	viewportHeight := m.height - topHeight - bottomHeight
+	if viewportHeight < 1 {
+		viewportHeight = 1
+	}
+	m.viewport.SetSize(m.width, viewportHeight)
 
 	topView, _ := m.renderDock(cfg.Top)
 	bottomView, _ := m.renderDock(cfg.Bottom)

@@ -378,7 +378,7 @@ func (s *Session) pushBindsAndLayout() {
 
 // handleUIMessage processes messages from the UI.
 // Called when UI sends ExecuteBindMsg, WindowSizeChangedMsg, etc.
-func (s *Session) handleUIMessage(msg any) {
+func (s *Session) handleUIMessage(msg ui.UIEvent) {
 	switch m := msg.(type) {
 	case ui.ExecuteBindMsg:
 		s.handleKeyBind(string(m))

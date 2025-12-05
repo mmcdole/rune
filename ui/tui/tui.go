@@ -21,7 +21,7 @@ type BubbleTeaUI struct {
 
 	// Outbound messages from UI to Session (e.g., ExecuteBindMsg, WindowSizeChangedMsg)
 	// Session reads from this channel in its event loop.
-	outbound chan any
+	outbound chan ui.UIEvent
 
 	// Shutdown coordination
 	done     chan struct{}
@@ -33,7 +33,7 @@ func NewBubbleTeaUI() *BubbleTeaUI {
 	return &BubbleTeaUI{
 		inputChan: make(chan string, 2048),
 		msgQueue:  make(chan tea.Msg, 4096),
-		outbound:  make(chan any, 256),
+		outbound:  make(chan ui.UIEvent, 256),
 		done:      make(chan struct{}),
 	}
 }
@@ -182,6 +182,6 @@ func (b *BubbleTeaUI) SetInput(text string) {
 
 // Outbound returns a channel of messages from UI to Session.
 // Session should read from this channel in its event loop.
-func (b *BubbleTeaUI) Outbound() <-chan any {
+func (b *BubbleTeaUI) Outbound() <-chan ui.UIEvent {
 	return b.outbound
 }
