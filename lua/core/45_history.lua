@@ -94,7 +94,6 @@ rune.bind("down", history_down)
 -- Reset on input submission
 rune.hooks.register("input", function(text)
     reset()
-    -- Don't consume the input, let it continue
 end, { priority = 1 })
 
 -- Export for potential customization
