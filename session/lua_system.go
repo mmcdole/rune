@@ -20,13 +20,13 @@ func (s *Session) Reload() {
 	select {
 	case s.events <- event.Event{
 		Type: event.AsyncResult,
-		Callback: func() {
+		Payload: event.Callback(func() {
 			if err := s.boot(); err != nil {
 				s.ui.Print(fmt.Sprintf("\033[31mReload Failed: %v\033[0m", err))
 			} else {
 				s.engine.CallHook("reloaded")
 			}
-		},
+		}),
 	}:
 	default:
 		s.ui.Print("\033[31mReload Failed: event queue full\033[0m")

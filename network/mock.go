@@ -19,7 +19,7 @@ func NewMockNetwork() *MockNetwork {
 func (m *MockNetwork) Connect(address string) error {
 	m.outputChan <- event.Event{
 		Type:    event.NetLine,
-		Payload: "[Mock Server] Connected to " + address,
+		Payload: event.Line("[Mock Server] Connected to " + address),
 	}
 	return nil
 }
@@ -31,7 +31,7 @@ func (m *MockNetwork) Disconnect() {}
 func (m *MockNetwork) Send(data string) {
 	m.outputChan <- event.Event{
 		Type:    event.NetLine,
-		Payload: "[Server Echo] " + data,
+		Payload: event.Line("[Server Echo] " + data),
 	}
 }
 

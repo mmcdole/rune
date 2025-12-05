@@ -9,21 +9,34 @@ const (
 	NetLine   // A complete line from server (ended with \n)
 	NetPrompt // A partial line/prompt (no \n, possibly GA/EOR terminated)
 
-	// Control events (promoted to top level for type safety)
-	SysQuit
-	SysConnect    // Payload = "address:port"
-	SysDisconnect
-	SysReload
-	SysLoadScript // Payload = "path/to/script.lua"
+	// Control events
+	SysDisconnect // No payload - network layer detected disconnect
 
 	// Internal
-	Timer
-	AsyncResult // Async work completion dispatched onto the session loop
+	AsyncResult // Callback-based async work completion
 )
 
-// Event is the universal packet sent to the Orchestrator
+// Event is the universal packet sent to the Orchestrator.
+// Payload is nil for events with no associated data.
 type Event struct {
-	Type     Type
-	Payload  string // For User/Server text, or control event data
-	Callback func() // For Timers (Lua Closures)
+	Type    Type
+	Payload Payload
 }
+
+// Payload is implemented by all event payload types.
+// The marker method restricts valid payloads to this package.
+type Payload interface {
+	eventPayload()
+}
+
+// --- Payload Types ---
+
+// Line is the payload for NetLine, NetPrompt, and UserInput events.
+type Line string
+
+func (Line) eventPayload() {}
+
+// Callback is the payload for AsyncResult events.
+type Callback func()
+
+func (Callback) eventPayload() {}

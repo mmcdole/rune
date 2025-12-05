@@ -198,7 +198,7 @@ func (c *TCPClient) readLoop(cx *connection) {
 				lines := cx.output.Receive(ev.Data)
 				for _, line := range lines {
 					select {
-					case c.outputChan <- event.Event{Type: event.NetLine, Payload: string(line)}:
+					case c.outputChan <- event.Event{Type: event.NetLine, Payload: event.Line(line)}:
 					case <-cx.done:
 						return
 					}
@@ -207,7 +207,7 @@ func (c *TCPClient) readLoop(cx *connection) {
 					prompt := cx.output.Prompt(false)
 					if prompt != "" {
 						select {
-						case c.outputChan <- event.Event{Type: event.NetPrompt, Payload: prompt}:
+						case c.outputChan <- event.Event{Type: event.NetPrompt, Payload: event.Line(prompt)}:
 						case <-cx.done:
 							return
 						}
@@ -222,7 +222,7 @@ func (c *TCPClient) readLoop(cx *connection) {
 						prompt := cx.output.Prompt(true)
 						if prompt != "" {
 							select {
-							case c.outputChan <- event.Event{Type: event.NetPrompt, Payload: prompt}:
+							case c.outputChan <- event.Event{Type: event.NetPrompt, Payload: event.Line(prompt)}:
 							case <-cx.done:
 								return
 							}

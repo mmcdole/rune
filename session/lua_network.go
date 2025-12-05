@@ -20,7 +20,7 @@ func (s *Session) Connect(addr string) {
 		err := s.net.Connect(ctx, addr)
 		s.events <- event.Event{
 			Type: event.AsyncResult,
-			Callback: func() {
+			Payload: event.Callback(func() {
 				if err != nil {
 					s.clientState.Connected = false
 					s.clientState.Address = ""
@@ -33,7 +33,7 @@ func (s *Session) Connect(addr string) {
 					s.engine.CallHook("connected", addr)
 				}
 				s.pushBarUpdates()
-			},
+			}),
 		}
 	}()
 }

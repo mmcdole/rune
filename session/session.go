@@ -144,7 +144,7 @@ func (s *Session) processEvents(ctx context.Context) {
 		case event := <-s.net.Output():
 			s.handleEvent(event)
 		case line := <-s.ui.Input():
-			s.handleEvent(event.Event{Type: event.UserInput, Payload: line})
+			s.handleEvent(event.Event{Type: event.UserInput, Payload: event.Line(line)})
 		case evt := <-s.timerEvents:
 			s.engine.OnTimer(evt.ID, evt.Repeating)
 		case <-s.barTicker.C:
@@ -159,7 +159,8 @@ func (s *Session) processEvents(ctx context.Context) {
 func (s *Session) handleEvent(ev event.Event) {
 	switch ev.Type {
 	case event.NetLine:
-		line := text.NewLine(ev.Payload)
+		payload := string(ev.Payload.(event.Line))
+		line := text.NewLine(payload)
 		if modified, show := s.engine.OnOutput(line); show {
 			s.ui.Print(modified)
 		}
@@ -172,12 +173,14 @@ func (s *Session) handleEvent(ev event.Event) {
 		if s.lastPrompt != "" {
 			s.ui.Print(s.lastPrompt)
 		}
-		line := text.NewLine(ev.Payload)
+		payload := string(ev.Payload.(event.Line))
+		line := text.NewLine(payload)
 		modified := s.engine.OnPrompt(line)
 		s.lastPrompt = modified
 		s.ui.SetPrompt(modified)
 
 	case event.UserInput:
+		payload := string(ev.Payload.(event.Line))
 		// Commit current prompt to history before sending input
 		if s.lastPrompt != "" {
 			s.ui.Print(s.lastPrompt)
@@ -185,34 +188,22 @@ func (s *Session) handleEvent(ev event.Event) {
 			s.ui.SetPrompt("")
 		}
 		// Add non-empty input to history
-		if ev.Payload != "" {
-			s.history.Add(ev.Payload)
+		if payload != "" {
+			s.history.Add(payload)
 		}
-		s.engine.OnInput(ev.Payload)
+		s.engine.OnInput(payload)
 		// Local echo to scrollback (styled in UI)
 		if le, ok := s.net.(interface{ LocalEchoEnabled() bool }); !ok || le.LocalEchoEnabled() {
-			s.ui.Echo(ev.Payload)
+			s.ui.Echo(payload)
 		}
 
 	case event.AsyncResult:
-		if ev.Callback != nil {
-			ev.Callback()
+		if cb, ok := ev.Payload.(event.Callback); ok && cb != nil {
+			cb()
 		}
-
-	case event.SysQuit:
-		s.Quit()
-
-	case event.SysConnect:
-		s.Connect(ev.Payload)
 
 	case event.SysDisconnect:
 		s.Disconnect()
-
-	case event.SysReload:
-		s.Reload()
-
-	case event.SysLoadScript:
-		s.Load(ev.Payload)
 	}
 }
 
