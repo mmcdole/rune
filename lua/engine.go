@@ -47,13 +47,6 @@ func NewEngine(host Host) *Engine {
 	}
 }
 
-// Stats holds Lua engine statistics for monitoring.
-type Stats struct {
-	StackSize      int
-	TimerCallbacks int
-	RegexCacheSize int
-}
-
 // Alias represents a user-defined alias.
 type Alias struct {
 	Name  string
@@ -64,19 +57,6 @@ type Alias struct {
 type Command struct {
 	Name        string
 	Description string
-}
-
-// Stats returns current Lua engine statistics.
-func (e *Engine) Stats() Stats {
-	stack := 0
-	if e.L != nil {
-		stack = e.L.GetTop()
-	}
-	return Stats{
-		StackSize:      stack,
-		TimerCallbacks: len(e.callbacks),
-		RegexCacheSize: e.regexCache.Len(),
-	}
 }
 
 // --- Lifecycle ---

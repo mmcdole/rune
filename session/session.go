@@ -7,14 +7,11 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
-	"sync/atomic"
 	"time"
 
 	"github.com/drake/rune/event"
 	"github.com/drake/rune/lua"
-	"github.com/drake/rune/network"
 	"github.com/drake/rune/text"
 	"github.com/drake/rune/timer"
 	"github.com/drake/rune/ui"
@@ -70,9 +67,6 @@ type Session struct {
 	// Shutdown coordination
 	cancel context.CancelFunc
 
-	// Stats (atomic for lock-free reads)
-	eventsProcessed atomic.Uint64
-
 	// Client state (for Lua rune.state access)
 	clientState lua.ClientState
 
@@ -103,39 +97,6 @@ func New(net Network, uiInstance ui.UI, cfg Config) *Session {
 	s.clientState.ScrollMode = "live"
 
 	return s
-}
-
-// Stats holds session statistics for monitoring.
-type Stats struct {
-	EventsProcessed uint64
-	EventQueueLen   int
-	EventQueueCap   int
-	TimerQueueLen   int
-	TimerQueueCap   int
-	Goroutines      int
-	Lua             lua.Stats
-	Timer           timer.Stats
-	Network         network.Stats
-}
-
-// Stats returns current session and component statistics.
-func (s *Session) Stats() Stats {
-	var netStats network.Stats
-	if tc, ok := s.net.(*network.TCPClient); ok {
-		netStats = tc.Stats()
-	}
-
-	return Stats{
-		EventsProcessed: s.eventsProcessed.Load(),
-		EventQueueLen:   len(s.events),
-		EventQueueCap:   cap(s.events),
-		TimerQueueLen:   len(s.timerEvents),
-		TimerQueueCap:   cap(s.timerEvents),
-		Goroutines:      runtime.NumGoroutine(),
-		Lua:             s.engine.Stats(),
-		Timer:           s.timer.Stats(),
-		Network:         netStats,
-	}
 }
 
 // Run starts the session and blocks until exit.
@@ -179,16 +140,12 @@ func (s *Session) processEvents(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case event := <-s.events:
-			s.eventsProcessed.Add(1)
 			s.handleEvent(event)
 		case event := <-s.net.Output():
-			s.eventsProcessed.Add(1)
 			s.handleEvent(event)
 		case line := <-s.ui.Input():
-			s.eventsProcessed.Add(1)
 			s.handleEvent(event.Event{Type: event.UserInput, Payload: line})
 		case evt := <-s.timerEvents:
-			s.eventsProcessed.Add(1)
 			s.engine.OnTimer(evt.ID, evt.Repeating)
 		case <-s.barTicker.C:
 			s.pushBarUpdates()

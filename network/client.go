@@ -11,19 +11,6 @@ import (
 	"github.com/drake/rune/event"
 )
 
-// Stats holds network statistics for monitoring.
-type Stats struct {
-	Connected      bool
-	BytesRead      uint64
-	BytesWritten   uint64
-	LinesEmitted   uint64
-	LastReadTime   time.Time
-	SendQueueLen   int
-	SendQueueCap   int
-	OutputQueueLen int
-	OutputQueueCap int
-}
-
 // TCPClient manages the lifecycle of TCP connections.
 // It provides a stable interface for the Session while handling the
 // chaotic reality of network sockets underneath.
@@ -35,12 +22,6 @@ type TCPClient struct {
 	// State protection
 	mu      sync.Mutex
 	current *connection // The currently active connection, or nil
-
-	// Stats (atomic for lock-free reads)
-	bytesRead    atomic.Uint64
-	bytesWritten atomic.Uint64
-	linesEmitted atomic.Uint64
-	lastReadTime atomic.Int64 // Unix nano
 }
 
 // connection represents a single, ephemeral TCP session.
@@ -72,35 +53,6 @@ func NewTCPClient() *TCPClient {
 	}
 }
 
-// Stats returns current network statistics.
-func (c *TCPClient) Stats() Stats {
-	c.mu.Lock()
-	cx := c.current
-	var sendQLen, sendQCap int
-	if cx != nil {
-		sendQLen = len(cx.sendQueue)
-		sendQCap = cap(cx.sendQueue)
-	}
-	c.mu.Unlock()
-
-	lastRead := time.Unix(0, c.lastReadTime.Load())
-	if lastRead.Unix() == 0 {
-		lastRead = time.Time{}
-	}
-
-	return Stats{
-		Connected:      cx != nil,
-		BytesRead:      c.bytesRead.Load(),
-		BytesWritten:   c.bytesWritten.Load(),
-		LinesEmitted:   c.linesEmitted.Load(),
-		LastReadTime:   lastRead,
-		SendQueueLen:   sendQLen,
-		SendQueueCap:   sendQCap,
-		OutputQueueLen: len(c.outputChan),
-		OutputQueueCap: cap(c.outputChan),
-	}
-}
-
 // Connect establishes a new connection.
 // If a connection already exists, it is cleanly closed and replaced.
 func (c *TCPClient) Connect(ctx context.Context, address string) error {
@@ -111,12 +63,6 @@ func (c *TCPClient) Connect(ctx context.Context, address string) error {
 	if c.current != nil {
 		c.current.close()
 	}
-
-	// Reset stats for new connection
-	c.bytesRead.Store(0)
-	c.bytesWritten.Store(0)
-	c.linesEmitted.Store(0)
-	c.lastReadTime.Store(0)
 
 	// Dial with context to respect app shutdown during connection attempts
 	var d net.Dialer
@@ -238,25 +184,19 @@ func (c *TCPClient) readLoop(cx *connection) {
 			continue
 		}
 
-		// Update stats
-		c.bytesRead.Add(uint64(n))
-		c.lastReadTime.Store(time.Now().UnixNano())
-
 		for _, ev := range cx.parser.Receive(buf[:n]) {
 			switch ev.Kind {
 			case TelnetEventDataSend:
 				cx.conn.SetWriteDeadline(time.Now().Add(time.Second))
-				written, werr := cx.conn.Write(ev.Data)
+				_, werr := cx.conn.Write(ev.Data)
 				cx.conn.SetWriteDeadline(time.Time{})
 				if werr != nil {
 					return
 				}
-				c.bytesWritten.Add(uint64(written))
 
 			case TelnetEventDataReceive:
 				lines := cx.output.Receive(ev.Data)
 				for _, line := range lines {
-					c.linesEmitted.Add(1)
 					select {
 					case c.outputChan <- event.Event{Type: event.NetLine, Payload: string(line)}:
 					case <-cx.done:
@@ -318,7 +258,7 @@ func (c *TCPClient) writeLoop(cx *connection) {
 			cx.output.InputSent()
 
 			cx.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-			n, err := cx.conn.Write([]byte(data + "\r\n"))
+			_, err := cx.conn.Write([]byte(data + "\r\n"))
 			cx.conn.SetWriteDeadline(time.Time{})
 
 			if err != nil {
@@ -326,7 +266,6 @@ func (c *TCPClient) writeLoop(cx *connection) {
 				cx.conn.Close()
 				return
 			}
-			c.bytesWritten.Add(uint64(n))
 		}
 	}
 }

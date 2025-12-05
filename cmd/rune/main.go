@@ -9,7 +9,6 @@ import (
 	"syscall"
 
 	"github.com/drake/rune/config"
-	"github.com/drake/rune/debug"
 	"github.com/drake/rune/lua"
 	"github.com/drake/rune/network"
 	"github.com/drake/rune/session"
@@ -35,10 +34,6 @@ func main() {
 		ConfigDir:   config.Dir(),
 		UserScripts: flag.Args(),
 	})
-
-	// Start debug monitor if RUNE_DEBUG=1
-	monitor := debug.NewMonitor(ctx, sess)
-	monitor.Start()
 
 	if err := sess.Run(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, err)
