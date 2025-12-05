@@ -1,8 +1,6 @@
 package session
 
 import (
-	"fmt"
-
 	"github.com/drake/rune/ui"
 )
 
@@ -32,9 +30,8 @@ func (s *Session) PaneClear(name string) {
 }
 
 // ShowPicker implements lua.Host.
-func (s *Session) ShowPicker(title string, items []ui.PickerItem, onSelect func(string), inline bool) {
-	id := s.registerPickerCallback(onSelect)
-	s.ui.ShowPicker(title, items, id, inline)
+func (s *Session) ShowPicker(title string, items []ui.PickerItem, callbackID string, inline bool) {
+	s.ui.ShowPicker(title, items, callbackID, inline)
 }
 
 // GetInput implements lua.Host.
@@ -48,24 +45,11 @@ func (s *Session) SetInput(text string) {
 	s.currentInput = text
 }
 
-// --- Picker callback management ---
-
-// registerPickerCallback stores a callback and returns its ID.
-func (s *Session) registerPickerCallback(fn func(string)) string {
-	s.pickerNextID++
-	id := fmt.Sprintf("p%d", s.pickerNextID)
-	s.pickerCallbacks[id] = fn
-	return id
-}
-
-// executePickerCallback runs and removes a callback by ID.
+// executePickerCallback delegates to Engine for callback execution.
 func (s *Session) executePickerCallback(id string, value string, accepted bool) {
-	cb, ok := s.pickerCallbacks[id]
-	if !ok {
-		return
-	}
-	delete(s.pickerCallbacks, id)
-	if accepted && cb != nil {
-		cb(value)
+	if accepted {
+		s.engine.ExecutePickerCallback(id, value)
+	} else {
+		s.engine.CancelPickerCallback(id)
 	}
 }

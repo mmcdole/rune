@@ -114,7 +114,7 @@ func (m *MockHost) OnConfigChange() {
 	// No-op for tests - config change notifications not tracked
 }
 
-func (m *MockHost) ShowPicker(title string, items []ui.PickerItem, onSelect func(string), inline bool) {
+func (m *MockHost) ShowPicker(title string, items []ui.PickerItem, callbackID string, inline bool) {
 	// No-op for tests
 }
 

@@ -1,6 +1,7 @@
 package lua
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,6 +25,10 @@ type Engine struct {
 	// Timer callbacks - Engine owns callbacks, Timer service owns IDs and scheduling
 	callbacks map[int]*glua.LFunction
 
+	// Picker callbacks - cleared on reload to prevent stale Lua references
+	pickerCallbacks map[string]*glua.LFunction
+	pickerNextID    int
+
 	// Lua-defined bar renderers
 	bars *barRegistry
 
@@ -35,10 +40,11 @@ type Engine struct {
 // In production, Session implements Host.
 func NewEngine(host Host) *Engine {
 	return &Engine{
-		host:      host,
-		callbacks: make(map[int]*glua.LFunction),
-		bars:      newBarRegistry(),
-		binds:     newBindRegistry(),
+		host:            host,
+		callbacks:       make(map[int]*glua.LFunction),
+		pickerCallbacks: make(map[string]*glua.LFunction),
+		bars:            newBarRegistry(),
+		binds:           newBindRegistry(),
 	}
 }
 
@@ -70,6 +76,10 @@ func (e *Engine) Init() error {
 	// Cancel all pending timers and clear callback map
 	e.host.TimerCancelAll()
 	e.callbacks = make(map[int]*glua.LFunction)
+
+	// Clear picker callbacks (prevents stale Lua references)
+	e.pickerCallbacks = make(map[string]*glua.LFunction)
+	e.pickerNextID = 0
 
 	// Reset bar registry
 	e.bars = newBarRegistry()
@@ -118,6 +128,35 @@ func (e *Engine) OnTimer(id int, repeating bool) {
 	if !repeating {
 		delete(e.callbacks, id)
 	}
+}
+
+// RegisterPickerCallback stores a Lua function for later execution when the
+// picker selection is made. Returns a unique callback ID.
+func (e *Engine) RegisterPickerCallback(fn *glua.LFunction) string {
+	e.pickerNextID++
+	id := fmt.Sprintf("p%d", e.pickerNextID)
+	e.pickerCallbacks[id] = fn
+	return id
+}
+
+// ExecutePickerCallback runs the Lua callback for a picker selection.
+// Safe to call after reload - stale callbacks are silently ignored.
+func (e *Engine) ExecutePickerCallback(id string, value string) {
+	fn, ok := e.pickerCallbacks[id]
+	if !ok || e.L == nil {
+		return
+	}
+	delete(e.pickerCallbacks, id)
+	e.L.Push(fn)
+	e.L.Push(glua.LString(value))
+	if err := e.L.PCall(1, 0, nil); err != nil {
+		e.CallHook("error", "picker callback: "+err.Error())
+	}
+}
+
+// CancelPickerCallback removes a picker callback without executing it.
+func (e *Engine) CancelPickerCallback(id string) {
+	delete(e.pickerCallbacks, id)
 }
 
 // --- Execution Primitives (Mechanism) ---

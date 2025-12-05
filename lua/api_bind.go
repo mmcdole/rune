@@ -38,6 +38,9 @@ func (e *Engine) registerBindFuncs() {
 // HandleKeyBind checks if a key has a Lua binding and executes it.
 // Returns true if the key was handled by Lua.
 func (e *Engine) HandleKeyBind(key string) bool {
+	if e.L == nil {
+		return false
+	}
 	fn, ok := e.binds.binds[key]
 	if !ok {
 		return false

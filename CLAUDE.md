@@ -131,7 +131,7 @@ User scripts auto-load from `~/.config/rune/init.lua` at startup.
 ## Current Development State
 
 - Test suite exists in `lua/testdata/` (JSON-driven tests)
-- UI has both console mode (`-simple` flag) and TUI (default)
+- UI uses TUI (Bubble Tea) by default
 
 ## Dependencies
 

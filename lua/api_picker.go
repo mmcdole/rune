@@ -67,18 +67,11 @@ func (e *Engine) registerPickerFuncs() {
 			return 0
 		}
 
-		// Create Go callback that will invoke the Lua function
-		// This is called synchronously from Session when UI returns selection
-		onSelect := func(value string) {
-			L.Push(onSelectFn)
-			L.Push(glua.LString(value))
-			if err := L.PCall(1, 0, nil); err != nil {
-				e.CallHook("error", "picker callback: "+err.Error())
-			}
-		}
+		// Register callback in Engine (cleared on reload to prevent stale references)
+		callbackID := e.RegisterPickerCallback(onSelectFn)
 
 		// Call host to show the picker
-		e.host.ShowPicker(title, items, onSelect, inline)
+		e.host.ShowPicker(title, items, callbackID, inline)
 		return 0
 	}))
 }

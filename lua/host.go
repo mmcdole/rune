@@ -20,7 +20,7 @@ type Host interface {
 	PaneWrite(name, text string)
 	PaneToggle(name string)
 	PaneClear(name string)
-	ShowPicker(title string, items []ui.PickerItem, onSelect func(value string), inline bool)
+	ShowPicker(title string, items []ui.PickerItem, callbackID string, inline bool)
 	GetInput() string
 	SetInput(text string)
 

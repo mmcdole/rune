@@ -24,6 +24,7 @@ type Network interface {
 	Disconnect()
 	Send(data string) error
 	Output() <-chan network.Output
+	LocalEchoEnabled() bool
 }
 
 // Compile-time interface check - Session implements lua.Host
@@ -40,7 +41,10 @@ type Config struct {
 	UserScripts []string // CLI script arguments
 }
 
-// Session orchestrates the MUD client components.
+// Session is the central actor/orchestrator that owns the Lua state and
+// processes all events sequentially via a single goroutine. It implements
+// lua.Host to provide Lua scripts access to network, UI, timers, and system
+// operations.
 type Session struct {
 	// Infrastructure
 	net   Network
@@ -51,9 +55,7 @@ type Session struct {
 	engine *lua.Engine
 
 	// Managers
-	history         *HistoryManager
-	pickerCallbacks map[string]func(string)
-	pickerNextID    int
+	history *HistoryManager
 
 	// Channels
 	events      chan event.Event
@@ -81,14 +83,13 @@ func New(net Network, uiInstance ui.UI, cfg Config) *Session {
 	timerEvents := make(chan timer.Event, 256)
 
 	s := &Session{
-		net:             net,
-		ui:              uiInstance,
-		timer:           timer.NewService(timerEvents),
-		timerEvents:     timerEvents,
-		events:          make(chan event.Event, 256),
-		config:          cfg,
-		history:         NewHistoryManager(10000),
-		pickerCallbacks: make(map[string]func(string)),
+		net:         net,
+		ui:          uiInstance,
+		timer:       timer.NewService(timerEvents),
+		timerEvents: timerEvents,
+		events:      make(chan event.Event, 256),
+		config:      cfg,
+		history:     NewHistoryManager(10000),
 	}
 
 
@@ -207,7 +208,7 @@ func (s *Session) handleEvent(ev event.Event) {
 		}
 		s.engine.OnInput(payload)
 		// Local echo to scrollback (styled in UI)
-		if le, ok := s.net.(interface{ LocalEchoEnabled() bool }); !ok || le.LocalEchoEnabled() {
+		if s.net.LocalEchoEnabled() {
 			s.ui.Echo(payload)
 		}
 

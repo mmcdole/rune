@@ -97,6 +97,9 @@ func parseLayoutArray(L *glua.LState, tbl *glua.LTable) []ui.LayoutEntry {
 // RenderBar calls a Lua bar render function and returns the content.
 // Called from Session on tick to update bar cache.
 func (e *Engine) RenderBar(name string, width int) (ui.BarContent, bool) {
+	if e.L == nil {
+		return ui.BarContent{}, false
+	}
 	fn, ok := e.bars.funcs[name]
 	if !ok {
 		return ui.BarContent{}, false
