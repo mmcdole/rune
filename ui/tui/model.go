@@ -7,18 +7,13 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/drake/rune/ui"
-	"github.com/drake/rune/ui/tui/layout"
 	"github.com/drake/rune/ui/tui/style"
+	"github.com/drake/rune/ui/tui/util"
 	"github.com/drake/rune/ui/tui/widget"
 )
 
 // tickMsg is used for periodic updates (line batching, clock refresh).
 type tickMsg time.Time
-
-// flushLinesMsg signals the model to flush pending lines.
-type flushLinesMsg struct {
-	Lines []string
-}
 
 // doTick returns a command that sends a tickMsg after the given duration.
 func doTick() tea.Cmd {
@@ -36,27 +31,15 @@ const (
 	ModePickerInline                  // Inline picker filters based on input
 )
 
-// filterClearSequences removes ANSI sequences that would clear the screen.
-func filterClearSequences(line string) string {
-	line = strings.ReplaceAll(line, "\x1b[2J", "")
-	line = strings.ReplaceAll(line, "\x1b[H", "")
-	line = strings.ReplaceAll(line, "\x1b[0;0H", "")
-	line = strings.ReplaceAll(line, "\x1b[1;1H", "")
-	return line
-}
-
 // Model is the main Bubble Tea model for the TUI.
 type Model struct {
 	// Layout
-	engine    *layout.Engine
-	renderers map[string]layout.Renderer // static: input, status, separator
-	bars      map[string]*widget.Bar     // created when barContent changes
+	widgets map[string]widget.Widget // all named widgets: input, separator, bars
 
 	// Widgets
 	scrollback *widget.ScrollbackBuffer
 	viewport   *widget.Viewport
 	input      *widget.Input
-	status     *widget.Status
 	panes      *widget.PaneManager
 	styles     style.Styles
 
@@ -67,8 +50,8 @@ type Model struct {
 	boundKeys  map[string]bool
 	barContent map[string]ui.BarContent
 	luaLayout  struct {
-		Top    []string
-		Bottom []string
+		Top    []ui.LayoutEntry
+		Bottom []ui.LayoutEntry
 	}
 
 	// State
@@ -80,6 +63,9 @@ type Model struct {
 	quitting     bool
 	initialized  bool
 	pendingLines []string
+
+	// Cached layout state (computed in Update, used in View)
+	viewportHeight int
 }
 
 // NewModel creates a new TUI model.
@@ -88,27 +74,22 @@ func NewModel(inputChan chan<- string, outbound chan<- any) Model {
 	scrollback := widget.NewScrollbackBuffer(100000)
 	viewport := widget.NewViewport(scrollback)
 	input := widget.NewInput(styles)
-	status := widget.NewStatus(styles)
 	panes := widget.NewPaneManager(styles)
 
 	m := Model{
-		engine:     layout.NewEngine(),
 		scrollback: scrollback,
 		viewport:   viewport,
 		input:      input,
-		status:     status,
 		panes:      panes,
 		styles:     styles,
 		inputChan:  inputChan,
 		outbound:   outbound,
-		renderers:  make(map[string]layout.Renderer),
-		bars:       make(map[string]*widget.Bar),
+		widgets:    make(map[string]widget.Widget),
 	}
 
-	// Register static renderers (all implement layout.Renderer)
-	m.renderers["input"] = input
-	m.renderers["status"] = status
-	m.renderers["separator"] = widget.NewSeparator()
+	// Register static widgets
+	m.widgets["input"] = input
+	m.widgets["separator"] = widget.NewSeparator()
 
 	return m
 }
@@ -123,104 +104,137 @@ func (m Model) Init() tea.Cmd {
 
 // Update implements tea.Model.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmds []tea.Cmd
-
 	switch msg := msg.(type) {
-
+	// System
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		m.engine.SetSize(msg.Width, msg.Height)
-		m.initialized = true
-		m.sendOutbound(ui.WindowSizeChangedMsg{Width: msg.Width, Height: msg.Height})
-		return m, nil
-
+		return m.handleWindowSize(msg)
 	case tickMsg:
-		if len(m.pendingLines) > 0 {
-			m.appendLines(m.pendingLines)
-			m.pendingLines = nil
-		}
-		return m, doTick()
+		return m.handleTick()
+	case tea.KeyMsg:
+		return m.handleKey(msg)
 
-	case ui.UpdateBindsMsg:
-		m.boundKeys = msg
-		return m, nil
+	// Session config updates
+	case ui.UpdateBindsMsg, ui.UpdateBarsMsg, ui.UpdateLayoutMsg:
+		return m.handleConfigUpdate(msg)
 
-	case ui.UpdateBarsMsg:
-		m.barContent = msg
-		return m, nil
+	// Server output
+	case ui.PrintLineMsg, ui.EchoLineMsg, ui.PromptMsg:
+		return m.handleServerOutput(msg)
 
-	case ui.UpdateLayoutMsg:
-		m.luaLayout.Top = msg.Top
-		m.luaLayout.Bottom = msg.Bottom
-		return m, nil
+	// Pane operations
+	case ui.PaneCreateMsg, ui.PaneWriteMsg, ui.PaneToggleMsg, ui.PaneClearMsg:
+		return m.handlePaneMsg(msg)
 
+	// Input control
 	case ui.ShowPickerMsg:
-		if msg.Inline {
-			m.inputMode = ModePickerInline
-		} else {
-			m.inputMode = ModePickerModal
-		}
-		m.input.ShowPicker(msg.Items, msg.Title, msg.CallbackID, msg.Inline)
-		return m, nil
-
+		return m.handleShowPicker(msg)
 	case ui.SetInputMsg:
 		m.input.SetValue(string(msg))
 		m.input.CursorEnd()
 		return m, nil
+	}
 
-	case flushLinesMsg:
-		cleanLines := make([]string, len(msg.Lines))
-		for i, line := range msg.Lines {
-			cleanLines[i] = filterClearSequences(line)
-			m.input.AddToWordCache(cleanLines[i])
+	return m, nil
+}
+
+func (m Model) handleWindowSize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
+	m.width = msg.Width
+	m.height = msg.Height
+	m.initialized = true
+	m.recalculateLayout()
+	m.sendOutbound(ui.WindowSizeChangedMsg{Width: msg.Width, Height: msg.Height})
+	return m, nil
+}
+
+func (m Model) handleTick() (tea.Model, tea.Cmd) {
+	if len(m.pendingLines) > 0 {
+		m.appendLines(m.pendingLines)
+		m.pendingLines = nil
+	}
+	return m, doTick()
+}
+
+func (m Model) handleConfigUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case ui.UpdateBindsMsg:
+		m.boundKeys = msg
+	case ui.UpdateBarsMsg:
+		m.syncBars(msg)
+		m.recalculateLayout()
+	case ui.UpdateLayoutMsg:
+		m.luaLayout.Top = msg.Top
+		m.luaLayout.Bottom = msg.Bottom
+		m.recalculateLayout()
+	}
+	return m, nil
+}
+
+// syncBars updates the widgets map to match the current bar content.
+// Creates new Bar instances for new names, removes stale ones, updates existing ones.
+func (m *Model) syncBars(content map[string]ui.BarContent) {
+	// Remove bars that no longer exist in content
+	for name := range m.barContent {
+		if _, exists := content[name]; !exists {
+			delete(m.widgets, name)
 		}
-		m.appendLines(cleanLines)
-		return m, nil
+	}
 
+	// Add or update bars
+	for name, barContent := range content {
+		bar, exists := m.widgets[name]
+		if !exists {
+			bar = widget.NewBar(name)
+			m.widgets[name] = bar
+		}
+		bar.(*widget.Bar).SetContent(barContent)
+	}
+
+	m.barContent = content
+}
+
+func (m Model) handleServerOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
 	case ui.PrintLineMsg:
-		cleanLine := filterClearSequences(string(msg))
+		cleanLine := util.FilterClearSequences(string(msg))
 		m.pendingLines = append(m.pendingLines, cleanLine)
 		m.input.AddToWordCache(cleanLine)
-		return m, nil
-
 	case ui.EchoLineMsg:
 		m.appendLines([]string{string(msg)})
-		return m, nil
-
 	case ui.PromptMsg:
 		text := string(msg)
 		if text != m.lastPrompt {
 			m.viewport.SetPrompt(text)
 			m.lastPrompt = text
 		}
-		return m, nil
+	}
+	return m, nil
+}
 
-	case ui.ConnectionStateMsg:
-		m.status.SetConnectionState(msg.State, msg.Address)
-		return m, nil
-
+func (m Model) handlePaneMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
 	case ui.PaneCreateMsg:
 		m.panes.Create(msg.Name)
-		return m, nil
-
+		m.recalculateLayout()
 	case ui.PaneWriteMsg:
 		m.panes.Write(msg.Name, msg.Text)
-		return m, nil
-
 	case ui.PaneToggleMsg:
 		m.panes.Toggle(msg.Name)
-		return m, nil
-
+		m.recalculateLayout()
 	case ui.PaneClearMsg:
 		m.panes.Clear(msg.Name)
-		return m, nil
-
-	case tea.KeyMsg:
-		return m.handleKey(msg)
 	}
+	return m, nil
+}
 
-	return m, tea.Batch(cmds...)
+func (m Model) handleShowPicker(msg ui.ShowPickerMsg) (tea.Model, tea.Cmd) {
+	if msg.Inline {
+		m.inputMode = ModePickerInline
+	} else {
+		m.inputMode = ModePickerModal
+	}
+	m.input.ShowPicker(msg.Items, msg.Title, msg.CallbackID, msg.Inline)
+	m.recalculateLayout()
+	return m, nil
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -235,6 +249,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.inputMode = ModeNormal
 			cbID := m.input.PickerCallbackID()
 			m.input.HidePicker()
+			m.recalculateLayout()
 			m.sendOutbound(ui.PickerSelectMsg{CallbackID: cbID, Accepted: false})
 			return m, nil
 		}
@@ -246,6 +261,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.inputMode = ModeNormal
 			cbID := m.input.PickerCallbackID()
 			m.input.HidePicker()
+			m.recalculateLayout()
 			m.sendOutbound(ui.PickerSelectMsg{CallbackID: cbID, Accepted: false})
 			return m, nil
 		}
@@ -318,7 +334,7 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Forward to input
 	oldValue := m.input.Value()
-	m.input.Update(msg)
+	m.input.UpdateTextInput(msg)
 
 	if newValue := m.input.Value(); newValue != oldValue {
 		m.sendOutbound(ui.InputChangedMsg(newValue))
@@ -356,6 +372,7 @@ func (m Model) handleInlinePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.inputMode = ModeNormal
 		m.input.HidePicker()
+		m.recalculateLayout()
 		return m, nil
 
 	case tea.KeyEnter:
@@ -368,6 +385,7 @@ func (m Model) handleInlinePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.inputMode = ModeNormal
 		m.input.HidePicker()
+		m.recalculateLayout()
 		return m.submitInput()
 
 	case tea.KeyCtrlU:
@@ -402,7 +420,7 @@ func (m Model) handleInlinePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	oldValue := m.input.Value()
-	m.input.Update(msg)
+	m.input.UpdateTextInput(msg)
 
 	if newValue := m.input.Value(); newValue != oldValue {
 		m.sendOutbound(ui.InputChangedMsg(newValue))
@@ -431,6 +449,7 @@ func (m *Model) closeInlinePicker() {
 	m.inputMode = ModeNormal
 	m.sendOutbound(ui.PickerSelectMsg{CallbackID: m.input.PickerCallbackID(), Accepted: false})
 	m.input.HidePicker()
+	m.recalculateLayout()
 }
 
 func (m Model) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -455,6 +474,7 @@ func (m Model) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.inputMode = ModeNormal
 		m.input.HidePicker()
+		m.recalculateLayout()
 		return m, nil
 
 	case tea.KeyRunes:
@@ -498,10 +518,8 @@ func (m *Model) updateScrollState() {
 	mode := m.viewport.Mode()
 	newLines := m.viewport.NewLineCount()
 
-	m.status.SetScrollMode(mode, newLines)
-
 	modeStr := "live"
-	if mode != 0 {
+	if mode != widget.ModeLive {
 		modeStr = "scrolled"
 	}
 	m.sendOutbound(ui.ScrollStateChangedMsg{Mode: modeStr, NewLines: newLines})
@@ -517,22 +535,14 @@ func (m *Model) getLayout() ui.LayoutConfig {
 	return ui.DefaultLayoutConfig()
 }
 
-// getRenderer returns the layout.Renderer for a component name.
-func (m *Model) getRenderer(name string) layout.Renderer {
-	// Static registry (input, status, separator)
-	if r, ok := m.renderers[name]; ok {
-		return r
+// getWidget returns the Widget for a given name.
+func (m *Model) getWidget(name string) widget.Widget {
+	// Check widgets map (input, separator, bars)
+	if w, ok := m.widgets[name]; ok {
+		return w
 	}
 
-	// Bars (created lazily, cached)
-	if _, ok := m.barContent[name]; ok {
-		if _, exists := m.bars[name]; !exists {
-			m.bars[name] = widget.NewBar(name, &m.barContent)
-		}
-		return m.bars[name]
-	}
-
-	// Panes (PaneManager returns *Pane which implements layout.Renderer)
+	// Panes (PaneManager returns *Pane which implements Widget)
 	if m.panes.Exists(name) {
 		return m.panes.Get(name)
 	}
@@ -540,18 +550,84 @@ func (m *Model) getRenderer(name string) layout.Renderer {
 	return nil
 }
 
-// buildDock converts layout names to a Dock of renderers.
-func (m *Model) buildDock(names []string) *layout.Dock {
-	dock := &layout.Dock{}
-	for _, name := range names {
-		if r := m.getRenderer(name); r != nil {
-			dock.Renderers = append(dock.Renderers, r)
-		}
+// recalculateLayout computes widget sizes based on current dimensions and layout config.
+// Called from Update handlers when window size or layout changes.
+func (m *Model) recalculateLayout() {
+	if m.width == 0 || m.height == 0 {
+		return
 	}
-	return dock
+
+	cfg := m.getLayout()
+
+	topHeight := m.sizeDock(cfg.Top)
+	bottomHeight := m.sizeDock(cfg.Bottom)
+
+	m.viewportHeight = m.height - topHeight - bottomHeight
+	if m.viewportHeight < 1 {
+		m.viewportHeight = 1
+	}
+	m.viewport.SetSize(m.width, m.viewportHeight)
+}
+
+// sizeDock calculates sizes for dock widgets and returns total height.
+// Sets widget sizes as a side effect.
+func (m *Model) sizeDock(entries []ui.LayoutEntry) int {
+	totalHeight := 0
+
+	for _, entry := range entries {
+		w := m.getWidget(entry.Name)
+		if w == nil {
+			continue
+		}
+
+		preferred := w.PreferredHeight()
+		if preferred == 0 {
+			continue
+		}
+
+		h := entry.Height
+		if h == 0 {
+			h = preferred
+		}
+
+		w.SetSize(m.width, h)
+		totalHeight += h
+	}
+
+	return totalHeight
+}
+
+// renderDock renders a list of layout entries, returns combined view and total height.
+// Assumes sizes have already been set by recalculateLayout.
+func (m *Model) renderDock(entries []ui.LayoutEntry) (string, int) {
+	var parts []string
+	totalHeight := 0
+
+	for _, entry := range entries {
+		w := m.getWidget(entry.Name)
+		if w == nil {
+			continue
+		}
+
+		preferred := w.PreferredHeight()
+		if preferred == 0 {
+			continue
+		}
+
+		h := entry.Height
+		if h == 0 {
+			h = preferred
+		}
+
+		parts = append(parts, w.View())
+		totalHeight += h
+	}
+
+	return strings.Join(parts, "\n"), totalHeight
 }
 
 // View implements tea.Model.
+// This method should be pure - no side effects. All sizing is done in Update via recalculateLayout.
 func (m Model) View() string {
 	if !m.initialized {
 		return "Loading..."
@@ -562,19 +638,17 @@ func (m Model) View() string {
 	}
 
 	cfg := m.getLayout()
-	top := m.buildDock(cfg.Top)
-	bottom := m.buildDock(cfg.Bottom)
 
-	viewportHeight := m.engine.Calculate(top, bottom)
-	m.viewport.SetDimensions(m.engine.Width(), viewportHeight)
+	topView, _ := m.renderDock(cfg.Top)
+	bottomView, _ := m.renderDock(cfg.Bottom)
 
 	var parts []string
-	if v := top.View(); v != "" {
-		parts = append(parts, v)
+	if topView != "" {
+		parts = append(parts, topView)
 	}
 	parts = append(parts, m.viewport.View())
-	if v := bottom.View(); v != "" {
-		parts = append(parts, v)
+	if bottomView != "" {
+		parts = append(parts, bottomView)
 	}
 
 	return strings.Join(parts, "\n")

@@ -49,8 +49,8 @@ type UpdateBarsMsg map[string]BarContent
 
 // UpdateLayoutMsg pushes layout configuration from Session to UI.
 type UpdateLayoutMsg struct {
-	Top    []string
-	Bottom []string
+	Top    []LayoutEntry
+	Bottom []LayoutEntry
 }
 
 // --- Push-based UI Messages (UI -> Session) ---

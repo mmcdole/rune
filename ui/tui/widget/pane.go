@@ -3,18 +3,14 @@ package widget
 import (
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-
-	"github.com/drake/rune/ui/tui/layout"
 	"github.com/drake/rune/ui/tui/style"
 	"github.com/drake/rune/ui/tui/util"
 )
 
-// Compile-time check that Pane implements layout.Renderer
-var _ layout.Renderer = (*Pane)(nil)
+// Compile-time check that Pane implements Widget
+var _ Widget = (*Pane)(nil)
 
 // Pane represents a named buffer that can be shown/hidden.
-// Implements layout.Renderer for use by the layout engine.
 type Pane struct {
 	Name    string
 	Lines   []string
@@ -35,15 +31,7 @@ func NewPane(name string, styles style.Styles) *Pane {
 	}
 }
 
-// Init implements tea.Model.
-func (p *Pane) Init() tea.Cmd { return nil }
-
-// Update implements tea.Model.
-func (p *Pane) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	return p, nil
-}
-
-// View implements tea.Model.
+// View implements Widget.
 func (p *Pane) View() string {
 	if !p.Visible {
 		return ""
@@ -80,13 +68,19 @@ func (p *Pane) View() string {
 	return strings.Join(parts, "\n")
 }
 
-// SetWidth implements layout.Renderer.
-func (p *Pane) SetWidth(w int) {
-	p.width = w
+// SetSize implements Widget.
+func (p *Pane) SetSize(width, height int) {
+	p.width = width
+	// Height includes header (1) + border (1), so content height = height - 2
+	if height > 2 {
+		p.height = height - 2
+	} else if height > 0 {
+		p.height = height
+	}
 }
 
-// Height implements layout.Renderer. Returns 0 if hidden.
-func (p *Pane) Height() int {
+// PreferredHeight implements Widget. Returns 0 if hidden.
+func (p *Pane) PreferredHeight() int {
 	if !p.Visible {
 		return 0
 	}
@@ -109,13 +103,6 @@ func (p *Pane) Toggle() {
 // Clear empties the pane.
 func (p *Pane) Clear() {
 	p.Lines = p.Lines[:0]
-}
-
-// SetContentHeight sets the display height (number of content lines).
-func (p *Pane) SetContentHeight(h int) {
-	if h > 0 {
-		p.height = h
-	}
 }
 
 // PaneManager handles multiple named panes.
@@ -171,11 +158,4 @@ func (pm *PaneManager) Clear(name string) {
 func (pm *PaneManager) Exists(name string) bool {
 	_, ok := pm.panes[name]
 	return ok
-}
-
-// SetPaneHeight sets the display height for a pane.
-func (pm *PaneManager) SetPaneHeight(name string, h int) {
-	if pane, ok := pm.panes[name]; ok {
-		pane.SetContentHeight(h)
-	}
 }

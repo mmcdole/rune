@@ -1,32 +1,22 @@
 package lua
 
-import glua "github.com/yuin/gopher-lua"
+import (
+	glua "github.com/yuin/gopher-lua"
 
-// BarData represents the raw strings returned by a Lua bar renderer.
-// Pure data with no UI dependencies - Session converts this to layout.BarContent.
-type BarData struct {
-	Left   string
-	Center string
-	Right  string
-}
-
-// LayoutConfig holds the current layout configuration set by Lua.
-type LayoutConfig struct {
-	Top    []string
-	Bottom []string
-}
+	"github.com/drake/rune/ui"
+)
 
 // barRegistry holds registered Lua bar render functions and layout config.
 type barRegistry struct {
 	funcs  map[string]*glua.LFunction
-	layout LayoutConfig
+	layout ui.LayoutConfig
 }
 
 func newBarRegistry() *barRegistry {
 	return &barRegistry{
 		funcs: make(map[string]*glua.LFunction),
-		layout: LayoutConfig{
-			Bottom: []string{"input", "status"}, // Default layout
+		layout: ui.LayoutConfig{
+			Bottom: []ui.LayoutEntry{{Name: "input"}, {Name: "status"}}, // Default layout
 		},
 	}
 }
@@ -51,14 +41,14 @@ func (e *Engine) registerBarFuncs() {
 	}))
 
 	// rune.ui.layout(config) - Set the layout configuration
-	// config = { top = {"bar1"}, bottom = {"input", "status"} }
+	// config = { top = {"bar1", {name="pane", height=10}}, bottom = {"input", "status"} }
 	e.L.SetField(ui, "layout", e.L.NewFunction(func(L *glua.LState) int {
 		cfg := L.CheckTable(1)
 
 		// Parse top array
 		topVal := L.GetField(cfg, "top")
 		if topTbl, ok := topVal.(*glua.LTable); ok {
-			e.bars.layout.Top = tableToStrings(L, topTbl)
+			e.bars.layout.Top = parseLayoutArray(L, topTbl)
 		} else {
 			e.bars.layout.Top = nil
 		}
@@ -66,7 +56,7 @@ func (e *Engine) registerBarFuncs() {
 		// Parse bottom array
 		bottomVal := L.GetField(cfg, "bottom")
 		if bottomTbl, ok := bottomVal.(*glua.LTable); ok {
-			e.bars.layout.Bottom = tableToStrings(L, bottomTbl)
+			e.bars.layout.Bottom = parseLayoutArray(L, bottomTbl)
 		} else {
 			e.bars.layout.Bottom = nil
 		}
@@ -76,12 +66,29 @@ func (e *Engine) registerBarFuncs() {
 	}))
 }
 
-// tableToStrings converts a Lua array table to a Go string slice.
-func tableToStrings(L *glua.LState, tbl *glua.LTable) []string {
-	var result []string
+// parseLayoutArray converts a Lua array table to LayoutEntry slice.
+// Supports both strings ("name") and tables ({name="name", height=10}).
+func parseLayoutArray(L *glua.LState, tbl *glua.LTable) []ui.LayoutEntry {
+	var result []ui.LayoutEntry
 	tbl.ForEach(func(k, v glua.LValue) {
-		if s, ok := v.(glua.LString); ok {
-			result = append(result, string(s))
+		switch val := v.(type) {
+		case glua.LString:
+			// Simple string: "component_name"
+			result = append(result, ui.LayoutEntry{Name: string(val)})
+		case *glua.LTable:
+			// Table: {name="component_name", height=10}
+			entry := ui.LayoutEntry{}
+			if name := L.GetField(val, "name"); name != glua.LNil {
+				entry.Name = name.String()
+			}
+			if height := L.GetField(val, "height"); height != glua.LNil {
+				if h, ok := height.(glua.LNumber); ok {
+					entry.Height = int(h)
+				}
+			}
+			if entry.Name != "" {
+				result = append(result, entry)
+			}
 		}
 	})
 	return result
@@ -89,10 +96,10 @@ func tableToStrings(L *glua.LState, tbl *glua.LTable) []string {
 
 // RenderBar calls a Lua bar render function and returns the content.
 // Called from Session on tick to update bar cache.
-func (e *Engine) RenderBar(name string, width int) (BarData, bool) {
+func (e *Engine) RenderBar(name string, width int) (ui.BarContent, bool) {
 	fn, ok := e.bars.funcs[name]
 	if !ok {
-		return BarData{}, false
+		return ui.BarContent{}, false
 	}
 
 	// Call the Lua function with width
@@ -100,7 +107,7 @@ func (e *Engine) RenderBar(name string, width int) (BarData, bool) {
 	e.L.Push(glua.LNumber(width))
 	if err := e.L.PCall(1, 1, nil); err != nil {
 		e.CallHook("error", "bar render: "+err.Error())
-		return BarData{}, false
+		return ui.BarContent{}, false
 	}
 
 	result := e.L.Get(-1)
@@ -109,15 +116,15 @@ func (e *Engine) RenderBar(name string, width int) (BarData, bool) {
 	// Handle return value - can be string or table {left, center, right}
 	switch v := result.(type) {
 	case glua.LString:
-		return BarData{Left: string(v)}, true
+		return ui.BarContent{Left: string(v)}, true
 	case *glua.LTable:
-		return BarData{
+		return ui.BarContent{
 			Left:   luaStringOrEmpty(e.L.GetField(v, "left")),
 			Center: luaStringOrEmpty(e.L.GetField(v, "center")),
 			Right:  luaStringOrEmpty(e.L.GetField(v, "right")),
 		}, true
 	default:
-		return BarData{}, false
+		return ui.BarContent{}, false
 	}
 }
 
@@ -137,7 +144,7 @@ func (e *Engine) HasBar(name string) bool {
 }
 
 // GetLayout returns the current Lua-defined layout configuration.
-func (e *Engine) GetLayout() LayoutConfig {
+func (e *Engine) GetLayout() ui.LayoutConfig {
 	return e.bars.layout
 }
 

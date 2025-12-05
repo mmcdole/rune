@@ -11,10 +11,13 @@ import (
 	"github.com/drake/rune/ui/tui/util"
 )
 
+// Compile-time check that Input implements Widget
+var _ Widget = (*Input)(nil)
+
 // Input handles the input area including text entry, picker overlay, and borders.
 type Input struct {
 	textinput textinput.Model
-	picker    *Picker[ui.PickerItem]
+	picker    *Picker
 	styles    style.Styles
 
 	// State
@@ -38,7 +41,7 @@ func NewInput(styles style.Styles) *Input {
 
 	return &Input{
 		textinput: ti,
-		picker: NewPicker[ui.PickerItem](PickerConfig{
+		picker: NewPicker(PickerConfig{
 			MaxVisible: 10,
 			EmptyText:  "No matches",
 		}, styles),
@@ -47,17 +50,14 @@ func NewInput(styles style.Styles) *Input {
 	}
 }
 
-// Init implements tea.Model.
-func (i *Input) Init() tea.Cmd { return nil }
-
-// Update implements tea.Model.
-func (i *Input) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+// UpdateTextInput forwards messages to the underlying textinput.
+func (i *Input) UpdateTextInput(msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
 	i.textinput, cmd = i.textinput.Update(msg)
-	return i, cmd
+	return cmd
 }
 
-// View implements tea.Model.
+// View implements Widget.
 func (i *Input) View() string {
 	var parts []string
 
@@ -78,18 +78,19 @@ func (i *Input) View() string {
 	return strings.Join(parts, "\n")
 }
 
-// SetWidth implements Widget.
-func (i *Input) SetWidth(w int) {
-	i.width = w
-	i.textinput.Width = w - 2 // Account for prompt
-	i.picker.SetWidth(w)
+// SetSize implements Widget.
+func (i *Input) SetSize(width, height int) {
+	i.width = width
+	i.textinput.Width = width - 2 // Account for prompt
+	i.picker.SetWidth(width)
+	// height is ignored - input has intrinsic height
 }
 
-// Height implements Widget.
-func (i *Input) Height() int {
+// PreferredHeight implements Widget.
+func (i *Input) PreferredHeight() int {
 	h := 3 // top border + input + bottom border
 	if i.pickerActive {
-		h += i.picker.Height()
+		h += i.picker.PreferredHeight()
 	}
 	return h
 }

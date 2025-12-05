@@ -39,14 +39,13 @@ func NewBubbleTeaUI() *BubbleTeaUI {
 }
 
 // send queues a message for delivery to the Bubble Tea program.
-// Never blocks - drops message if queue is full.
+// Blocks until message is queued - never drops messages.
+// For a MUD client, dropping server output is unacceptable.
 func (b *BubbleTeaUI) send(msg tea.Msg) {
 	select {
 	case <-b.done:
 		return
 	case b.msgQueue <- msg:
-	default:
-		// Drop rather than block producers
 	}
 }
 
@@ -164,7 +163,7 @@ func (b *BubbleTeaUI) UpdateBinds(keys map[string]bool) {
 }
 
 // UpdateLayout sends layout configuration from Session to UI.
-func (b *BubbleTeaUI) UpdateLayout(top, bottom []string) {
+func (b *BubbleTeaUI) UpdateLayout(top, bottom []ui.LayoutEntry) {
 	b.send(ui.UpdateLayoutMsg{Top: top, Bottom: bottom})
 }
 

@@ -321,13 +321,13 @@ func (s *Session) boot() error {
 
 	// Push initial state to UI after all scripts loaded
 	s.pushBindsAndLayout()
+	s.pushBarUpdates()
 
 	return nil
 }
 
 // renderBars calls all Lua bar renderers and returns their content.
 // Must be called from Session goroutine (thread-safe Lua access).
-// Converts lua.BarData to ui.BarContent (decoupling lua from ui).
 func (s *Session) renderBars(width int) map[string]ui.BarContent {
 	names := s.engine.GetBarNames()
 	if len(names) == 0 {
@@ -336,12 +336,8 @@ func (s *Session) renderBars(width int) map[string]ui.BarContent {
 
 	result := make(map[string]ui.BarContent, len(names))
 	for _, name := range names {
-		if data, ok := s.engine.RenderBar(name, width); ok {
-			result[name] = ui.BarContent{
-				Left:   data.Left,
-				Center: data.Center,
-				Right:  data.Right,
-			}
+		if content, ok := s.engine.RenderBar(name, width); ok {
+			result[name] = content
 		}
 	}
 	return result

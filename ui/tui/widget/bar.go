@@ -3,50 +3,37 @@ package widget
 import (
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-
 	"github.com/drake/rune/ui"
-	"github.com/drake/rune/ui/tui/layout"
 	"github.com/drake/rune/ui/tui/util"
 )
 
-// Compile-time check that Bar implements layout.Renderer
-var _ layout.Renderer = (*Bar)(nil)
+// Compile-time check that Bar implements Widget
+var _ Widget = (*Bar)(nil)
 
 // Bar renders a Lua-defined bar with left/center/right sections.
-// Implements layout.Renderer for use by the layout engine.
 type Bar struct {
 	name    string
-	content *map[string]ui.BarContent
+	content ui.BarContent
 	width   int
 }
 
 // NewBar creates a new bar renderer.
-func NewBar(name string, content *map[string]ui.BarContent) *Bar {
+func NewBar(name string) *Bar {
 	return &Bar{
-		name:    name,
-		content: content,
+		name: name,
 	}
 }
 
-// Init implements tea.Model.
-func (b *Bar) Init() tea.Cmd { return nil }
-
-// Update implements tea.Model.
-func (b *Bar) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	return b, nil
+// SetContent updates the bar's content.
+func (b *Bar) SetContent(content ui.BarContent) {
+	b.content = content
 }
 
-// View implements layout.Renderer.
+// View implements Widget.
 func (b *Bar) View() string {
-	content, ok := (*b.content)[b.name]
-	if !ok {
-		return "" // Safe guard if content removed between frames
-	}
-
-	left := content.Left
-	center := content.Center
-	right := content.Right
+	left := b.content.Left
+	center := b.content.Center
+	right := b.content.Right
 
 	leftLen := util.VisibleLen(left)
 	centerLen := util.VisibleLen(center)
@@ -73,14 +60,15 @@ func (b *Bar) View() string {
 	return left + strings.Repeat(" ", pad) + right
 }
 
-// SetWidth implements layout.Renderer.
-func (b *Bar) SetWidth(w int) {
-	b.width = w
+// SetSize implements Widget.
+func (b *Bar) SetSize(width, height int) {
+	b.width = width
+	// height is ignored - bars are always 1 line
 }
 
-// Height implements layout.Renderer.
-func (b *Bar) Height() int {
-	if _, ok := (*b.content)[b.name]; ok {
+// PreferredHeight implements Widget.
+func (b *Bar) PreferredHeight() int {
+	if b.content.Left != "" || b.content.Center != "" || b.content.Right != "" {
 		return 1
 	}
 	return 0 // Hidden if no content

@@ -1,9 +1,16 @@
 package widget
 
-import (
-	"strings"
+import "strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+// Compile-time check that Viewport implements Widget
+var _ Widget = (*Viewport)(nil)
+
+// ScrollMode indicates whether viewport is live or scrolled back.
+type ScrollMode int
+
+const (
+	ModeLive ScrollMode = iota
+	ModeScrolled
 )
 
 // ScrollbackBuffer is a ring buffer for storing terminal output lines.
@@ -73,15 +80,7 @@ func NewViewport(buffer *ScrollbackBuffer) *Viewport {
 	}
 }
 
-// Init implements tea.Model.
-func (v *Viewport) Init() tea.Cmd { return nil }
-
-// Update implements tea.Model.
-func (v *Viewport) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	return v, nil
-}
-
-// View implements tea.Model.
+// View implements Widget.
 func (v *Viewport) View() string {
 	if v.cacheValid {
 		return v.cachedView
@@ -156,26 +155,19 @@ func (v *Viewport) View() string {
 	return v.cachedView
 }
 
-// SetWidth implements Widget.
-func (v *Viewport) SetWidth(w int) {
-	if w != v.width {
-		v.width = w
-		v.cacheValid = false
-	}
-}
-
-// Height implements Widget.
-func (v *Viewport) Height() int {
-	return v.height
-}
-
-// SetDimensions sets viewport size.
-func (v *Viewport) SetDimensions(width, height int) {
+// SetSize implements Widget.
+func (v *Viewport) SetSize(width, height int) {
 	if width != v.width || height != v.height {
 		v.width = width
 		v.height = height
 		v.cacheValid = false
 	}
+}
+
+// PreferredHeight implements Widget.
+// Viewport is a fill component - it takes whatever space is allocated.
+func (v *Viewport) PreferredHeight() int {
+	return v.height
 }
 
 // OnNewLines is called when lines are added.

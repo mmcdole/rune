@@ -18,7 +18,7 @@ type UI interface {
 	// Updates
 	UpdateBars(content map[string]BarContent)
 	UpdateBinds(keys map[string]bool)
-	UpdateLayout(top, bottom []string)
+	UpdateLayout(top, bottom []LayoutEntry)
 
 	// Components
 	ShowPicker(title string, items []PickerItem, callbackID string, inline bool)

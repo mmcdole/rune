@@ -3,18 +3,10 @@ package widget
 import (
 	"strings"
 
+	"github.com/drake/rune/ui"
 	"github.com/drake/rune/ui/tui/style"
 	"github.com/drake/rune/ui/tui/util"
 )
-
-// PickerItem represents a row in the picker.
-type PickerItem interface {
-	FilterValue() string
-	GetText() string
-	GetDescription() string
-	GetValue() string
-	MatchesDescription() bool
-}
 
 // PickerConfig holds picker configuration.
 type PickerConfig struct {
@@ -23,10 +15,10 @@ type PickerConfig struct {
 	EmptyText  string
 }
 
-// Picker is a generic fuzzy-filtering selector.
-type Picker[T PickerItem] struct {
-	items     []T
-	filtered  []T
+// Picker is a fuzzy-filtering selector for PickerItems.
+type Picker struct {
+	items     []ui.PickerItem
+	filtered  []ui.PickerItem
 	matches   []util.Match
 	query     string
 	selected  int
@@ -37,42 +29,42 @@ type Picker[T PickerItem] struct {
 }
 
 // NewPicker creates a new picker.
-func NewPicker[T PickerItem](config PickerConfig, styles style.Styles) *Picker[T] {
+func NewPicker(config PickerConfig, styles style.Styles) *Picker {
 	if config.MaxVisible == 0 {
 		config.MaxVisible = 10
 	}
 	if config.EmptyText == "" {
 		config.EmptyText = "No matches"
 	}
-	return &Picker[T]{
+	return &Picker{
 		config: config,
 		styles: styles,
 	}
 }
 
 // SetItems sets the items to filter.
-func (p *Picker[T]) SetItems(items []T) {
+func (p *Picker) SetItems(items []ui.PickerItem) {
 	p.items = items
 	p.Reset()
 }
 
 // SetWidth updates the picker width.
-func (p *Picker[T]) SetWidth(w int) {
+func (p *Picker) SetWidth(w int) {
 	p.width = w
 }
 
 // SetHeader updates the header text.
-func (p *Picker[T]) SetHeader(header string) {
+func (p *Picker) SetHeader(header string) {
 	p.config.Header = header
 }
 
 // Query returns the current filter query.
-func (p *Picker[T]) Query() string {
+func (p *Picker) Query() string {
 	return p.query
 }
 
 // Filter updates the filtered list based on query.
-func (p *Picker[T]) Filter(query string) {
+func (p *Picker) Filter(query string) {
 	p.query = query
 
 	if query == "" {
@@ -91,7 +83,7 @@ func (p *Picker[T]) Filter(query string) {
 
 	rawMatches := util.FuzzyFilter(query, searchStrings)
 
-	p.filtered = make([]T, len(rawMatches))
+	p.filtered = make([]ui.PickerItem, len(rawMatches))
 	p.matches = rawMatches
 	for i, match := range rawMatches {
 		p.filtered[i] = p.items[match.Index]
@@ -105,7 +97,7 @@ func (p *Picker[T]) Filter(query string) {
 }
 
 // SelectUp moves selection up with wraparound.
-func (p *Picker[T]) SelectUp() {
+func (p *Picker) SelectUp() {
 	if len(p.filtered) == 0 {
 		return
 	}
@@ -117,7 +109,7 @@ func (p *Picker[T]) SelectUp() {
 }
 
 // SelectDown moves selection down with wraparound.
-func (p *Picker[T]) SelectDown() {
+func (p *Picker) SelectDown() {
 	if len(p.filtered) == 0 {
 		return
 	}
@@ -128,7 +120,7 @@ func (p *Picker[T]) SelectDown() {
 	p.adjustScroll()
 }
 
-func (p *Picker[T]) adjustScroll() {
+func (p *Picker) adjustScroll() {
 	if p.selected < p.scrollOff {
 		p.scrollOff = p.selected
 	} else if p.selected >= p.scrollOff+p.config.MaxVisible {
@@ -137,7 +129,7 @@ func (p *Picker[T]) adjustScroll() {
 }
 
 // Reset clears the picker state.
-func (p *Picker[T]) Reset() {
+func (p *Picker) Reset() {
 	p.query = ""
 	p.filtered = p.items
 	p.matches = nil
@@ -146,16 +138,15 @@ func (p *Picker[T]) Reset() {
 }
 
 // Selected returns the currently selected item.
-func (p *Picker[T]) Selected() (T, bool) {
-	var zero T
+func (p *Picker) Selected() (ui.PickerItem, bool) {
 	if len(p.filtered) == 0 || p.selected < 0 || p.selected >= len(p.filtered) {
-		return zero, false
+		return ui.PickerItem{}, false
 	}
 	return p.filtered[p.selected], true
 }
 
-// Height returns the rendered height including border.
-func (p *Picker[T]) Height() int {
+// PreferredHeight returns the rendered height including border.
+func (p *Picker) PreferredHeight() int {
 	h := len(p.filtered)
 	if h > p.config.MaxVisible {
 		h = p.config.MaxVisible
@@ -173,7 +164,7 @@ func (p *Picker[T]) Height() int {
 }
 
 // View renders the picker overlay.
-func (p *Picker[T]) View() string {
+func (p *Picker) View() string {
 	var lines []string
 
 	if p.config.Header != "" {
@@ -210,7 +201,7 @@ func (p *Picker[T]) View() string {
 	return p.styles.OverlayBorder.Width(p.width - 4).Render(content)
 }
 
-func (p *Picker[T]) renderItem(item T, width int, selected bool, matches []int) string {
+func (p *Picker) renderItem(item ui.PickerItem, width int, selected bool, matches []int) string {
 	prefix := "  "
 	if selected {
 		prefix = "> "
