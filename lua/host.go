@@ -6,54 +6,40 @@ import (
 	"github.com/drake/rune/ui"
 )
 
-// NetworkService handles connection logic.
-type NetworkService interface {
+// Host provides all services the Lua engine needs from the host application.
+// In production, Session implements this interface.
+type Host interface {
+	// Network
+	Send(data string) error
 	Connect(addr string)
 	Disconnect()
-	Send(data string) error
-}
 
-// UIService handles visual elements.
-type UIService interface {
+	// UI
 	Print(text string)
-
-	// Pane operations
 	PaneCreate(name string)
 	PaneWrite(name, text string)
 	PaneToggle(name string)
 	PaneClear(name string)
-
-	// Picker
 	ShowPicker(title string, items []ui.PickerItem, onSelect func(value string), inline bool)
-
-	// Input
 	GetInput() string
 	SetInput(text string)
-}
 
-// TimerService handles scheduling.
-type TimerService interface {
+	// Timers
 	TimerAfter(d time.Duration) int
 	TimerEvery(d time.Duration) int
 	TimerCancel(id int)
 	TimerCancelAll()
-}
 
-// SystemService handles app lifecycle.
-type SystemService interface {
+	// System
 	Quit()
 	Reload()
 	Load(path string)
-}
 
-// HistoryService handles input history.
-type HistoryService interface {
+	// History
 	GetHistory() []string
 	AddToHistory(cmd string)
-}
 
-// StateService provides read-only access to client state.
-type StateService interface {
+	// State
 	GetClientState() ClientState
 	OnConfigChange()
 }

@@ -15,7 +15,7 @@ func (e *Engine) registerPaneFuncs() {
 	// rune._pane.create(name): Create a named pane
 	e.L.SetField(paneTable, "create", e.L.NewFunction(func(L *glua.LState) int {
 		name := L.CheckString(1)
-		e.ui.PaneCreate(name)
+		e.host.PaneCreate(name)
 		return 0
 	}))
 
@@ -23,21 +23,21 @@ func (e *Engine) registerPaneFuncs() {
 	e.L.SetField(paneTable, "write", e.L.NewFunction(func(L *glua.LState) int {
 		name := L.CheckString(1)
 		text := L.CheckString(2)
-		e.ui.PaneWrite(name, text)
+		e.host.PaneWrite(name, text)
 		return 0
 	}))
 
 	// rune._pane.toggle(name): Toggle pane visibility
 	e.L.SetField(paneTable, "toggle", e.L.NewFunction(func(L *glua.LState) int {
 		name := L.CheckString(1)
-		e.ui.PaneToggle(name)
+		e.host.PaneToggle(name)
 		return 0
 	}))
 
 	// rune._pane.clear(name): Clear pane contents
 	e.L.SetField(paneTable, "clear", e.L.NewFunction(func(L *glua.LState) int {
 		name := L.CheckString(1)
-		e.ui.PaneClear(name)
+		e.host.PaneClear(name)
 		return 0
 	}))
 }

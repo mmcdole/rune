@@ -28,15 +28,8 @@ type Network interface {
 	Output() <-chan event.Event
 }
 
-// Compile-time interface checks - Session implements all Lua service interfaces
-var (
-	_ lua.NetworkService = (*Session)(nil)
-	_ lua.UIService      = (*Session)(nil)
-	_ lua.TimerService   = (*Session)(nil)
-	_ lua.SystemService  = (*Session)(nil)
-	_ lua.HistoryService = (*Session)(nil)
-	_ lua.StateService   = (*Session)(nil)
-)
+// Compile-time interface check - Session implements lua.Host
+var _ lua.Host = (*Session)(nil)
 
 // UI is imported from the ui package.
 // See ui/interface.go for the full interface definition.
@@ -103,8 +96,8 @@ func New(net Network, uiInstance ui.UI, cfg Config) *Session {
 	}
 
 
-	// Create engine with Session as all service interfaces
-	s.engine = lua.NewEngine(s, s, s, s, s, s)
+	// Create engine with Session as Host
+	s.engine = lua.NewEngine(s)
 
 	// Initialize client state defaults
 	s.clientState.ScrollMode = "live"

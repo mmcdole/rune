@@ -7,7 +7,7 @@ func (e *Engine) registerCoreFuncs() {
 	// rune._send_raw(text): Bypasses alias processing, writes directly to socket
 	e.L.SetField(e.runeTable, "_send_raw", e.L.NewFunction(func(L *glua.LState) int {
 		cmd := L.CheckString(1)
-		if err := e.net.Send(cmd); err != nil {
+		if err := e.host.Send(cmd); err != nil {
 			L.RaiseError("%s", err.Error())
 			return 0
 		}
@@ -17,32 +17,32 @@ func (e *Engine) registerCoreFuncs() {
 	// rune._print(text): Outputs text to the local display
 	e.L.SetField(e.runeTable, "_print", e.L.NewFunction(func(L *glua.LState) int {
 		msg := L.CheckString(1)
-		e.ui.Print(msg)
+		e.host.Print(msg)
 		return 0
 	}))
 
 	// rune._quit(): Exit the client
 	e.L.SetField(e.runeTable, "_quit", e.L.NewFunction(func(L *glua.LState) int {
-		e.sys.Quit()
+		e.host.Quit()
 		return 0
 	}))
 
 	// rune._connect(address): Connect to server
 	e.L.SetField(e.runeTable, "_connect", e.L.NewFunction(func(L *glua.LState) int {
 		addr := L.CheckString(1)
-		e.net.Connect(addr)
+		e.host.Connect(addr)
 		return 0
 	}))
 
 	// rune._disconnect(): Disconnect from server
 	e.L.SetField(e.runeTable, "_disconnect", e.L.NewFunction(func(L *glua.LState) int {
-		e.net.Disconnect()
+		e.host.Disconnect()
 		return 0
 	}))
 
 	// rune._reload(): Reload all scripts
 	e.L.SetField(e.runeTable, "_reload", e.L.NewFunction(func(L *glua.LState) int {
-		e.sys.Reload()
+		e.host.Reload()
 		return 0
 	}))
 

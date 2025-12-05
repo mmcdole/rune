@@ -7,15 +7,8 @@ import (
 	"github.com/drake/rune/ui"
 )
 
-// Compile-time checks that MockHost implements all segregated interfaces
-var (
-	_ UIService      = (*MockHost)(nil)
-	_ NetworkService = (*MockHost)(nil)
-	_ TimerService   = (*MockHost)(nil)
-	_ SystemService  = (*MockHost)(nil)
-	_ HistoryService = (*MockHost)(nil)
-	_ StateService   = (*MockHost)(nil)
-)
+// Compile-time check that MockHost implements Host
+var _ Host = (*MockHost)(nil)
 
 // MockHost implements all service interfaces for testing.
 type MockHost struct {

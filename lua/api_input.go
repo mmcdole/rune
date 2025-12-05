@@ -9,14 +9,14 @@ func (e *Engine) registerInputFuncs() {
 
 	// rune.input.get() - Get the current input line content
 	e.L.SetField(inp, "get", e.L.NewFunction(func(L *glua.LState) int {
-		L.Push(glua.LString(e.ui.GetInput()))
+		L.Push(glua.LString(e.host.GetInput()))
 		return 1
 	}))
 
 	// rune.input.set(text) - Set the input line content
 	e.L.SetField(inp, "set", e.L.NewFunction(func(L *glua.LState) int {
 		text := L.CheckString(1)
-		e.ui.SetInput(text)
+		e.host.SetInput(text)
 		return 0
 	}))
 }

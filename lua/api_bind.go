@@ -22,7 +22,7 @@ func (e *Engine) registerBindFuncs() {
 		key := L.CheckString(1)
 		fn := L.CheckFunction(2)
 		e.binds.binds[key] = fn
-		e.state.OnConfigChange() // Notify Session to push update to UI
+		e.host.OnConfigChange() // Notify Session to push update to UI
 		return 0
 	}))
 
@@ -30,7 +30,7 @@ func (e *Engine) registerBindFuncs() {
 	e.L.SetField(e.runeTable, "unbind", e.L.NewFunction(func(L *glua.LState) int {
 		key := L.CheckString(1)
 		delete(e.binds.binds, key)
-		e.state.OnConfigChange() // Notify Session to push update to UI
+		e.host.OnConfigChange() // Notify Session to push update to UI
 		return 0
 	}))
 }

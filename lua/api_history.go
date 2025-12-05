@@ -9,7 +9,7 @@ func (e *Engine) registerHistoryFuncs() {
 
 	// rune.history.get() - Returns array of input history strings
 	e.L.SetField(hist, "get", e.L.NewFunction(func(L *glua.LState) int {
-		history := e.history.GetHistory()
+		history := e.host.GetHistory()
 		tbl := L.NewTable()
 		for i, cmd := range history {
 			tbl.RawSetInt(i+1, glua.LString(cmd))
@@ -21,7 +21,7 @@ func (e *Engine) registerHistoryFuncs() {
 	// rune.history.add(cmd) - Add a command to history
 	e.L.SetField(hist, "add", e.L.NewFunction(func(L *glua.LState) int {
 		cmd := L.CheckString(1)
-		e.history.AddToHistory(cmd)
+		e.host.AddToHistory(cmd)
 		return 0
 	}))
 }

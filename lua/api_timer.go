@@ -16,7 +16,7 @@ func (e *Engine) registerTimerFuncs() {
 		seconds := L.CheckNumber(1)
 		fn := L.CheckFunction(2)
 
-		id := e.timer.TimerAfter(toDuration(seconds))
+		id := e.host.TimerAfter(toDuration(seconds))
 		e.callbacks[id] = fn
 
 		L.Push(glua.LNumber(id))
@@ -28,7 +28,7 @@ func (e *Engine) registerTimerFuncs() {
 		seconds := L.CheckNumber(1)
 		fn := L.CheckFunction(2)
 
-		id := e.timer.TimerEvery(toDuration(seconds))
+		id := e.host.TimerEvery(toDuration(seconds))
 		e.callbacks[id] = fn
 
 		L.Push(glua.LNumber(id))
@@ -40,7 +40,7 @@ func (e *Engine) registerTimerFuncs() {
 		id := int(L.CheckNumber(1))
 		if _, ok := e.callbacks[id]; ok {
 			delete(e.callbacks, id)
-			e.timer.TimerCancel(id)
+			e.host.TimerCancel(id)
 		}
 		return 0
 	}))
@@ -48,7 +48,7 @@ func (e *Engine) registerTimerFuncs() {
 	// rune._timer.cancel_all(): Stop all timers
 	e.L.SetField(timerTable, "cancel_all", e.L.NewFunction(func(L *glua.LState) int {
 		e.callbacks = make(map[int]*glua.LFunction)
-		e.timer.TimerCancelAll()
+		e.host.TimerCancelAll()
 		return 0
 	}))
 }
