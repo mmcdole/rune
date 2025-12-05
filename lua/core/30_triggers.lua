@@ -20,12 +20,23 @@ function rune.trigger.add(pattern, action, options)
     local id = next_id
     next_id = next_id + 1
 
+    local compiled_regex = nil
+    if options.regex then
+        local err
+        compiled_regex, err = rune.regex.compile(pattern)
+        if not compiled_regex then
+            rune.print("[Trigger] Invalid regex: " .. (err or "unknown error"))
+            return nil
+        end
+    end
+
     storage[id] = {
         pattern = pattern,
         action = action,
         enabled = options.enabled ~= false,  -- default true
         gag = options.gag or false,
         is_regex = options.regex or false,   -- Use Go regex instead of Lua patterns
+        compiled = compiled_regex,           -- Pre-compiled regex (nil for Lua patterns)
         raw = options.raw or false,          -- Match on raw line with ANSI (default: clean)
     }
     table.insert(order, id)
@@ -175,9 +186,9 @@ function rune.trigger.process(line)
             local match_line = trig.raw and raw_line or clean_line
 
             -- Support both Lua patterns and Go Regex
-            if trig.is_regex then
-                -- rune.regex.match returns a table of captures {full, group1, group2...}
-                matches = rune.regex.match(trig.pattern, match_line)
+            if trig.compiled then
+                -- Use pre-compiled regex for O(1) matching
+                matches = trig.compiled:match(match_line)
             else
                 -- Standard Lua match
                 local m = {match_line:match(trig.pattern)}

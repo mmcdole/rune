@@ -6,44 +6,66 @@ import (
 	glua "github.com/yuin/gopher-lua"
 )
 
-// registerRegexFuncs registers internal rune._regex.* primitives (wrapped by Lua)
+const luaRegexTypeName = "Regex"
+
+// registerRegexType registers the Regex userdata type.
+func registerRegexType(L *glua.LState) {
+	mt := L.NewTypeMetatable(luaRegexTypeName)
+	L.SetField(mt, "__index", L.NewFunction(regexIndex))
+}
+
+// regexIndex handles method calls on Regex userdata.
+func regexIndex(L *glua.LState) int {
+	re := L.CheckUserData(1).Value.(*regexp.Regexp)
+	method := L.CheckString(2)
+
+	switch method {
+	case "match":
+		L.Push(L.NewFunction(func(L *glua.LState) int {
+			text := L.CheckString(1)
+			matches := re.FindStringSubmatch(text)
+			if matches == nil {
+				L.Push(glua.LNil)
+				return 1
+			}
+			tbl := L.NewTable()
+			for i, m := range matches {
+				tbl.RawSetInt(i+1, glua.LString(m))
+			}
+			L.Push(tbl)
+			return 1
+		}))
+		return 1
+	case "pattern":
+		L.Push(glua.LString(re.String()))
+		return 1
+	}
+
+	return 0
+}
+
+// registerRegexFuncs registers internal rune._regex.* primitives
 func (e *Engine) registerRegexFuncs() {
+	registerRegexType(e.L)
+
 	regexTable := e.L.NewTable()
 	e.L.SetField(e.runeTable, "_regex", regexTable)
 
-	// rune._regex.match(pattern, text): Match using Go's regexp with LRU caching
-	e.L.SetField(regexTable, "match", e.L.NewFunction(func(L *glua.LState) int {
+	// rune._regex.compile(pattern): Compile and return a Regex userdata
+	e.L.SetField(regexTable, "compile", e.L.NewFunction(func(L *glua.LState) int {
 		pattern := L.CheckString(1)
-		text := L.CheckString(2)
 
-		// Check LRU cache first
-		re, ok := e.regexCache.Get(pattern)
-		if !ok {
-			var err error
-			re, err = regexp.Compile(pattern)
-			if err != nil {
-				L.Push(glua.LNil)
-				L.Push(glua.LString(err.Error()))
-				return 2
-			}
-			e.regexCache.Add(pattern, re)
-		}
-
-		// FindStringSubmatch returns [full_match, group1, group2...]
-		matches := re.FindStringSubmatch(text)
-		if matches == nil {
+		re, err := regexp.Compile(pattern)
+		if err != nil {
 			L.Push(glua.LNil)
-			return 1
+			L.Push(glua.LString(err.Error()))
+			return 2
 		}
 
-		// Convert []string to Lua Table
-		tbl := L.NewTable()
-		for i, m := range matches {
-			// Lua arrays are 1-indexed
-			tbl.RawSetInt(i+1, glua.LString(m))
-		}
-
-		L.Push(tbl)
+		ud := L.NewUserData()
+		ud.Value = re
+		L.SetMetatable(ud, L.GetTypeMetatable(luaRegexTypeName))
+		L.Push(ud)
 		return 1
 	}))
 }

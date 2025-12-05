@@ -3,11 +3,9 @@ package lua
 import (
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"github.com/drake/rune/text"
-	lru "github.com/hashicorp/golang-lru/v2"
 	glua "github.com/yuin/gopher-lua"
 )
 
@@ -15,8 +13,7 @@ import (
 // It is a pure mechanism: it knows how to run Lua code and expose APIs.
 // It does NOT know about core scripts, config dirs, or boot sequences.
 type Engine struct {
-	L          *glua.LState
-	regexCache *lru.Cache[string, *regexp.Regexp]
+	L *glua.LState
 
 	// Cached table reference
 	runeTable *glua.LTable
@@ -37,13 +34,11 @@ type Engine struct {
 // NewEngine creates an Engine with a Host interface.
 // In production, Session implements Host.
 func NewEngine(host Host) *Engine {
-	cache, _ := lru.New[string, *regexp.Regexp](100)
 	return &Engine{
-		regexCache: cache,
-		host:       host,
-		callbacks:  make(map[int]*glua.LFunction),
-		bars:       newBarRegistry(),
-		binds:      newBindRegistry(),
+		host:      host,
+		callbacks: make(map[int]*glua.LFunction),
+		bars:      newBarRegistry(),
+		binds:     newBindRegistry(),
 	}
 }
 
@@ -71,10 +66,6 @@ func (e *Engine) Init() error {
 
 	// Create fresh Lua state
 	e.L = glua.NewState()
-
-	// Reset regex cache
-	cache, _ := lru.New[string, *regexp.Regexp](100)
-	e.regexCache = cache
 
 	// Cancel all pending timers and clear callback map
 	e.host.TimerCancelAll()

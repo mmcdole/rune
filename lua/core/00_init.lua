@@ -108,10 +108,10 @@ end
 
 rune.regex = {}
 
--- rune.regex.match(pattern, text): Match using Go's regexp (cached)
--- Returns: table of matches [1]=full, [2]=group1, etc. or nil if no match
-function rune.regex.match(pattern, text)
-    return rune._regex.match(pattern, text)
+-- rune.regex.compile(pattern): Compile a regex pattern
+-- Returns: Regex userdata with :match(text) method, or nil + error
+function rune.regex.compile(pattern)
+    return rune._regex.compile(pattern)
 end
 
 -- =============================================================================
