@@ -92,7 +92,7 @@ rune.bind("up", history_up)
 rune.bind("down", history_down)
 
 -- Reset on input submission
-rune.hooks.register("input", function(text)
+rune.hooks.on("input", function(text)
     reset()
 end, { priority = 1 })
 

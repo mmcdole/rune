@@ -41,7 +41,7 @@ rune.command.add("connect", function(args)
         last_port = port
         rune.connect(host .. ":" .. port)
     else
-        rune.print("[Usage] /connect <host> <port>")
+        rune.echo("[Usage] /connect <host> <port>")
     end
 end, "Connect to a MUD server")
 
@@ -55,21 +55,21 @@ rune.command.add("reconnect", function(args)
     if last_host and last_port then
         rune.connect(last_host .. ":" .. last_port)
     else
-        rune.print("[Error] No previous connection")
+        rune.echo("[Error] No previous connection")
     end
 end, "Reconnect to last server")
 
 -- /load <path> - Load a Lua script
 rune.command.add("load", function(args)
     if args == "" then
-        rune.print("[Usage] /load <path>")
+        rune.echo("[Usage] /load <path>")
         return
     end
     local err = rune.load(args)
     if err then
-        rune.print("[Error] " .. err)
+        rune.echo("[Error] " .. err)
     else
-        rune.print("[Loaded] " .. args)
+        rune.echo("[Loaded] " .. args)
     end
 end, "Load a Lua script file")
 
@@ -81,7 +81,7 @@ end, "Reload all scripts")
 -- /lua <code> - Execute Lua code directly
 rune.command.add("lua", function(args)
     if args == "" then
-        rune.print("[Usage] /lua <code>")
+        rune.echo("[Usage] /lua <code>")
         return
     end
 
@@ -90,93 +90,152 @@ rune.command.add("lua", function(args)
         local ok, result = pcall(fn)
         if ok then
             if result ~= nil then
-                rune.print(tostring(result))
+                rune.echo(tostring(result))
             end
         else
-            rune.print("[Error] " .. tostring(result))
+            rune.echo("[Error] " .. tostring(result))
         end
     else
-        rune.print("[Error] " .. tostring(err))
+        rune.echo("[Error] " .. tostring(err))
     end
 end, "Execute Lua code")
 
 -- /aliases - List all aliases
 rune.command.add("aliases", function(args)
-    rune.alias.list()
+    local aliases = rune.alias.list()
+    rune.echo("[Aliases]")
+    if #aliases == 0 then
+        rune.echo("  (none)")
+        return
+    end
+    for _, a in ipairs(aliases) do
+        local status = a.enabled and "on" or "off"
+        local group_str = a.group and (" <" .. a.group .. ">") or ""
+        local once_str = a.once and " (once)" or ""
+        rune.echo(string.format("  [%s] %s: %s -> %s%s%s",
+            status, a.mode, a.match, a.value, group_str, once_str))
+    end
 end, "List all aliases")
 
 -- /triggers - List all triggers
 rune.command.add("triggers", function(args)
-    rune.trigger.list()
+    local triggers = rune.trigger.list()
+    rune.echo("[Triggers]")
+    if #triggers == 0 then
+        rune.echo("  (none)")
+        return
+    end
+    for _, t in ipairs(triggers) do
+        local status = t.enabled and "on" or "off"
+        local group_str = t.group and (" <" .. t.group .. ">") or ""
+        local gag_str = t.gag and " (gag)" or ""
+        local once_str = t.once and " (once)" or ""
+        rune.echo(string.format("  [%s] %s: /%s/ -> %s%s%s%s",
+            status, t.mode, t.pattern, t.value, group_str, gag_str, once_str))
+    end
 end, "List all triggers")
 
 -- /test <line> - Simulate server output (test triggers)
 rune.command.add("test", function(args)
     if args == "" then
-        rune.print("[Usage] /test <line>")
+        rune.echo("[Usage] /test <line>")
         return
     end
 
-    rune.print("[Test Input] " .. args)
-    local modified, show = rune.trigger.process(args)
+    rune.echo("[Test Input] " .. args)
+
+    -- Create a mock Line object for testing
+    local mock_line = {
+        _raw = args,
+        _clean = args,
+        raw = function(self) return self._raw end,
+        clean = function(self) return self._clean end,
+    }
+
+    local modified, show = rune.trigger.process(mock_line)
     if show and modified ~= "" then
-        rune.print("[Test Output] " .. modified)
+        rune.echo("[Test Output] " .. modified)
     else
-        rune.print("[Test Output] (gagged)")
+        rune.echo("[Test Output] (gagged)")
     end
 end, "Test triggers with simulated line")
 
--- /rmtrigger <id or pattern> - Remove a trigger
+-- /rmtrigger <name> - Remove a trigger by name
 rune.command.add("rmtrigger", function(args)
     if args == "" then
-        rune.print("[Usage] /rmtrigger <id or pattern>")
+        rune.echo("[Usage] /rmtrigger <name>")
         return
     end
 
-    -- Try to parse as number first
-    local id = tonumber(args)
-    if id then
-        rune.trigger.remove(id)
+    if rune.trigger.remove(args) then
+        rune.echo("[Removed] trigger: " .. args)
     else
-        rune.trigger.remove(args)
+        rune.echo("[Error] No trigger named: " .. args)
     end
-end, "Remove a trigger by ID or pattern")
+end, "Remove a trigger by name")
+
+-- /rmalias <name> - Remove an alias by name
+rune.command.add("rmalias", function(args)
+    if args == "" then
+        rune.echo("[Usage] /rmalias <name>")
+        return
+    end
+
+    if rune.alias.remove(args) then
+        rune.echo("[Removed] alias: " .. args)
+    else
+        rune.echo("[Error] No alias named: " .. args)
+    end
+end, "Remove an alias by name")
 
 -- /quit - Exit the client
 rune.command.add("quit", function(args)
-    rune.print("[System] Goodbye!")
+    rune.echo("[System] Goodbye!")
     rune.quit()
 end, "Exit the client")
 
 -- /help - Show available commands
 rune.command.add("help", function(args)
-    rune.print("[Connection]")
-    rune.print("  /connect <host> <port>  - Connect to server")
-    rune.print("  /disconnect             - Disconnect")
-    rune.print("  /reconnect              - Reconnect to last server")
-    rune.print("")
-    rune.print("[Scripts]")
-    rune.print("  /load <path>            - Load Lua script")
-    rune.print("  /reload                 - Reload all scripts")
-    rune.print("  /lua <code>             - Execute Lua code")
-    rune.print("")
-    rune.print("[Debug]")
-    rune.print("  /aliases                - List aliases")
-    rune.print("  /triggers               - List triggers")
-    rune.print("  /rmtrigger <id>         - Remove trigger")
-    rune.print("  /test <line>            - Test triggers")
-    rune.print("")
-    rune.print("[Other]")
-    rune.print("  /quit                   - Exit")
-    rune.print("  /help                   - Show this help")
-    rune.print("")
-    rune.print("[Lua API]")
-    rune.print("  rune.alias.add(name, expansion_or_func)")
-    rune.print("  rune.alias.remove(name)")
-    rune.print("  rune.trigger.add(pattern, action, {gag=bool})")
-    rune.print("  rune.trigger.remove(id_or_pattern)")
-    rune.print("  rune.trigger.enable(id_or_pattern, bool)")
-    rune.print("  rune.timer.after(seconds, func)")
-    rune.print("  rune.timer.every(seconds, func)")
+    rune.echo("[Connection]")
+    rune.echo("  /connect <host> <port>  - Connect to server")
+    rune.echo("  /disconnect             - Disconnect")
+    rune.echo("  /reconnect              - Reconnect to last server")
+    rune.echo("")
+    rune.echo("[Scripts]")
+    rune.echo("  /load <path>            - Load Lua script")
+    rune.echo("  /reload                 - Reload all scripts")
+    rune.echo("  /lua <code>             - Execute Lua code")
+    rune.echo("")
+    rune.echo("[Debug]")
+    rune.echo("  /aliases                - List aliases")
+    rune.echo("  /triggers               - List triggers")
+    rune.echo("  /rmtrigger <name>       - Remove trigger by name")
+    rune.echo("  /rmalias <name>         - Remove alias by name")
+    rune.echo("  /test <line>            - Test triggers")
+    rune.echo("")
+    rune.echo("[Other]")
+    rune.echo("  /quit                   - Exit")
+    rune.echo("  /help                   - Show this help")
+    rune.echo("")
+    rune.echo("[Lua API - Aliases]")
+    rune.echo("  rune.alias.exact(key, action, opts?)")
+    rune.echo("  rune.alias.regex(pat, action, opts?)")
+    rune.echo("")
+    rune.echo("[Lua API - Triggers]")
+    rune.echo("  rune.trigger.exact(line, action, opts?)")
+    rune.echo("  rune.trigger.contains(substr, action, opts?)")
+    rune.echo("  rune.trigger.regex(pat, action, opts?)")
+    rune.echo("")
+    rune.echo("[Lua API - Options]")
+    rune.echo("  {name='n', group='g', once=true, priority=50, gag=true}")
+    rune.echo("")
+    rune.echo("[Lua API - Management]")
+    rune.echo("  handle:disable() / handle:enable() / handle:remove()")
+    rune.echo("  rune.trigger.disable(name) / enable(name) / remove(name)")
+    rune.echo("  rune.alias.remove_group(group) / rune.trigger.remove_group(group)")
+    rune.echo("  rune.group.disable(name) / enable(name)")
+    rune.echo("")
+    rune.echo("[Lua API - Sending]")
+    rune.echo("  rune.send(cmd)  - Through alias expansion")
+    rune.echo("  rune.send_raw(cmd)  - Direct to socket")
 end, "Show available commands")
-

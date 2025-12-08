@@ -1,0 +1,103 @@
+{
+  "tests": [
+    {
+      "name": "Disable Stops Triggers",
+      "setup_lua": [
+        "rune.trigger.contains('attack', 'flee', {group = 'combat'})",
+        "rune.group.disable('combat')"
+      ],
+      "output": "A goblin attacks you!",
+      "expected_commands": []
+    },
+    {
+      "name": "Enable Resumes Triggers",
+      "setup_lua": [
+        "rune.trigger.contains('attack', 'flee', {group = 'combat'})",
+        "rune.group.disable('combat')",
+        "rune.group.enable('combat')"
+      ],
+      "output": "A goblin attacks you!",
+      "expected_commands": ["flee"]
+    },
+    {
+      "name": "Disable Stops Aliases",
+      "setup_lua": [
+        "rune.alias.exact('k', 'kill', {group = 'combat'})",
+        "rune.group.disable('combat')"
+      ],
+      "input": "k orc",
+      "expected_commands": ["k orc"]
+    },
+    {
+      "name": "Enable Resumes Aliases",
+      "setup_lua": [
+        "rune.alias.exact('k', 'kill', {group = 'combat'})",
+        "rune.group.disable('combat')",
+        "rune.group.enable('combat')"
+      ],
+      "input": "k orc",
+      "expected_commands": ["kill orc"]
+    },
+    {
+      "name": "Remove Group Removes All Items",
+      "setup_lua": [
+        "rune.trigger.contains('attack', 'flee', {group = 'combat'})",
+        "rune.alias.exact('k', 'kill', {group = 'combat'})",
+        "rune.trigger.remove_group('combat')",
+        "rune.alias.remove_group('combat')"
+      ],
+      "output": "A goblin attacks you!",
+      "expected_commands": []
+    },
+    {
+      "name": "Only Target Group Affected",
+      "setup_lua": [
+        "rune.trigger.contains('attack', 'flee', {group = 'combat'})",
+        "rune.trigger.contains('hello', 'wave', {group = 'social'})",
+        "rune.group.disable('combat')"
+      ],
+      "output": "Bob says hello",
+      "expected_commands": ["wave"]
+    },
+    {
+      "name": "No Group Not Affected",
+      "setup_lua": [
+        "rune.trigger.contains('attack', 'flee')",
+        "rune.group.disable('combat')"
+      ],
+      "output": "A goblin attacks you!",
+      "expected_commands": ["flee"]
+    },
+    {
+      "name": "Preserves Individual State - Enabled Item",
+      "setup_lua": [
+        "rune.trigger.contains('attack', 'flee', {group = 'combat'})",
+        "rune.group.disable('combat')",
+        "rune.group.enable('combat')"
+      ],
+      "output": "A goblin attacks you!",
+      "expected_commands": ["flee"]
+    },
+    {
+      "name": "Preserves Individual State - Disabled Item Stays Disabled",
+      "setup_lua": "local t = rune.trigger.contains('attack', 'flee', {group = 'combat'}); t:disable(); rune.group.disable('combat'); rune.group.enable('combat')",
+      "output": "A goblin attacks you!",
+      "expected_commands": []
+    },
+    {
+      "name": "Both Levels Must Be Enabled - Group Off",
+      "setup_lua": [
+        "rune.trigger.contains('attack', 'flee', {group = 'combat'})",
+        "rune.group.disable('combat')"
+      ],
+      "output": "A goblin attacks you!",
+      "expected_commands": []
+    },
+    {
+      "name": "Both Levels Must Be Enabled - Item Off",
+      "setup_lua": "local t = rune.trigger.contains('attack', 'flee', {group = 'combat'}); t:disable()",
+      "output": "A goblin attacks you!",
+      "expected_commands": []
+    }
+  ]
+}

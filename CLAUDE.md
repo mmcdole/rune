@@ -72,7 +72,7 @@ Go provides internal primitives (`rune._*`), wrapped by Lua for the public API:
 **Core:**
 - `rune.send(text)` - Process aliases and send to server
 - `rune.send_raw(text)` - Bypass alias processing, write directly to socket
-- `rune.print(text)` - Output text to local display
+- `rune.echo(text)` - Output text to local display
 - `rune.quit()` - Exit the client
 - `rune.connect(address)` - Connect to server
 - `rune.disconnect()` - Disconnect from server

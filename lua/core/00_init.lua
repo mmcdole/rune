@@ -8,7 +8,7 @@ rune.debug = false
 
 function rune.dbg(msg)
     if rune.debug then
-        rune.print("\027[90m[dbg]\027[0m " .. msg)
+        rune.echo("\027[90m[dbg]\027[0m " .. msg)
     end
 end
 
@@ -18,8 +18,8 @@ function rune.send_raw(text)
     rune._send_raw(text)
 end
 
-function rune.print(text)
-    rune._print(text)
+function rune.echo(text)
+    rune._echo(text)
 end
 
 function rune.quit()
@@ -45,5 +45,5 @@ end
 
 -- Startup
 
-rune.print("Rune MUD Client")
-rune.print("Type /help for commands")
+rune.echo("Rune MUD Client")
+rune.echo("Type /help for commands")

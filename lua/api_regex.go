@@ -22,7 +22,8 @@ func regexIndex(L *glua.LState) int {
 	switch method {
 	case "match":
 		L.Push(L.NewFunction(func(L *glua.LState) int {
-			text := L.CheckString(1)
+			// Method call re:match(text): self at position 1, text at position 2
+			text := L.CheckString(2)
 			matches := re.FindStringSubmatch(text)
 			if matches == nil {
 				L.Push(glua.LNil)

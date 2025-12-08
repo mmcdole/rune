@@ -1,16 +1,40 @@
 {
   "tests": [
     {
-      "name": "Basic Alias",
-      "setup_lua": "rune.alias.add('n', 'north')",
+      "name": "Exact Basic",
+      "setup_lua": "rune.alias.exact('n', 'north')",
       "input": "n",
       "expected_commands": ["north"]
     },
     {
-      "name": "Nested Aliases",
+      "name": "Exact with Arguments",
+      "setup_lua": "rune.alias.exact('k', 'kill')",
+      "input": "k orc",
+      "expected_commands": ["kill orc"]
+    },
+    {
+      "name": "Exact No Match - Different Command",
+      "setup_lua": "rune.alias.exact('n', 'north')",
+      "input": "s",
+      "expected_commands": ["s"]
+    },
+    {
+      "name": "Exact No Match - Substring",
+      "setup_lua": "rune.alias.exact('north', 'go north')",
+      "input": "n",
+      "expected_commands": ["n"]
+    },
+    {
+      "name": "Exact Function with Args",
+      "setup_lua": "rune.alias.exact('go', function(args, ctx) rune.send_raw(args) end)",
+      "input": "go north",
+      "expected_commands": ["north"]
+    },
+    {
+      "name": "Exact Nested Aliases",
       "setup_lua": [
-        "rune.alias.add('7w', 'w;w;w;w;w;w;w')",
-        "rune.alias.add('castle', 's;7w;enter castle')"
+        "rune.alias.exact('7w', 'w;w;w;w;w;w;w')",
+        "rune.alias.exact('castle', 's;7w;enter castle')"
       ],
       "input": "castle",
       "expected_commands": [
@@ -20,16 +44,86 @@
       ]
     },
     {
-      "name": "Alias with Function",
-      "setup_lua": "rune.alias.add('greet', function() rune.send_raw('say Hello, world!') end)",
-      "input": "greet",
-      "expected_commands": ["say Hello, world!"]
+      "name": "Regex Basic Capture",
+      "setup_lua": "rune.alias.regex('^k\\\\s+(\\\\w+)$', 'kill %1')",
+      "input": "k orc",
+      "expected_commands": ["kill orc"]
     },
     {
-      "name": "Alias with Arguments",
-      "setup_lua": "rune.alias.add('go', function(args) rune.send_raw(args) end)",
-      "input": "go north",
+      "name": "Regex Multiple Captures",
+      "setup_lua": "rune.alias.regex('^give\\\\s+(\\\\w+)\\\\s+to\\\\s+(\\\\w+)$', 'give %1 %2')",
+      "input": "give sword to guard",
+      "expected_commands": ["give sword guard"]
+    },
+    {
+      "name": "Regex No Match",
+      "setup_lua": "rune.alias.regex('^k\\\\s+(\\\\w+)$', 'kill %1')",
+      "input": "kill orc",
+      "expected_commands": ["kill orc"]
+    },
+    {
+      "name": "Regex Function",
+      "setup_lua": "rune.alias.regex('^say\\\\s+(.+)$', function(matches, ctx) rune.send_raw('say ' .. string.upper(matches[1])) end)",
+      "input": "say hello",
+      "expected_commands": ["say HELLO"]
+    },
+    {
+      "name": "Regex Alternation",
+      "setup_lua": "rune.alias.regex('^(n|s|e|w)$', 'go %1')",
+      "input": "n",
+      "expected_commands": ["go n"]
+    },
+    {
+      "name": "Regex Priority Over Exact",
+      "setup_lua": [
+        "rune.alias.exact('test', 'exact-matched')",
+        "rune.alias.regex('^test$', 'regex-matched')"
+      ],
+      "input": "test",
+      "expected_commands": ["regex-matched"]
+    },
+    {
+      "name": "Exact Disable Via Handle",
+      "setup_lua": "local a = rune.alias.exact('n', 'north'); a:disable()",
+      "input": "n",
+      "expected_commands": ["n"]
+    },
+    {
+      "name": "Exact Enable After Disable",
+      "setup_lua": "local a = rune.alias.exact('n', 'north'); a:disable(); a:enable()",
+      "input": "n",
       "expected_commands": ["north"]
+    },
+    {
+      "name": "Exact Disable By Name",
+      "setup_lua": [
+        "rune.alias.exact('n', 'north', {name = 'go_north'})",
+        "rune.alias.disable('go_north')"
+      ],
+      "input": "n",
+      "expected_commands": ["n"]
+    },
+    {
+      "name": "Exact Enable By Name",
+      "setup_lua": [
+        "rune.alias.exact('n', 'north', {name = 'go_north'})",
+        "rune.alias.disable('go_north')",
+        "rune.alias.enable('go_north')"
+      ],
+      "input": "n",
+      "expected_commands": ["north"]
+    },
+    {
+      "name": "Regex Disable Via Handle",
+      "setup_lua": "local a = rune.alias.regex('^go\\\\s+(\\\\w+)$', 'walk %1'); a:disable()",
+      "input": "go north",
+      "expected_commands": ["go north"]
+    },
+    {
+      "name": "Regex Enable After Disable",
+      "setup_lua": "local a = rune.alias.regex('^go\\\\s+(\\\\w+)$', 'walk %1'); a:disable(); a:enable()",
+      "input": "go north",
+      "expected_commands": ["walk north"]
     }
   ]
 }

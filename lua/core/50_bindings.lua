@@ -21,7 +21,7 @@ end)
 
 -- Alias Search (Ctrl+T)
 rune.bind("ctrl+t", function()
-    local aliases = rune.alias.all()
+    local aliases = rune.alias.list()
 
     -- Format for picker
     local items = {}

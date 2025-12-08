@@ -35,8 +35,7 @@ func checkLine(L *glua.LState, n int) *text.Line {
 // lineMethods defines the methods available on Line objects in Lua.
 var lineMethods = map[string]glua.LGFunction{
 	"raw":   lineRaw,
-	"line":  lineLine,
-	"clean": lineLine, // Alias for line()
+	"clean": lineClean,
 }
 
 // lineRaw returns the raw line with ANSI codes.
@@ -47,9 +46,9 @@ func lineRaw(L *glua.LState) int {
 	return 1
 }
 
-// lineLine returns the clean line without ANSI codes.
-// Usage: line:line() or line:clean()
-func lineLine(L *glua.LState) int {
+// lineClean returns the line without ANSI codes.
+// Usage: line:clean()
+func lineClean(L *glua.LState) int {
 	line := checkLine(L, 1)
 	L.Push(glua.LString(line.Clean))
 	return 1

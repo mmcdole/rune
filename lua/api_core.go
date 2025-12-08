@@ -14,8 +14,8 @@ func (e *Engine) registerCoreFuncs() {
 		return 0
 	}))
 
-	// rune._print(text): Outputs text to the local display
-	e.L.SetField(e.runeTable, "_print", e.L.NewFunction(func(L *glua.LState) int {
+	// rune._echo(text): Outputs text to the local game window
+	e.L.SetField(e.runeTable, "_echo", e.L.NewFunction(func(L *glua.LState) int {
 		msg := L.CheckString(1)
 		e.host.Print(msg)
 		return 0

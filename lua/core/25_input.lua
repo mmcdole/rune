@@ -59,38 +59,28 @@ end
 -- INTERNAL: Recursive send implementation
 local function send_impl(input, depth)
     if depth > MAX_RECURSION_DEPTH then
-        rune.print("\027[31m[Error] Alias loop detected (depth limit exceeded)\027[0m")
+        rune.echo("\027[31m[Error] Alias loop detected (depth limit exceeded)\027[0m")
         return
     end
 
     local commands = expand_input(input)
 
     for _, line in ipairs(commands) do
-        local cmd, args = line:match("^(%S+)%s*(.*)")
-
-        if not cmd then
+        if line == "" then
             -- Empty command - send it directly
             rune.send_raw(line)
         else
-            args = args or ""
-            local alias = rune.alias.get(cmd)
+            -- Try alias expansion (pattern aliases first, then exact aliases)
+            local processed, result = rune.alias.process(line)
 
-            if alias then
-                if type(alias) == "function" then
-                    -- Function aliases are a new execution context
-                    local ok, err = pcall(alias, args)
-                    if not ok then
-                        rune.print("\027[31m[Error] Alias '" .. cmd .. "' failed: " .. tostring(err) .. "\027[0m")
-                    end
-                else
-                    -- String alias: recursively expand
-                    local expansion = alias
-                    if args ~= "" then
-                        expansion = expansion .. " " .. args
-                    end
-                    send_impl(expansion, depth + 1)
+            if processed then
+                if result then
+                    -- Alias returned a string - recursively expand
+                    send_impl(result, depth + 1)
                 end
+                -- If result is nil, alias was a function that handled everything
             else
+                -- No alias matched - send directly
                 rune.send_raw(line)
             end
         end
@@ -103,7 +93,7 @@ function rune.send(input)
 end
 
 -- Register input handler
-rune.hooks.register("input", function(input)
+rune.hooks.on("input", function(input)
     -- Check for slash command first
     local cmd, args = input:match("^/(%S+)%s*(.*)")
     if cmd then
@@ -111,7 +101,7 @@ rune.hooks.register("input", function(input)
         if handler then
             handler(args)
         else
-            rune.print("[Error] Unknown command: /" .. cmd)
+            rune.echo("[Error] Unknown command: /" .. cmd)
         end
         return false
     end
@@ -122,7 +112,7 @@ rune.hooks.register("input", function(input)
 end, { priority = 100 })
 
 -- Register output handler
-rune.hooks.register("output", function(line)
+rune.hooks.on("output", function(line)
     local modified, show = rune.trigger.process(line)
     if not show then
         return false
@@ -131,7 +121,7 @@ rune.hooks.register("output", function(line)
 end, { priority = 100 })
 
 -- Register prompt handler
-rune.hooks.register("prompt", function(line)
+rune.hooks.on("prompt", function(line)
     local modified, show = rune.trigger.process(line)
     if not show then
         return false
