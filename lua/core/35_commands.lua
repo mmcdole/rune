@@ -131,7 +131,7 @@ rune.command.add("triggers", function(args)
         local gag_str = t.gag and " (gag)" or ""
         local once_str = t.once and " (once)" or ""
         rune.echo(string.format("  [%s] %s: /%s/ -> %s%s%s%s",
-            status, t.mode, t.pattern, t.value, group_str, gag_str, once_str))
+            status, t.mode, t.match, t.value, group_str, gag_str, once_str))
     end
 end, "List all triggers")
 
