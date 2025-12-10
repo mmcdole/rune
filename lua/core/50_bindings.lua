@@ -27,9 +27,9 @@ rune.bind("ctrl+t", function()
     local items = {}
     for _, a in ipairs(aliases) do
         table.insert(items, {
-            text = a.name,
+            text = a.match,
             desc = a.value,
-            value = a.name
+            value = a.match
         })
     end
 
