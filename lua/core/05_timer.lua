@@ -32,7 +32,7 @@ function Handle:enable()
     return self
 end
 
-function Handle:cancel()
+function Handle:remove()
     local data = self._data
     local registry = self._registry
 
@@ -62,8 +62,8 @@ function Handle:cancel()
     return self
 end
 
--- Alias for consistency with aliases/triggers
-Handle.remove = Handle.cancel
+-- Alias: cancel is intuitive for timers
+Handle.cancel = Handle.remove
 
 function Handle:name()
     return self._data.name
@@ -101,7 +101,7 @@ local function create_timer(seconds, action, opts, repeating)
 
     -- If named, remove existing with same name (upsert)
     if data.name and registry.by_name[data.name] then
-        registry.by_name[data.name]:cancel()
+        registry.by_name[data.name]:remove()
     end
 
     -- Build the callback wrapper
@@ -121,8 +121,8 @@ local function create_timer(seconds, action, opts, repeating)
             group = data.group,
             type = "timer",
         }
-        function ctx:cancel()
-            handle:cancel()
+        function ctx:remove()
+            handle:remove()
         end
 
         -- Execute action
@@ -137,7 +137,7 @@ local function create_timer(seconds, action, opts, repeating)
 
         -- Auto-remove one-shot timers after firing
         if not data.repeating then
-            handle:cancel()
+            handle:remove()
         end
     end
 
@@ -202,17 +202,17 @@ function rune.timer.enable(name)
     return false
 end
 
-function rune.timer.cancel(name)
+function rune.timer.remove(name)
     local handle = registry.by_name[name]
     if handle then
-        handle:cancel()
+        handle:remove()
         return true
     end
     return false
 end
 
--- Alias for consistency with aliases/triggers
-rune.timer.remove = rune.timer.cancel
+-- Alias: cancel is intuitive for timers
+rune.timer.cancel = rune.timer.remove
 
 -- List all timers - returns array of {seconds, mode, value, name, enabled, group}
 function rune.timer.list()
@@ -240,7 +240,7 @@ function rune.timer.clear()
         items[#items + 1] = data._handle
     end
     for _, handle in ipairs(items) do
-        handle:cancel()
+        handle:remove()
     end
 end
 
@@ -261,7 +261,7 @@ function rune.timer.remove_group(group_name)
         items[#items + 1] = handle
     end
     for _, handle in ipairs(items) do
-        handle:cancel()
+        handle:remove()
         count = count + 1
     end
     return count

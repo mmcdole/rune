@@ -174,8 +174,8 @@ end
 rune.alias = {}
 
 -- Match command word exactly (first word of input, literal)
-function rune.alias.exact(key, action, opts)
-    return create_alias(key, action, opts, true)
+function rune.alias.exact(command, action, opts)
+    return create_alias(command, action, opts, true)
 end
 
 -- Go regexp match on full input line

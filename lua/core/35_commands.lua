@@ -1,5 +1,12 @@
 -- Slash Command System
 
+-- ANSI color helpers for command output
+local function green(s) return "\027[32m" .. s .. "\027[0m" end
+local function red(s) return "\027[31m" .. s .. "\027[0m" end
+local function yellow(s) return "\027[33m" .. s .. "\027[0m" end
+local function cyan(s) return "\027[36m" .. s .. "\027[0m" end
+local function dim(s) return "\027[90m" .. s .. "\027[0m" end
+
 rune.command = {}
 local commands = {}  -- Private storage: name -> {handler, description}
 
@@ -103,35 +110,40 @@ end, "Execute Lua code")
 -- /aliases - List all aliases
 rune.command.add("aliases", function(args)
     local aliases = rune.alias.list()
-    rune.echo("[Aliases]")
+    rune.echo(green("[Aliases]") .. dim(" (" .. #aliases .. " total)"))
     if #aliases == 0 then
-        rune.echo("  (none)")
+        rune.echo("  " .. dim("(none)"))
         return
     end
     for _, a in ipairs(aliases) do
-        local status = a.enabled and "on" or "off"
-        local group_str = a.group and (" <" .. a.group .. ">") or ""
-        local once_str = a.once and " (once)" or ""
-        rune.echo(string.format("  [%s] %s: %s -> %s%s%s",
-            status, a.mode, a.match, a.value, group_str, once_str))
+        local status = a.enabled and green("[on] ") or red("[off]")
+        local group_str = a.group and ("  " .. cyan("<" .. a.group .. ">")) or ""
+        local flags = {}
+        if a.once then flags[#flags + 1] = "once" end
+        local flags_str = #flags > 0 and ("  " .. dim("(" .. table.concat(flags, ", ") .. ")")) or ""
+        rune.echo(string.format("  %s %-8s %s %s %s%s%s",
+            status, a.mode, yellow('"' .. a.match .. '"'), dim("->"), a.value, group_str, flags_str))
     end
 end, "List all aliases")
 
 -- /triggers - List all triggers
 rune.command.add("triggers", function(args)
     local triggers = rune.trigger.list()
-    rune.echo("[Triggers]")
+    rune.echo(green("[Triggers]") .. dim(" (" .. #triggers .. " total)"))
     if #triggers == 0 then
-        rune.echo("  (none)")
+        rune.echo("  " .. dim("(none)"))
         return
     end
     for _, t in ipairs(triggers) do
-        local status = t.enabled and "on" or "off"
-        local group_str = t.group and (" <" .. t.group .. ">") or ""
-        local gag_str = t.gag and " (gag)" or ""
-        local once_str = t.once and " (once)" or ""
-        rune.echo(string.format("  [%s] %s: /%s/ -> %s%s%s%s",
-            status, t.mode, t.match, t.value, group_str, gag_str, once_str))
+        local status = t.enabled and green("[on] ") or red("[off]")
+        local group_str = t.group and ("  " .. cyan("<" .. t.group .. ">")) or ""
+        local flags = {}
+        if t.gag then flags[#flags + 1] = "gag" end
+        if t.once then flags[#flags + 1] = "once" end
+        if t.raw then flags[#flags + 1] = "raw" end
+        local flags_str = #flags > 0 and ("  " .. dim("(" .. table.concat(flags, ", ") .. ")")) or ""
+        rune.echo(string.format("  %s %-8s %s %s %s%s%s",
+            status, t.mode, yellow('"' .. t.match .. '"'), dim("->"), t.value, group_str, flags_str))
     end
 end, "List all triggers")
 
@@ -160,33 +172,64 @@ rune.command.add("test", function(args)
     end
 end, "Test triggers with simulated line")
 
--- /rmtrigger <name> - Remove a trigger by name
-rune.command.add("rmtrigger", function(args)
-    if args == "" then
-        rune.echo("[Usage] /rmtrigger <name>")
+-- /timers - List all timers
+rune.command.add("timers", function(args)
+    local timers = rune.timer.list()
+    rune.echo(green("[Timers]") .. dim(" (" .. #timers .. " total)"))
+    if #timers == 0 then
+        rune.echo("  " .. dim("(none)"))
         return
     end
-
-    if rune.trigger.remove(args) then
-        rune.echo("[Removed] trigger: " .. args)
-    else
-        rune.echo("[Error] No trigger named: " .. args)
+    for _, t in ipairs(timers) do
+        local status = t.enabled and green("[on] ") or red("[off]")
+        local group_str = t.group and ("  " .. cyan("<" .. t.group .. ">")) or ""
+        local name_str = t.name and (" " .. dim("name:") .. t.name) or ""
+        local timing = string.format("%s %.1fs", t.mode, t.seconds)
+        rune.echo(string.format("  %s %-12s %s %s%s%s",
+            status, timing, dim("->"), t.value, group_str, name_str))
     end
-end, "Remove a trigger by name")
+end, "List all timers")
 
--- /rmalias <name> - Remove an alias by name
-rune.command.add("rmalias", function(args)
-    if args == "" then
-        rune.echo("[Usage] /rmalias <name>")
+-- /hooks - List all hooks
+rune.command.add("hooks", function(args)
+    local hooks = rune.hooks.list()
+    rune.echo(green("[Hooks]") .. dim(" (" .. #hooks .. " total)"))
+    if #hooks == 0 then
+        rune.echo("  " .. dim("(none)"))
         return
     end
-
-    if rune.alias.remove(args) then
-        rune.echo("[Removed] alias: " .. args)
-    else
-        rune.echo("[Error] No alias named: " .. args)
+    for _, h in ipairs(hooks) do
+        local status = h.enabled and green("[on] ") or red("[off]")
+        local group_str = h.group and ("  " .. cyan("<" .. h.group .. ">")) or ""
+        local name_str = h.name or "(anonymous)"
+        local pri_str = dim("pri:") .. tostring(h.priority)
+        rune.echo(string.format("  %s %-12s %s %s %s%s",
+            status, h.event, pri_str, dim("->"), name_str, group_str))
     end
-end, "Remove an alias by name")
+end, "List all hooks")
+
+-- /groups - List all groups and their enabled state
+rune.command.add("groups", function(args)
+    local groups = rune.group.list()
+    rune.echo(green("[Groups]") .. dim(" (" .. #groups .. " total)"))
+    if #groups == 0 then
+        rune.echo("  " .. dim("(none)"))
+        return
+    end
+    for _, g in ipairs(groups) do
+        local status = g.enabled and green("[on] ") or red("[off]")
+        rune.echo("  " .. status .. " " .. g.name)
+    end
+end, "List all groups")
+
+-- /raw <text> - Send without alias expansion
+rune.command.add("raw", function(args)
+    if args == "" then
+        rune.echo("[Usage] /raw <text>")
+        return
+    end
+    rune.send_raw(args)
+end, "Send text without alias expansion")
 
 -- /quit - Exit the client
 rune.command.add("quit", function(args)
@@ -196,46 +239,28 @@ end, "Exit the client")
 
 -- /help - Show available commands
 rune.command.add("help", function(args)
-    rune.echo("[Connection]")
+    rune.echo(green("[Connection]"))
     rune.echo("  /connect <host> <port>  - Connect to server")
     rune.echo("  /disconnect             - Disconnect")
     rune.echo("  /reconnect              - Reconnect to last server")
     rune.echo("")
-    rune.echo("[Scripts]")
+    rune.echo(green("[Scripts]"))
     rune.echo("  /load <path>            - Load Lua script")
     rune.echo("  /reload                 - Reload all scripts")
     rune.echo("  /lua <code>             - Execute Lua code")
     rune.echo("")
-    rune.echo("[Debug]")
+    rune.echo(green("[Listing]"))
     rune.echo("  /aliases                - List aliases")
     rune.echo("  /triggers               - List triggers")
-    rune.echo("  /rmtrigger <name>       - Remove trigger by name")
-    rune.echo("  /rmalias <name>         - Remove alias by name")
-    rune.echo("  /test <line>            - Test triggers")
+    rune.echo("  /timers                 - List timers")
+    rune.echo("  /hooks                  - List hooks")
+    rune.echo("  /groups                 - List groups")
     rune.echo("")
-    rune.echo("[Other]")
+    rune.echo(green("[Sending]"))
+    rune.echo("  /raw <text>             - Send without alias expansion")
+    rune.echo("  /test <line>            - Test triggers with simulated line")
+    rune.echo("")
+    rune.echo(green("[Other]"))
     rune.echo("  /quit                   - Exit")
     rune.echo("  /help                   - Show this help")
-    rune.echo("")
-    rune.echo("[Lua API - Aliases]")
-    rune.echo("  rune.alias.exact(key, action, opts?)")
-    rune.echo("  rune.alias.regex(pat, action, opts?)")
-    rune.echo("")
-    rune.echo("[Lua API - Triggers]")
-    rune.echo("  rune.trigger.exact(line, action, opts?)")
-    rune.echo("  rune.trigger.contains(substr, action, opts?)")
-    rune.echo("  rune.trigger.regex(pat, action, opts?)")
-    rune.echo("")
-    rune.echo("[Lua API - Options]")
-    rune.echo("  {name='n', group='g', once=true, priority=50, gag=true}")
-    rune.echo("")
-    rune.echo("[Lua API - Management]")
-    rune.echo("  handle:disable() / handle:enable() / handle:remove()")
-    rune.echo("  rune.trigger.disable(name) / enable(name) / remove(name)")
-    rune.echo("  rune.alias.remove_group(group) / rune.trigger.remove_group(group)")
-    rune.echo("  rune.group.disable(name) / enable(name)")
-    rune.echo("")
-    rune.echo("[Lua API - Sending]")
-    rune.echo("  rune.send(cmd)  - Through alias expansion")
-    rune.echo("  rune.send_raw(cmd)  - Direct to socket")
 end, "Show available commands")

@@ -89,8 +89,8 @@ rune.hooks = {}
 
 -- Attach a handler to an event
 -- Returns: Handle with :remove(), :enable(), :disable(), :name(), :group()
-function rune.hooks.on(event, handler, options)
-    options = options or {}
+function rune.hooks.on(event, handler, opts)
+    opts = opts or {}
 
     if not registry[event] then
         registry[event] = {}
@@ -103,10 +103,10 @@ function rune.hooks.on(event, handler, options)
         id = id,
         event = event,
         handler = handler,
-        priority = options.priority or 50,
+        priority = opts.priority or 50,
         enabled = true,
-        name = options.name,
-        group = options.group,
+        name = opts.name,
+        group = opts.group,
     }
 
     local handle = setmetatable({

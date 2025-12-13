@@ -187,10 +187,10 @@ func (s *Session) handleEvent(ev event.Event) {
 		if payload != "" {
 			s.history.Add(payload)
 		}
-		s.engine.OnInput(payload)
 		if s.net.LocalEchoEnabled() {
 			s.ui.Echo(payload)
 		}
+		s.engine.OnInput(payload)
 
 	case event.AsyncResult:
 		if cb, ok := ev.Payload.(event.Callback); ok && cb != nil {
