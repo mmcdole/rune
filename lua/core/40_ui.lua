@@ -8,14 +8,31 @@ local function yellow(s) return "\027[33m" .. s .. "\027[0m" end
 local function gray(s) return "\027[90m" .. s .. "\027[0m" end
 local function dim(s) return "\027[2m" .. s .. "\027[0m" end
 
+-- Ctrl+C double-tap quit state
+local quit_pending = false
+
+-- Ctrl+C binding: first press shows warning, second press quits
+rune.bind("ctrl+c", function()
+    if quit_pending then
+        rune.quit()
+    else
+        quit_pending = true
+        rune.timer.after(2, function()
+            quit_pending = false
+        end, {name = "_quit_timeout"})
+    end
+end)
+
 -- Register the status bar renderer
 -- This function is called by Session every 250ms to get current bar content
 rune.ui.bar("status", function(width)
     local state = rune.state
 
-    -- Left side: connection status
+    -- Left side: connection status (or quit warning)
     local left
-    if state.connected then
+    if quit_pending then
+        left = yellow("Press Ctrl+C again to exit")
+    elseif state.connected then
         left = green("●") .. " " .. gray(state.address)
     else
         left = gray("●") .. " " .. gray("Disconnected")

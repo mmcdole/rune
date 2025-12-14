@@ -233,10 +233,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Global keys
 	switch msg.Type {
 	case tea.KeyCtrlC:
-		if m.input.Value() == "" && m.inputMode == ModeNormal {
-			m.quitting = true
-			return m, tea.Quit
-		}
+		// In picker mode: cancel picker
 		if m.inputMode != ModeNormal {
 			m.inputMode = ModeNormal
 			cbID := m.input.PickerCallbackID()
@@ -244,8 +241,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.sendOutbound(ui.PickerSelectMsg{CallbackID: cbID, Accepted: false})
 			return m, nil
 		}
-		m.input.Reset()
-		return m, nil
+		// Input has text: clear it
+		if m.input.Value() != "" {
+			m.input.Reset()
+			return m, nil
+		}
+		// Empty input: fall through to handleNormalKey for Lua binding
 
 	case tea.KeyEsc:
 		if m.inputMode != ModeNormal {

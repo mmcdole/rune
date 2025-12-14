@@ -8,9 +8,7 @@ import (
 
 // Quit implements lua.SystemService.
 func (s *Session) Quit() {
-	if s.cancel != nil {
-		s.cancel()
-	}
+	s.ui.Quit()
 }
 
 // Reload implements lua.SystemService.
