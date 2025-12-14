@@ -4,11 +4,12 @@ import (
 	"strings"
 
 	"github.com/drake/rune/text"
+	"github.com/mattn/go-runewidth"
 )
 
-// VisibleLen returns the visible length of a string (excluding ANSI codes).
+// VisibleLen returns the visible display width of a string (excluding ANSI codes).
 func VisibleLen(s string) int {
-	return len(text.StripANSI(s))
+	return runewidth.StringWidth(text.StripANSI(s))
 }
 
 // FilterClearSequences removes ANSI sequences that would clear the screen.
