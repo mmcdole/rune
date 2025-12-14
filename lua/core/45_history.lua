@@ -15,6 +15,15 @@ local function history_up()
         return
     end
 
+    -- If input was externally modified (Ctrl+C, manual edit), reset state
+    if state.index > 0 then
+        local current = rune.input.get()
+        local expected = history[#history - state.index + 1]
+        if current ~= expected then
+            reset()
+        end
+    end
+
     -- Save draft on first navigation
     if state.index == 0 then
         state.draft = rune.input.get()
@@ -53,6 +62,15 @@ local function history_down()
     end
 
     local history = rune.history.get()
+
+    -- If input was externally modified (Ctrl+C, manual edit), reset state
+    local current = rune.input.get()
+    local expected = history[#history - state.index + 1]
+    if current ~= expected then
+        reset()
+        return -- Now at draft, can't go down further
+    end
+
     local prefix = state.draft
 
     if prefix ~= "" then

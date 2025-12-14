@@ -292,6 +292,7 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.scrollback.Append("\033[31m[WARNING] Input dropped - engine lagging\033[0m")
 		}
 		m.input.Reset()
+		m.sendOutbound(ui.InputChangedMsg("")) // Keep session.currentInput in sync
 		return m, nil
 
 	case tea.KeyCtrlU:
