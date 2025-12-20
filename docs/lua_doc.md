@@ -150,6 +150,26 @@ rune.load(path)   -- Load a Lua script, returns nil on success or error string
 rune.reload()     -- Clear state and reload all scripts
 ```
 
+#### Requiring Other Files
+
+When a script is loaded (via `rune.load()` or command line), its directory is temporarily added to Lua's `package.path`. This allows you to `require()` other Lua files relative to the script's location:
+
+```
+~/.config/rune/
+├── init.lua              -- main script
+├── combat.lua            -- require("combat")
+└── utils/
+    └── helpers.lua       -- require("utils.helpers")
+```
+
+```lua
+-- In init.lua:
+local combat = require("combat")         -- loads combat.lua
+local helpers = require("utils.helpers") -- loads utils/helpers.lua
+```
+
+Standard Lua `require()` semantics apply: modules are cached after first load, and should return a table of exports.
+
 ### Application
 
 ```lua
