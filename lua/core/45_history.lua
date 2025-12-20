@@ -8,6 +8,12 @@ local state = {
     draft = "",     -- saved input when entering history
 }
 
+-- Reset navigation state (defined early so it can be called from history_up/down)
+local function reset()
+    state.index = 0
+    state.draft = ""
+end
+
 -- Navigate up in history (older entries)
 local function history_up()
     local history = rune.history.get()
@@ -97,12 +103,6 @@ local function history_down()
             rune.input.set(history[#history - state.index + 1])
         end
     end
-end
-
--- Reset navigation state
-local function reset()
-    state.index = 0
-    state.draft = ""
 end
 
 -- Bind arrow keys
