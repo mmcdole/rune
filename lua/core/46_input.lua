@@ -79,8 +79,6 @@ end
 -- Keybindings for word navigation
 rune.bind("alt+left", function() rune.input.word_left() end)
 rune.bind("alt+right", function() rune.input.word_right() end)
-rune.bind("alt+b", function() rune.input.word_left() end)
-rune.bind("alt+f", function() rune.input.word_right() end)
 rune.bind("ctrl+left", function() rune.input.word_left() end)
 rune.bind("ctrl+right", function() rune.input.word_right() end)
 

@@ -173,11 +173,6 @@ func (i *Input) SetGhostText(text string) {
 	i.ghostText = text
 }
 
-// GhostText returns the current ghost text.
-func (i *Input) GhostText() string {
-	return i.ghostText
-}
-
 // DeleteWord deletes the word before cursor.
 func (i *Input) DeleteWord() {
 	val := i.textinput.Value()
@@ -191,42 +186,6 @@ func (i *Input) DeleteWord() {
 			newPos--
 		}
 		i.textinput.SetValue(val[:newPos] + val[pos:])
-		i.textinput.SetCursor(newPos)
-	}
-}
-
-// WordLeft moves cursor to start of previous word.
-func (i *Input) WordLeft() {
-	val := i.textinput.Value()
-	pos := i.textinput.Position()
-	if pos > 0 {
-		newPos := pos - 1
-		// Skip spaces
-		for newPos > 0 && val[newPos-1] == ' ' {
-			newPos--
-		}
-		// Skip word characters
-		for newPos > 0 && val[newPos-1] != ' ' {
-			newPos--
-		}
-		i.textinput.SetCursor(newPos)
-	}
-}
-
-// WordRight moves cursor to end of next word.
-func (i *Input) WordRight() {
-	val := i.textinput.Value()
-	pos := i.textinput.Position()
-	if pos < len(val) {
-		newPos := pos
-		// Skip current word characters
-		for newPos < len(val) && val[newPos] != ' ' {
-			newPos++
-		}
-		// Skip spaces
-		for newPos < len(val) && val[newPos] == ' ' {
-			newPos++
-		}
 		i.textinput.SetCursor(newPos)
 	}
 }
