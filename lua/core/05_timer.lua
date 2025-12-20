@@ -326,3 +326,19 @@ end
 function rune.pane.clear(name)
     rune._pane.clear(name)
 end
+
+function rune.pane.scroll_up(name, lines)
+    rune._pane.scroll_up(name, lines or 1)
+end
+
+function rune.pane.scroll_down(name, lines)
+    rune._pane.scroll_down(name, lines or 1)
+end
+
+function rune.pane.scroll_to_top(name)
+    rune._pane.scroll_to_top(name)
+end
+
+function rune.pane.scroll_to_bottom(name)
+    rune._pane.scroll_to_bottom(name)
+end
