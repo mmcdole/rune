@@ -45,6 +45,48 @@ func (s *Session) SetInput(text string) {
 	s.currentInput = text
 }
 
+// InputGetCursor implements lua.Host.
+func (s *Session) InputGetCursor() int {
+	return s.currentCursor
+}
+
+// InputSetCursor implements lua.Host.
+func (s *Session) InputSetCursor(pos int) {
+	s.currentCursor = pos
+	s.ui.InputSetCursor(pos)
+}
+
+// SetGhost implements lua.Host.
+// Sets ghost text for command-level suggestions.
+func (s *Session) SetGhost(text string) {
+	s.ui.SetGhost(text)
+}
+
+// OpenEditor implements lua.Host.
+func (s *Session) OpenEditor(initial string) (string, bool) {
+	return s.ui.OpenEditor(initial)
+}
+
+// PaneScrollUp implements lua.Host.
+func (s *Session) PaneScrollUp(name string, lines int) {
+	s.ui.PaneScrollUp(name, lines)
+}
+
+// PaneScrollDown implements lua.Host.
+func (s *Session) PaneScrollDown(name string, lines int) {
+	s.ui.PaneScrollDown(name, lines)
+}
+
+// PaneScrollToTop implements lua.Host.
+func (s *Session) PaneScrollToTop(name string) {
+	s.ui.PaneScrollToTop(name)
+}
+
+// PaneScrollToBottom implements lua.Host.
+func (s *Session) PaneScrollToBottom(name string) {
+	s.ui.PaneScrollToBottom(name)
+}
+
 // executePickerCallback delegates to Engine for callback execution.
 func (s *Session) executePickerCallback(id string, value string, accepted bool) {
 	if accepted {

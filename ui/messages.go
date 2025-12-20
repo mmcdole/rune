@@ -87,9 +87,20 @@ func (ScrollStateChangedMsg) uiEvent() {}
 
 // InputChangedMsg notifies Session of input content changes.
 // Session tracks this so Lua can query current input via rune.input.get().
-type InputChangedMsg string
+type InputChangedMsg struct {
+	Text   string
+	Cursor int
+}
 
 func (InputChangedMsg) uiEvent() {}
+
+// CursorMovedMsg notifies Session of cursor position changes (without text change).
+// This allows tracking cursor for Lua without triggering input_changed hooks.
+type CursorMovedMsg struct {
+	Cursor int
+}
+
+func (CursorMovedMsg) uiEvent() {}
 
 // --- Picker Messages (Session -> UI) ---
 
@@ -118,3 +129,37 @@ type PickerSelectMsg struct {
 }
 
 func (PickerSelectMsg) uiEvent() {}
+
+// --- Input Primitive Messages (Session -> UI) ---
+
+// InputSetCursorMsg sets the cursor position.
+type InputSetCursorMsg int
+
+// SetGhostMsg sets the ghost text for command-level suggestions.
+// Go just renders this as dim text if it prefix-matches the input.
+// Lua is the source of truth for what to suggest.
+type SetGhostMsg string
+
+// --- Pane Scrolling Messages (Session -> UI) ---
+
+// PaneScrollUpMsg scrolls a pane up by N lines.
+type PaneScrollUpMsg struct {
+	Name  string
+	Lines int
+}
+
+// PaneScrollDownMsg scrolls a pane down by N lines.
+type PaneScrollDownMsg struct {
+	Name  string
+	Lines int
+}
+
+// PaneScrollToTopMsg scrolls a pane to the top.
+type PaneScrollToTopMsg struct {
+	Name string
+}
+
+// PaneScrollToBottomMsg scrolls a pane to the bottom.
+type PaneScrollToBottomMsg struct {
+	Name string
+}

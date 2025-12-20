@@ -1,6 +1,9 @@
 package tui
 
 import (
+	"os"
+	"os/exec"
+	"strings"
 	"sync"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -176,6 +179,91 @@ func (b *BubbleTeaUI) ShowPicker(title string, items []ui.PickerItem, callbackID
 // SetInput sets the input line content.
 func (b *BubbleTeaUI) SetInput(text string) {
 	b.send(ui.SetInputMsg(text))
+}
+
+// --- Input Primitives for Lua ---
+
+// InputGetCursor returns the current cursor position.
+// Note: Session tracks cursor position via InputChangedMsg, so this is not typically called.
+func (b *BubbleTeaUI) InputGetCursor() int {
+	return 0 // Session tracks this, not used directly
+}
+
+// InputSetCursor sets the cursor position.
+func (b *BubbleTeaUI) InputSetCursor(pos int) {
+	b.send(ui.InputSetCursorMsg(pos))
+}
+
+// SetGhost sets the ghost text for command-level suggestions.
+// Go just renders; Lua is the source of truth for what to suggest.
+func (b *BubbleTeaUI) SetGhost(text string) {
+	b.send(ui.SetGhostMsg(text))
+}
+
+// OpenEditor opens $EDITOR with the given initial text.
+// Returns the edited content and whether the edit was successful.
+func (b *BubbleTeaUI) OpenEditor(initial string) (string, bool) {
+	// This is synchronous - we need to suspend the TUI
+	if b.program == nil {
+		return "", false
+	}
+
+	// Create temp file
+	f, err := os.CreateTemp("", "rune-input-*.txt")
+	if err != nil {
+		return "", false
+	}
+	tmpPath := f.Name()
+	f.WriteString(initial)
+	f.Close()
+	defer os.Remove(tmpPath)
+
+	// Suspend TUI
+	b.program.ReleaseTerminal()
+
+	// Run editor
+	editor := os.Getenv("EDITOR")
+	if editor == "" {
+		editor = "vim"
+	}
+	cmd := exec.Command(editor, tmpPath)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	err = cmd.Run()
+
+	// Resume TUI
+	b.program.RestoreTerminal()
+
+	if err != nil {
+		return "", false
+	}
+
+	content, err := os.ReadFile(tmpPath)
+	if err != nil {
+		return "", false
+	}
+	return strings.TrimSpace(string(content)), true
+}
+
+// --- Pane Scrolling Primitives for Lua ---
+
+// PaneScrollUp scrolls a pane up by N lines.
+func (b *BubbleTeaUI) PaneScrollUp(name string, lines int) {
+	b.send(ui.PaneScrollUpMsg{Name: name, Lines: lines})
+}
+
+// PaneScrollDown scrolls a pane down by N lines.
+func (b *BubbleTeaUI) PaneScrollDown(name string, lines int) {
+	b.send(ui.PaneScrollDownMsg{Name: name, Lines: lines})
+}
+
+// PaneScrollToTop scrolls a pane to the top.
+func (b *BubbleTeaUI) PaneScrollToTop(name string) {
+	b.send(ui.PaneScrollToTopMsg{Name: name})
+}
+
+// PaneScrollToBottom scrolls a pane to the bottom.
+func (b *BubbleTeaUI) PaneScrollToBottom(name string) {
+	b.send(ui.PaneScrollToBottomMsg{Name: name})
 }
 
 // --- Outbound messages from UI to Session ---

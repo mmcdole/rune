@@ -40,4 +40,34 @@ func (e *Engine) registerPaneFuncs() {
 		e.host.PaneClear(name)
 		return 0
 	}))
+
+	// rune._pane.scroll_up(name, lines): Scroll pane up
+	e.L.SetField(paneTable, "scroll_up", e.L.NewFunction(func(L *glua.LState) int {
+		name := L.CheckString(1)
+		lines := L.OptInt(2, 1)
+		e.host.PaneScrollUp(name, lines)
+		return 0
+	}))
+
+	// rune._pane.scroll_down(name, lines): Scroll pane down
+	e.L.SetField(paneTable, "scroll_down", e.L.NewFunction(func(L *glua.LState) int {
+		name := L.CheckString(1)
+		lines := L.OptInt(2, 1)
+		e.host.PaneScrollDown(name, lines)
+		return 0
+	}))
+
+	// rune._pane.scroll_to_top(name): Scroll pane to top
+	e.L.SetField(paneTable, "scroll_to_top", e.L.NewFunction(func(L *glua.LState) int {
+		name := L.CheckString(1)
+		e.host.PaneScrollToTop(name)
+		return 0
+	}))
+
+	// rune._pane.scroll_to_bottom(name): Scroll pane to bottom
+	e.L.SetField(paneTable, "scroll_to_bottom", e.L.NewFunction(func(L *glua.LState) int {
+		name := L.CheckString(1)
+		e.host.PaneScrollToBottom(name)
+		return 0
+	}))
 }

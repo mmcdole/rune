@@ -24,6 +24,18 @@ type Host interface {
 	GetInput() string
 	SetInput(text string)
 
+	// Input primitives
+	InputGetCursor() int
+	InputSetCursor(pos int)
+	SetGhost(text string) // Ghost text for command suggestions
+	OpenEditor(initial string) (string, bool)
+
+	// Pane scrolling
+	PaneScrollUp(name string, lines int)
+	PaneScrollDown(name string, lines int)
+	PaneScrollToTop(name string)
+	PaneScrollToBottom(name string)
+
 	// Timers
 	TimerAfter(d time.Duration) int
 	TimerEvery(d time.Duration) int

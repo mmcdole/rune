@@ -26,4 +26,16 @@ type UI interface {
 	WritePane(name, text string)
 	TogglePane(name string)
 	ClearPane(name string)
+
+	// Input primitives for Lua
+	InputGetCursor() int
+	InputSetCursor(pos int)
+	SetGhost(text string) // Ghost text for command suggestions
+	OpenEditor(initial string) (string, bool)
+
+	// Pane scrolling primitives for Lua
+	PaneScrollUp(name string, lines int)
+	PaneScrollDown(name string, lines int)
+	PaneScrollToTop(name string)
+	PaneScrollToBottom(name string)
 }

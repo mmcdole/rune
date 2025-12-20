@@ -219,6 +219,35 @@ func (v *Viewport) PageDown() {
 	v.cacheValid = false
 }
 
+// ScrollUp scrolls up by N lines (toward older content).
+func (v *Viewport) ScrollUp(lines int) {
+	maxOffset := v.buffer.Count() - v.height
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+
+	v.offset += lines
+	if v.offset > maxOffset {
+		v.offset = maxOffset
+	}
+
+	if v.offset > 0 {
+		v.mode = ModeScrolled
+	}
+	v.cacheValid = false
+}
+
+// ScrollDown scrolls down by N lines (toward newer content).
+func (v *Viewport) ScrollDown(lines int) {
+	v.offset -= lines
+	if v.offset <= 0 {
+		v.offset = 0
+		v.mode = ModeLive
+		v.newLines = 0
+	}
+	v.cacheValid = false
+}
+
 // GotoBottom returns to live mode.
 func (v *Viewport) GotoBottom() {
 	v.offset = 0

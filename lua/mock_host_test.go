@@ -134,6 +134,38 @@ func (m *MockHost) SetInput(text string) {
 	// No-op for tests
 }
 
+func (m *MockHost) InputGetCursor() int {
+	return 0
+}
+
+func (m *MockHost) InputSetCursor(pos int) {
+	// No-op for tests
+}
+
+func (m *MockHost) SetGhost(text string) {
+	// No-op for tests
+}
+
+func (m *MockHost) OpenEditor(initial string) (string, bool) {
+	return "", false
+}
+
+func (m *MockHost) PaneScrollUp(name string, lines int) {
+	// No-op for tests
+}
+
+func (m *MockHost) PaneScrollDown(name string, lines int) {
+	// No-op for tests
+}
+
+func (m *MockHost) PaneScrollToTop(name string) {
+	// No-op for tests
+}
+
+func (m *MockHost) PaneScrollToBottom(name string) {
+	// No-op for tests
+}
+
 func (m *MockHost) TimerAfter(d time.Duration) int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
