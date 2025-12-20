@@ -8,7 +8,6 @@ import (
 
 	"github.com/drake/rune/ui"
 	"github.com/drake/rune/ui/tui/style"
-	"github.com/drake/rune/ui/tui/util"
 )
 
 // Compile-time check that Input implements Widget
@@ -25,8 +24,8 @@ type Input struct {
 	pickerCB     string // Callback ID for picker selection
 	width        int
 
-	// Tab completion
-	wordCache *util.CompletionEngine
+	// Ghost text (command-level suggestion from Lua)
+	ghostText string
 }
 
 // NewInput creates a new input widget.
@@ -37,7 +36,6 @@ func NewInput(styles style.Styles) *Input {
 	ti.CharLimit = 0
 	ti.Width = 80
 	ti.Focus()
-	ti.ShowSuggestions = true
 
 	return &Input{
 		textinput: ti,
@@ -45,8 +43,7 @@ func NewInput(styles style.Styles) *Input {
 			MaxVisible: 10,
 			EmptyText:  "No matches",
 		}, styles),
-		styles:    styles,
-		wordCache: util.NewCompletionEngine(5000),
+		styles: styles,
 	}
 }
 
@@ -69,8 +66,38 @@ func (i *Input) View() string {
 	// Top border
 	parts = append(parts, i.borderLine())
 
-	// Input field
-	parts = append(parts, i.textinput.View())
+	// Input field with ghost text
+	currentVal := i.textinput.Value()
+	cursorPos := i.textinput.Position()
+
+	// Check if we should render ghost text
+	hasGhost := i.ghostText != "" &&
+		strings.HasPrefix(i.ghostText, currentVal) &&
+		len(i.ghostText) > len(currentVal) &&
+		cursorPos == len(currentVal) // Only show ghost when cursor is at end
+
+	var inputView string
+	if hasGhost {
+		// Build custom view with ghost text integrated at cursor position
+		// This makes the cursor appear ON the first ghost char (like fish shell)
+		remainder := i.ghostText[len(currentVal):]
+		prompt := i.textinput.Prompt
+
+		// Render: prompt + typed text + cursor on first ghost char + rest of ghost dim
+		if len(remainder) > 0 {
+			firstGhostRune := []rune(remainder)[0]
+			restGhost := string([]rune(remainder)[1:])
+			// \x1b[7m = inverse (cursor), \x1b[90m = dim gray
+			inputView = prompt + currentVal +
+				"\x1b[7;90m" + string(firstGhostRune) + "\x1b[27m" + // cursor on first ghost char
+				"\x1b[90m" + restGhost + "\x1b[0m" // rest of ghost dim
+		}
+	} else {
+		// Use normal textinput view (with its own cursor)
+		inputView = i.textinput.View()
+	}
+
+	parts = append(parts, inputView)
 
 	// Bottom border
 	parts = append(parts, i.borderLine())
@@ -127,7 +154,7 @@ func (i *Input) SetCursor(pos int) {
 // Reset clears the input.
 func (i *Input) Reset() {
 	i.textinput.SetValue("")
-	i.textinput.SetSuggestions(nil)
+	i.ghostText = ""
 }
 
 // Focus gives focus to the input.
@@ -140,61 +167,15 @@ func (i *Input) Blur() {
 	i.textinput.Blur()
 }
 
-// SetSuggestions sets tab completion suggestions.
-func (i *Input) SetSuggestions(suggestions []string) {
-	i.textinput.SetSuggestions(suggestions)
+// SetGhostText sets the ghost suggestion text (visual only).
+// Go just renders; Lua is the source of truth for what to suggest.
+func (i *Input) SetGhostText(text string) {
+	i.ghostText = text
 }
 
-// UpdateSuggestions refreshes suggestions based on current input.
-func (i *Input) UpdateSuggestions() {
-	val := i.textinput.Value()
-	if val == "" {
-		i.textinput.SetSuggestions(nil)
-		return
-	}
-
-	pos := i.textinput.Position()
-	start, end := util.FindWordBoundaries(val, pos)
-	if start == end {
-		i.textinput.SetSuggestions(nil)
-		return
-	}
-
-	prefix := val[start:end]
-	if len(prefix) < 2 {
-		i.textinput.SetSuggestions(nil)
-		return
-	}
-
-	matches := i.wordCache.FindMatches(prefix)
-	if len(matches) == 0 {
-		i.textinput.SetSuggestions(nil)
-		return
-	}
-
-	// Build full-line suggestions
-	before := val[:start]
-	after := ""
-	if end < len(val) {
-		after = val[end:]
-	}
-
-	suggestions := make([]string, 0, len(matches))
-	for _, match := range matches {
-		suggestions = append(suggestions, before+match+after)
-	}
-
-	i.textinput.SetSuggestions(suggestions)
-}
-
-// AddToWordCache adds words from a line to the completion cache.
-func (i *Input) AddToWordCache(line string) {
-	i.wordCache.AddLine(line)
-}
-
-// AddInputToWordCache adds user input to the completion cache.
-func (i *Input) AddInputToWordCache(input string) {
-	i.wordCache.AddInput(input)
+// GhostText returns the current ghost text.
+func (i *Input) GhostText() string {
+	return i.ghostText
 }
 
 // DeleteWord deletes the word before cursor.
@@ -210,6 +191,42 @@ func (i *Input) DeleteWord() {
 			newPos--
 		}
 		i.textinput.SetValue(val[:newPos] + val[pos:])
+		i.textinput.SetCursor(newPos)
+	}
+}
+
+// WordLeft moves cursor to start of previous word.
+func (i *Input) WordLeft() {
+	val := i.textinput.Value()
+	pos := i.textinput.Position()
+	if pos > 0 {
+		newPos := pos - 1
+		// Skip spaces
+		for newPos > 0 && val[newPos-1] == ' ' {
+			newPos--
+		}
+		// Skip word characters
+		for newPos > 0 && val[newPos-1] != ' ' {
+			newPos--
+		}
+		i.textinput.SetCursor(newPos)
+	}
+}
+
+// WordRight moves cursor to end of next word.
+func (i *Input) WordRight() {
+	val := i.textinput.Value()
+	pos := i.textinput.Position()
+	if pos < len(val) {
+		newPos := pos
+		// Skip current word characters
+		for newPos < len(val) && val[newPos] != ' ' {
+			newPos++
+		}
+		// Skip spaces
+		for newPos < len(val) && val[newPos] == ' ' {
+			newPos++
+		}
 		i.textinput.SetCursor(newPos)
 	}
 }

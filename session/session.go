@@ -67,7 +67,8 @@ type Session struct {
 	config       Config
 	cancel       context.CancelFunc
 	clientState  lua.ClientState
-	currentInput string // Tracked so Lua can query via rune.input.get()
+	currentInput  string // Tracked so Lua can query via rune.input.get()
+	currentCursor int    // Tracked so Lua can query via rune.input.get_cursor()
 }
 
 // New creates a new Session. It is passive - no goroutines start here.
@@ -121,6 +122,14 @@ func (s *Session) Run(ctx context.Context) error {
 // processEvents is the main event loop.
 func (s *Session) processEvents(ctx context.Context) {
 	for {
+		// Priority: drain UI input messages first (for responsive completion)
+		select {
+		case msg := <-s.ui.Outbound():
+			s.handleUIMessage(msg)
+			continue
+		default:
+		}
+
 		select {
 		case <-ctx.Done():
 			return
@@ -330,6 +339,11 @@ func (s *Session) handleUIMessage(msg ui.UIEvent) {
 	case ui.PickerSelectMsg:
 		s.executePickerCallback(m.CallbackID, m.Value, m.Accepted)
 	case ui.InputChangedMsg:
-		s.currentInput = string(m)
+		s.currentInput = m.Text
+		s.currentCursor = m.Cursor
+		s.engine.CallHook("input_changed", m.Text)
+	case ui.CursorMovedMsg:
+		s.currentCursor = m.Cursor
+		// No Lua hook - cursor-only changes don't need Lua processing
 	}
 }

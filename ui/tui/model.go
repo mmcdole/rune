@@ -130,6 +130,41 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.input.SetValue(string(msg))
 		m.input.CursorEnd()
 		return m, nil
+
+	// Input primitives (from Lua)
+	case ui.InputSetCursorMsg:
+		m.input.SetCursor(int(msg))
+		return m, nil
+	case ui.SetGhostMsg:
+		// New clean ghost text - Go just renders, Lua is source of truth
+		m.input.SetGhostText(string(msg))
+		return m, nil
+
+	// Pane scrolling (from Lua)
+	case ui.PaneScrollUpMsg:
+		if msg.Name == "main" {
+			m.viewport.ScrollUp(msg.Lines)
+			m.updateScrollState()
+		}
+		return m, nil
+	case ui.PaneScrollDownMsg:
+		if msg.Name == "main" {
+			m.viewport.ScrollDown(msg.Lines)
+			m.updateScrollState()
+		}
+		return m, nil
+	case ui.PaneScrollToTopMsg:
+		if msg.Name == "main" {
+			m.viewport.GotoTop()
+			m.updateScrollState()
+		}
+		return m, nil
+	case ui.PaneScrollToBottomMsg:
+		if msg.Name == "main" {
+			m.viewport.GotoBottom()
+			m.updateScrollState()
+		}
+		return m, nil
 	}
 
 	return m, nil
@@ -192,7 +227,6 @@ func (m Model) handleServerOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ui.PrintLineMsg:
 		cleanLine := util.FilterClearSequences(string(msg))
 		m.pendingLines = append(m.pendingLines, cleanLine)
-		m.input.AddToWordCache(cleanLine)
 	case ui.EchoLineMsg:
 		m.appendLines([]string{string(msg)})
 	case ui.PromptMsg:
@@ -256,8 +290,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.sendOutbound(ui.PickerSelectMsg{CallbackID: cbID, Accepted: false})
 			return m, nil
 		}
-		m.input.Reset()
-		return m, nil
+		// Fall through to handleNormalKey for Lua binding
 	}
 
 	switch m.inputMode {
@@ -283,16 +316,13 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEnter:
 		text := m.input.Value()
-		if text != "" {
-			m.input.AddInputToWordCache(text)
-		}
 		select {
 		case m.inputChan <- text:
 		default:
 			m.scrollback.Append("\033[31m[WARNING] Input dropped - engine lagging\033[0m")
 		}
 		m.input.Reset()
-		m.sendOutbound(ui.InputChangedMsg("")) // Keep session.currentInput in sync
+		m.sendOutbound(ui.InputChangedMsg{Text: "", Cursor: 0})
 		return m, nil
 
 	case tea.KeyCtrlU:
@@ -302,7 +332,9 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyCtrlW:
 		m.input.DeleteWord()
 		return m, nil
+	}
 
+	switch msg.Type {
 	case tea.KeyPgUp:
 		m.viewport.PageUp()
 		m.updateScrollState()
@@ -326,19 +358,24 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Forward to input
 	oldValue := m.input.Value()
+	oldCursor := m.input.Position()
 	m.input.UpdateTextInput(msg)
 
-	if newValue := m.input.Value(); newValue != oldValue {
-		m.sendOutbound(ui.InputChangedMsg(newValue))
+	newValue := m.input.Value()
+	newCursor := m.input.Position()
+	if newValue != oldValue {
+		m.sendOutbound(ui.InputChangedMsg{Text: newValue, Cursor: newCursor})
+	} else if newCursor != oldCursor {
+		m.sendOutbound(ui.CursorMovedMsg{Cursor: newCursor})
 	}
 
-	m.input.UpdateSuggestions()
 	return m, nil
 }
 
 func (m Model) handleInlinePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	keyStr := keyToString(msg)
-	if keyStr != "" && m.boundKeys[keyStr] && keyStr != "up" && keyStr != "down" {
+	// Don't send picker navigation keys to Lua - handle them locally
+	if keyStr != "" && m.boundKeys[keyStr] && keyStr != "up" && keyStr != "down" && keyStr != "tab" {
 		m.sendOutbound(ui.ExecuteBindMsg(keyStr))
 		return m, nil
 	}
@@ -410,22 +447,23 @@ func (m Model) handleInlinePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	oldValue := m.input.Value()
+	oldCursor := m.input.Position()
 	m.input.UpdateTextInput(msg)
 
-	if newValue := m.input.Value(); newValue != oldValue {
-		m.sendOutbound(ui.InputChangedMsg(newValue))
+	newValue := m.input.Value()
+	newCursor := m.input.Position()
+	if newValue != oldValue {
+		m.sendOutbound(ui.InputChangedMsg{Text: newValue, Cursor: newCursor})
 		m.input.UpdatePickerFilter()
+	} else if newCursor != oldCursor {
+		m.sendOutbound(ui.CursorMovedMsg{Cursor: newCursor})
 	}
 
-	m.input.UpdateSuggestions()
 	return m, nil
 }
 
 func (m Model) submitInput() (tea.Model, tea.Cmd) {
 	text := m.input.Value()
-	if text != "" {
-		m.input.AddInputToWordCache(text)
-	}
 	select {
 	case m.inputChan <- text:
 	default:
@@ -654,8 +692,8 @@ func keyToString(msg tea.KeyMsg) string {
 		return "ctrl+g"
 	case tea.KeyCtrlH:
 		return "ctrl+h"
-	case tea.KeyCtrlI:
-		return "ctrl+i"
+	case tea.KeyCtrlI: // Same as KeyTab
+		return "tab"
 	case tea.KeyCtrlJ:
 		return "ctrl+j"
 	case tea.KeyCtrlK:
@@ -718,6 +756,12 @@ func keyToString(msg tea.KeyMsg) string {
 		return "up"
 	case tea.KeyDown:
 		return "down"
+	case tea.KeyLeft:
+		return "left"
+	case tea.KeyRight:
+		return "right"
+	case tea.KeyEsc:
+		return "escape"
 	default:
 		return ""
 	}
