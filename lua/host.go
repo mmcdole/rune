@@ -46,6 +46,7 @@ type Host interface {
 	Quit()
 	Reload()
 	Load(path string)
+	RefreshBars() // Force immediate bar refresh
 
 	// History
 	GetHistory() []string

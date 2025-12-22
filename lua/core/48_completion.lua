@@ -7,7 +7,7 @@ rune.completion = rune.completion or {}
 local MAX_WORDS = 5000
 local MIN_WORD_LEN = 3
 
--- Data structures
+-- Data structures for word cache
 local cache = {}        -- lower -> {word=original, order=int}
 local order_list = {}   -- array of lowercase words (insertion order for eviction)
 local prefix_idx = {}   -- 2-char -> set of lowercase words
@@ -25,7 +25,7 @@ local function cache_add(word)
     local entry = cache[lower]
 
     if entry then
-        -- Update existing entry (no list reordering - just bump order)
+        -- Update existing entry (bump recency)
         entry.word = word
         entry.order = order_counter
     else
@@ -83,30 +83,28 @@ local function cache_find(prefix)
 end
 
 -- ============================================================
--- Completion State
+-- Completion State (data-driven, no boolean flags)
 -- ============================================================
 
 local state = {
-    matches = {},      -- matching words
-    index = 0,         -- current position (0 = none selected)
-    word_start = 0,    -- where word starts in input
-    word_end = 0,      -- where word ends in input
-    prefix = "",       -- what user typed
-    cycling = false,   -- actively cycling through matches
-    original = "",     -- text before cycling started
+    matches    = {},    -- current matches
+    index      = 0,     -- current selection (1-based when cycling)
+    word_start = 0,     -- where word starts in input
+    word_end   = 0,     -- where word ends in input
+    original   = nil,   -- nil = not cycling, string = input before cycling started
+    expected   = nil,   -- expected input after Tab (for identity check)
 }
 
-local skip_next_change = false
+-- Export state for status bar to read
+rune.completion.state = state
 
 local function reset_state()
     state.matches = {}
     state.index = 0
     state.word_start = 0
     state.word_end = 0
-    state.prefix = ""
-    state.cycling = false
-    state.original = ""
-    rune.input.set_ghost("")
+    state.original = nil
+    state.expected = nil
 end
 
 local function find_word_at_cursor()
@@ -131,15 +129,16 @@ local function find_word_at_cursor()
 end
 
 local function insert_completion(suggestion)
-    local text = state.cycling and state.original or rune.input.get()
+    local text = state.original or rune.input.get()
     local before = text:sub(1, state.word_start - 1)
     local after = text:sub(state.word_end + 1)
     local space = after == "" and " " or ""
 
-    skip_next_change = true
-    rune.input.set(before .. suggestion .. space .. after)
+    local new_input = before .. suggestion .. space .. after
+
+    state.expected = new_input   -- "I expect this..."
+    rune.input.set(new_input)    -- "...because I'm setting it"
     rune.input.set_cursor(#before + #suggestion + #space)
-    rune.input.set_ghost("")
 end
 
 local function update_ghost()
@@ -160,11 +159,6 @@ local function update_ghost()
     state.index = 1
     state.word_start = word_start
     state.word_end = word_end
-    state.prefix = prefix
-
-    -- Show ghost text (current input + completion remainder)
-    local ghost = rune.input.get() .. matches[1]:sub(#prefix + 1)
-    rune.input.set_ghost(ghost)
 end
 
 -- ============================================================
@@ -185,13 +179,25 @@ rune.hooks.on("input", function(text)
     end
 end, { name = "_completion_input", priority = 200 })
 
--- Update ghost on input change
+-- Smart input_changed hook: data-driven, no flags
 rune.hooks.on("input_changed", function()
-    if skip_next_change then
-        skip_next_change = false
+    local text = rune.input.get()
+
+    -- 1. Empty input: always reset
+    if text == "" then
+        reset_state()
         return
     end
-    state.cycling = false
+
+    -- 2. Identity check: if this is what Tab just set, ignore
+    if state.expected and text == state.expected then
+        state.expected = nil
+        return
+    end
+
+    -- 3. User typed something: exit cycling, update ghost
+    state.original = nil
+    state.expected = nil
     update_ghost()
 end, { name = "_completion_ghost", priority = 100 })
 
@@ -199,30 +205,31 @@ end, { name = "_completion_ghost", priority = 100 })
 -- Key Bindings
 -- ============================================================
 
--- Tab: insert match, then cycle on subsequent presses
-rune.bind("tab", function()
+-- Cycle through completions (Tab = forward, Shift+Tab = backward)
+local function cycle(direction)
     if #state.matches == 0 then return end
 
-    if not state.cycling then
-        -- First tab: enter cycling mode
-        state.cycling = true
+    if not state.original then
+        -- First Tab: enter cycling mode
         state.original = rune.input.get()
     else
-        -- Subsequent tabs: advance to next match
-        state.index = state.index % #state.matches + 1
+        -- Subsequent Tabs: advance index
+        state.index = ((state.index - 1 + direction) % #state.matches) + 1
     end
 
     insert_completion(state.matches[state.index])
-end)
+    rune.ui.refresh_bars()
+end
+
+rune.bind("tab", function() cycle(1) end)
+rune.bind("shift+tab", function() cycle(-1) end)
 
 -- ============================================================
 -- Public API
 -- ============================================================
 
-function rune.completion.complete_word()
-    if #state.matches > 0 then
-        insert_completion(state.matches[state.index])
-    end
+function rune.completion.reset()
+    reset_state()
 end
 
 function rune.completion.clear_cache()

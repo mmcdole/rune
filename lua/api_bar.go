@@ -40,6 +40,13 @@ func (e *Engine) registerBarFuncs() {
 		return 0
 	}))
 
+	// rune.ui.refresh_bars() - Force immediate bar refresh
+	// Use when bar state changes and you don't want to wait for the 250ms ticker
+	e.L.SetField(ui, "refresh_bars", e.L.NewFunction(func(L *glua.LState) int {
+		e.host.RefreshBars()
+		return 0
+	}))
+
 	// rune.ui.layout(config) - Set the layout configuration
 	// config = { top = {"bar1", {name="pane", height=10}}, bottom = {"input", "status"} }
 	e.L.SetField(ui, "layout", e.L.NewFunction(func(L *glua.LState) int {

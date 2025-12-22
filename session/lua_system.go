@@ -45,3 +45,9 @@ func (s *Session) Load(path string) {
 
 	s.engine.CallHook("loaded", path)
 }
+
+// RefreshBars forces an immediate bar refresh.
+// Called from Lua when bar state changes and we don't want to wait for the ticker.
+func (s *Session) RefreshBars() {
+	s.pushBarUpdates()
+}

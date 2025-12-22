@@ -129,6 +129,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ui.SetInputMsg:
 		m.input.SetValue(string(msg))
 		m.input.CursorEnd()
+		m.sendOutbound(ui.InputChangedMsg{Text: string(msg), Cursor: len(msg)})
 		return m, nil
 
 	// Input primitives (from Lua)
@@ -694,6 +695,8 @@ func keyToString(msg tea.KeyMsg) string {
 		return "ctrl+h"
 	case tea.KeyCtrlI: // Same as KeyTab
 		return "tab"
+	case tea.KeyShiftTab:
+		return "shift+tab"
 	case tea.KeyCtrlJ:
 		return "ctrl+j"
 	case tea.KeyCtrlK:

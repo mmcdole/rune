@@ -80,6 +80,10 @@ func (m *MockHost) Load(path string) {
 	m.LoadCalls = append(m.LoadCalls, path)
 }
 
+func (m *MockHost) RefreshBars() {
+	// No-op for tests
+}
+
 func (m *MockHost) PaneCreate(name string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

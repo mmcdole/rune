@@ -6,10 +6,9 @@
 -- This file handles other input enhancements
 -- ============================================================
 
--- Escape: clear input
+-- Escape: clear input (completion auto-clears via input_changed hook)
 rune.bind("escape", function()
     rune.input.set("")
-    rune.input.set_ghost("")
 end)
 
 -- ============================================================
