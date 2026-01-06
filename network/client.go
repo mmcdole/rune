@@ -129,13 +129,6 @@ func (c *TCPClient) Output() <-chan Output {
 	return c.outputChan
 }
 
-// IsConnected checks if there is an active connection.
-func (c *TCPClient) IsConnected() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.current != nil
-}
-
 // LocalEchoEnabled reports whether the current connection prefers local echo.
 // Defaults to true if no active connection.
 func (c *TCPClient) LocalEchoEnabled() bool {

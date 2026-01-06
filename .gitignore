@@ -1,2 +1,11 @@
-allcode.txt
+# Build artifacts
 rune
+layout-test
+*.out
+*.test
+
+# Generated files
+allcode.txt
+
+# Local files
+website-mockups/

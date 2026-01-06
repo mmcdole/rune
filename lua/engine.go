@@ -38,18 +38,6 @@ func NewEngine(host Host) *Engine {
 	}
 }
 
-// Alias represents a user-defined alias.
-type Alias struct {
-	Name  string
-	Value string // expansion string or "(function)"
-}
-
-// Command represents a slash command.
-type Command struct {
-	Name        string
-	Description string
-}
-
 // Init initializes (or re-initializes) the Lua VM with fresh state.
 // It registers the API but does NOT load any scripts - that's the caller's job.
 func (e *Engine) Init() error {
@@ -244,103 +232,6 @@ func (e *Engine) CallHook(event string, args ...string) {
 		NRet:    0,
 		Protect: true,
 	}, luaArgs...)
-}
-
-// ExecuteCallback runs a callback function.
-func (e *Engine) ExecuteCallback(cb func()) {
-	if cb != nil {
-		cb()
-	}
-}
-
-// GetAliases returns all defined aliases by calling rune.alias.all().
-func (e *Engine) GetAliases() []Alias {
-	if e.L == nil {
-		return nil
-	}
-
-	// Get rune.alias.all function
-	aliasTable := e.L.GetField(e.runeTable, "alias")
-	if aliasTable == glua.LNil {
-		return nil
-	}
-	allFn := e.L.GetField(aliasTable, "all")
-	if allFn == glua.LNil {
-		return nil
-	}
-
-	// Call rune.alias.all()
-	if err := e.L.CallByParam(glua.P{
-		Fn:      allFn,
-		NRet:    1,
-		Protect: true,
-	}); err != nil {
-		return nil
-	}
-
-	result := e.L.Get(-1)
-	e.L.Pop(1)
-
-	tbl, ok := result.(*glua.LTable)
-	if !ok {
-		return nil
-	}
-
-	var aliases []Alias
-	tbl.ForEach(func(_, v glua.LValue) {
-		if row, ok := v.(*glua.LTable); ok {
-			name := e.L.GetField(row, "name").String()
-			value := e.L.GetField(row, "value").String()
-			aliases = append(aliases, Alias{Name: name, Value: value})
-		}
-	})
-
-	return aliases
-}
-
-// GetCommands returns all slash commands by calling rune.command.list().
-func (e *Engine) GetCommands() []Command {
-	if e.L == nil {
-		return nil
-	}
-
-	// Get rune.command.list function
-	commandTable := e.L.GetField(e.runeTable, "command")
-	if commandTable == glua.LNil {
-		return nil
-	}
-	listFn := e.L.GetField(commandTable, "list")
-	if listFn == glua.LNil {
-		return nil
-	}
-
-	// Call rune.command.list()
-	if err := e.L.CallByParam(glua.P{
-		Fn:      listFn,
-		NRet:    1,
-		Protect: true,
-	}); err != nil {
-		return nil
-	}
-
-	result := e.L.Get(-1)
-	e.L.Pop(1)
-
-	tbl, ok := result.(*glua.LTable)
-	if !ok {
-		return nil
-	}
-
-	var commands []Command
-	tbl.ForEach(func(_, v glua.LValue) {
-		if row, ok := v.(*glua.LTable); ok {
-			name := e.L.GetField(row, "name").String()
-			desc := e.L.GetField(row, "description").String()
-			commands = append(commands, Command{Name: name, Description: desc})
-		}
-	})
-
-	return commands
 }
 
 func (e *Engine) registerAPIs() {
