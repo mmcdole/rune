@@ -128,11 +128,6 @@ func (b *BubbleTeaUI) Quit() {
 	})
 }
 
-// SetConnectionState updates the connection status display.
-func (b *BubbleTeaUI) SetConnectionState(state ui.ConnectionState, addr string) {
-	b.send(ui.ConnectionStateMsg{State: state, Address: addr})
-}
-
 // CreatePane creates a new named pane.
 func (b *BubbleTeaUI) CreatePane(name string) {
 	b.send(ui.PaneCreateMsg{Name: name})
@@ -182,12 +177,6 @@ func (b *BubbleTeaUI) SetInput(text string) {
 }
 
 // --- Input Primitives for Lua ---
-
-// InputGetCursor returns the current cursor position.
-// Note: Session tracks cursor position via InputChangedMsg, so this is not typically called.
-func (b *BubbleTeaUI) InputGetCursor() int {
-	return 0 // Session tracks this, not used directly
-}
 
 // InputSetCursor sets the cursor position.
 func (b *BubbleTeaUI) InputSetCursor(pos int) {

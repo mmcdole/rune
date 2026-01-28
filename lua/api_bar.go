@@ -6,21 +6,6 @@ import (
 	"github.com/drake/rune/ui"
 )
 
-// barRegistry holds registered Lua bar render functions and layout config.
-type barRegistry struct {
-	funcs  map[string]*glua.LFunction
-	layout ui.LayoutConfig
-}
-
-func newBarRegistry() *barRegistry {
-	return &barRegistry{
-		funcs: make(map[string]*glua.LFunction),
-		layout: ui.LayoutConfig{
-			Bottom: []ui.LayoutEntry{{Name: "input"}, {Name: "status"}}, // Default layout
-		},
-	}
-}
-
 // registerBarFuncs registers the rune.ui.bar API.
 func (e *Engine) registerBarFuncs() {
 	// Create rune.ui table if it doesn't exist
@@ -36,7 +21,7 @@ func (e *Engine) registerBarFuncs() {
 	e.L.SetField(ui, "bar", e.L.NewFunction(func(L *glua.LState) int {
 		name := L.CheckString(1)
 		fn := L.CheckFunction(2)
-		e.bars.funcs[name] = fn
+		e.barFuncs[name] = fn
 		return 0
 	}))
 
@@ -55,17 +40,17 @@ func (e *Engine) registerBarFuncs() {
 		// Parse top array
 		topVal := L.GetField(cfg, "top")
 		if topTbl, ok := topVal.(*glua.LTable); ok {
-			e.bars.layout.Top = parseLayoutArray(L, topTbl)
+			e.barLayout.Top = parseLayoutArray(L, topTbl)
 		} else {
-			e.bars.layout.Top = nil
+			e.barLayout.Top = nil
 		}
 
 		// Parse bottom array
 		bottomVal := L.GetField(cfg, "bottom")
 		if bottomTbl, ok := bottomVal.(*glua.LTable); ok {
-			e.bars.layout.Bottom = parseLayoutArray(L, bottomTbl)
+			e.barLayout.Bottom = parseLayoutArray(L, bottomTbl)
 		} else {
-			e.bars.layout.Bottom = nil
+			e.barLayout.Bottom = nil
 		}
 
 		e.host.OnConfigChange() // Notify Session to push layout update to UI
@@ -107,7 +92,7 @@ func (e *Engine) RenderBar(name string, width int) (ui.BarContent, bool) {
 	if e.L == nil {
 		return ui.BarContent{}, false
 	}
-	fn, ok := e.bars.funcs[name]
+	fn, ok := e.barFuncs[name]
 	if !ok {
 		return ui.BarContent{}, false
 	}
@@ -140,8 +125,8 @@ func (e *Engine) RenderBar(name string, width int) (ui.BarContent, bool) {
 
 // GetBarNames returns the names of all registered bars.
 func (e *Engine) GetBarNames() []string {
-	names := make([]string, 0, len(e.bars.funcs))
-	for name := range e.bars.funcs {
+	names := make([]string, 0, len(e.barFuncs))
+	for name := range e.barFuncs {
 		names = append(names, name)
 	}
 	return names
@@ -149,13 +134,13 @@ func (e *Engine) GetBarNames() []string {
 
 // HasBar returns true if a bar with the given name is registered.
 func (e *Engine) HasBar(name string) bool {
-	_, ok := e.bars.funcs[name]
+	_, ok := e.barFuncs[name]
 	return ok
 }
 
 // GetLayout returns the current Lua-defined layout configuration.
 func (e *Engine) GetLayout() ui.LayoutConfig {
-	return e.bars.layout
+	return e.barLayout
 }
 
 // luaStringOrEmpty returns the string value of a Lua value, or empty string if nil.

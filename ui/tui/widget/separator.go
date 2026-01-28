@@ -1,6 +1,6 @@
 package widget
 
-import "strings"
+import "github.com/drake/rune/ui/tui/style"
 
 // Compile-time check that Separator implements Widget
 var _ Widget = (*Separator)(nil)
@@ -17,7 +17,7 @@ func NewSeparator() *Separator {
 
 // View implements Widget.
 func (s *Separator) View() string {
-	return "\x1b[90m" + strings.Repeat("─", s.width) + "\x1b[0m"
+	return style.RenderBorder(s.width)
 }
 
 // SetSize implements Widget.

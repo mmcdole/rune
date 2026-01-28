@@ -123,7 +123,7 @@ func (i *Input) PreferredHeight() int {
 }
 
 func (i *Input) borderLine() string {
-	return "\x1b[90m" + strings.Repeat("─", i.width) + "\x1b[0m"
+	return style.RenderBorder(i.width)
 }
 
 // Value returns the current input text.

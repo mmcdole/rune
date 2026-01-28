@@ -2,17 +2,6 @@ package lua
 
 import glua "github.com/yuin/gopher-lua"
 
-// bindRegistry holds registered Lua key bindings.
-type bindRegistry struct {
-	binds map[string]*glua.LFunction
-}
-
-func newBindRegistry() *bindRegistry {
-	return &bindRegistry{
-		binds: make(map[string]*glua.LFunction),
-	}
-}
-
 // registerBindFuncs registers the rune.bind API.
 func (e *Engine) registerBindFuncs() {
 	// rune.bind(key, callback) - Register a key binding
@@ -21,7 +10,7 @@ func (e *Engine) registerBindFuncs() {
 	e.L.SetField(e.runeTable, "bind", e.L.NewFunction(func(L *glua.LState) int {
 		key := L.CheckString(1)
 		fn := L.CheckFunction(2)
-		e.binds.binds[key] = fn
+		e.bindFuncs[key] = fn
 		e.host.OnConfigChange() // Notify Session to push update to UI
 		return 0
 	}))
@@ -29,7 +18,7 @@ func (e *Engine) registerBindFuncs() {
 	// rune.unbind(key) - Remove a key binding
 	e.L.SetField(e.runeTable, "unbind", e.L.NewFunction(func(L *glua.LState) int {
 		key := L.CheckString(1)
-		delete(e.binds.binds, key)
+		delete(e.bindFuncs, key)
 		e.host.OnConfigChange() // Notify Session to push update to UI
 		return 0
 	}))
@@ -41,7 +30,7 @@ func (e *Engine) HandleKeyBind(key string) bool {
 	if e.L == nil {
 		return false
 	}
-	fn, ok := e.binds.binds[key]
+	fn, ok := e.bindFuncs[key]
 	if !ok {
 		return false
 	}
@@ -56,8 +45,8 @@ func (e *Engine) HandleKeyBind(key string) bool {
 
 // GetBoundKeys returns all bound key names.
 func (e *Engine) GetBoundKeys() []string {
-	keys := make([]string, 0, len(e.binds.binds))
-	for key := range e.binds.binds {
+	keys := make([]string, 0, len(e.bindFuncs))
+	for key := range e.bindFuncs {
 		keys = append(keys, key)
 	}
 	return keys

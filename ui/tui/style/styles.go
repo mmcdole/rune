@@ -1,8 +1,15 @@
 package style
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/lipgloss"
 )
+
+// RenderBorder returns a horizontal border line with dim styling.
+func RenderBorder(width int) string {
+	return "\x1b[90m" + strings.Repeat("─", width) + "\x1b[0m"
+}
 
 // Styles holds all the lipgloss styles for the TUI.
 type Styles struct {

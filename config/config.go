@@ -26,8 +26,3 @@ func Dir() string {
 
 	return filepath.Join(base, "rune")
 }
-
-// InitFile returns the path to init.lua
-func InitFile() string {
-	return filepath.Join(Dir(), "init.lua")
-}

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/drake/rune/text"
+	"github.com/drake/rune/ui"
 	glua "github.com/yuin/gopher-lua"
 )
 
@@ -23,8 +24,12 @@ type Engine struct {
 	pickerCallbacks map[string]*glua.LFunction
 	pickerNextID    int
 
-	bars  *barRegistry
-	binds *bindRegistry
+	// Bar rendering
+	barFuncs  map[string]*glua.LFunction
+	barLayout ui.LayoutConfig
+
+	// Key bindings
+	bindFuncs map[string]*glua.LFunction
 }
 
 // NewEngine creates an Engine with a Host interface.
@@ -33,8 +38,11 @@ func NewEngine(host Host) *Engine {
 		host:            host,
 		callbacks:       make(map[int]*glua.LFunction),
 		pickerCallbacks: make(map[string]*glua.LFunction),
-		bars:            newBarRegistry(),
-		binds:           newBindRegistry(),
+		barFuncs:        make(map[string]*glua.LFunction),
+		barLayout: ui.LayoutConfig{
+			Bottom: []ui.LayoutEntry{{Name: "input"}, {Name: "status"}},
+		},
+		bindFuncs: make(map[string]*glua.LFunction),
 	}
 }
 
@@ -53,8 +61,11 @@ func (e *Engine) Init() error {
 	e.pickerCallbacks = make(map[string]*glua.LFunction)
 	e.pickerNextID = 0
 
-	e.bars = newBarRegistry()
-	e.binds = newBindRegistry()
+	e.barFuncs = make(map[string]*glua.LFunction)
+	e.barLayout = ui.LayoutConfig{
+		Bottom: []ui.LayoutEntry{{Name: "input"}, {Name: "status"}},
+	}
+	e.bindFuncs = make(map[string]*glua.LFunction)
 
 	registerLineType(e.L)
 	e.registerAPIs()

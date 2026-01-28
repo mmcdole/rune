@@ -16,12 +16,6 @@ type EchoLineMsg string
 // PromptMsg represents a server prompt (partial line without newline).
 type PromptMsg string
 
-// ConnectionStateMsg notifies the TUI of connection state changes.
-type ConnectionStateMsg struct {
-	State   ConnectionState
-	Address string
-}
-
 // PaneWriteMsg appends a line to a named pane.
 type PaneWriteMsg struct {
 	Name string

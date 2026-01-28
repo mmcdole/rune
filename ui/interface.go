@@ -28,7 +28,6 @@ type UI interface {
 	ClearPane(name string)
 
 	// Input primitives for Lua
-	InputGetCursor() int
 	InputSetCursor(pos int)
 	SetGhost(text string) // Ghost text for command suggestions
 	OpenEditor(initial string) (string, bool)

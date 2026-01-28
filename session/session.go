@@ -18,15 +18,6 @@ import (
 	"github.com/drake/rune/ui"
 )
 
-// Network defines the TCP/Telnet layer.
-type Network interface {
-	Connect(ctx context.Context, address string) error
-	Disconnect()
-	Send(data string) error
-	Output() <-chan network.Output
-	LocalEchoEnabled() bool
-}
-
 // Compile-time interface check - Session implements lua.Host
 var _ lua.Host = (*Session)(nil)
 
@@ -47,15 +38,16 @@ type Config struct {
 // operations.
 type Session struct {
 	// Infrastructure
-	net   Network
+	net   *network.TCPClient
 	ui    ui.UI
 	timer *timer.Service
 
 	// Scripting
 	engine *lua.Engine
 
-	// Managers
-	history *HistoryManager
+	// History
+	historyLines []string
+	historyLimit int
 
 	// Channels
 	events      chan event.Event
@@ -72,7 +64,7 @@ type Session struct {
 }
 
 // New creates a new Session. It is passive - no goroutines start here.
-func New(net Network, uiInstance ui.UI, cfg Config) *Session {
+func New(net *network.TCPClient, uiInstance ui.UI, cfg Config) *Session {
 	timerEvents := make(chan timer.Event, 256)
 
 	s := &Session{
@@ -81,8 +73,9 @@ func New(net Network, uiInstance ui.UI, cfg Config) *Session {
 		timer:       timer.NewService(timerEvents),
 		timerEvents: timerEvents,
 		events:      make(chan event.Event, 256),
-		config:      cfg,
-		history:     NewHistoryManager(10000),
+		config:       cfg,
+		historyLines: make([]string, 0, 10000),
+		historyLimit: 10000,
 	}
 
 	s.engine = lua.NewEngine(s)
@@ -194,7 +187,7 @@ func (s *Session) handleEvent(ev event.Event) {
 			s.ui.SetPrompt("")
 		}
 		if payload != "" {
-			s.history.Add(payload)
+			s.AddToHistory(payload)
 		}
 		if s.net.LocalEchoEnabled() {
 			s.ui.Echo(payload)
@@ -213,17 +206,32 @@ func (s *Session) handleEvent(ev event.Event) {
 
 // boot loads the VM state.
 func (s *Session) boot() error {
+	if err := s.initLua(); err != nil {
+		return err
+	}
+	if err := s.loadCoreScripts(); err != nil {
+		return err
+	}
+	if err := s.loadUserScripts(); err != nil {
+		return err
+	}
+	s.engine.CallHook("ready")
+	s.pushBindsAndLayout()
+	s.pushBarUpdates()
+	return nil
+}
+
+// initLua initializes the Lua VM and sets up config.
+func (s *Session) initLua() error {
 	if err := s.engine.Init(); err != nil {
 		return err
 	}
-
-	// Set config directory
 	setupCode := fmt.Sprintf("rune.config_dir = [[%s]]", s.config.ConfigDir)
-	if err := s.engine.DoString("boot_config", setupCode); err != nil {
-		return err
-	}
+	return s.engine.DoString("boot_config", setupCode)
+}
 
-	// Load core scripts
+// loadCoreScripts loads embedded core Lua scripts in sorted order.
+func (s *Session) loadCoreScripts() error {
 	entries, err := fs.ReadDir(s.config.CoreScripts, "core")
 	if err != nil {
 		return fmt.Errorf("reading core scripts: %w", err)
@@ -246,8 +254,11 @@ func (s *Session) boot() error {
 			return fmt.Errorf("core/%s: %w", file, err)
 		}
 	}
+	return nil
+}
 
-	// Load user init.lua
+// loadUserScripts loads init.lua and CLI-specified scripts.
+func (s *Session) loadUserScripts() error {
 	initPath := filepath.Join(s.config.ConfigDir, "init.lua")
 	if _, err := os.Stat(initPath); err == nil {
 		if err := s.engine.DoFile(initPath); err != nil {
@@ -255,18 +266,11 @@ func (s *Session) boot() error {
 		}
 	}
 
-	// Load CLI scripts
 	for _, path := range s.config.UserScripts {
 		if err := s.engine.DoFile(path); err != nil {
 			return fmt.Errorf("%s: %w", path, err)
 		}
 	}
-
-	s.engine.CallHook("ready")
-
-	s.pushBindsAndLayout()
-	s.pushBarUpdates()
-
 	return nil
 }
 
@@ -337,7 +341,7 @@ func (s *Session) handleUIMessage(msg ui.UIEvent) {
 		s.engine.UpdateState(s.clientState)
 		s.pushBarUpdates()
 	case ui.PickerSelectMsg:
-		s.executePickerCallback(m.CallbackID, m.Value, m.Accepted)
+		s.handlePickerResult(m.CallbackID, m.Value, m.Accepted)
 	case ui.InputChangedMsg:
 		s.currentInput = m.Text
 		s.currentCursor = m.Cursor

@@ -53,6 +53,5 @@ type Host interface {
 	AddToHistory(cmd string)
 
 	// State
-	GetClientState() ClientState
 	OnConfigChange()
 }

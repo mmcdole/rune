@@ -87,8 +87,8 @@ func (s *Session) PaneScrollToBottom(name string) {
 	s.ui.PaneScrollToBottom(name)
 }
 
-// executePickerCallback delegates to Engine for callback execution.
-func (s *Session) executePickerCallback(id string, value string, accepted bool) {
+// handlePickerResult delegates to Engine for callback execution or cancellation.
+func (s *Session) handlePickerResult(id string, value string, accepted bool) {
 	if accepted {
 		s.engine.ExecutePickerCallback(id, value)
 	} else {

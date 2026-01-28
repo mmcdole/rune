@@ -15,7 +15,7 @@ type Pane struct {
 	Name    string
 	Lines   []string
 	Visible bool
-	height  int // Number of lines to show when visible (renamed to avoid conflict with Height method)
+	height  int // Number of lines to show when visible
 	styles  style.Styles
 	width   int
 }

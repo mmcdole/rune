@@ -179,6 +179,8 @@ func (m Model) handleWindowSize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// handleTick processes pending lines in a batch.
+// Lines are batched within a 16ms window to prevent excessive renders on fast MUD output.
 func (m Model) handleTick() (tea.Model, tea.Cmd) {
 	if len(m.pendingLines) > 0 {
 		m.appendLines(m.pendingLines)
@@ -335,25 +337,7 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	switch msg.Type {
-	case tea.KeyPgUp:
-		m.viewport.PageUp()
-		m.updateScrollState()
-		return m, nil
-
-	case tea.KeyPgDown:
-		m.viewport.PageDown()
-		m.updateScrollState()
-		return m, nil
-
-	case tea.KeyEnd:
-		m.viewport.GotoBottom()
-		m.updateScrollState()
-		return m, nil
-
-	case tea.KeyHome:
-		m.viewport.GotoTop()
-		m.updateScrollState()
+	if m.handleScrollKey(msg.Type) {
 		return m, nil
 	}
 
@@ -425,25 +409,9 @@ func (m Model) handleInlinePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.input.DeleteWord()
 		m.input.UpdatePickerFilter()
 		return m, nil
+	}
 
-	case tea.KeyPgUp:
-		m.viewport.PageUp()
-		m.updateScrollState()
-		return m, nil
-
-	case tea.KeyPgDown:
-		m.viewport.PageDown()
-		m.updateScrollState()
-		return m, nil
-
-	case tea.KeyEnd:
-		m.viewport.GotoBottom()
-		m.updateScrollState()
-		return m, nil
-
-	case tea.KeyHome:
-		m.viewport.GotoTop()
-		m.updateScrollState()
+	if m.handleScrollKey(msg.Type) {
 		return m, nil
 	}
 
@@ -550,6 +518,25 @@ func (m *Model) updateScrollState() {
 		modeStr = "scrolled"
 	}
 	m.sendOutbound(ui.ScrollStateChangedMsg{Mode: modeStr, NewLines: newLines})
+}
+
+// handleScrollKey handles viewport scrolling keys.
+// Returns true if the key was handled.
+func (m *Model) handleScrollKey(keyType tea.KeyType) bool {
+	switch keyType {
+	case tea.KeyPgUp:
+		m.viewport.PageUp()
+	case tea.KeyPgDown:
+		m.viewport.PageDown()
+	case tea.KeyHome:
+		m.viewport.GotoTop()
+	case tea.KeyEnd:
+		m.viewport.GotoBottom()
+	default:
+		return false
+	}
+	m.updateScrollState()
+	return true
 }
 
 func (m *Model) getLayout() ui.LayoutConfig {
@@ -671,101 +658,57 @@ func (m Model) View() string {
 	return strings.Join(parts, "\n")
 }
 
+// keyNames maps Bubble Tea key types to string names for Lua bindings.
+var keyNames = map[tea.KeyType]string{
+	tea.KeyCtrlA:    "ctrl+a",
+	tea.KeyCtrlB:    "ctrl+b",
+	tea.KeyCtrlC:    "ctrl+c",
+	tea.KeyCtrlD:    "ctrl+d",
+	tea.KeyCtrlE:    "ctrl+e",
+	tea.KeyCtrlF:    "ctrl+f",
+	tea.KeyCtrlG:    "ctrl+g",
+	tea.KeyCtrlH:    "ctrl+h",
+	tea.KeyCtrlI:    "tab", // Same as KeyTab
+	tea.KeyShiftTab: "shift+tab",
+	tea.KeyCtrlJ:    "ctrl+j",
+	tea.KeyCtrlK:    "ctrl+k",
+	tea.KeyCtrlL:    "ctrl+l",
+	tea.KeyCtrlM:    "ctrl+m",
+	tea.KeyCtrlN:    "ctrl+n",
+	tea.KeyCtrlO:    "ctrl+o",
+	tea.KeyCtrlP:    "ctrl+p",
+	tea.KeyCtrlQ:    "ctrl+q",
+	tea.KeyCtrlR:    "ctrl+r",
+	tea.KeyCtrlS:    "ctrl+s",
+	tea.KeyCtrlT:    "ctrl+t",
+	tea.KeyCtrlU:    "ctrl+u",
+	tea.KeyCtrlV:    "ctrl+v",
+	tea.KeyCtrlW:    "ctrl+w",
+	tea.KeyCtrlX:    "ctrl+x",
+	tea.KeyCtrlY:    "ctrl+y",
+	tea.KeyCtrlZ:    "ctrl+z",
+	tea.KeyF1:       "f1",
+	tea.KeyF2:       "f2",
+	tea.KeyF3:       "f3",
+	tea.KeyF4:       "f4",
+	tea.KeyF5:       "f5",
+	tea.KeyF6:       "f6",
+	tea.KeyF7:       "f7",
+	tea.KeyF8:       "f8",
+	tea.KeyF9:       "f9",
+	tea.KeyF10:      "f10",
+	tea.KeyF11:      "f11",
+	tea.KeyF12:      "f12",
+	tea.KeyUp:       "up",
+	tea.KeyDown:     "down",
+	tea.KeyLeft:     "left",
+	tea.KeyRight:    "right",
+	tea.KeyEsc:      "escape",
+}
+
 func keyToString(msg tea.KeyMsg) string {
 	if msg.Type == tea.KeyRunes && len(msg.Runes) > 0 {
 		return string(msg.Runes)
 	}
-
-	switch msg.Type {
-	case tea.KeyCtrlA:
-		return "ctrl+a"
-	case tea.KeyCtrlB:
-		return "ctrl+b"
-	case tea.KeyCtrlC:
-		return "ctrl+c"
-	case tea.KeyCtrlD:
-		return "ctrl+d"
-	case tea.KeyCtrlE:
-		return "ctrl+e"
-	case tea.KeyCtrlF:
-		return "ctrl+f"
-	case tea.KeyCtrlG:
-		return "ctrl+g"
-	case tea.KeyCtrlH:
-		return "ctrl+h"
-	case tea.KeyCtrlI: // Same as KeyTab
-		return "tab"
-	case tea.KeyShiftTab:
-		return "shift+tab"
-	case tea.KeyCtrlJ:
-		return "ctrl+j"
-	case tea.KeyCtrlK:
-		return "ctrl+k"
-	case tea.KeyCtrlL:
-		return "ctrl+l"
-	case tea.KeyCtrlM:
-		return "ctrl+m"
-	case tea.KeyCtrlN:
-		return "ctrl+n"
-	case tea.KeyCtrlO:
-		return "ctrl+o"
-	case tea.KeyCtrlP:
-		return "ctrl+p"
-	case tea.KeyCtrlQ:
-		return "ctrl+q"
-	case tea.KeyCtrlR:
-		return "ctrl+r"
-	case tea.KeyCtrlS:
-		return "ctrl+s"
-	case tea.KeyCtrlT:
-		return "ctrl+t"
-	case tea.KeyCtrlU:
-		return "ctrl+u"
-	case tea.KeyCtrlV:
-		return "ctrl+v"
-	case tea.KeyCtrlW:
-		return "ctrl+w"
-	case tea.KeyCtrlX:
-		return "ctrl+x"
-	case tea.KeyCtrlY:
-		return "ctrl+y"
-	case tea.KeyCtrlZ:
-		return "ctrl+z"
-	case tea.KeyF1:
-		return "f1"
-	case tea.KeyF2:
-		return "f2"
-	case tea.KeyF3:
-		return "f3"
-	case tea.KeyF4:
-		return "f4"
-	case tea.KeyF5:
-		return "f5"
-	case tea.KeyF6:
-		return "f6"
-	case tea.KeyF7:
-		return "f7"
-	case tea.KeyF8:
-		return "f8"
-	case tea.KeyF9:
-		return "f9"
-	case tea.KeyF10:
-		return "f10"
-	case tea.KeyF11:
-		return "f11"
-	case tea.KeyF12:
-		return "f12"
-	case tea.KeyUp:
-		return "up"
-	case tea.KeyDown:
-		return "down"
-	case tea.KeyLeft:
-		return "left"
-	case tea.KeyRight:
-		return "right"
-	case tea.KeyEsc:
-		return "escape"
-	default:
-		return ""
-	}
+	return keyNames[msg.Type]
 }
