@@ -3,7 +3,7 @@ package lua
 import (
 	"time"
 
-	"github.com/drake/rune/ui"
+	"github.com/mmcdole/rune/ui"
 )
 
 // Host provides all services the Lua engine needs from the host application.

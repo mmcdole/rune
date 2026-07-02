@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/drake/rune/event"
+	"github.com/mmcdole/rune/event"
 )
 
 // Connect implements lua.Host.

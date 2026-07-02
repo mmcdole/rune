@@ -1,7 +1,7 @@
 package lua
 
 import (
-	"github.com/drake/rune/ui"
+	"github.com/mmcdole/rune/ui"
 	glua "github.com/yuin/gopher-lua"
 )
 

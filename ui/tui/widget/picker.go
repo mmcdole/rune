@@ -3,9 +3,9 @@ package widget
 import (
 	"strings"
 
-	"github.com/drake/rune/ui"
-	"github.com/drake/rune/ui/tui/style"
-	"github.com/drake/rune/ui/tui/util"
+	"github.com/mmcdole/rune/ui"
+	"github.com/mmcdole/rune/ui/tui/style"
+	"github.com/mmcdole/rune/ui/tui/util"
 )
 
 // PickerConfig holds picker configuration.

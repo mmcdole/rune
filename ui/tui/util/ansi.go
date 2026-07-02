@@ -3,8 +3,8 @@ package util
 import (
 	"strings"
 
-	"github.com/drake/rune/text"
 	"github.com/mattn/go-runewidth"
+	"github.com/mmcdole/rune/text"
 )
 
 // VisibleLen returns the visible display width of a string (excluding ANSI codes).

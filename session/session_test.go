@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/drake/rune/event"
-	"github.com/drake/rune/lua"
+	"github.com/mmcdole/rune/event"
+	"github.com/mmcdole/rune/lua"
 )
 
 // newTestSession boots a Session against mocks with the real embedded

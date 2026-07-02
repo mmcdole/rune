@@ -3,8 +3,8 @@ package session
 import (
 	"fmt"
 
-	"github.com/drake/rune/event"
-	"github.com/drake/rune/text"
+	"github.com/mmcdole/rune/event"
+	"github.com/mmcdole/rune/text"
 )
 
 // Quit implements lua.Host.

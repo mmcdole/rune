@@ -8,11 +8,11 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/drake/rune/config"
-	"github.com/drake/rune/lua"
-	"github.com/drake/rune/network"
-	"github.com/drake/rune/session"
-	"github.com/drake/rune/ui/tui"
+	"github.com/mmcdole/rune/config"
+	"github.com/mmcdole/rune/lua"
+	"github.com/mmcdole/rune/network"
+	"github.com/mmcdole/rune/session"
+	"github.com/mmcdole/rune/ui/tui"
 )
 
 func main() {

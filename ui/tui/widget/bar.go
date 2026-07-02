@@ -3,8 +3,8 @@ package widget
 import (
 	"strings"
 
-	"github.com/drake/rune/ui"
-	"github.com/drake/rune/ui/tui/util"
+	"github.com/mmcdole/rune/ui"
+	"github.com/mmcdole/rune/ui/tui/util"
 )
 
 // Compile-time check that Bar implements Widget

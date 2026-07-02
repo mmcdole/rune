@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/drake/rune/text"
+	"github.com/mmcdole/rune/text"
 )
 
 var errNotConnected = errors.New("not connected")

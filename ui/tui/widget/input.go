@@ -6,8 +6,8 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/drake/rune/ui"
-	"github.com/drake/rune/ui/tui/style"
+	"github.com/mmcdole/rune/ui"
+	"github.com/mmcdole/rune/ui/tui/style"
 )
 
 // Compile-time check that Input implements Widget

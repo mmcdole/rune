@@ -8,7 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/drake/rune/ui"
+	"github.com/mmcdole/rune/ui"
 )
 
 // BubbleTeaUI implements interfaces.UI using Bubble Tea.

@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/drake/rune/text"
+	"github.com/mmcdole/rune/text"
 )
 
 // Session logging (lua.Host implementation). The file handle is

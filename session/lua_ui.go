@@ -3,7 +3,7 @@ package session
 import (
 	"unicode/utf8"
 
-	"github.com/drake/rune/ui"
+	"github.com/mmcdole/rune/ui"
 )
 
 // Print implements lua.Host.

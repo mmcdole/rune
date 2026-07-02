@@ -1,4 +1,4 @@
-module github.com/drake/rune
+module github.com/mmcdole/rune
 
 go 1.25.4
 

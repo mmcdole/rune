@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/drake/rune/lua"
+	"github.com/mmcdole/rune/lua"
 )
 
 // newTestSessionInDir is newTestSession with a caller-owned config

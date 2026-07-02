@@ -6,11 +6,11 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/drake/rune/text"
-	"github.com/drake/rune/ui"
-	"github.com/drake/rune/ui/tui/style"
-	"github.com/drake/rune/ui/tui/util"
-	"github.com/drake/rune/ui/tui/widget"
+	"github.com/mmcdole/rune/text"
+	"github.com/mmcdole/rune/ui"
+	"github.com/mmcdole/rune/ui/tui/style"
+	"github.com/mmcdole/rune/ui/tui/util"
+	"github.com/mmcdole/rune/ui/tui/widget"
 )
 
 // tickMsg is used for periodic updates (line batching, clock refresh).

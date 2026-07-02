@@ -5,8 +5,8 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/drake/rune/network"
-	"github.com/drake/rune/ui"
+	"github.com/mmcdole/rune/network"
+	"github.com/mmcdole/rune/ui"
 )
 
 // mockNetwork implements Network without sockets.

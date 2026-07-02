@@ -3,7 +3,7 @@ package lua
 import (
 	glua "github.com/yuin/gopher-lua"
 
-	"github.com/drake/rune/ui"
+	"github.com/mmcdole/rune/ui"
 )
 
 // Bar renderers are owned by the Lua bar module (35_bars.lua), which

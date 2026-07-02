@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/drake/rune/text"
-	"github.com/drake/rune/ui"
+	"github.com/mmcdole/rune/text"
+	"github.com/mmcdole/rune/ui"
 	glua "github.com/yuin/gopher-lua"
 )
 

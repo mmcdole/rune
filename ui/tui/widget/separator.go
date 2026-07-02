@@ -1,6 +1,6 @@
 package widget
 
-import "github.com/drake/rune/ui/tui/style"
+import "github.com/mmcdole/rune/ui/tui/style"
 
 // Compile-time check that Separator implements Widget
 var _ Widget = (*Separator)(nil)

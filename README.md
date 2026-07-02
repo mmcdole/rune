@@ -25,13 +25,13 @@ Rune combines Go's performance and concurrency with Lua's flexibility for script
 ## Installation
 
 ```bash
-go install github.com/drake/rune/cmd/rune@latest
+go install github.com/mmcdole/rune/cmd/rune@latest
 ```
 
 Or build from source:
 
 ```bash
-git clone https://github.com/drake/rune
+git clone https://github.com/mmcdole/rune
 cd rune
 go build ./cmd/rune/
 ```

@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/drake/rune/ui"
+	"github.com/mmcdole/rune/ui"
 )
 
 // Compile-time check that MockHost implements Host

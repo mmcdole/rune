@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/drake/rune/text"
+	"github.com/mmcdole/rune/text"
 )
 
 // testCase represents a single test case from JSON

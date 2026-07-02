@@ -11,12 +11,12 @@ import (
 	"sort"
 	"time"
 
-	"github.com/drake/rune/event"
-	"github.com/drake/rune/lua"
-	"github.com/drake/rune/network"
-	"github.com/drake/rune/text"
-	"github.com/drake/rune/timer"
-	"github.com/drake/rune/ui"
+	"github.com/mmcdole/rune/event"
+	"github.com/mmcdole/rune/lua"
+	"github.com/mmcdole/rune/network"
+	"github.com/mmcdole/rune/text"
+	"github.com/mmcdole/rune/timer"
+	"github.com/mmcdole/rune/ui"
 )
 
 // Compile-time interface check - Session implements lua.Host
