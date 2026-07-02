@@ -6,8 +6,8 @@ type Type int
 const (
 	// Data events
 	UserInput Type = iota
-	NetLine   // A complete line from server (ended with \n)
-	NetPrompt // A partial line/prompt (no \n, possibly GA/EOR terminated)
+	NetLine        // A complete line from server (ended with \n)
+	NetPrompt      // A partial line/prompt (no \n, possibly GA/EOR terminated)
 
 	// Control events
 	SysDisconnect // Connection closed

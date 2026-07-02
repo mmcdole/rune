@@ -21,10 +21,6 @@ import (
 // Compile-time interface check - Session implements lua.Host
 var _ lua.Host = (*Session)(nil)
 
-// UI is imported from the ui package.
-// See ui/interface.go for the full interface definition.
-
-
 // Config holds session configuration
 type Config struct {
 	CoreScripts embed.FS // Embedded core Lua scripts
@@ -58,10 +54,9 @@ type Session struct {
 	barTicker   *time.Ticker
 
 	// State
-	lastPrompt   string
-	config       Config
-	cancel       context.CancelFunc
-	clientState  lua.ClientState
+	lastPrompt    string
+	config        Config
+	clientState   lua.ClientState
 	currentInput  string // Tracked so Lua can query via rune.input.get()
 	currentCursor int    // Tracked so Lua can query via rune.input.get_cursor()
 }
@@ -71,11 +66,11 @@ func New(net *network.TCPClient, uiInstance ui.UI, cfg Config) *Session {
 	timerEvents := make(chan timer.Event, 256)
 
 	s := &Session{
-		net:         net,
-		ui:          uiInstance,
-		timer:       timer.NewService(timerEvents),
-		timerEvents: timerEvents,
-		events:      make(chan event.Event, 256),
+		net:          net,
+		ui:           uiInstance,
+		timer:        timer.NewService(timerEvents),
+		timerEvents:  timerEvents,
+		events:       make(chan event.Event, 256),
 		config:       cfg,
 		historyLines: make([]string, 0, 10000),
 		historyLimit: 10000,
@@ -90,9 +85,9 @@ func New(net *network.TCPClient, uiInstance ui.UI, cfg Config) *Session {
 
 // Run starts the session and blocks until exit.
 func (s *Session) Run(ctx context.Context) error {
-	// Derive cancellable context for internal shutdown (rune.quit)
+	// Derive a cancellable context so Run can stop the event loop
+	// before tearing down the engine.
 	ctx, cancel := context.WithCancel(ctx)
-	s.cancel = cancel
 
 	defer func() {
 		cancel()

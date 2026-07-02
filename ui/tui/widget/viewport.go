@@ -62,7 +62,7 @@ func (sb *ScrollbackBuffer) At(i int) string {
 // Viewport renders a window into the scrollback buffer.
 type Viewport struct {
 	buffer     *ScrollbackBuffer
-	offset     int        // Lines from bottom (0 = showing newest)
+	offset     int // Lines from bottom (0 = showing newest)
 	height     int
 	width      int
 	mode       ScrollMode

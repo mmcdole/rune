@@ -21,8 +21,8 @@ type MockHost struct {
 	ConnectCalls    []string
 	DisconnectCalls int
 	ReloadCalls     int
-	LoadCalls []string
-	PaneCalls []struct{ Op, Name, Data string }
+	LoadCalls       []string
+	PaneCalls       []struct{ Op, Name, Data string }
 	ScheduledTimers []struct {
 		ID       int
 		Duration time.Duration
