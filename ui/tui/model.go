@@ -130,7 +130,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ui.SetInputMsg:
 		m.input.SetValue(string(msg))
 		m.input.CursorEnd()
-		m.sendOutbound(ui.InputChangedMsg{Text: string(msg), Cursor: len(msg)})
+		m.sendOutbound(ui.InputChangedMsg{Text: string(msg), Cursor: m.input.Position()})
+		// Lua editing binds (ctrl+u, ctrl+w) change input while the
+		// inline picker is open; keep its filter in sync, and close
+		// the picker (cancelling its callback) when input is cleared.
+		if m.inputMode == ModePickerInline {
+			if string(msg) == "" {
+				m.closeInlinePicker()
+			} else {
+				m.input.UpdatePickerFilter()
+			}
+		}
 		return m, nil
 
 	// Input primitives (from Lua)
@@ -267,11 +277,19 @@ func (m Model) handleShowPicker(msg ui.ShowPickerMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// handleKey routes key presses.
+//
+// Key policy: Go owns keys only while a UI-internal mode is active
+// (picker capture/cancel) plus Enter-to-submit; all other editing and
+// navigation policy lives in Lua binds. In normal mode a bound
+// non-printable key always goes to Lua; a bound printable key goes to
+// Lua only when the input is empty (so "j" can be a hotkey without
+// breaking typing). Unbound scroll keys fall back to Go so scrollback
+// stays usable even in degraded mode.
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Global keys
+	// Picker modes capture Ctrl+C/Esc as "cancel"
 	switch msg.Type {
-	case tea.KeyCtrlC:
-		// In picker mode: cancel picker
+	case tea.KeyCtrlC, tea.KeyEsc:
 		if m.inputMode != ModeNormal {
 			m.inputMode = ModeNormal
 			cbID := m.input.PickerCallbackID()
@@ -279,22 +297,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.sendOutbound(ui.PickerSelectMsg{CallbackID: cbID, Accepted: false})
 			return m, nil
 		}
-		// Input has text: clear it
-		if m.input.Value() != "" {
-			m.input.Reset()
-			return m, nil
-		}
-		// Empty input: fall through to handleNormalKey for Lua binding
-
-	case tea.KeyEsc:
-		if m.inputMode != ModeNormal {
-			m.inputMode = ModeNormal
-			cbID := m.input.PickerCallbackID()
-			m.input.HidePicker()
-			m.sendOutbound(ui.PickerSelectMsg{CallbackID: cbID, Accepted: false})
-			return m, nil
-		}
-		// Fall through to handleNormalKey for Lua binding
+		// Normal mode: fall through so the Lua binds decide
+		// (clear input, double-tap quit, ...)
 	}
 
 	switch m.inputMode {
@@ -317,8 +321,7 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	switch msg.Type {
-	case tea.KeyEnter:
+	if msg.Type == tea.KeyEnter {
 		line := m.input.Value()
 		select {
 		case m.inputChan <- line:
@@ -328,16 +331,9 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.input.Reset()
 		m.sendOutbound(ui.InputChangedMsg{Text: "", Cursor: 0})
 		return m, nil
-
-	case tea.KeyCtrlU:
-		m.input.SetValue("")
-		return m, nil
-
-	case tea.KeyCtrlW:
-		m.input.DeleteWord()
-		return m, nil
 	}
 
+	// Unbound scroll keys: Go fallback (keeps degraded mode scrollable)
 	if m.handleScrollKey(msg.Type) {
 		return m, nil
 	}
@@ -358,10 +354,18 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// inlinePickerLocalKeys are navigation keys the inline picker handles
+// itself instead of forwarding to Lua binds.
+var inlinePickerLocalKeys = map[string]bool{
+	"up":   true,
+	"down": true,
+	"tab":  true,
+}
+
 func (m Model) handleInlinePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	keyStr := keyToString(msg)
 	// Don't send picker navigation keys to Lua - handle them locally
-	if keyStr != "" && m.boundKeys[keyStr] && keyStr != "up" && keyStr != "down" && keyStr != "tab" {
+	if keyStr != "" && m.boundKeys[keyStr] && !inlinePickerLocalKeys[keyStr] {
 		m.sendOutbound(ui.ExecuteBindMsg(keyStr))
 		return m, nil
 	}
@@ -400,16 +404,6 @@ func (m Model) handleInlinePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.inputMode = ModeNormal
 		m.input.HidePicker()
 		return m.submitInput()
-
-	case tea.KeyCtrlU:
-		m.input.SetValue("")
-		m.closeInlinePicker()
-		return m, nil
-
-	case tea.KeyCtrlW:
-		m.input.DeleteWord()
-		m.input.UpdatePickerFilter()
-		return m, nil
 	}
 
 	if m.handleScrollKey(msg.Type) {
@@ -700,11 +694,17 @@ var keyNames = map[tea.KeyType]string{
 	tea.KeyF10:      "f10",
 	tea.KeyF11:      "f11",
 	tea.KeyF12:      "f12",
-	tea.KeyUp:       "up",
-	tea.KeyDown:     "down",
-	tea.KeyLeft:     "left",
-	tea.KeyRight:    "right",
-	tea.KeyEsc:      "escape",
+	tea.KeyUp:        "up",
+	tea.KeyDown:      "down",
+	tea.KeyLeft:      "left",
+	tea.KeyRight:     "right",
+	tea.KeyEsc:       "escape",
+	tea.KeyPgUp:      "pageup",
+	tea.KeyPgDown:    "pagedown",
+	tea.KeyHome:      "home",
+	tea.KeyEnd:       "end",
+	tea.KeyShiftHome: "shift+home",
+	tea.KeyShiftEnd:  "shift+end",
 }
 
 func keyToString(msg tea.KeyMsg) string {

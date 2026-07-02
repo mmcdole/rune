@@ -46,8 +46,8 @@ end
 
 rune.bind("pageup", function() rune.pane.scroll_up("main", 20) end)
 rune.bind("pagedown", function() rune.pane.scroll_down("main", 20) end)
-rune.bind("shift+pageup", function() rune.pane.scroll_to_top("main") end)
-rune.bind("shift+pagedown", function() rune.pane.scroll_to_bottom("main") end)
+rune.bind("home", function() rune.pane.scroll_to_top("main") end)
+rune.bind("end", function() rune.pane.scroll_to_bottom("main") end)
 
 -- ============================================================
 -- STATUS BAR
@@ -83,14 +83,21 @@ end
 -- Ctrl+C double-tap quit state
 local quit_pending = false
 
--- Ctrl+C binding: first press shows warning, second press quits
+-- Ctrl+C binding: with text in the input it clears the line;
+-- on an empty line, first press warns and the second press quits.
 rune.bind("ctrl+c", function()
+    if rune.input.get() ~= "" then
+        rune.input.set("")
+        return
+    end
     if quit_pending then
         rune.quit()
     else
         quit_pending = true
+        rune.ui.refresh_bars()
         rune.timer.after(2, function()
             quit_pending = false
+            rune.ui.refresh_bars()
         end, {name = "_quit_timeout"})
     end
 end)
