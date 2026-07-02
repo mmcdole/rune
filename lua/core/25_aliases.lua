@@ -307,12 +307,7 @@ function rune.alias.process(input)
                         result = ret
                     end
                 elseif type(data.action) == "string" then
-                    -- Function replacement inserts the capture
-                    -- literally, so a "%" in matched text is safe.
-                    result = data.action
-                    for i, m in ipairs(matches) do
-                        result = result:gsub("%%" .. i, function() return m end)
-                    end
+                    result = rune.substitute_captures(data.action, matches)
                 end
 
                 -- Handle once

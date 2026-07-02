@@ -61,6 +61,17 @@ function rune.caller_source(level)
     return src
 end
 
+-- Substitute %1..%N capture references in a template string.
+-- Single-pass with greedy digits, so %10 means capture 10, not
+-- capture 1 followed by "0". Unknown indices stay literal. The
+-- function replacement inserts captured text literally, so "%" in
+-- matched text cannot corrupt the template.
+function rune.substitute_captures(template, matches)
+    return (template:gsub("%%(%d+)", function(d)
+        return matches[tonumber(d)]
+    end))
+end
+
 -- Core function wrappers around Go primitives (rune._*)
 
 -- Send raw text to the server, bypassing alias processing.

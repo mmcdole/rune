@@ -310,14 +310,7 @@ function rune.trigger.process(line)
                             end
                         end
                     elseif type(data.action) == "string" and data.action ~= "" then
-                        -- String action with capture substitution.
-                        -- Function replacement inserts the capture
-                        -- literally, so a "%" in matched text is safe.
-                        local cmd = data.action
-                        for i, m in ipairs(matches) do
-                            cmd = cmd:gsub("%%" .. i, function() return m end)
-                        end
-                        rune.send(cmd)
+                        rune.send(rune.substitute_captures(data.action, matches))
                     end
                 end
 

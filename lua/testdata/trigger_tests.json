@@ -4,7 +4,9 @@
       "name": "Exact Match",
       "setup_lua": "rune.trigger.exact('You are hungry.', function(matches, ctx) rune.send_raw('eat bread') end)",
       "output": "You are hungry.",
-      "expected_commands": ["eat bread"]
+      "expected_commands": [
+        "eat bread"
+      ]
     },
     {
       "name": "Exact No Match - Partial",
@@ -22,13 +24,17 @@
       "name": "Starts Match",
       "setup_lua": "rune.trigger.starts('You are', function(matches, ctx) rune.send_raw('status check') end)",
       "output": "You are hungry.",
-      "expected_commands": ["status check"]
+      "expected_commands": [
+        "status check"
+      ]
     },
     {
       "name": "Starts Match - Exact Prefix",
       "setup_lua": "rune.trigger.starts('HP:', function(matches, ctx) rune.send_raw('hp found') end)",
       "output": "HP: 100/100",
-      "expected_commands": ["hp found"]
+      "expected_commands": [
+        "hp found"
+      ]
     },
     {
       "name": "Starts No Match - Middle",
@@ -46,19 +52,25 @@
       "name": "Starts String Action",
       "setup_lua": "rune.trigger.starts('Enemy ', 'attack')",
       "output": "Enemy approaches!",
-      "expected_commands": ["attack"]
+      "expected_commands": [
+        "attack"
+      ]
     },
     {
       "name": "Contains Match",
       "setup_lua": "rune.trigger.contains('hungry', function(matches, ctx) rune.send_raw('eat bread') end)",
       "output": "You are hungry.",
-      "expected_commands": ["eat bread"]
+      "expected_commands": [
+        "eat bread"
+      ]
     },
     {
       "name": "Contains Match - Middle",
       "setup_lua": "rune.trigger.contains('tells you', function(matches, ctx) rune.send_raw('reply hi') end)",
       "output": "Bob tells you: hello there",
-      "expected_commands": ["reply hi"]
+      "expected_commands": [
+        "reply hi"
+      ]
     },
     {
       "name": "Contains No Match",
@@ -70,19 +82,25 @@
       "name": "Contains String Action",
       "setup_lua": "rune.trigger.contains('attacks you', 'flee')",
       "output": "A goblin attacks you!",
-      "expected_commands": ["flee"]
+      "expected_commands": [
+        "flee"
+      ]
     },
     {
       "name": "Regex Basic Capture",
       "setup_lua": "rune.trigger.regex('HP: (\\\\d+)/100', function(matches, ctx) rune.send_raw('hp=' .. matches[1]) end)",
       "output": "HP: 30/100",
-      "expected_commands": ["hp=30"]
+      "expected_commands": [
+        "hp=30"
+      ]
     },
     {
       "name": "Regex Multiple Captures",
       "setup_lua": "rune.trigger.regex('Stats: (\\\\d+)/(\\\\d+)', function(matches, ctx) rune.send_raw('stats=' .. matches[1] .. ',' .. matches[2]) end)",
       "output": "Stats: 45/100",
-      "expected_commands": ["stats=45,100"]
+      "expected_commands": [
+        "stats=45,100"
+      ]
     },
     {
       "name": "Regex No Match",
@@ -94,13 +112,17 @@
       "name": "Regex String Action with Substitution",
       "setup_lua": "rune.trigger.regex('(\\\\w+) attacks you', 'kill %1')",
       "output": "Goblin attacks you!",
-      "expected_commands": ["kill Goblin"]
+      "expected_commands": [
+        "kill Goblin"
+      ]
     },
     {
       "name": "Regex Alternation",
       "setup_lua": "rune.trigger.regex('You go (north|south|east|west)', function(matches, ctx) rune.send_raw('went=' .. matches[1]) end)",
       "output": "You go north",
-      "expected_commands": ["went=north"]
+      "expected_commands": [
+        "went=north"
+      ]
     },
     {
       "name": "Multiple Triggers Same Input",
@@ -109,14 +131,20 @@
         "rune.trigger.regex('HP: (\\\\d+)/100', function(matches, ctx) if tonumber(matches[1]) < 20 then rune.send_raw('crit=' .. matches[1]) end end)"
       ],
       "output": "HP: 15/100",
-      "expected_commands": ["low=15", "crit=15"]
+      "expected_commands": [
+        "low=15",
+        "crit=15"
+      ]
     },
     {
       "name": "Trigger with User Input",
       "setup_lua": "rune.trigger.regex('HP: (\\\\d+)/100', function(matches, ctx) rune.send_raw('hp=' .. matches[1]) end)",
       "input": "look",
       "output": "HP: 45/100",
-      "expected_commands": ["look", "hp=45"]
+      "expected_commands": [
+        "look",
+        "hp=45"
+      ]
     },
     {
       "name": "Disable Via Handle",
@@ -128,7 +156,9 @@
       "name": "Enable After Disable",
       "setup_lua": "local t = rune.trigger.contains('attack', 'flee'); t:disable(); t:enable()",
       "output": "A goblin attacks you!",
-      "expected_commands": ["flee"]
+      "expected_commands": [
+        "flee"
+      ]
     },
     {
       "name": "Disable By Name",
@@ -147,7 +177,9 @@
         "rune.trigger.enable('combat_flee')"
       ],
       "output": "A goblin attacks you!",
-      "expected_commands": ["flee"]
+      "expected_commands": [
+        "flee"
+      ]
     },
     {
       "name": "Regex Disable Via Handle",
@@ -159,7 +191,9 @@
       "name": "Regex Enable After Disable",
       "setup_lua": "local t = rune.trigger.regex('HP: (\\\\d+)/100', 'heal'); t:disable(); t:enable()",
       "output": "HP: 30/100",
-      "expected_commands": ["heal"]
+      "expected_commands": [
+        "heal"
+      ]
     },
     {
       "name": "Starts Disable Via Handle",
@@ -171,13 +205,17 @@
       "name": "Starts Enable After Disable",
       "setup_lua": "local t = rune.trigger.starts('Enemy', 'attack'); t:disable(); t:enable()",
       "output": "Enemy approaches!",
-      "expected_commands": ["attack"]
+      "expected_commands": [
+        "attack"
+      ]
     },
     {
       "name": "Raw Option - Regex Matches ANSI Codes",
       "setup_lua": "rune.trigger.regex('\\\\x1b\\\\[1;31m(\\\\w+)\\\\x1b\\\\[m', function(matches, ctx) rune.send_raw('found=' .. matches[1]) end, {raw = true})",
       "output": "\u001b[1;31mPlayer\u001b[m is here",
-      "expected_commands": ["found=Player"]
+      "expected_commands": [
+        "found=Player"
+      ]
     },
     {
       "name": "Raw Option - Without Raw ANSI Not Matched",
@@ -189,7 +227,9 @@
       "name": "Raw Option - Contains Matches ANSI Codes",
       "setup_lua": "rune.trigger.contains('\\027[1;31m', function() rune.send_raw('has_red') end, {raw = true})",
       "output": "\u001b[1;31mAlert\u001b[m",
-      "expected_commands": ["has_red"]
+      "expected_commands": [
+        "has_red"
+      ]
     },
     {
       "name": "Raw Option - Contains Without Raw",
@@ -201,13 +241,37 @@
       "name": "Raw Option - Exact Matches Full Raw Line",
       "setup_lua": "rune.trigger.exact('\\027[32mOK\\027[m', function() rune.send_raw('exact_raw') end, {raw = true})",
       "output": "\u001b[32mOK\u001b[m",
-      "expected_commands": ["exact_raw"]
+      "expected_commands": [
+        "exact_raw"
+      ]
     },
     {
       "name": "Raw Option - Starts Matches Raw Prefix",
       "setup_lua": "rune.trigger.starts('\\027[33m', function() rune.send_raw('yellow_start') end, {raw = true})",
       "output": "\u001b[33mWarning\u001b[m message",
-      "expected_commands": ["yellow_start"]
+      "expected_commands": [
+        "yellow_start"
+      ]
+    },
+    {
+      "name": "Capture 10 Not Consumed As Capture 1",
+      "setup_lua": [
+        "rune.trigger.regex('^(a) (b) (c) (d) (e) (f) (g) (h) (i) (j)$', 'say %10 then %1')"
+      ],
+      "output": "a b c d e f g h i j",
+      "expected_commands": [
+        "say j then a"
+      ]
+    },
+    {
+      "name": "Unknown Capture Index Stays Literal",
+      "setup_lua": [
+        "rune.trigger.regex('^kill (\\\\S+)$', 'say %1 %5')"
+      ],
+      "output": "kill rat",
+      "expected_commands": [
+        "say rat %5"
+      ]
     }
   ]
 }
