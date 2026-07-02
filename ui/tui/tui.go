@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/drake/rune/text"
 	"github.com/drake/rune/ui"
 )
 
@@ -59,9 +60,8 @@ func (b *BubbleTeaUI) Print(text string) {
 }
 
 // Echo appends user input to scrollback with local-echo styling.
-func (b *BubbleTeaUI) Echo(text string) {
-	styled := "\033[32m> " + text + "\033[0m"
-	b.send(ui.EchoLineMsg(styled))
+func (b *BubbleTeaUI) Echo(line string) {
+	b.send(ui.EchoLineMsg(text.Green("> " + line)))
 }
 
 // SetPrompt updates the active server prompt (overlay at bottom).

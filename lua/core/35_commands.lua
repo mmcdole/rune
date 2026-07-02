@@ -1,11 +1,9 @@
 -- Slash Command System
 
--- ANSI color helpers for command output
-local function green(s) return "\027[32m" .. s .. "\027[0m" end
-local function red(s) return "\027[31m" .. s .. "\027[0m" end
-local function yellow(s) return "\027[33m" .. s .. "\027[0m" end
-local function cyan(s) return "\027[36m" .. s .. "\027[0m" end
-local function dim(s) return "\027[90m" .. s .. "\027[0m" end
+-- Styling shorthands (see 01_style.lua)
+local green, red, yellow, cyan, dim =
+    rune.style.green, rune.style.red, rune.style.yellow,
+    rune.style.cyan, rune.style.gray
 
 rune.command = {}
 local commands = {}  -- Private storage: name -> {handler, description}

@@ -46,7 +46,7 @@ function rune.regex.match(pattern, text)
     if entry.err then
         if not entry.reported then
             entry.reported = true
-            rune.echo("\027[31m[Regex]\027[0m invalid pattern '" .. tostring(pattern) ..
+            rune.echo(rune.style.red("[Regex]") .. " invalid pattern '" .. tostring(pattern) ..
                 "': " .. tostring(entry.err))
         end
         return nil

@@ -54,12 +54,10 @@ rune.bind("shift+pagedown", function() rune.pane.scroll_to_bottom("main") end)
 -- Reactive status bar using rune.ui.bar() API
 -- ============================================================
 
--- ANSI color helpers
-local function green(s) return "\027[32m" .. s .. "\027[0m" end
-local function yellow(s) return "\027[33m" .. s .. "\027[0m" end
-local function gray(s) return "\027[90m" .. s .. "\027[0m" end
-local function dim(s) return "\027[2m" .. s .. "\027[0m" end
-local function inverse(s) return "\027[7m" .. s .. "\027[0m" end
+-- Styling shorthands (see 01_style.lua)
+local green, yellow, gray, dim, inverse =
+    rune.style.green, rune.style.yellow, rune.style.gray,
+    rune.style.dim, rune.style.inverse
 
 -- Render completion bar when cycling through matches
 local function render_completion_bar(width)

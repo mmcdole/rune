@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/drake/rune/text"
 	"github.com/drake/rune/ui"
 	"github.com/drake/rune/ui/tui/style"
 	"github.com/drake/rune/ui/tui/util"
@@ -318,11 +319,11 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.Type {
 	case tea.KeyEnter:
-		text := m.input.Value()
+		line := m.input.Value()
 		select {
-		case m.inputChan <- text:
+		case m.inputChan <- line:
 		default:
-			m.scrollback.Append("\033[31m[WARNING] Input dropped - engine lagging\033[0m")
+			m.scrollback.Append(text.Red("[WARNING] Input dropped - engine lagging"))
 		}
 		m.input.Reset()
 		m.sendOutbound(ui.InputChangedMsg{Text: "", Cursor: 0})
@@ -432,11 +433,11 @@ func (m Model) handleInlinePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) submitInput() (tea.Model, tea.Cmd) {
-	text := m.input.Value()
+	line := m.input.Value()
 	select {
-	case m.inputChan <- text:
+	case m.inputChan <- line:
 	default:
-		m.scrollback.Append("\033[31m[WARNING] Input dropped - engine lagging\033[0m")
+		m.scrollback.Append(text.Red("[WARNING] Input dropped - engine lagging"))
 	}
 	m.input.Reset()
 	return m, nil

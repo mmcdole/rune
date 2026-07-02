@@ -343,7 +343,7 @@ func (e *Engine) CallHook(event string, args ...string) {
 		e.reportHooksBroken()
 		// Errors must never disappear, even with hooks broken.
 		if event == "error" {
-			e.host.Print("\033[31m[Error] " + strings.Join(args, " ") + "\033[0m")
+			e.host.Print(text.Red("[Error] " + strings.Join(args, " ")))
 		}
 		return
 	}
@@ -407,7 +407,7 @@ func (e *Engine) getHooksCall() (glua.LValue, bool) {
 func (e *Engine) reportError(source string, err error) {
 	msg := source + ": " + err.Error()
 	if e.reportingError {
-		e.host.Print("\033[31m[Error] " + msg + "\033[0m")
+		e.host.Print(text.Red("[Error] " + msg))
 		return
 	}
 	e.reportingError = true
@@ -422,9 +422,9 @@ func (e *Engine) reportHooksBroken() {
 		return
 	}
 	e.hooksBrokenReported = true
-	e.host.Print("\033[31m[System] rune.hooks.call is unavailable - scripting disabled. " +
+	e.host.Print(text.Red("[System] rune.hooks.call is unavailable - scripting disabled. " +
 		"Input and output pass through raw; /reload and /quit still work. " +
-		"Fix your scripts and /reload.\033[0m")
+		"Fix your scripts and /reload."))
 }
 
 func expandTilde(path string) string {

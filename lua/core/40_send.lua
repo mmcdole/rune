@@ -59,7 +59,7 @@ end
 -- INTERNAL: Recursive send implementation
 local function send_impl(input, depth)
     if depth > MAX_RECURSION_DEPTH then
-        rune.echo("\027[31m[Error] Alias loop detected (depth limit exceeded)\027[0m")
+        rune.echo(rune.style.red("[Error] Alias loop detected (depth limit exceeded)"))
         return
     end
 

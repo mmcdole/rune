@@ -102,7 +102,7 @@ func (s *Session) Run(ctx context.Context) error {
 	}()
 
 	if err := s.boot(); err != nil {
-		s.ui.Print(fmt.Sprintf("\033[31m[System] Boot Error: %v\033[0m", err))
+		s.ui.Print(text.Red(fmt.Sprintf("[System] Boot Error: %v", err)))
 	}
 
 	s.barTicker = time.NewTicker(250 * time.Millisecond)
