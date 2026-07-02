@@ -21,12 +21,17 @@
 --   - Function: function(ctx)
 --       ctx = {name, group, type, remove()}
 
+-- Go timer id -> callback. Go only schedules wake-ups; this module
+-- owns dispatch, so all callback state dies with the VM on reload.
+local pending = {}
+
 local registry = rune.registry.new{
     kind = "timer",
     on_remove = function(data)
         -- Stop the underlying Go timer when the entry goes away
         if data.timer_id then
             rune._timer.cancel(data.timer_id)
+            pending[data.timer_id] = nil
         end
     end,
 }
@@ -73,16 +78,26 @@ local function create_timer(seconds, action, opts, repeating)
     end
 
     if repeating then
-        data.timer_id = rune._timer.every(seconds, callback)
+        data.timer_id = rune._timer.every(seconds)
     else
-        data.timer_id = rune._timer.after(seconds, callback)
+        data.timer_id = rune._timer.after(seconds)
     end
+    pending[data.timer_id] = callback
 
     return handle
 end
 
 -- Public API
 rune.timer = {}
+
+-- INTERNAL: called by Go when a timer fires. Unknown ids - cancelled
+-- mid-flight, or scheduled by a previous VM generation - are ignored.
+function rune.timer._fire(id)
+    local callback = pending[id]
+    if callback then
+        callback()
+    end
+end
 
 -- One-shot timer (fires once after delay)
 function rune.timer.after(seconds, action, opts)

@@ -7,47 +7,37 @@ import (
 )
 
 // registerTimerFuncs registers rune._timer.* primitives.
+//
+// Go only schedules wake-ups and returns ids; the Lua timer module
+// (20_timer.lua) owns the id -> callback mapping and all dispatch,
+// so callback state lives in exactly one place and dies with the VM
+// on reload.
 func (e *Engine) registerTimerFuncs() {
 	timerTable := e.L.NewTable()
 	e.L.SetField(e.runeTable, "_timer", timerTable)
 
-	// rune._timer.after(seconds, callback): One-shot timer, returns ID
+	// rune._timer.after(seconds): One-shot wake-up, returns ID
 	e.L.SetField(timerTable, "after", e.L.NewFunction(func(L *glua.LState) int {
 		seconds := L.CheckNumber(1)
-		fn := L.CheckFunction(2)
-
-		id := e.host.TimerAfter(toDuration(seconds))
-		e.callbacks[id] = fn
-
-		L.Push(glua.LNumber(id))
+		L.Push(glua.LNumber(e.host.TimerAfter(toDuration(seconds))))
 		return 1
 	}))
 
-	// rune._timer.every(seconds, callback): Repeating timer, returns ID
+	// rune._timer.every(seconds): Repeating wake-up, returns ID
 	e.L.SetField(timerTable, "every", e.L.NewFunction(func(L *glua.LState) int {
 		seconds := L.CheckNumber(1)
-		fn := L.CheckFunction(2)
-
-		id := e.host.TimerEvery(toDuration(seconds))
-		e.callbacks[id] = fn
-
-		L.Push(glua.LNumber(id))
+		L.Push(glua.LNumber(e.host.TimerEvery(toDuration(seconds))))
 		return 1
 	}))
 
-	// rune._timer.cancel(id): Stop a timer
+	// rune._timer.cancel(id): Stop a scheduled wake-up
 	e.L.SetField(timerTable, "cancel", e.L.NewFunction(func(L *glua.LState) int {
-		id := int(L.CheckNumber(1))
-		if _, ok := e.callbacks[id]; ok {
-			delete(e.callbacks, id)
-			e.host.TimerCancel(id)
-		}
+		e.host.TimerCancel(int(L.CheckNumber(1)))
 		return 0
 	}))
 
-	// rune._timer.cancel_all(): Stop all timers
+	// rune._timer.cancel_all(): Stop all scheduled wake-ups
 	e.L.SetField(timerTable, "cancel_all", e.L.NewFunction(func(L *glua.LState) int {
-		e.callbacks = make(map[int]*glua.LFunction)
 		e.host.TimerCancelAll()
 		return 0
 	}))

@@ -146,7 +146,7 @@ func (s *Session) processEvents(ctx context.Context) {
 		case line := <-s.ui.Input():
 			s.handleEvent(event.Event{Type: event.UserInput, Payload: event.Line(line)})
 		case evt := <-s.timerEvents:
-			s.engine.OnTimer(evt.ID, evt.Repeating)
+			s.engine.OnTimer(evt.ID)
 		case <-s.barTicker.C:
 			s.pushBarUpdates()
 		case msg := <-s.ui.Outbound():

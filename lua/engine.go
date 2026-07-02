@@ -25,7 +25,6 @@ type Engine struct {
 	L         *glua.LState
 	runeTable *glua.LTable
 	host      Host
-	callbacks map[int]*glua.LFunction
 
 	// Cleared on reload to prevent stale Lua references
 	pickerCallbacks map[string]*glua.LFunction
@@ -57,7 +56,6 @@ type Engine struct {
 func NewEngine(host Host) *Engine {
 	return &Engine{
 		host:            host,
-		callbacks:       make(map[int]*glua.LFunction),
 		pickerCallbacks: make(map[string]*glua.LFunction),
 		barFuncs:        make(map[string]*glua.LFunction),
 		barFailures:     make(map[string]int),
@@ -128,7 +126,6 @@ func (e *Engine) Init() error {
 	e.L = glua.NewState()
 
 	e.host.TimerCancelAll()
-	e.callbacks = make(map[int]*glua.LFunction)
 
 	e.pickerCallbacks = make(map[string]*glua.LFunction)
 	e.pickerNextID = 0
@@ -150,31 +147,33 @@ func (e *Engine) Init() error {
 // Close cleans up the Lua state.
 func (e *Engine) Close() {
 	e.host.TimerCancelAll()
-	e.callbacks = nil
 	if e.L != nil {
 		e.L.Close()
 		e.L = nil
 	}
 }
 
-// OnTimer handles wake-up calls from Session.
-func (e *Engine) OnTimer(id int, repeating bool) {
+// OnTimer handles wake-up calls from Session by dispatching to the
+// Lua timer module, which owns the id -> callback mapping. Ids from a
+// previous VM generation (or cancelled mid-flight) are ignored there.
+func (e *Engine) OnTimer(id int) {
 	if e.L == nil {
 		return
 	}
 
-	fn, ok := e.callbacks[id]
+	fire, ok := e.getRuneFunc("timer", "_fire")
 	if !ok {
-		return // Cancelled, or belonged to previous Engine instance
+		return // Timer module unavailable (core failed to load)
 	}
 
-	e.L.Push(fn)
-	if err := e.guard(func() error { return e.L.PCall(0, 0, nil) }); err != nil {
+	if err := e.guard(func() error {
+		return e.L.CallByParam(glua.P{
+			Fn:      fire,
+			NRet:    0,
+			Protect: true,
+		}, glua.LNumber(id))
+	}); err != nil {
 		e.reportError("timer callback", err)
-	}
-
-	if !repeating {
-		delete(e.callbacks, id)
 	}
 }
 
@@ -393,19 +392,25 @@ func (e *Engine) registerAPIs() {
 	e.registerInputFuncs()
 }
 
-// getHooksCall returns rune.hooks.call, the Lua-side dispatcher for all
-// events. Returns false if the hook system is unavailable - because a
-// core script failed to load, or a user script clobbered rune.hooks.
-func (e *Engine) getHooksCall() (glua.LValue, bool) {
-	hooksTable, ok := e.L.GetField(e.runeTable, "hooks").(*glua.LTable)
+// getRuneFunc returns rune.<table>.<field> if it is a function.
+// Returns false when the module is unavailable - because a core
+// script failed to load, or a user script clobbered the table.
+func (e *Engine) getRuneFunc(table, field string) (glua.LValue, bool) {
+	tbl, ok := e.L.GetField(e.runeTable, table).(*glua.LTable)
 	if !ok {
 		return glua.LNil, false
 	}
-	call := e.L.GetField(hooksTable, "call")
-	if call.Type() != glua.LTFunction {
+	fn := e.L.GetField(tbl, field)
+	if fn.Type() != glua.LTFunction {
 		return glua.LNil, false
 	}
-	return call, true
+	return fn, true
+}
+
+// getHooksCall returns rune.hooks.call, the Lua-side dispatcher for
+// all events.
+func (e *Engine) getHooksCall() (glua.LValue, bool) {
+	return e.getRuneFunc("hooks", "call")
 }
 
 // reportError surfaces an engine-level error to the user through the
