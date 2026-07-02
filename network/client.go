@@ -22,6 +22,14 @@ type TCPClient struct {
 	current *connection // The currently active connection, or nil
 }
 
+// outMsg is a queued write. line messages are user commands (CRLF
+// appended, prompt buffer cleared); raw messages are protocol bytes
+// such as telnet negotiation replies, written verbatim.
+type outMsg struct {
+	data []byte
+	line bool
+}
+
 // connection represents a single, ephemeral TCP session.
 // It is created on Connect() and discarded on Disconnect().
 type connection struct {
@@ -35,8 +43,10 @@ type connection struct {
 
 	localEcho atomic.Bool
 
-	// Buffered queue for outgoing data specific to this connection
-	sendQueue chan string
+	// Buffered queue for outgoing data specific to this connection.
+	// writeLoop is the ONLY goroutine that writes to conn (and the only
+	// one that touches write deadlines); everything else enqueues here.
+	sendQueue chan outMsg
 
 	// Signal to stop internal goroutines
 	done      chan struct{}
@@ -80,7 +90,7 @@ func (c *TCPClient) Connect(ctx context.Context, address string) error {
 		conn:      conn,
 		parser:    NewParser(defaultCompatibility()),
 		output:    NewOutputBuffer(TelnetModeUnterminated),
-		sendQueue: make(chan string, 4096),
+		sendQueue: make(chan outMsg, 4096),
 		done:      make(chan struct{}),
 	}
 	cx.localEcho.Store(true)
@@ -117,7 +127,7 @@ func (c *TCPClient) Send(data string) error {
 	}
 
 	select {
-	case cx.sendQueue <- data:
+	case cx.sendQueue <- outMsg{data: []byte(data), line: true}:
 		return nil
 	default:
 		return fmt.Errorf("send buffer full (network stalled?)")
@@ -178,10 +188,13 @@ func (c *TCPClient) readLoop(cx *connection) {
 		for _, ev := range cx.parser.Receive(buf[:n]) {
 			switch ev.Kind {
 			case TelnetEventDataSend:
-				cx.conn.SetWriteDeadline(time.Now().Add(time.Second))
-				_, werr := cx.conn.Write(ev.Data)
-				cx.conn.SetWriteDeadline(time.Time{})
-				if werr != nil {
+				// Negotiation replies go through the send queue so a
+				// single goroutine owns the socket writes and their
+				// deadlines. Blocking here is fine: writeLoop drains
+				// continuously, and done unblocks us on teardown.
+				select {
+				case cx.sendQueue <- outMsg{data: ev.Data}:
+				case <-cx.done:
 					return
 				}
 
@@ -238,18 +251,23 @@ func (c *TCPClient) readLoop(cx *connection) {
 }
 
 // writeLoop handles outgoing data for a specific connection.
+// It is the sole writer to the socket, so write deadlines cannot race.
 func (c *TCPClient) writeLoop(cx *connection) {
 	for {
 		select {
 		case <-cx.done:
 			return
-		case data := <-cx.sendQueue:
-			// Clear prompt buffer before sending - in unterminated mode,
-			// the server will reprint the prompt after echoing our input
-			cx.output.InputSent()
+		case msg := <-cx.sendQueue:
+			data := msg.data
+			if msg.line {
+				// Clear prompt buffer before sending - in unterminated mode,
+				// the server will reprint the prompt after echoing our input
+				cx.output.InputSent()
+				data = append(data, '\r', '\n')
+			}
 
 			cx.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-			_, err := cx.conn.Write([]byte(data + "\r\n"))
+			_, err := cx.conn.Write(data)
 			cx.conn.SetWriteDeadline(time.Time{})
 
 			if err != nil {
