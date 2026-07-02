@@ -198,6 +198,41 @@ rune.command.add("hooks", function(args)
     end
 end, "List all hooks")
 
+-- /binds - List all key bindings
+rune.command.add("binds", function(args)
+    local binds = rune.binds.list()
+    rune.echo(green("[Binds]") .. dim(" (" .. #binds .. " total)"))
+    if #binds == 0 then
+        rune.echo("  " .. dim("(none)"))
+        return
+    end
+    for _, b in ipairs(binds) do
+        local status = b.enabled and green("[on] ") or red("[off]")
+        local group_str = b.group and ("  " .. cyan("<" .. b.group .. ">")) or ""
+        local name_str = b.name and ("  " .. dim("name:") .. b.name) or ""
+        local src_str = b.source and ("  " .. dim("@" .. b.source)) or ""
+        rune.echo(string.format("  %s %-16s%s%s%s",
+            status, yellow(b.key), group_str, name_str, src_str))
+    end
+end, "List all key bindings")
+
+-- /bars - List all bar renderers
+rune.command.add("bars", function(args)
+    local bars = rune.bars.list()
+    rune.echo(green("[Bars]") .. dim(" (" .. #bars .. " total)"))
+    if #bars == 0 then
+        rune.echo("  " .. dim("(none)"))
+        return
+    end
+    for _, b in ipairs(bars) do
+        local status = b.enabled and green("[on] ") or red("[off]")
+        local group_str = b.group and ("  " .. cyan("<" .. b.group .. ">")) or ""
+        local src_str = b.source and ("  " .. dim("@" .. b.source)) or ""
+        rune.echo(string.format("  %s %-16s%s%s",
+            status, yellow(b.bar), group_str, src_str))
+    end
+end, "List all bar renderers")
+
 -- /groups - List all groups and their enabled state
 rune.command.add("groups", function(args)
     local groups = rune.group.list()
@@ -244,6 +279,8 @@ rune.command.add("help", function(args)
     rune.echo("  /triggers               - List triggers")
     rune.echo("  /timers                 - List timers")
     rune.echo("  /hooks                  - List hooks")
+    rune.echo("  /binds                  - List key bindings")
+    rune.echo("  /bars                   - List bar renderers")
     rune.echo("  /groups                 - List groups")
     rune.echo("")
     rune.echo(green("[Sending]"))
