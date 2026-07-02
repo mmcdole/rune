@@ -107,9 +107,22 @@ func (s *Session) Run(ctx context.Context) error {
 
 	s.barTicker = time.NewTicker(250 * time.Millisecond)
 
-	go s.processEvents(ctx)
+	eventLoopDone := make(chan struct{})
+	go func() {
+		defer close(eventLoopDone)
+		s.processEvents(ctx)
+	}()
 
-	return s.ui.Run()
+	err := s.ui.Run()
+
+	// Join the event loop before the deferred engine.Close tears down
+	// the Lua state: processEvents may be mid-call into the VM. UI
+	// sends are no-ops after Run returns, and Lua execution is bounded
+	// by the engine watchdog, so this cannot block indefinitely.
+	cancel()
+	<-eventLoopDone
+
+	return err
 }
 
 // processEvents is the main event loop.
