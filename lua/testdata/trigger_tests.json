@@ -272,6 +272,39 @@
       "expected_commands": [
         "say rat %5"
       ]
+    },
+    {
+      "name": "Rewritten Line Matches Later Triggers",
+      "setup_lua": [
+        "rune.trigger.contains('goblin', function(m, ctx) return ctx.line:clean():gsub('goblin', 'GOBLIN') end, {priority = 10})",
+        "rune.trigger.contains('GOBLIN', 'flee', {priority = 20})"
+      ],
+      "output": "A goblin attacks you!",
+      "expected_commands": [
+        "flee"
+      ]
+    },
+    {
+      "name": "Later Trigger Receives Rewritten Text",
+      "setup_lua": [
+        "rune.trigger.contains('rat', function(m, ctx) return 'a dire rat appears' end, {priority = 10})",
+        "rune.trigger.regex('^a (\\\\S+) rat', 'say %1', {priority = 20})"
+      ],
+      "output": "You see a rat.",
+      "expected_commands": [
+        "say dire"
+      ]
+    },
+    {
+      "name": "Hook Rewrite Chains To Next Hook",
+      "setup_lua": [
+        "rune.hooks.on('output', function(line) return line:clean() .. ' [tagged]' end, {priority = 10})",
+        "rune.hooks.on('output', function(line) rune.send_raw(line:clean()) end, {priority = 20})"
+      ],
+      "output": "hello",
+      "expected_commands": [
+        "hello [tagged]"
+      ]
     }
   ]
 }

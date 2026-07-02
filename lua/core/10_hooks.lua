@@ -197,13 +197,14 @@ local function run_handler(entry, ...)
 end
 
 -- Call all handlers for an event
--- For output/prompt: chains modifications, false gags
+-- For output/prompt: chains modifications (each handler sees the
+--   previous handler's rewrite), false gags
 -- For input: false stops processing
 -- For sys events: all handlers run (notifications)
 --
 -- Return semantics for handlers:
 --   return false    -> Stop/Gag
---   return string   -> Modify, pass to next
+--   return string   -> Replace the line for subsequent handlers
 --   return nil      -> Pass through unmodified
 function rune.hooks.call(event, ...)
     local handlers = registry[event]
@@ -223,11 +224,12 @@ function rune.hooks.call(event, ...)
     end
 
     -- Determine event type for return value handling
-    if event == "output" then
-        -- Output receives a Line object (userdata with :raw() and :clean() methods)
-        -- Chain handlers, passing the Line object to each
+    if event == "output" or event == "prompt" then
+        -- Output/prompt receive a Line object (:raw() and :clean()).
+        -- True chaining: a handler returning a string replaces the line
+        -- for every subsequent handler, so rewrites compose in priority
+        -- order instead of last-writer-wins on the original text.
         local line = select(1, ...)
-        local modified_text = nil  -- Track if any handler modified the output
 
         for _, entry in ipairs(handlers) do
             if active(entry) then
@@ -235,38 +237,12 @@ function rune.hooks.call(event, ...)
                 if result == false then
                     return "", false  -- gagged
                 elseif type(result) == "string" then
-                    modified_text = result  -- handler returned modified text
+                    line = rune.line.new(result)
                 end
                 -- nil = pass through unchanged
             end
         end
 
-        -- Return modified text if any handler changed it, otherwise raw line
-        if modified_text then
-            return modified_text, true
-        end
-        return line:raw(), true
-
-    elseif event == "prompt" then
-        -- Prompt receives a Line object (like output)
-        local line = select(1, ...)
-        local modified_text = nil
-
-        for _, entry in ipairs(handlers) do
-            if active(entry) then
-                local result = run_handler(entry, line)
-                if result == false then
-                    return "", false  -- gagged
-                elseif type(result) == "string" then
-                    modified_text = result  -- modified
-                end
-                -- nil = pass through unchanged
-            end
-        end
-
-        if modified_text then
-            return modified_text, true
-        end
         return line:raw(), true
 
     elseif event == "input" then

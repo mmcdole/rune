@@ -158,15 +158,7 @@ rune.command.add("test", function(args)
 
     rune.echo("[Test Input] " .. args)
 
-    -- Create a mock Line object for testing
-    local mock_line = {
-        _raw = args,
-        _clean = args,
-        raw = function(self) return self._raw end,
-        clean = function(self) return self._clean end,
-    }
-
-    local modified, show = rune.trigger.process(mock_line)
+    local modified, show = rune.trigger.process(rune.line.new(args))
     if show and modified ~= "" then
         rune.echo("[Test Output] " .. modified)
     else

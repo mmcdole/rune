@@ -61,6 +61,26 @@ function rune.caller_source(level)
     return src
 end
 
+-- Line objects
+-- Server output arrives as objects with :raw() and :clean() methods
+-- (raw keeps ANSI codes, clean strips them). rune.line.new builds a
+-- compatible object from plain text - used when a handler rewrites a
+-- line so the rewritten text flows to the next handler, and by /test.
+rune.line = {}
+
+function rune.line.new(raw)
+    local clean = nil
+    return {
+        raw = function() return raw end,
+        clean = function()
+            if clean == nil then
+                clean = rune._strip_ansi(raw)
+            end
+            return clean
+        end,
+    }
+end
+
 -- Substitute %1..%N capture references in a template string.
 -- Single-pass with greedy digits, so %10 means capture 10, not
 -- capture 1 followed by "0". Unknown indices stay literal. The

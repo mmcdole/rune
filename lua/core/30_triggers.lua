@@ -244,6 +244,8 @@ end
 
 -- Process triggers against a line (called by hooks)
 -- Returns: modified_text (string), show (bool)
+-- A function action returning a string rewrites the line: later
+-- triggers match against (and receive) the rewritten text.
 function rune.trigger.process(line)
     local gagged = false
     local modified_text = nil
@@ -306,7 +308,11 @@ function rune.trigger.process(line)
                             if result == false then
                                 gagged = true
                             elseif type(result) == "string" then
+                                -- Rewrite: later triggers see the new text
                                 modified_text = result
+                                line = rune.line.new(result)
+                                raw_line = line:raw()
+                                clean_line = line:clean()
                             end
                         end
                     elseif type(data.action) == "string" and data.action ~= "" then

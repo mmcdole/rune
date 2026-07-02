@@ -1,6 +1,9 @@
 package lua
 
-import glua "github.com/yuin/gopher-lua"
+import (
+	"github.com/drake/rune/text"
+	glua "github.com/yuin/gopher-lua"
+)
 
 // registerCoreFuncs registers internal rune._* primitives (wrapped by Lua).
 //
@@ -52,6 +55,15 @@ func (e *Engine) registerCoreFuncs() {
 	e.L.SetField(e.runeTable, "_reload", e.L.NewFunction(func(L *glua.LState) int {
 		e.host.Reload()
 		return 0
+	}))
+
+	// rune._strip_ansi(text): Remove ANSI escape sequences.
+	// Used by rune.line.new so Lua-built line objects get the same
+	// clean text as lines arriving from the server.
+	e.L.SetField(e.runeTable, "_strip_ansi", e.L.NewFunction(func(L *glua.LState) int {
+		s := L.CheckString(1)
+		L.Push(glua.LString(text.StripANSI(s)))
+		return 1
 	}))
 
 	// rune._load(path): Load a Lua script (runs immediately, no round-trip).
