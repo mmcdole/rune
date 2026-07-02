@@ -1,6 +1,8 @@
 package session
 
 import (
+	"unicode/utf8"
+
 	"github.com/drake/rune/ui"
 )
 
@@ -51,7 +53,16 @@ func (s *Session) InputGetCursor() int {
 }
 
 // InputSetCursor implements lua.Host.
+// The position is clamped to the current input's rune count here, so
+// the mirror Lua reads via rune.input.get_cursor() cannot drift from
+// what the input widget (which clamps independently) will display.
 func (s *Session) InputSetCursor(pos int) {
+	if pos < 0 {
+		pos = 0
+	}
+	if max := utf8.RuneCountInString(s.currentInput); pos > max {
+		pos = max
+	}
 	s.currentCursor = pos
 	s.ui.InputSetCursor(pos)
 }
