@@ -31,6 +31,9 @@ type MockHost struct {
 
 	// Timer ID generation
 	nextTimerID int
+
+	// When set, Send fails with this error instead of recording the call
+	SendErr error
 }
 
 func NewMockHost() *MockHost {
@@ -40,6 +43,9 @@ func NewMockHost() *MockHost {
 func (m *MockHost) Send(data string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.SendErr != nil {
+		return m.SendErr
+	}
 	m.SendCalls = append(m.SendCalls, data)
 	return nil
 }

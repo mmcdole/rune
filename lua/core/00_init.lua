@@ -42,8 +42,15 @@ end
 
 -- Core function wrappers around Go primitives (rune._*)
 
+-- Send raw text to the server, bypassing alias processing.
+-- Echoes send failures (e.g. not connected) rather than raising.
+-- Returns true, or nil + error message.
 function rune.send_raw(text)
-    rune._send_raw(text)
+    local ok, err = rune._send_raw(text)
+    if not ok then
+        rune.echo("\027[31m[Error]\027[0m " .. tostring(err))
+    end
+    return ok, err
 end
 
 function rune.echo(text)
@@ -66,7 +73,7 @@ function rune.reload()
     rune._reload()
 end
 
--- Returns nil on success, error string on failure
+-- Load a Lua script. Returns true, or nil + error message.
 function rune.load(path)
     return rune._load(path)
 end

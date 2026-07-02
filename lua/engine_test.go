@@ -1,12 +1,15 @@
 package lua
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/drake/rune/text"
 )
+
+var errNotConnected = errors.New("not connected")
 
 // TestWatchdogInterruptsRunawayScript verifies that a script stuck in an
 // infinite loop is interrupted after CallTimeout instead of hanging the
@@ -220,6 +223,35 @@ func TestCaptureWithPercentIsLiteral(t *testing.T) {
 	engine.OnOutput(text.NewLine("You gain 50% exp"))
 	if sent := host.DrainNetworkCalls(); len(sent) != 1 || sent[0] != "say 50%" {
 		t.Errorf("expected literal %%-capture substitution, got %v", sent)
+	}
+}
+
+// TestSendRawFailureIsReportedNotRaised verifies the nil+err convention:
+// a failed send is echoed and returned as a value, and does not raise a
+// Lua error that would abort the calling script.
+func TestSendRawFailureIsReportedNotRaised(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	host.SendErr = errNotConnected
+
+	script := `
+		local ok, err = rune.send_raw("north")
+		assert(ok == nil, "expected nil ok")
+		assert(err == "not connected", "expected error message, got " .. tostring(err))
+	`
+	if err := engine.DoString("test", script); err != nil {
+		t.Fatalf("send_raw should not raise: %v", err)
+	}
+
+	echoed := false
+	for _, p := range host.DrainPrintCalls() {
+		if strings.Contains(p, "not connected") {
+			echoed = true
+		}
+	}
+	if !echoed {
+		t.Error("expected send failure to be echoed")
 	}
 }
 

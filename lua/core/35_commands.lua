@@ -72,11 +72,11 @@ rune.command.add("load", function(args)
         rune.echo("[Usage] /load <path>")
         return
     end
-    local err = rune.load(args)
-    if err then
-        rune.echo("[Error] " .. err)
-    else
+    local ok, err = rune.load(args)
+    if ok then
         rune.echo("[Loaded] " .. args)
+    else
+        rune.echo("[Error] " .. tostring(err))
     end
 end, "Load a Lua script file")
 

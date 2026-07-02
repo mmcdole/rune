@@ -2,16 +2,24 @@ package lua
 
 import glua "github.com/yuin/gopher-lua"
 
-// registerCoreFuncs registers internal rune._* primitives (wrapped by Lua)
+// registerCoreFuncs registers internal rune._* primitives (wrapped by Lua).
+//
+// Convention: recoverable runtime failures (not connected, file not
+// found) return nil + error message rather than raising, matching
+// rune._regex.compile. Raising is reserved for programmer errors like
+// wrong argument types (L.Check*).
 func (e *Engine) registerCoreFuncs() {
-	// rune._send_raw(text): Bypasses alias processing, writes directly to socket
+	// rune._send_raw(text): Bypasses alias processing, writes directly to socket.
+	// Returns true, or nil + error message.
 	e.L.SetField(e.runeTable, "_send_raw", e.L.NewFunction(func(L *glua.LState) int {
 		cmd := L.CheckString(1)
 		if err := e.host.Send(cmd); err != nil {
-			L.RaiseError("%s", err.Error())
-			return 0
+			L.Push(glua.LNil)
+			L.Push(glua.LString(err.Error()))
+			return 2
 		}
-		return 0
+		L.Push(glua.LTrue)
+		return 1
 	}))
 
 	// rune._echo(text): Outputs text to the local game window
@@ -46,14 +54,17 @@ func (e *Engine) registerCoreFuncs() {
 		return 0
 	}))
 
-	// rune._load(path): Load a Lua script (runs immediately, no round-trip)
+	// rune._load(path): Load a Lua script (runs immediately, no round-trip).
+	// Returns true, or nil + error message.
 	e.L.SetField(e.runeTable, "_load", e.L.NewFunction(func(L *glua.LState) int {
 		path := L.CheckString(1)
 		if err := e.DoFile(path); err != nil {
+			L.Push(glua.LNil)
 			L.Push(glua.LString(err.Error()))
-			return 1
+			return 2
 		}
 		e.CallHook("loaded", path)
-		return 0
+		L.Push(glua.LTrue)
+		return 1
 	}))
 }
