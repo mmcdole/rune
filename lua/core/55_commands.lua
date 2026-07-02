@@ -98,15 +98,66 @@ function rune.command.list()
     return result
 end
 
--- /connect <host> <port> - Connect to server
+-- /connect - three forms, resolved in order:
+--   no args              -> picker over saved worlds (58_worlds.lua)
+--   <world name>         -> saved world's address
+--   <host> <port> [tls|tls+insecure], or a bare address ("host:port",
+--                           optionally with a scheme) -> direct
+-- rune.world is checked defensively: it loads after this file, and
+-- may be missing in degraded mode.
+local USAGE_CONNECT = "[Usage] /connect <world> | /connect <host> <port> [tls|tls+insecure]"
+
 rune.command.add("connect", function(args)
-    local host, port = args:match("^(%S+)%s+(%d+)$")
-    if host and port then
-        rune.connect(host .. ":" .. port)
-    else
-        rune.echo("[Usage] /connect <host> <port>")
+    if args == "" then
+        local worlds = rune.world and rune.world.list() or {}
+        if #worlds == 0 then
+            rune.echo(USAGE_CONNECT)
+            return
+        end
+        local items = {}
+        for _, w in ipairs(worlds) do
+            table.insert(items, { text = w.name, desc = w.address, value = w.name })
+        end
+        rune.ui.picker.show{
+            title = "Connect",
+            items = items,
+            match_description = true,
+            on_select = function(name)
+                local entry = rune.world and rune.world.get(name)
+                if entry then
+                    rune.connect(entry.address)
+                end
+            end,
+        }
+        return
     end
-end, "Connect to a MUD server")
+
+    local word = args:match("^(%S+)$")
+    if word and rune.world then
+        local entry = rune.world.get(word)
+        if entry then
+            rune.connect(entry.address)
+            return
+        end
+    end
+
+    local host, port, scheme = args:match("^(%S+)%s+(%d+)%s*(%S*)$")
+    if host and port then
+        if scheme == "" then
+            rune.connect(host .. ":" .. port)
+        elseif scheme == "tls" or scheme == "tls+insecure" then
+            rune.connect(scheme .. "://" .. host .. ":" .. port)
+        else
+            rune.echo(USAGE_CONNECT)
+        end
+        return
+    end
+    if word and word:find(":") then
+        rune.connect(word)
+    else
+        rune.echo(USAGE_CONNECT)
+    end
+end, "Connect to a world or address")
 
 -- /disconnect - Disconnect from server
 rune.command.add("disconnect", function(args)
@@ -114,9 +165,10 @@ rune.command.add("disconnect", function(args)
 end, "Disconnect from server")
 
 -- /reconnect - Reconnect to last server. The address is stored in
--- rune.persist (on the "connected" event), so it survives /reload.
+-- rune.store (on the "connected" event), so it survives /reload and
+-- client restarts.
 rune.command.add("reconnect", function(args)
-    local addr = rune.persist.get("last_address")
+    local addr = rune.store.get("last_address")
     if addr then
         rune.connect(addr)
     else
@@ -311,6 +363,29 @@ rune.command.add("groups", function(args)
     end
 end, "List all groups")
 
+-- /group <name> on|off - Master switch for a group, so a pack of
+-- triggers/aliases can be toggled mid-game without typing Lua.
+rune.command.add("group", function(args)
+    local name, action = args:match("^(%S+)%s+(%S+)$")
+    if not name or (action ~= "on" and action ~= "off") then
+        rune.echo("[Usage] /group <name> on|off")
+        return
+    end
+    local known = false
+    for _, g in ipairs(rune.group.list()) do
+        if g.name == name then known = true break end
+    end
+    if action == "on" then
+        rune.group.enable(name)
+        rune.echo(green("[Group]") .. " " .. name .. " enabled" ..
+            (known and "" or dim("  (no items in this group yet)")))
+    else
+        rune.group.disable(name)
+        rune.echo(yellow("[Group]") .. " " .. name .. " disabled" ..
+            (known and "" or dim("  (no items in this group yet)")))
+    end
+end, "Enable/disable a group (/group <name> on|off)")
+
 -- /raw <text> - Send without alias expansion
 rune.command.add("raw", function(args)
     if args == "" then
@@ -319,6 +394,17 @@ rune.command.add("raw", function(args)
     end
     rune.send_raw(args)
 end, "Send text without alias expansion")
+
+-- /echo <text> - Print to the local screen (never sent to the server).
+-- Handy for testing and for use in alias/bind command strings.
+rune.command.add("echo", function(args)
+    rune.echo(args)
+end, "Print text locally")
+
+-- /version - Client version
+rune.command.add("version", function(args)
+    rune.echo("Rune " .. rune.version)
+end, "Show client version")
 
 -- /quit - Exit the client
 rune.command.add("quit", function(args)

@@ -131,6 +131,29 @@
       "expected_commands": [
         "hookfired"
       ]
+    },
+    {
+      "name": "Slash Command Group Off",
+      "setup_lua": [
+        "rune.alias.exact('k', 'kill', {group = 'combat'})",
+        "rune.hooks.call('input', '/group combat off')"
+      ],
+      "input": "k orc",
+      "expected_commands": [
+        "k orc"
+      ]
+    },
+    {
+      "name": "Slash Command Group Back On",
+      "setup_lua": [
+        "rune.alias.exact('k', 'kill', {group = 'combat'})",
+        "rune.hooks.call('input', '/group combat off')",
+        "rune.hooks.call('input', '/group combat on')"
+      ],
+      "input": "k orc",
+      "expected_commands": [
+        "kill orc"
+      ]
     }
   ]
 }

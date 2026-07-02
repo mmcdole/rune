@@ -405,7 +405,9 @@ func (e *Engine) registerAPIs() {
 	e.registerPickerFuncs()
 	e.registerHistoryFuncs()
 	e.registerInputFuncs()
-	e.registerPersistFuncs()
+	e.registerSessionFuncs()
+	e.registerStoreFuncs()
+	e.registerLogFuncs()
 }
 
 // getRuneFunc returns rune.<table>.<field> if it is a function.

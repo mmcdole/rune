@@ -51,12 +51,29 @@ type Host interface {
 	GetHistory() []string
 	AddToHistory(cmd string)
 
-	// Persistence: a small Go-owned string store that survives script
-	// reloads (but not client exit). Lets Lua keep state - like the
-	// last connection address - across the VM teardown of /reload.
-	PersistSet(key, value string)
-	PersistGet(key string) (string, bool)
-	PersistDelete(key string)
+	// Session store: a small Go-owned string store that survives
+	// script reloads (but not client exit). Lets Lua keep state
+	// across the VM teardown of /reload. Durable state belongs in
+	// the disk-backed Store* tier below.
+	SessionSet(key, value string)
+	SessionGet(key string) (string, bool)
+	SessionDelete(key string)
+
+	// Durable store: a Go-owned key→JSON store backed by
+	// <config>/store.json; survives client exit. Values are raw JSON
+	// (the lua package converts Lua values); writes are write-through
+	// and atomic. Reads are served from memory.
+	StoreSet(key, rawJSON string) error
+	StoreGet(key string) (string, bool)
+	StoreDelete(key string) error
+
+	// Logging: Go owns the file handle so an active log survives
+	// /reload and is flushed/closed on exit. WHAT gets logged (which
+	// lines, stripping, headers) is Lua policy (lua/core/57_log.lua).
+	LogStart(path string) (string, error) // opens (append); returns resolved path
+	LogStop() bool                        // closes; reports whether a log was open
+	LogWrite(text string)                 // appends one line; no-op when inactive
+	LogStatus() (string, bool)            // active log path, if any
 
 	// State
 	OnConfigChange()

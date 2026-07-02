@@ -57,7 +57,7 @@ event/event.go                - Session event types and payloads
 session/                      - Session: event loop, implements lua.Host
   session.go                  - Orchestrator, Network interface, boot
   lua_*.go                    - Host implementation (network, ui, timers,
-                                system, history, persist, state)
+                                system, history, session, store, log, state)
 lua/                          - Lua runtime package
   engine.go                   - Engine: wraps gopher-lua, watchdog, dispatch
   api_*.go                    - rune._* primitive registration
@@ -90,7 +90,7 @@ Bar tick (250ms)            -> Session -> rune.bars._render_all(width) -> UI bar
 
 ## Lua Core Scripts (lua/core/, loaded in numeric order)
 
-- `00_init.lua` - Config, guarded_call, caller_source, line objects, capture substitution, primitive wrappers (send_raw, persist, history, rune.ui, rune.state proxy)
+- `00_init.lua` - Config, guarded_call, caller_source, line objects, capture substitution, primitive wrappers (send_raw, session/store, history, rune.ui, rune.state proxy)
 - `05_style.lua` - `rune.style` ANSI helpers (the one place Lua writes escape codes)
 - `10_regex.lua` - Cached Go-regexp matching (bounded cache), `validate`
 - `15_registry.lua` - Shared registry factory (`rune.registry.new`)
@@ -102,6 +102,8 @@ Bar tick (250ms)            -> Session -> rune.bars._render_all(width) -> UI bar
 - `45_aliases.lua` - Aliases (exact + regex)
 - `50_triggers.lua` - Triggers (exact/starts/contains/regex, gag, raw)
 - `55_commands.lua` - Slash commands (registry-based; `rune.command.dispatch` quarantines each command individually; `/help` is generated from the registry)
+- `57_log.lua` - Session logging (`rune.log`, the `log-output`/`log-echo` policy hooks, `/log`); the file handle is Go-owned so logging survives `/reload`
+- `58_worlds.lua` - World bookmarks (`rune.world`, `/world`, `/worlds`), stored durably via `rune.store`
 - `60_send.lua` - Command expansion (`;` splitting, `#N` repeats anchored at command position), core input/output/prompt handlers
 - `65_events.lua` - Default system event handlers (including the `"echo"` styler)
 - `70_input.lua` - Input wrappers, history navigation, word ops, tab completion
@@ -111,7 +113,7 @@ Bar tick (250ms)            -> Session -> rune.bars._render_all(width) -> UI bar
 
 Full reference: `docs/lua_doc.md`. Go primitives (`rune._*`) are internal.
 
-- **Core**: `rune.send`, `rune.send_raw`, `rune.echo`, `rune.connect`, `rune.disconnect`, `rune.load`, `rune.reload`, `rune.quit`, `rune.config_dir`
+- **Core**: `rune.send`, `rune.send_raw`, `rune.echo`, `rune.connect`, `rune.disconnect`, `rune.load`, `rune.reload`, `rune.quit`, `rune.config_dir`, `rune.version`. Connect addresses take an optional scheme: `host:port` (plain, default), `tls://host:port`, `tls+insecure://host:port` (self-signed certs)
 - **Registries** (all return handles with `:enable/:disable/:remove/:name/:group`; opts `{name, group, priority, once}`):
   - `rune.alias.exact/regex(pattern, action, opts?)`
   - `rune.trigger.exact/starts/contains/regex(pattern, action, opts?)` (+ `gag`, `raw` opts)
@@ -125,7 +127,9 @@ Full reference: `docs/lua_doc.md`. Go primitives (`rune._*`) are internal.
 - **UI**: `rune.ui.layout{top=..., bottom=...}`, `rune.ui.refresh_bars()`, `rune.ui.picker.show(opts)`, `rune.pane.*`
 - **Input**: `rune.input.get/set/get_cursor/set_cursor/open_editor/word_left/word_right/delete_word`
 - **State**: `rune.state` (read-only proxy: connected, address, scroll_mode, scroll_lines, width, height)
-- **Persist**: `rune.persist.set/get/delete` - Go-owned string store that survives `/reload` (not client exit)
+- **Storage** (two Go-owned tiers; the name encodes the lifetime): `rune.session.set/get/delete` - string store that survives `/reload` but not exit; `rune.store.set/get/delete` - durable store backed by `<config>/store.json` (atomic write-through), values may be strings/numbers/booleans/JSON-able tables, `set(key, nil)` deletes, unstorable values return `nil, err`
+- **Worlds**: `rune.world.add/remove/get/list` - named server bookmarks in `rune.store` under `"worlds"`; `/connect <name>` resolves them first, bare `/connect` opens a picker over them
+- **Logging**: `rune.log.start/stop/status/write` - session log to file. The handle is Go-owned (survives `/reload`, closed on exit); what gets written is Lua policy in `57_log.lua` (post-trigger output + input echo, ANSI-stripped; gagged lines and prompts excluded)
 - **Style**: `rune.style.red/green/yellow/.../bold/dim/inverse`
 - **Lines**: output/prompt handlers receive line objects (`:raw()`, `:clean()`); `rune.line.new(text)` builds one
 - **History**: `rune.history.get/add`
@@ -137,7 +141,7 @@ Notifications: `"ready"`, `"connecting"`, `"connected"`, `"disconnecting"`, `"di
 
 ### Slash Commands
 
-`/connect`, `/disconnect`, `/reconnect`, `/load`, `/reload`, `/lua`, `/aliases`, `/triggers`, `/timers`, `/hooks`, `/binds`, `/bars`, `/groups`, `/raw`, `/test`, `/help`, `/quit`
+`/connect` (a world name, `<host> <port> [tls|tls+insecure]`, or a single address; no args opens the world picker), `/disconnect`, `/reconnect` (survives restarts via `rune.store`), `/world add|remove|list`, `/worlds`, `/load`, `/reload`, `/lua`, `/log` (`start [file]` / `stop` / `status`), `/aliases`, `/triggers`, `/timers`, `/hooks`, `/binds`, `/bars`, `/groups`, `/group <name> on|off`, `/raw`, `/echo`, `/test`, `/version`, `/help`, `/quit`
 
 User scripts auto-load from `~/.config/rune/init.lua` at startup.
 

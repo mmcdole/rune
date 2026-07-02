@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -58,8 +59,17 @@ type Session struct {
 	historyLines []string
 	historyLimit int
 
-	// Reload-surviving Lua state (see lua_persist.go)
-	persist map[string]string
+	// Reload-surviving Lua state (see lua_session.go)
+	sessionStore map[string]string
+
+	// Durable store backed by <config>/store.json (see lua_store.go)
+	store        map[string]json.RawMessage
+	storePath    string
+	storeLoadErr error // corrupt/unreadable store.json, reported at boot
+
+	// Active session log (see lua_log.go); survives /reload
+	logFile *os.File
+	logPath string
 
 	// Channels
 	events      chan event.Event
@@ -87,11 +97,12 @@ func New(net Network, uiInstance ui.UI, cfg Config) *Session {
 		config:       cfg,
 		historyLines: make([]string, 0, 10000),
 		historyLimit: 10000,
-		persist:      make(map[string]string),
+		sessionStore: make(map[string]string),
 	}
 
 	s.engine = lua.NewEngine(s)
 	s.clientState.ScrollMode = "live"
+	s.loadStore()
 
 	return s
 }
@@ -110,6 +121,7 @@ func (s *Session) Run(ctx context.Context) error {
 		}
 		s.timer.Stop()
 		s.net.Disconnect()
+		s.LogStop()
 		s.ui.Quit()
 	}()
 
@@ -235,6 +247,10 @@ func (s *Session) handleEvent(ev event.Event) {
 
 // boot loads the VM state.
 func (s *Session) boot() error {
+	if s.storeLoadErr != nil {
+		s.ui.Print(text.Red("[System] " + s.storeLoadErr.Error()))
+		s.storeLoadErr = nil
+	}
 	if err := s.initLua(); err != nil {
 		return err
 	}

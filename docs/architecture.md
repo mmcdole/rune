@@ -66,7 +66,7 @@ The UI layer (built with Bubble Tea) is deliberately "dumb."
 
 A wrapper around gopher-lua.
 
-- **Single Host interface:** The Engine depends on one `lua.Host` interface (`lua/host.go`). Session implements it, with the methods grouped by service area across `session/lua_*.go` (network, ui, timers, system, history, persist, state). Tests substitute a mock Host.
+- **Single Host interface:** The Engine depends on one `lua.Host` interface (`lua/host.go`). Session implements it, with the methods grouped by service area across `session/lua_*.go` (network, ui, timers, system, history, session, store, log, state). Tests substitute a mock Host.
 - **Reactivity:** The Engine updates a global `rune.state` table whenever system state changes (connection, scroll position), allowing scripts to reactively render UI elements.
 
 ## 3. UI Architecture: The "Push" Model

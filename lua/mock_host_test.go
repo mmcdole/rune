@@ -38,8 +38,16 @@ type MockHost struct {
 	// When set, OpenEditor delegates here (e.g. to simulate a slow editor)
 	OpenEditorFn func(initial string) (string, bool)
 
-	// Reload-surviving store (see Host.PersistSet)
-	Persisted map[string]string
+	// Reload-surviving store (see Host.SessionSet)
+	SessionStore map[string]string
+
+	// Session log capture (see Host.LogStart)
+	LogPath   string
+	LogActive bool
+	LogWrites []string
+
+	// Durable store capture (see Host.StoreSet); raw JSON values
+	StoreData map[string]string
 }
 
 func NewMockHost() *MockHost {
@@ -138,30 +146,86 @@ func (m *MockHost) GetHistory() []string {
 	return nil
 }
 
-func (m *MockHost) PersistSet(key, value string) {
+func (m *MockHost) SessionSet(key, value string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.Persisted == nil {
-		m.Persisted = make(map[string]string)
+	if m.SessionStore == nil {
+		m.SessionStore = make(map[string]string)
 	}
-	m.Persisted[key] = value
+	m.SessionStore[key] = value
 }
 
-func (m *MockHost) PersistGet(key string) (string, bool) {
+func (m *MockHost) SessionGet(key string) (string, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	v, ok := m.Persisted[key]
+	v, ok := m.SessionStore[key]
 	return v, ok
 }
 
-func (m *MockHost) PersistDelete(key string) {
+func (m *MockHost) SessionDelete(key string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	delete(m.Persisted, key)
+	delete(m.SessionStore, key)
+}
+
+func (m *MockHost) StoreSet(key, rawJSON string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.StoreData == nil {
+		m.StoreData = make(map[string]string)
+	}
+	m.StoreData[key] = rawJSON
+	return nil
+}
+
+func (m *MockHost) StoreGet(key string) (string, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	v, ok := m.StoreData[key]
+	return v, ok
+}
+
+func (m *MockHost) StoreDelete(key string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.StoreData, key)
+	return nil
 }
 
 func (m *MockHost) AddToHistory(cmd string) {
 	// No-op for tests
+}
+
+func (m *MockHost) LogStart(path string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.LogPath = path
+	m.LogActive = true
+	return path, nil
+}
+
+func (m *MockHost) LogStop() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	was := m.LogActive
+	m.LogActive = false
+	m.LogPath = ""
+	return was
+}
+
+func (m *MockHost) LogWrite(text string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.LogActive {
+		return
+	}
+	m.LogWrites = append(m.LogWrites, text)
+}
+
+func (m *MockHost) LogStatus() (string, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.LogPath, m.LogActive
 }
 
 func (m *MockHost) GetInput() string {

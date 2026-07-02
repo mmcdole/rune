@@ -1,5 +1,9 @@
 -- Core Configuration and Go Primitive Wrappers
 
+-- The core scripts are embedded in the binary, so this constant is the
+-- binary's version (shown by /version and the startup banner).
+rune.version = "0.1.0"
+
 rune.config = {
     delimiter = ";"
 }
@@ -143,25 +147,49 @@ rune.state = setmetatable({}, {
     end,
 })
 
--- Reload-surviving state
--- A small Go-owned string store that survives /reload (the Lua VM is
--- torn down and rebuilt) but not client exit. Use it for state that
--- must outlive a reload - the last connection address, toggles, etc.
--- Values are strings; encode anything richer yourself.
+-- Session store
+-- A small Go-owned string store scoped to this client session: it
+-- survives /reload (the Lua VM is torn down and rebuilt) but not
+-- client exit. Use it for state that must outlive a reload - combat
+-- toggles, counters, etc. Values are strings; encode anything richer
+-- yourself. State that must survive a restart belongs in rune.store.
 
-rune.persist = {}
+rune.session = {}
 
-function rune.persist.set(key, value)
-    rune._persist.set(key, value)
+function rune.session.set(key, value)
+    rune._session.set(key, value)
 end
 
 -- Returns the stored string, or nil if unset.
-function rune.persist.get(key)
-    return rune._persist.get(key)
+function rune.session.get(key)
+    return rune._session.get(key)
 end
 
-function rune.persist.delete(key)
-    rune._persist.delete(key)
+function rune.session.delete(key)
+    rune._session.delete(key)
+end
+
+-- Durable store
+-- A Go-owned store backed by store.json in rune.config_dir: values
+-- survive client exit. Values may be strings, numbers, booleans, or
+-- JSON-able tables (all-string keys, or arrays 1..n). Writes hit disk
+-- immediately. For state that only needs to outlive /reload, prefer
+-- rune.session.
+
+rune.store = {}
+
+-- Returns true, or nil + error message. set(key, nil) deletes.
+function rune.store.set(key, value)
+    return rune._store.set(key, value)
+end
+
+-- Returns the stored value (decoded), or nil if unset.
+function rune.store.get(key)
+    return rune._store.get(key)
+end
+
+function rune.store.delete(key)
+    return rune._store.delete(key)
 end
 
 -- Input history (Go owns the ring buffer so it survives reloads)
@@ -208,5 +236,5 @@ end
 
 -- Startup
 
-rune.echo("Rune MUD Client")
+rune.echo("Rune MUD Client " .. rune.version)
 rune.echo("Type /help for commands")

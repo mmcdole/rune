@@ -2,8 +2,10 @@ package network
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -61,9 +63,36 @@ func NewTCPClient() *TCPClient {
 	}
 }
 
+// splitAddress separates an optional scheme prefix from host:port.
+// Supported schemes: "telnet://" (plain TCP, the default when no
+// scheme is given), "tls://" (TLS with certificate verification), and
+// "tls+insecure://" (TLS without verification - many MUDs run
+// self-signed certificates).
+func splitAddress(address string) (hostport string, useTLS, insecure bool, err error) {
+	scheme, rest, found := strings.Cut(address, "://")
+	if !found {
+		return address, false, false, nil
+	}
+	switch scheme {
+	case "telnet", "tcp":
+		return rest, false, false, nil
+	case "tls":
+		return rest, true, false, nil
+	case "tls+insecure":
+		return rest, true, true, nil
+	default:
+		return "", false, false, fmt.Errorf("unknown scheme %q (use telnet://, tls:// or tls+insecure://)", scheme)
+	}
+}
+
 // Connect establishes a new connection.
 // If a connection already exists, it is cleanly closed and replaced.
 func (c *TCPClient) Connect(ctx context.Context, address string) error {
+	hostport, useTLS, insecure, err := splitAddress(address)
+	if err != nil {
+		return err
+	}
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -74,7 +103,7 @@ func (c *TCPClient) Connect(ctx context.Context, address string) error {
 
 	// Dial with context to respect app shutdown during connection attempts
 	var d net.Dialer
-	conn, err := d.DialContext(ctx, "tcp", address)
+	conn, err := d.DialContext(ctx, "tcp", hostport)
 	if err != nil {
 		return err
 	}
@@ -83,6 +112,22 @@ func (c *TCPClient) Connect(ctx context.Context, address string) error {
 	if tcpConn, ok := conn.(*net.TCPConn); ok {
 		tcpConn.SetKeepAlive(true)
 		tcpConn.SetKeepAlivePeriod(30 * time.Second)
+	}
+
+	if useTLS {
+		host, _, splitErr := net.SplitHostPort(hostport)
+		if splitErr != nil {
+			host = hostport
+		}
+		tlsConn := tls.Client(conn, &tls.Config{
+			ServerName:         host,
+			InsecureSkipVerify: insecure,
+		})
+		if err := tlsConn.HandshakeContext(ctx); err != nil {
+			conn.Close()
+			return fmt.Errorf("TLS handshake: %w", err)
+		}
+		conn = tlsConn
 	}
 
 	// Create the new connection object

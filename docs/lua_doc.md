@@ -8,7 +8,7 @@
 | `rune.send(text)` | Send command (processes aliases) |
 | `rune.send_raw(text)` | Send directly to server (bypasses aliases) |
 | `rune.echo(text)` | Print to local display |
-| `rune.connect(addr)` | Connect to server |
+| `rune.connect(addr)` | Connect to server (`host:port`, optionally `tls://`) |
 | `rune.disconnect()` | Disconnect from server |
 | `rune.load(path)` | Load a Lua script |
 | `rune.reload()` | Reload all scripts |
@@ -140,12 +140,28 @@
 | `rune.history.get()` | Get command history array (oldest first) |
 | `rune.history.add(cmd)` | Append a command to history |
 
-### Persist
+### Storage
+Two tiers - the name tells you the lifetime:
+
 | Function | Description |
 |----------|-------------|
-| `rune.persist.set(key, value)` | Store a string that survives `/reload` |
-| `rune.persist.get(key)` | Retrieve stored string, or nil |
-| `rune.persist.delete(key)` | Remove a key |
+| `rune.session.set/get/delete(key, ...)` | String store for **this session**: survives `/reload`, not exit |
+| `rune.store.set/get/delete(key, ...)` | **Durable** store (`store.json`): structured values, survives exit |
+
+### Worlds
+| Function | Description |
+|----------|-------------|
+| `rune.world.add(name, address, opts?)` | Save a world bookmark (durable) |
+| `rune.world.remove(name)` | Remove a bookmark |
+| `rune.world.get(name)` | Entry table (`{address=...}`), or nil |
+| `rune.world.list()` | Sorted array of `{name, address}` |
+
+### Logging
+| Function | Description |
+|----------|-------------|
+| `rune.log.start(path?)` | Log the session to a file (default: `<config>/logs/<timestamp>.log`) |
+| `rune.log.stop()` | Stop logging |
+| `rune.log.status()` | Active log path, or nil |
 
 ### Style
 | Function | Description |
@@ -181,9 +197,21 @@ rune.echo(text)      -- Print to local display (not sent to server)
 ### Connection
 
 ```lua
-rune.connect(address)  -- Connect to server (e.g., "example.com:23")
+rune.connect(address)  -- Connect to server (e.g., "example.com:4000")
 rune.disconnect()      -- Disconnect from server
 ```
+
+The address accepts an optional scheme prefix:
+
+```lua
+rune.connect("mud.example.com:4000")                -- plain telnet (default)
+rune.connect("tls://mud.example.com:4000")          -- TLS, certificate verified
+rune.connect("tls+insecure://mud.example.com:4000") -- TLS, no verification
+                                                    -- (self-signed certs)
+```
+
+The full address (scheme included) is what `rune.state.address` reports
+and what the core stores for `/reconnect`.
 
 ### Scripts
 
@@ -222,6 +250,7 @@ rune.quit()       -- Exit the client
 
 ```lua
 rune.config_dir   -- Path to ~/.config/rune (read-only)
+rune.version      -- Client version string (shown by /version)
 rune.debug        -- Set to true to enable debug output
 rune.dbg(msg)     -- Print debug message (only if rune.debug is true)
 ```
@@ -898,17 +927,102 @@ rune.history.add(cmd) -- Append a command (consecutive duplicates ignored)
 
 ---
 
-## Persist API
+## Storage APIs
 
-A small string store owned by the client. It survives `/reload` (the
-Lua VM is torn down and rebuilt) but not client exit - use a file
-under `rune.config_dir` for state that must survive restarts. The
-core uses it to remember the last connection address for `/reconnect`.
+Two Go-owned stores with different lifetimes:
+
+| | `rune.session` | `rune.store` |
+|---|---|---|
+| Survives `/reload` | yes | yes |
+| Survives client exit | **no** | **yes** (disk: `<config>/store.json`) |
+| Values | strings only | strings, numbers, booleans, JSON-able tables |
+| Use for | combat toggles, counters, mid-session scratch | bookmarks, settings, anything durable |
+
+### Session Store
+
+Scoped to this client session: survives `/reload` (the Lua VM is torn
+down and rebuilt) but not exit.
 
 ```lua
-rune.persist.set(key, value)  -- Store a string
-rune.persist.get(key)         -- Returns the string, or nil
-rune.persist.delete(key)      -- Remove a key
+rune.session.set(key, value)  -- Store a string
+rune.session.get(key)         -- Returns the string, or nil
+rune.session.delete(key)      -- Remove a key
+```
+
+### Durable Store
+
+Backed by `store.json` under `rune.config_dir` (pretty-printed, so it
+is hand-editable while the client is closed). Writes hit disk
+immediately and atomically. Reads are served from memory. A corrupt
+file at boot is preserved as `store.json.bak` and reported, never
+silently discarded. The core uses it for world bookmarks and the last
+connection address (`/reconnect`).
+
+```lua
+rune.store.set(key, value)  -- Returns true, or nil + error.
+                            -- value: string/number/boolean, or a table
+                            -- with all-string keys or array shape 1..n.
+                            -- set(key, nil) deletes.
+rune.store.get(key)         -- Returns the decoded value, or nil
+rune.store.delete(key)      -- Returns true, or nil + error
+```
+
+Unstorable values (functions, userdata, mixed-key tables, cycles)
+return `nil, err` - nothing is written.
+
+---
+
+## Worlds
+
+Named server bookmarks, stored durably in `rune.store` under the
+`"worlds"` key. Managed from the input line with `/world add <name>
+<host> <port> [tls|tls+insecure]`, `/world remove <name>`, and
+`/world list` (or `/worlds`). `/connect <name>` resolves bookmarks
+first, and `/connect` with no arguments opens a picker over them.
+
+```lua
+rune.world.add(name, address, opts?) -- Returns true, or nil + error.
+                                     -- Names cannot contain spaces, ":" or "/".
+                                     -- opts keys are stored verbatim alongside
+                                     -- the address (room for future fields).
+rune.world.remove(name)              -- Returns true if it existed
+rune.world.get(name)                 -- Entry table ({address=...}), or nil
+rune.world.list()                    -- Sorted array of {name, address}
+```
+
+---
+
+## Logging API
+
+Log the session to a file (`/log start`, `/log stop`, `/log status`
+drive this from the input line). The file handle is Go-owned, so an
+active log survives `/reload` and is closed cleanly on exit.
+
+```lua
+rune.log.start(path?) -- Start logging. Default path:
+                      --   <config_dir>/logs/<timestamp>.log
+                      -- Returns the resolved path, or nil + error.
+rune.log.stop()       -- Stop logging. Returns true if a log was open.
+rune.log.status()     -- Active log path, or nil.
+rune.log.write(text)  -- Append a line directly (no-op while not logging).
+```
+
+What gets written is Lua policy (see `57_log.lua`): server output
+lines after trigger processing (rewrites are logged as rewritten,
+gagged lines are not logged) and the local echo of typed input, both
+ANSI-stripped, so the log reads like the screen. Prompts and client
+messages (`rune.echo`) are not logged. The echo hook does not fire
+while the server suppresses echo, so passwords stay out of logs.
+
+The default policy lives in two priority-200 hooks named `log-output`
+and `log-echo`. For a different policy, disable them and write your
+own:
+
+```lua
+rune.hooks.disable("log-output")
+rune.hooks.on("output", function(line)
+    rune.log.write(os.date("[%H:%M:%S] ") .. line:clean())
+end, { priority = 200 })
 ```
 
 ---

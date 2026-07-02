@@ -253,6 +253,39 @@ func TestEchoHookStylesAndGags(t *testing.T) {
 	}
 }
 
+// TestConnectCommandForms verifies the /connect argument shapes:
+// host+port, host+port+tls scheme, and the single host:port form.
+func TestConnectCommandForms(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	cases := []struct {
+		input string
+		want  string // expected address, "" = usage error instead
+	}{
+		{"/connect mud.example.com 4000", "mud.example.com:4000"},
+		{"/connect mud.example.com 4000 tls", "tls://mud.example.com:4000"},
+		{"/connect mud.example.com 4000 tls+insecure", "tls+insecure://mud.example.com:4000"},
+		{"/connect mud.example.com:4000", "mud.example.com:4000"},
+		{"/connect tls://mud.example.com:4000", "tls://mud.example.com:4000"},
+		{"/connect mud.example.com 4000 bogus", ""},
+		{"/connect mud.example.com", ""},
+	}
+	for _, c := range cases {
+		host.ConnectCalls = nil
+		engine.OnInput(c.input)
+		if c.want == "" {
+			if len(host.ConnectCalls) != 0 {
+				t.Errorf("%q: expected usage error, connected to %v", c.input, host.ConnectCalls)
+			}
+			continue
+		}
+		if len(host.ConnectCalls) != 1 || host.ConnectCalls[0] != c.want {
+			t.Errorf("%q: connect calls = %v, want [%s]", c.input, host.ConnectCalls, c.want)
+		}
+	}
+}
+
 // TestFailingBarIsQuarantined verifies that a bar renderer failing
 // repeatedly is disabled instead of erroring 4x/second forever, and
 // that re-registering it gives a fresh start.
@@ -401,30 +434,113 @@ func TestRegistrationsRecordSource(t *testing.T) {
 	}
 }
 
-// TestPersistSurvivesReload verifies rune.persist round-trips through
-// the host and survives a VM teardown (which is the whole point).
-func TestPersistSurvivesReload(t *testing.T) {
+// TestSessionStoreSurvivesReload verifies rune.session round-trips
+// through the host and survives a VM teardown (the whole point).
+func TestSessionStoreSurvivesReload(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 
 	script := `
-		rune.persist.set("last_address", "mud.example.com:4000")
-		assert(rune.persist.get("last_address") == "mud.example.com:4000")
-		assert(rune.persist.get("missing") == nil)
-		rune.persist.set("gone", "x")
-		rune.persist.delete("gone")
-		assert(rune.persist.get("gone") == nil)
+		rune.session.set("last_address", "mud.example.com:4000")
+		assert(rune.session.get("last_address") == "mud.example.com:4000")
+		assert(rune.session.get("missing") == nil)
+		rune.session.set("gone", "x")
+		rune.session.delete("gone")
+		assert(rune.session.get("gone") == nil)
 	`
-	if err := engine.DoString("persist_test", script); err != nil {
-		t.Fatalf("persist round-trip failed: %v", err)
+	if err := engine.DoString("session_test", script); err != nil {
+		t.Fatalf("session store round-trip failed: %v", err)
 	}
 
 	// Tear down and rebuild the VM, as /reload does
 	if err := engine.Init(); err != nil {
 		t.Fatalf("re-init failed: %v", err)
 	}
-	if host.Persisted["last_address"] != "mud.example.com:4000" {
-		t.Error("persisted value lost across VM teardown")
+	if host.SessionStore["last_address"] != "mud.example.com:4000" {
+		t.Error("session store value lost across VM teardown")
+	}
+}
+
+// TestStoreRoundTripsStructuredValues verifies rune.store converts
+// Lua values to JSON and back: nested tables, arrays, scalars; and
+// that unstorable values are rejected with nil, err instead of raised.
+func TestStoreRoundTripsStructuredValues(t *testing.T) {
+	engine, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	script := `
+		assert(rune.store.set("cfg", {
+			name = "arctic",
+			hp_warn = 0.25,
+			auto = true,
+			route = {"n", "e", "e"},
+			nested = { deep = { value = 42 } },
+		}))
+
+		local cfg = rune.store.get("cfg")
+		assert(cfg.name == "arctic")
+		assert(cfg.hp_warn == 0.25)
+		assert(cfg.auto == true)
+		assert(#cfg.route == 3 and cfg.route[2] == "e")
+		assert(cfg.nested.deep.value == 42)
+
+		assert(rune.store.get("missing") == nil)
+
+		-- Unstorable: functions
+		local ok, err = rune.store.set("bad", { fn = function() end })
+		assert(ok == nil and err ~= nil, "function value should be rejected")
+
+		-- Unstorable: cycles
+		local cyc = {}
+		cyc.self = cyc
+		local ok2, err2 = rune.store.set("bad", cyc)
+		assert(ok2 == nil and err2 ~= nil, "cycle should be rejected")
+
+		-- set(key, nil) deletes
+		assert(rune.store.set("cfg", nil))
+		assert(rune.store.get("cfg") == nil)
+	`
+	if err := engine.DoString("store_test", script); err != nil {
+		t.Fatalf("store round-trip failed: %v", err)
+	}
+}
+
+// TestWorldResolution verifies /world add saves a bookmark and
+// /connect resolves the name before falling back to address parsing.
+func TestWorldResolution(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	engine.OnInput("/world add arctic mud.arcticmud.org 2700")
+	engine.OnInput("/world add secure example.com 4000 tls")
+	engine.OnInput("/connect arctic")
+	engine.OnInput("/connect secure")
+
+	want := []string{"mud.arcticmud.org:2700", "tls://example.com:4000"}
+	if len(host.ConnectCalls) != 2 || host.ConnectCalls[0] != want[0] || host.ConnectCalls[1] != want[1] {
+		t.Fatalf("connect calls = %v, want %v", host.ConnectCalls, want)
+	}
+
+	// Removed worlds no longer resolve (and a bare name is not an address)
+	engine.OnInput("/world remove arctic")
+	host.ConnectCalls = nil
+	engine.OnInput("/connect arctic")
+	if len(host.ConnectCalls) != 0 {
+		t.Errorf("removed world still resolved: %v", host.ConnectCalls)
+	}
+}
+
+// TestReconnectUsesStoredAddress verifies the "connected" handler
+// stores the address durably and /reconnect dials it again.
+func TestReconnectUsesStoredAddress(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	engine.CallHook("connected", "tls://mud.example.com:4000")
+	engine.OnInput("/reconnect")
+
+	if len(host.ConnectCalls) != 1 || host.ConnectCalls[0] != "tls://mud.example.com:4000" {
+		t.Errorf("connect calls = %v, want the stored address (scheme intact)", host.ConnectCalls)
 	}
 }
 
