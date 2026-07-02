@@ -12,11 +12,12 @@ type ClientState struct {
 	Height      int    // Terminal height
 }
 
-// registerStateFuncs creates the rune.state table.
-// This table is read-only from Lua's perspective - Go pushes updates.
+// registerStateFuncs creates the rune._state table that Go pushes
+// client state into. Lua exposes it as the read-only rune.state proxy
+// (00_init.lua), so scripts cannot corrupt Go-owned state.
 func (e *Engine) registerStateFuncs() {
 	stateTable := e.L.NewTable()
-	e.L.SetField(e.runeTable, "state", stateTable)
+	e.L.SetField(e.runeTable, "_state", stateTable)
 
 	// Initialize with defaults
 	e.L.SetField(stateTable, "connected", glua.LFalse)
@@ -27,14 +28,14 @@ func (e *Engine) registerStateFuncs() {
 	e.L.SetField(stateTable, "height", glua.LNumber(0))
 }
 
-// UpdateState pushes new client state to the Lua rune.state table.
+// UpdateState pushes new client state to the Lua rune._state table.
 // Called by Session when connection or scroll state changes.
 func (e *Engine) UpdateState(state ClientState) {
 	if e.L == nil || e.runeTable == nil {
 		return
 	}
 
-	stateTable := e.L.GetField(e.runeTable, "state")
+	stateTable := e.L.GetField(e.runeTable, "_state")
 	if stateTable == glua.LNil {
 		return
 	}

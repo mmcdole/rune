@@ -5,6 +5,42 @@
 --   - Tab completion with word cache
 
 -- ============================================================
+-- INPUT PRIMITIVES
+-- Thin wrappers over Go's rune._input.* - Go registers only
+-- rune._* primitives, Lua owns the public API surface.
+-- ============================================================
+
+rune.input = {}
+
+function rune.input.get()
+    return rune._input.get()
+end
+
+function rune.input.set(text)
+    rune._input.set(text)
+end
+
+function rune.input.get_cursor()
+    return rune._input.get_cursor()
+end
+
+function rune.input.set_cursor(pos)
+    rune._input.set_cursor(pos)
+end
+
+-- Ghost text (dim suggestion rendered after the input; Go just
+-- renders, Lua is the source of truth for what to suggest)
+function rune.input.set_ghost(text)
+    rune._input.set_ghost(text)
+end
+
+-- Open $EDITOR with the given initial text.
+-- Returns edited_text, ok.
+function rune.input.open_editor(initial)
+    return rune._input.open_editor(initial)
+end
+
+-- ============================================================
 -- HISTORY NAVIGATION
 -- Implements zsh-style prefix-matching history navigation.
 -- Up arrow: search backwards for entries matching current input prefix

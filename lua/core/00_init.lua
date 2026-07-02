@@ -130,6 +130,61 @@ function rune.load(path)
     return rune._load(path)
 end
 
+-- Client state (read-only view)
+-- Go pushes updates into rune._state; rune.state is a read-only proxy
+-- so scripts cannot corrupt Go-owned state. Fields: connected,
+-- address, scroll_mode, scroll_lines, width, height.
+rune.state = setmetatable({}, {
+    __index = function(_, key)
+        return rune._state[key]
+    end,
+    __newindex = function()
+        error("rune.state is read-only (the client owns this state)", 2)
+    end,
+})
+
+-- Input history (Go owns the ring buffer so it survives reloads)
+
+rune.history = {}
+
+function rune.history.get()
+    return rune._history.get()
+end
+
+function rune.history.add(cmd)
+    rune._history.add(cmd)
+end
+
+-- UI namespace
+-- rune.ui.bar is added by 18_bars.lua, which owns the bar registry.
+
+rune.ui = {}
+
+-- Set the layout configuration.
+-- config = { top = {"bar1", {name="pane", height=10}}, bottom = {"input", "status"} }
+function rune.ui.layout(config)
+    rune._ui.layout(config)
+end
+
+-- Force an immediate bar refresh instead of waiting for the ticker.
+function rune.ui.refresh_bars()
+    rune._ui.refresh_bars()
+end
+
+rune.ui.picker = {}
+
+-- Show a picker overlay.
+-- opts = {
+--   title = "History",              -- optional (modal mode only)
+--   items = {"a", "b"} or {{text=..., value=..., desc=...}},
+--   on_select = function(value) end,
+--   mode = "inline",                -- optional: "inline" or "modal" (default)
+--   match_description = true,       -- optional: fuzzy-match descriptions too
+-- }
+function rune.ui.picker.show(opts)
+    rune._ui.picker_show(opts)
+end
+
 -- Startup
 
 rune.echo("Rune MUD Client")

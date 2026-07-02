@@ -10,26 +10,21 @@ import (
 // also applies the standard failure quarantine. Go's role is calling
 // rune.bars._render_all on the tick and marshaling the result.
 
-// registerBarFuncs registers layout/refresh primitives on rune.ui.
+// registerBarFuncs registers layout/refresh primitives on rune._ui.
+// The public rune.ui wrappers are defined in Lua (00_init.lua).
 func (e *Engine) registerBarFuncs() {
-	// Create rune.ui table if it doesn't exist
-	uiTable := e.L.GetField(e.runeTable, "ui")
-	if uiTable == glua.LNil {
-		uiTable = e.L.NewTable()
-		e.L.SetField(e.runeTable, "ui", uiTable)
-	}
-	ui := uiTable.(*glua.LTable)
+	internal := e.L.GetField(e.runeTable, "_ui").(*glua.LTable)
 
-	// rune.ui.refresh_bars() - Force immediate bar refresh
+	// rune._ui.refresh_bars() - Force immediate bar refresh
 	// Use when bar state changes and you don't want to wait for the 250ms ticker
-	e.L.SetField(ui, "refresh_bars", e.L.NewFunction(func(L *glua.LState) int {
+	e.L.SetField(internal, "refresh_bars", e.L.NewFunction(func(L *glua.LState) int {
 		e.host.RefreshBars()
 		return 0
 	}))
 
-	// rune.ui.layout(config) - Set the layout configuration
+	// rune._ui.layout(config) - Set the layout configuration
 	// config = { top = {"bar1", {name="pane", height=10}}, bottom = {"input", "status"} }
-	e.L.SetField(ui, "layout", e.L.NewFunction(func(L *glua.LState) int {
+	e.L.SetField(internal, "layout", e.L.NewFunction(func(L *glua.LState) int {
 		cfg := L.CheckTable(1)
 
 		// Parse top array

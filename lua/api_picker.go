@@ -5,21 +5,14 @@ import (
 	glua "github.com/yuin/gopher-lua"
 )
 
-// registerPickerFuncs registers the rune.ui.picker API.
+// registerPickerFuncs registers the rune._ui.picker_show primitive.
+// The public rune.ui.picker.show API is defined in Lua (00_init.lua);
+// opts parsing stays here because it marshals Lua tables into Go
+// types for the UI.
 func (e *Engine) registerPickerFuncs() {
-	// Ensure rune.ui table exists
-	uiTable := e.L.GetField(e.runeTable, "ui")
-	if uiTable == glua.LNil {
-		uiTable = e.L.NewTable()
-		e.L.SetField(e.runeTable, "ui", uiTable)
-	}
-	ui := uiTable.(*glua.LTable)
+	internal := e.L.GetField(e.runeTable, "_ui").(*glua.LTable)
 
-	// Create rune.ui.picker namespace
-	picker := e.L.NewTable()
-	e.L.SetField(ui, "picker", picker)
-
-	// rune.ui.picker.show(opts) - Show a picker overlay
+	// rune._ui.picker_show(opts) - Show a picker overlay
 	// opts = {
 	//   title = "History",                  -- optional title (modal mode only)
 	//   items = {"item1", "item2"} or {{text="...", value="...", desc="..."}},
@@ -29,7 +22,7 @@ func (e *Engine) registerPickerFuncs() {
 	// }
 	// Modal mode: picker captures keyboard and has its own search field.
 	// Inline mode: user types in main input, picker filters based on input content.
-	e.L.SetField(picker, "show", e.L.NewFunction(func(L *glua.LState) int {
+	e.L.SetField(internal, "picker_show", e.L.NewFunction(func(L *glua.LState) int {
 		opts := L.CheckTable(1)
 
 		// Parse title (optional - used in modal mode header)
