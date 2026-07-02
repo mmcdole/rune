@@ -96,7 +96,7 @@ func (s *Session) Run(ctx context.Context) error {
 		if s.barTicker != nil {
 			s.barTicker.Stop()
 		}
-		s.timer.CancelAll()
+		s.timer.Stop()
 		s.net.Disconnect()
 		s.ui.Quit()
 	}()

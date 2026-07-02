@@ -15,10 +15,12 @@ type Event struct {
 // It owns: ID generation, scheduling, repeating logic, cancellation.
 // Uses fixed-interval semantics: repeating timers reschedule immediately on fire.
 type Service struct {
-	events chan<- Event
-	timers map[int]*entry
-	nextID int
-	mu     sync.Mutex
+	events   chan<- Event
+	timers   map[int]*entry
+	nextID   int
+	mu       sync.Mutex
+	done     chan struct{}
+	stopOnce sync.Once
 }
 
 type entry struct {
@@ -31,7 +33,18 @@ func NewService(events chan<- Event) *Service {
 	return &Service{
 		events: events,
 		timers: make(map[int]*entry),
+		done:   make(chan struct{}),
 	}
+}
+
+// Stop cancels all timers and releases any fire goroutines blocked on
+// event delivery. Call when the event consumer shuts down; the service
+// must not be reused afterwards.
+func (s *Service) Stop() {
+	s.stopOnce.Do(func() {
+		close(s.done)
+	})
+	s.CancelAll()
 }
 
 // After schedules a one-shot timer. Returns the timer ID.
@@ -86,10 +99,24 @@ func (s *Service) fire(id int) {
 	}
 	s.mu.Unlock()
 
+	ev := Event{ID: id, Repeating: repeating}
+	if repeating {
+		// A repeating tick may be dropped when the consumer is
+		// saturated - the next tick carries the same information.
+		select {
+		case s.events <- ev:
+		case <-s.done:
+		default:
+		}
+		return
+	}
+
+	// A one-shot fire must not be silently dropped: its callback would
+	// never run and nothing would ever retry. Block until the consumer
+	// drains the queue; done unblocks us if the consumer is gone.
 	select {
-	case s.events <- Event{ID: id, Repeating: repeating}:
-	default:
-		// Receiver shutting down or buffer full
+	case s.events <- ev:
+	case <-s.done:
 	}
 }
 
