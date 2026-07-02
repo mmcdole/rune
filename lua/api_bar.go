@@ -1,19 +1,16 @@
 package lua
 
 import (
-	"fmt"
-
 	glua "github.com/yuin/gopher-lua"
 
 	"github.com/drake/rune/ui"
 )
 
-// maxBarFailures is the number of consecutive render errors after which
-// a bar is removed. Bars render 4x/second, so an always-failing
-// renderer would otherwise spam errors indefinitely.
-const maxBarFailures = 3
+// Bar renderers are owned by the Lua bar module (18_bars.lua), which
+// also applies the standard failure quarantine. Go's role is calling
+// rune.bars._render_all on the tick and marshaling the result.
 
-// registerBarFuncs registers the rune.ui.bar API.
+// registerBarFuncs registers layout/refresh primitives on rune.ui.
 func (e *Engine) registerBarFuncs() {
 	// Create rune.ui table if it doesn't exist
 	uiTable := e.L.GetField(e.runeTable, "ui")
@@ -22,16 +19,6 @@ func (e *Engine) registerBarFuncs() {
 		e.L.SetField(e.runeTable, "ui", uiTable)
 	}
 	ui := uiTable.(*glua.LTable)
-
-	// rune.ui.bar(name, render_fn) - Register a bar renderer
-	// render_fn receives (width) and returns string or {left, center, right}
-	e.L.SetField(ui, "bar", e.L.NewFunction(func(L *glua.LState) int {
-		name := L.CheckString(1)
-		fn := L.CheckFunction(2)
-		e.barFuncs[name] = fn
-		delete(e.barFailures, name) // Re-registering gives a fresh start
-		return 0
-	}))
 
 	// rune.ui.refresh_bars() - Force immediate bar refresh
 	// Use when bar state changes and you don't want to wait for the 250ms ticker
@@ -94,65 +81,56 @@ func parseLayoutArray(L *glua.LState, tbl *glua.LTable) []ui.LayoutEntry {
 	return result
 }
 
-// RenderBar calls a Lua bar render function and returns the content.
-// Called from Session on tick to update bar cache.
-func (e *Engine) RenderBar(name string, width int) (ui.BarContent, bool) {
+// RenderBars asks the Lua bar module to render every active bar at
+// the given width. Returns nil when no bars produced content or the
+// module is unavailable (degraded mode).
+// Must be called from the Session goroutine (single Lua owner).
+func (e *Engine) RenderBars(width int) map[string]ui.BarContent {
 	if e.L == nil {
-		return ui.BarContent{}, false
+		return nil
 	}
-	fn, ok := e.barFuncs[name]
+	render, ok := e.getRuneFunc("bars", "_render_all")
 	if !ok {
-		return ui.BarContent{}, false
+		return nil
 	}
 
-	// Call the Lua function with width
-	e.L.Push(fn)
-	e.L.Push(glua.LNumber(width))
-	if err := e.guard(func() error { return e.L.PCall(1, 1, nil) }); err != nil {
-		e.barFailures[name]++
-		if e.barFailures[name] >= maxBarFailures {
-			delete(e.barFuncs, name)
-			delete(e.barFailures, name)
-			e.reportError("bar '"+name+"'",
-				fmt.Errorf("removed after %d consecutive errors: %w", maxBarFailures, err))
-		} else {
-			e.reportError("bar '"+name+"'", err)
-		}
-		return ui.BarContent{}, false
+	if err := e.guard(func() error {
+		return e.L.CallByParam(glua.P{
+			Fn:      render,
+			NRet:    1,
+			Protect: true,
+		}, glua.LNumber(width))
+	}); err != nil {
+		e.reportError("bar render", err)
+		return nil
 	}
-	delete(e.barFailures, name) // Success resets the failure streak
 
-	result := e.L.Get(-1)
+	ret := e.L.Get(-1)
 	e.L.Pop(1)
 
-	// Handle return value - can be string or table {left, center, right}
-	switch v := result.(type) {
-	case glua.LString:
-		return ui.BarContent{Left: string(v)}, true
-	case *glua.LTable:
-		return ui.BarContent{
-			Left:   luaStringOrEmpty(e.L.GetField(v, "left")),
-			Center: luaStringOrEmpty(e.L.GetField(v, "center")),
-			Right:  luaStringOrEmpty(e.L.GetField(v, "right")),
-		}, true
-	default:
-		return ui.BarContent{}, false
+	tbl, ok := ret.(*glua.LTable)
+	if !ok {
+		return nil
 	}
-}
 
-// GetBarNames returns the names of all registered bars.
-func (e *Engine) GetBarNames() []string {
-	names := make([]string, 0, len(e.barFuncs))
-	for name := range e.barFuncs {
-		names = append(names, name)
+	result := make(map[string]ui.BarContent)
+	tbl.ForEach(func(k, v glua.LValue) {
+		name := k.String()
+		switch val := v.(type) {
+		case glua.LString:
+			result[name] = ui.BarContent{Left: string(val)}
+		case *glua.LTable:
+			result[name] = ui.BarContent{
+				Left:   luaStringOrEmpty(e.L.GetField(val, "left")),
+				Center: luaStringOrEmpty(e.L.GetField(val, "center")),
+				Right:  luaStringOrEmpty(e.L.GetField(val, "right")),
+			}
+		}
+	})
+	if len(result) == 0 {
+		return nil
 	}
-	return names
-}
-
-// HasBar returns true if a bar with the given name is registered.
-func (e *Engine) HasBar(name string) bool {
-	_, ok := e.barFuncs[name]
-	return ok
+	return result
 }
 
 // GetLayout returns the current Lua-defined layout configuration.

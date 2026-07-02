@@ -173,10 +173,11 @@ func TestFailingHookIsQuarantined(t *testing.T) {
 	}
 }
 
-// TestFailingBarIsRemoved verifies that a bar renderer failing
-// repeatedly is removed instead of erroring 4x/second forever.
-func TestFailingBarIsRemoved(t *testing.T) {
-	engine, _, cleanup := setupTest(t)
+// TestFailingBarIsQuarantined verifies that a bar renderer failing
+// repeatedly is disabled instead of erroring 4x/second forever, and
+// that re-registering it gives a fresh start.
+func TestFailingBarIsQuarantined(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 
 	setup := `rune.ui.bar("hp", function() error("boom") end)`
@@ -185,10 +186,38 @@ func TestFailingBarIsRemoved(t *testing.T) {
 	}
 
 	for i := 0; i < 3; i++ {
-		engine.RenderBar("hp", 80)
+		engine.RenderBars(80)
 	}
-	if engine.HasBar("hp") {
-		t.Error("expected failing bar to be removed after 3 errors")
+
+	disabled := false
+	for _, p := range host.DrainPrintCalls() {
+		if strings.Contains(p, "disabled after 3 consecutive errors") {
+			disabled = true
+		}
+	}
+	if !disabled {
+		t.Fatal("expected quarantine notice after 3 failures")
+	}
+
+	// The quarantined bar no longer renders or reports
+	if content := engine.RenderBars(80); content != nil {
+		if _, ok := content["hp"]; ok {
+			t.Error("quarantined bar still rendering")
+		}
+	}
+	for _, p := range host.DrainPrintCalls() {
+		if strings.Contains(p, "boom") {
+			t.Errorf("quarantined bar still reporting: %q", p)
+		}
+	}
+
+	// Re-registering the bar resets the quarantine
+	if err := engine.DoString("rereg", `rune.ui.bar("hp", function() return "HP 100" end)`); err != nil {
+		t.Fatalf("re-register failed: %v", err)
+	}
+	content := engine.RenderBars(80)
+	if content == nil || content["hp"].Left != "HP 100" {
+		t.Errorf("re-registered bar did not render, got %v", content)
 	}
 }
 
@@ -289,6 +318,48 @@ func TestRegistrationsRecordSource(t *testing.T) {
 	`
 	if err := engine.DoString("attr_test.lua", script); err != nil {
 		t.Fatalf("source attribution failed: %v", err)
+	}
+}
+
+// TestKeyBindRoundTrip verifies the bind path: Lua registers through
+// rune.bind, Go sees the key via GetBoundKeys, and HandleKeyBind
+// dispatches back into the Lua callback. Unbinding removes the key.
+func TestKeyBindRoundTrip(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	if err := engine.DoString("setup", `rune.bind("ctrl+g", function() rune.send_raw("bound") end)`); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
+	found := false
+	for _, k := range engine.GetBoundKeys() {
+		if k == "ctrl+g" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("ctrl+g missing from GetBoundKeys")
+	}
+
+	engine.HandleKeyBind("ctrl+g")
+	if sent := host.DrainNetworkCalls(); len(sent) != 1 || sent[0] != "bound" {
+		t.Errorf("expected bind callback to fire, got %v", sent)
+	}
+
+	// An unbound key is a no-op, not an error
+	engine.HandleKeyBind("ctrl+q")
+	if sent := host.DrainNetworkCalls(); len(sent) != 0 {
+		t.Errorf("unbound key fired something: %v", sent)
+	}
+
+	if err := engine.DoString("unbind", `assert(rune.unbind("ctrl+g"))`); err != nil {
+		t.Fatalf("unbind failed: %v", err)
+	}
+	for _, k := range engine.GetBoundKeys() {
+		if k == "ctrl+g" {
+			t.Error("ctrl+g still bound after unbind")
+		}
 	}
 }
 

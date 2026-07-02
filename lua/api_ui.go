@@ -5,6 +5,21 @@ import glua "github.com/yuin/gopher-lua"
 // registerUIFuncs registers all UI-related API functions
 func (e *Engine) registerUIFuncs() {
 	e.registerPaneFuncs()
+	e.registerUIInternalFuncs()
+}
+
+// registerUIInternalFuncs registers rune._ui.* primitives used by the
+// core modules (not part of the public API).
+func (e *Engine) registerUIInternalFuncs() {
+	internal := e.L.NewTable()
+	e.L.SetField(e.runeTable, "_ui", internal)
+
+	// rune._ui.config_changed(): notify the host that binds/layout
+	// changed so it can push fresh state to the UI.
+	e.L.SetField(internal, "config_changed", e.L.NewFunction(func(L *glua.LState) int {
+		e.host.OnConfigChange()
+		return 0
+	}))
 }
 
 // registerPaneFuncs registers internal rune._pane.* primitives (wrapped by Lua)

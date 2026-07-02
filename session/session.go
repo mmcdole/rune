@@ -287,23 +287,6 @@ func (s *Session) loadUserScripts() error {
 	return nil
 }
 
-// renderBars calls all Lua bar renderers and returns their content.
-// Must be called from Session goroutine (thread-safe Lua access).
-func (s *Session) renderBars(width int) map[string]ui.BarContent {
-	names := s.engine.GetBarNames()
-	if len(names) == 0 {
-		return nil
-	}
-
-	result := make(map[string]ui.BarContent, len(names))
-	for _, name := range names {
-		if content, ok := s.engine.RenderBar(name, width); ok {
-			result[name] = content
-		}
-	}
-	return result
-}
-
 // handleKeyBind executes a Lua key binding.
 // Must be called from Session goroutine (thread-safe Lua access).
 func (s *Session) handleKeyBind(key string) {
@@ -317,7 +300,7 @@ func (s *Session) pushBarUpdates() {
 		width = 80
 	}
 
-	content := s.renderBars(width)
+	content := s.engine.RenderBars(width)
 	if content != nil {
 		s.ui.UpdateBars(content)
 	}

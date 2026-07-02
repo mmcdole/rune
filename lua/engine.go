@@ -30,13 +30,8 @@ type Engine struct {
 	pickerCallbacks map[string]*glua.LFunction
 	pickerNextID    int
 
-	// Bar rendering
-	barFuncs    map[string]*glua.LFunction
-	barFailures map[string]int // Consecutive render failures per bar
-	barLayout   ui.LayoutConfig
-
-	// Key bindings
-	bindFuncs map[string]*glua.LFunction
+	// Layout config, marshaled from rune.ui.layout calls
+	barLayout ui.LayoutConfig
 
 	// Watchdog
 	CallTimeout time.Duration      // Time budget per Lua entry; see DefaultCallTimeout
@@ -57,12 +52,9 @@ func NewEngine(host Host) *Engine {
 	return &Engine{
 		host:            host,
 		pickerCallbacks: make(map[string]*glua.LFunction),
-		barFuncs:        make(map[string]*glua.LFunction),
-		barFailures:     make(map[string]int),
 		barLayout: ui.LayoutConfig{
 			Bottom: []ui.LayoutEntry{{Name: "input"}, {Name: "status"}},
 		},
-		bindFuncs:   make(map[string]*glua.LFunction),
 		CallTimeout: DefaultCallTimeout,
 	}
 }
@@ -130,12 +122,9 @@ func (e *Engine) Init() error {
 	e.pickerCallbacks = make(map[string]*glua.LFunction)
 	e.pickerNextID = 0
 
-	e.barFuncs = make(map[string]*glua.LFunction)
-	e.barFailures = make(map[string]int)
 	e.barLayout = ui.LayoutConfig{
 		Bottom: []ui.LayoutEntry{{Name: "input"}, {Name: "status"}},
 	}
-	e.bindFuncs = make(map[string]*glua.LFunction)
 	e.hooksBrokenReported = false
 
 	registerLineType(e.L)
@@ -386,7 +375,6 @@ func (e *Engine) registerAPIs() {
 	e.registerUIFuncs()
 	e.registerStateFuncs()
 	e.registerBarFuncs()
-	e.registerBindFuncs()
 	e.registerPickerFuncs()
 	e.registerHistoryFuncs()
 	e.registerInputFuncs()
