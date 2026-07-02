@@ -21,6 +21,19 @@ import (
 // Compile-time interface check - Session implements lua.Host
 var _ lua.Host = (*Session)(nil)
 
+// Network is the connection layer Session drives. In production this
+// is *network.TCPClient; tests substitute a mock so the event loop
+// can be exercised without sockets.
+type Network interface {
+	Connect(ctx context.Context, address string) error
+	Disconnect()
+	Send(data string) error
+	Output() <-chan network.Output
+	LocalEchoEnabled() bool
+}
+
+var _ Network = (*network.TCPClient)(nil)
+
 // Config holds session configuration
 type Config struct {
 	CoreScripts embed.FS // Embedded core Lua scripts
@@ -34,7 +47,7 @@ type Config struct {
 // operations.
 type Session struct {
 	// Infrastructure
-	net   *network.TCPClient
+	net   Network
 	ui    ui.UI
 	timer *timer.Service
 
@@ -62,7 +75,7 @@ type Session struct {
 }
 
 // New creates a new Session. It is passive - no goroutines start here.
-func New(net *network.TCPClient, uiInstance ui.UI, cfg Config) *Session {
+func New(net Network, uiInstance ui.UI, cfg Config) *Session {
 	timerEvents := make(chan timer.Event, 256)
 
 	s := &Session{
