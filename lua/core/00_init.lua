@@ -177,7 +177,7 @@ function rune.history.add(cmd)
 end
 
 -- UI namespace
--- rune.ui.bar is added by 18_bars.lua, which owns the bar registry.
+-- rune.ui.bar is added by 35_bars.lua, which owns the bar registry.
 
 rune.ui = {}
 

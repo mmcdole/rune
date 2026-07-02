@@ -1,5 +1,5 @@
 -- Bar Renderer System
--- Built on rune.registry (06_registry.lua). Renderers get the same
+-- Built on rune.registry (15_registry.lua). Renderers get the same
 -- quarantine as every other callback: three consecutive failures
 -- disable the bar instead of erroring 4x/second forever.
 --

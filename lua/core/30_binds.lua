@@ -1,5 +1,5 @@
 -- Key Binding System
--- Built on rune.registry (06_registry.lua), so binds get the same
+-- Built on rune.registry (15_registry.lua), so binds get the same
 -- names, groups, source attribution, quarantine, and listings as
 -- hooks/triggers/aliases/timers.
 --
@@ -8,7 +8,7 @@
 --   rune.unbind(key)                 -- Remove a binding
 --   rune.binds.list()                -- For /binds
 --
--- Options: name, group (see 06_registry.lua). A disabled bind (or one
+-- Options: name, group (see 15_registry.lua). A disabled bind (or one
 -- in a disabled group) swallows its key without running the callback.
 --
 -- Go's role is transport only: the UI forwards keys present in

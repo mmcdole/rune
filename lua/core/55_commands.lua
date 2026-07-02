@@ -1,6 +1,6 @@
 -- Slash Command System
 
--- Styling shorthands (see 01_style.lua)
+-- Styling shorthands (see 05_style.lua)
 local green, red, yellow, cyan, dim =
     rune.style.green, rune.style.red, rune.style.yellow,
     rune.style.cyan, rune.style.gray

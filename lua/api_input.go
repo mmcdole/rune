@@ -3,7 +3,7 @@ package lua
 import glua "github.com/yuin/gopher-lua"
 
 // registerInputFuncs registers rune._input.* primitives.
-// The public rune.input API is defined in Lua (50_input.lua).
+// The public rune.input API is defined in Lua (70_input.lua).
 func (e *Engine) registerInputFuncs() {
 	inp := e.L.NewTable()
 	e.L.SetField(e.runeTable, "_input", inp)

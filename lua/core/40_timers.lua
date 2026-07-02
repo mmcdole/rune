@@ -1,6 +1,6 @@
 -- Timer System
 -- Timers execute actions after a delay or repeatedly at intervals.
--- Built on rune.registry (06_registry.lua).
+-- Built on rune.registry (15_registry.lua).
 --
 -- API:
 --   rune.timer.after(seconds, action, opts?)  -- One-shot timer

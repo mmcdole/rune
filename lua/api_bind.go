@@ -2,7 +2,7 @@ package lua
 
 import glua "github.com/yuin/gopher-lua"
 
-// Key bindings are owned by the Lua bind module (17_binds.lua); Go is
+// Key bindings are owned by the Lua bind module (30_binds.lua); Go is
 // transport only. The Engine methods here bridge Session to the two
 // internal Lua entry points.
 

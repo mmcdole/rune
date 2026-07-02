@@ -1,6 +1,6 @@
 -- Hook Registry System
 -- Allows multiple handlers per event with priority ordering.
--- Built on rune.registry (06_registry.lua) for handles, names,
+-- Built on rune.registry (15_registry.lua) for handles, names,
 -- groups, and priorities.
 --
 -- API:

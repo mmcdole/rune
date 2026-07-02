@@ -34,8 +34,8 @@ Rune is a MUD (Multi-User Dungeon) client built with Go for system-level operati
 These rules keep the boundary consistent; follow them when adding APIs:
 
 - **Go registers only `rune._*` primitives** (`_send_raw`, `_timer`, `_input`, `_ui`, ...). Every public name (`rune.send`, `rune.input.get`, `rune.ui.bar`, ...) is defined in Lua, even when the wrapper is thin. The Lua core in `lua/core/` IS the public API surface. The only non-underscore field Go sets is `rune.config_dir` (data, not API).
-- **Registries live in Lua** on the shared factory (`rune.registry.new`, `06_registry.lua`). Hooks, timers, aliases, triggers, binds, and bars all get handles, upsert-by-name, groups, priorities, source attribution, and failure quarantine from one implementation. Go dispatches through internal entry points (`rune.hooks.call`, `rune.binds._dispatch`, `rune.bars._render_all`, `rune.timer._fire`).
-- **Presentation belongs to Lua** via `rune.style` (`01_style.lua`). Go colors only its last-resort degraded-path messages, through `text.Red`/`text.Green` - raw escape codes live in exactly one file per language.
+- **Registries live in Lua** on the shared factory (`rune.registry.new`, `15_registry.lua`). Hooks, timers, aliases, triggers, binds, and bars all get handles, upsert-by-name, groups, priorities, source attribution, and failure quarantine from one implementation. Go dispatches through internal entry points (`rune.hooks.call`, `rune.binds._dispatch`, `rune.bars._render_all`, `rune.timer._fire`).
+- **Presentation belongs to Lua** via `rune.style` (`05_style.lua`). Go colors only its last-resort degraded-path messages, through `text.Red`/`text.Green` - raw escape codes live in exactly one file per language.
 - **Key policy**: Go handles keys only while a UI-internal mode is active (picker capture/cancel) plus Enter-to-submit. Everything else is a Lua bind. Bound printable keys fire only when the input is empty; Go's scroll-key handler is a fallback for unbound keys (keeps degraded mode scrollable).
 - **Error convention**: Go primitives return `nil, err` for recoverable failures (send while disconnected, missing file, bad pattern); raising is reserved for programmer errors (wrong argument types).
 
@@ -91,21 +91,21 @@ Bar tick (250ms)            -> Session -> rune.bars._render_all(width) -> UI bar
 ## Lua Core Scripts (lua/core/, loaded in numeric order)
 
 - `00_init.lua` - Config, guarded_call, caller_source, line objects, capture substitution, primitive wrappers (send_raw, persist, history, rune.ui, rune.state proxy)
-- `01_style.lua` - `rune.style` ANSI helpers (the one place Lua writes escape codes)
-- `05_regex.lua` - Cached Go-regexp matching (bounded cache), `validate`
-- `06_registry.lua` - Shared registry factory (`rune.registry.new`)
-- `10_hooks.lua` - Hook registry + `rune.hooks.call` dispatcher
-- `15_groups.lua` - Group master switches
-- `17_binds.lua` - Key bindings (`rune.bind`, `rune.binds`)
-- `18_bars.lua` - Bar renderers (`rune.ui.bar`, `rune.bars`)
-- `20_timer.lua` - Timers (owns id→callback map; Go only schedules)
-- `25_aliases.lua` - Aliases (exact + regex)
-- `30_triggers.lua` - Triggers (exact/starts/contains/regex, gag, raw)
-- `35_commands.lua` - Slash commands
-- `40_send.lua` - Command expansion (`;` splitting, `#N` repeats), core input/output/prompt handlers
-- `45_events.lua` - Default system event handlers
-- `50_input.lua` - Input wrappers, history navigation, word ops, tab completion
-- `55_ui.lua` - Panes, status bar, default binds and pickers
+- `05_style.lua` - `rune.style` ANSI helpers (the one place Lua writes escape codes)
+- `10_regex.lua` - Cached Go-regexp matching (bounded cache), `validate`
+- `15_registry.lua` - Shared registry factory (`rune.registry.new`)
+- `20_hooks.lua` - Hook registry + `rune.hooks.call` dispatcher
+- `25_groups.lua` - Group master switches
+- `30_binds.lua` - Key bindings (`rune.bind`, `rune.binds`)
+- `35_bars.lua` - Bar renderers (`rune.ui.bar`, `rune.bars`)
+- `40_timers.lua` - Timers (owns id→callback map; Go only schedules)
+- `45_aliases.lua` - Aliases (exact + regex)
+- `50_triggers.lua` - Triggers (exact/starts/contains/regex, gag, raw)
+- `55_commands.lua` - Slash commands
+- `60_send.lua` - Command expansion (`;` splitting, `#N` repeats), core input/output/prompt handlers
+- `65_events.lua` - Default system event handlers
+- `70_input.lua` - Input wrappers, history navigation, word ops, tab completion
+- `75_ui.lua` - Panes, status bar, default binds and pickers
 
 ## Lua API (rune namespace) - highlights
 

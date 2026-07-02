@@ -9,7 +9,7 @@ import (
 // registerTimerFuncs registers rune._timer.* primitives.
 //
 // Go only schedules wake-ups and returns ids; the Lua timer module
-// (20_timer.lua) owns the id -> callback mapping and all dispatch,
+// (40_timers.lua) owns the id -> callback mapping and all dispatch,
 // so callback state lives in exactly one place and dies with the VM
 // on reload.
 func (e *Engine) registerTimerFuncs() {

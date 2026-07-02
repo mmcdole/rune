@@ -1,6 +1,6 @@
 -- Alias System
 -- Aliases match user input and transform/expand it.
--- Built on rune.registry (06_registry.lua).
+-- Built on rune.registry (15_registry.lua).
 --
 -- API (literal matching):
 --   rune.alias.exact(key, action, opts?)      -- Match command word exactly (literal)

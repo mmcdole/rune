@@ -54,7 +54,7 @@ rune.bind("end", function() rune.pane.scroll_to_bottom("main") end)
 -- Reactive status bar using rune.ui.bar() API
 -- ============================================================
 
--- Styling shorthands (see 01_style.lua)
+-- Styling shorthands (see 05_style.lua)
 local green, yellow, gray, dim, inverse =
     rune.style.green, rune.style.yellow, rune.style.gray,
     rune.style.dim, rune.style.inverse

@@ -1,6 +1,6 @@
 -- Trigger System
 -- Triggers match server output and execute actions.
--- Built on rune.registry (06_registry.lua).
+-- Built on rune.registry (15_registry.lua).
 --
 -- API (literal matching):
 --   rune.trigger.exact(line, action, opts?)      -- Exact line match (literal)
