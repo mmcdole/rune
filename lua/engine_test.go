@@ -189,6 +189,40 @@ func TestFailingBarIsRemoved(t *testing.T) {
 	}
 }
 
+// TestInvalidRegexFailsAtRegistration verifies that a bad pattern is a
+// loud error at trigger/alias creation, not a trigger that never fires.
+func TestInvalidRegexFailsAtRegistration(t *testing.T) {
+	engine, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	err := engine.DoString("setup", `rune.trigger.regex("(unclosed", "look")`)
+	if err == nil || !strings.Contains(err.Error(), "invalid trigger pattern") {
+		t.Errorf("expected registration error for bad trigger pattern, got: %v", err)
+	}
+
+	err = engine.DoString("setup2", `rune.alias.regex("(unclosed", "look")`)
+	if err == nil || !strings.Contains(err.Error(), "invalid alias pattern") {
+		t.Errorf("expected registration error for bad alias pattern, got: %v", err)
+	}
+}
+
+// TestCaptureWithPercentIsLiteral verifies that captured text containing
+// "%" is substituted literally instead of corrupting the gsub template.
+func TestCaptureWithPercentIsLiteral(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	setup := `rune.trigger.regex("^You gain (\\S+) exp", "say %1")`
+	if err := engine.DoString("setup", setup); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
+	engine.OnOutput(text.NewLine("You gain 50% exp"))
+	if sent := host.DrainNetworkCalls(); len(sent) != 1 || sent[0] != "say 50%" {
+		t.Errorf("expected literal %%-capture substitution, got %v", sent)
+	}
+}
+
 // TestWatchdogRunawayHookDoesNotHang verifies the watchdog also covers
 // the hook dispatch path (OnInput), not just direct script execution.
 func TestWatchdogRunawayHookDoesNotHang(t *testing.T) {

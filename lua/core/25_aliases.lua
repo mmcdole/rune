@@ -179,7 +179,13 @@ function rune.alias.exact(command, action, opts)
 end
 
 -- Go regexp match on full input line
+-- Raises on an invalid pattern so typos fail loudly at registration,
+-- with the caller's file:line, instead of never matching.
 function rune.alias.regex(pattern, action, opts)
+    local ok, err = rune.regex.validate(pattern)
+    if not ok then
+        error("invalid alias pattern '" .. tostring(pattern) .. "': " .. tostring(err), 2)
+    end
     return create_alias(pattern, action, opts, false)
 end
 
@@ -297,9 +303,11 @@ function rune.alias.process(input)
                         result = ret
                     end
                 elseif type(data.action) == "string" then
+                    -- Function replacement inserts the capture
+                    -- literally, so a "%" in matched text is safe.
                     result = data.action
                     for i, m in ipairs(matches) do
-                        result = result:gsub("%%" .. i, m)
+                        result = result:gsub("%%" .. i, function() return m end)
                     end
                 end
 

@@ -169,7 +169,13 @@ function rune.trigger.contains(substring, action, opts)
 end
 
 -- Go regexp match
+-- Raises on an invalid pattern so typos fail loudly at registration,
+-- with the caller's file:line, instead of never firing.
 function rune.trigger.regex(pattern, action, opts)
+    local ok, err = rune.regex.validate(pattern)
+    if not ok then
+        error("invalid trigger pattern '" .. tostring(pattern) .. "': " .. tostring(err), 2)
+    end
     return create_trigger(pattern, action, opts, MODE_REGEX)
 end
 
@@ -301,10 +307,12 @@ function rune.trigger.process(line)
                             end
                         end
                     elseif type(data.action) == "string" and data.action ~= "" then
-                        -- String action with capture substitution
+                        -- String action with capture substitution.
+                        -- Function replacement inserts the capture
+                        -- literally, so a "%" in matched text is safe.
                         local cmd = data.action
                         for i, m in ipairs(matches) do
-                            cmd = cmd:gsub("%%" .. i, m)
+                            cmd = cmd:gsub("%%" .. i, function() return m end)
                         end
                         rune.send(cmd)
                     end
