@@ -181,6 +181,13 @@ func (e *Engine) CancelPickerCallback(id string) {
 	delete(e.pickerCallbacks, id)
 }
 
+// SetConfigDir exposes the config directory to scripts as
+// rune.config_dir. Set directly on the table rather than via generated
+// Lua source, so arbitrary path characters cannot break or inject code.
+func (e *Engine) SetConfigDir(dir string) {
+	e.L.SetField(e.runeTable, "config_dir", glua.LString(dir))
+}
+
 // DoString executes a raw string of Lua code.
 // The name parameter is used for stack traces.
 func (e *Engine) DoString(name, code string) error {

@@ -226,8 +226,8 @@ func (s *Session) initLua() error {
 	if err := s.engine.Init(); err != nil {
 		return err
 	}
-	setupCode := fmt.Sprintf("rune.config_dir = [[%s]]", s.config.ConfigDir)
-	return s.engine.DoString("boot_config", setupCode)
+	s.engine.SetConfigDir(s.config.ConfigDir)
+	return nil
 }
 
 // loadCoreScripts loads embedded core Lua scripts in sorted order.
