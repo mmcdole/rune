@@ -143,6 +143,27 @@ rune.state = setmetatable({}, {
     end,
 })
 
+-- Reload-surviving state
+-- A small Go-owned string store that survives /reload (the Lua VM is
+-- torn down and rebuilt) but not client exit. Use it for state that
+-- must outlive a reload - the last connection address, toggles, etc.
+-- Values are strings; encode anything richer yourself.
+
+rune.persist = {}
+
+function rune.persist.set(key, value)
+    rune._persist.set(key, value)
+end
+
+-- Returns the stored string, or nil if unset.
+function rune.persist.get(key)
+    return rune._persist.get(key)
+end
+
+function rune.persist.delete(key)
+    rune._persist.delete(key)
+end
+
 -- Input history (Go owns the ring buffer so it survives reloads)
 
 rune.history = {}

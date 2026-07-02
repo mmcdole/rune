@@ -49,6 +49,9 @@ type Session struct {
 	historyLines []string
 	historyLimit int
 
+	// Reload-surviving Lua state (see lua_persist.go)
+	persist map[string]string
+
 	// Channels
 	events      chan event.Event
 	timerEvents chan timer.Event
@@ -76,6 +79,7 @@ func New(net *network.TCPClient, uiInstance ui.UI, cfg Config) *Session {
 		config:       cfg,
 		historyLines: make([]string, 0, 10000),
 		historyLimit: 10000,
+		persist:      make(map[string]string),
 	}
 
 	s.engine = lua.NewEngine(s)

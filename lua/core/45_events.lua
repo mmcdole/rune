@@ -14,6 +14,8 @@ end, { priority = 100 })
 
 rune.hooks.on("connected", function(addr)
     rune.echo("[System] Connected to " .. addr)
+    -- Remember across /reload so /reconnect keeps working
+    rune.persist.set("last_address", addr)
 end, { priority = 100 })
 
 rune.hooks.on("disconnecting", function()

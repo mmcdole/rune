@@ -34,16 +34,10 @@ function rune.command.list()
     return result
 end
 
--- Track last connection for reconnect
-local last_host = nil
-local last_port = nil
-
 -- /connect <host> <port> - Connect to server
 rune.command.add("connect", function(args)
     local host, port = args:match("^(%S+)%s+(%d+)$")
     if host and port then
-        last_host = host
-        last_port = port
         rune.connect(host .. ":" .. port)
     else
         rune.echo("[Usage] /connect <host> <port>")
@@ -55,10 +49,12 @@ rune.command.add("disconnect", function(args)
     rune.disconnect()
 end, "Disconnect from server")
 
--- /reconnect - Reconnect to last server
+-- /reconnect - Reconnect to last server. The address is stored in
+-- rune.persist (on the "connected" event), so it survives /reload.
 rune.command.add("reconnect", function(args)
-    if last_host and last_port then
-        rune.connect(last_host .. ":" .. last_port)
+    local addr = rune.persist.get("last_address")
+    if addr then
+        rune.connect(addr)
     else
         rune.echo("[Error] No previous connection")
     end

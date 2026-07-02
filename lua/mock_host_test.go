@@ -37,6 +37,9 @@ type MockHost struct {
 
 	// When set, OpenEditor delegates here (e.g. to simulate a slow editor)
 	OpenEditorFn func(initial string) (string, bool)
+
+	// Reload-surviving store (see Host.PersistSet)
+	Persisted map[string]string
 }
 
 func NewMockHost() *MockHost {
@@ -133,6 +136,28 @@ func (m *MockHost) ShowPicker(title string, items []ui.PickerItem, callbackID st
 
 func (m *MockHost) GetHistory() []string {
 	return nil
+}
+
+func (m *MockHost) PersistSet(key, value string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.Persisted == nil {
+		m.Persisted = make(map[string]string)
+	}
+	m.Persisted[key] = value
+}
+
+func (m *MockHost) PersistGet(key string) (string, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	v, ok := m.Persisted[key]
+	return v, ok
+}
+
+func (m *MockHost) PersistDelete(key string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.Persisted, key)
 }
 
 func (m *MockHost) AddToHistory(cmd string) {

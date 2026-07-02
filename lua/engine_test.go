@@ -321,6 +321,33 @@ func TestRegistrationsRecordSource(t *testing.T) {
 	}
 }
 
+// TestPersistSurvivesReload verifies rune.persist round-trips through
+// the host and survives a VM teardown (which is the whole point).
+func TestPersistSurvivesReload(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	script := `
+		rune.persist.set("last_address", "mud.example.com:4000")
+		assert(rune.persist.get("last_address") == "mud.example.com:4000")
+		assert(rune.persist.get("missing") == nil)
+		rune.persist.set("gone", "x")
+		rune.persist.delete("gone")
+		assert(rune.persist.get("gone") == nil)
+	`
+	if err := engine.DoString("persist_test", script); err != nil {
+		t.Fatalf("persist round-trip failed: %v", err)
+	}
+
+	// Tear down and rebuild the VM, as /reload does
+	if err := engine.Init(); err != nil {
+		t.Fatalf("re-init failed: %v", err)
+	}
+	if host.Persisted["last_address"] != "mud.example.com:4000" {
+		t.Error("persisted value lost across VM teardown")
+	}
+}
+
 // TestKeyBindRoundTrip verifies the bind path: Lua registers through
 // rune.bind, Go sees the key via GetBoundKeys, and HandleKeyBind
 // dispatches back into the Lua callback. Unbinding removes the key.

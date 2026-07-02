@@ -52,6 +52,13 @@ type Host interface {
 	GetHistory() []string
 	AddToHistory(cmd string)
 
+	// Persistence: a small Go-owned string store that survives script
+	// reloads (but not client exit). Lets Lua keep state - like the
+	// last connection address - across the VM teardown of /reload.
+	PersistSet(key, value string)
+	PersistGet(key string) (string, bool)
+	PersistDelete(key string)
+
 	// State
 	OnConfigChange()
 }
