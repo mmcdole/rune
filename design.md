@@ -1,7 +1,7 @@
 > **Historical document.** This is the original clean-slate design sketch;
 > the pseudo-code and function names below (`on_input`, `add_alias`, `#wait`)
 > predate the implementation and do not match the current API. For current
-> architecture see `architecture.md`; for the current Lua API see
+> architecture see `docs/architecture.md`; for the current Lua API see
 > `docs/lua_doc.md`.
 
 

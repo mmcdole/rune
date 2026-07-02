@@ -66,7 +66,7 @@ The UI layer (built with Bubble Tea) is deliberately "dumb."
 
 A wrapper around gopher-lua.
 
-- **Segregated Interfaces (ISP):** The Engine depends on six focused service interfaces rather than a monolithic host: `UIService`, `NetworkService`, `TimerService`, `SystemService`, `HistoryService`, and `StateService`. This keeps the Lua implementation decoupled and testable.
+- **Single Host interface:** The Engine depends on one `lua.Host` interface (`lua/host.go`). Session implements it, with the methods grouped by service area across `session/lua_*.go` (network, ui, timers, system, history, persist, state). Tests substitute a mock Host.
 - **Reactivity:** The Engine updates a global `rune.state` table whenever system state changes (connection, scroll position), allowing scripts to reactively render UI elements.
 
 ## 3. UI Architecture: The "Push" Model
@@ -111,7 +111,7 @@ Rune avoids hardcoded UI modals. Instead, it exposes a single, configurable Pick
 
 ## 4. Networking & Telnet
 
-Rune implements a bespoke Telnet parser (`network/parser.go`) ported from `libmudtelnet`.
+Rune implements a bespoke Telnet parser (`network/telnet.go`) ported from `libmudtelnet`.
 
 - **State Machine:** Handles negotiation (WILL/WONT/DO/DONT) and subnegotiation.
 - **Compatibility Table:** Tracks the state of every Telnet option to prevent negotiation loops.
@@ -121,7 +121,7 @@ Rune implements a bespoke Telnet parser (`network/parser.go`) ported from `libmu
 
 ### 5.1 The Adapter Pattern
 
-The `ui/tui.go` file acts as an adapter, converting the Bubble Tea `Update`/`View` model into the channel-based API expected by the Session.
+The `ui/tui/tui.go` file acts as an adapter, converting the Bubble Tea `Update`/`View` model into the channel-based API expected by the Session.
 
 ### 5.2 The Observer Pattern (Reactive State)
 
@@ -133,18 +133,21 @@ Interaction between UI and Session is message-passing (commands), not function c
 
 ## 6. Future Extensibility
 
-- New UI widgets can be added to `ui/components` and exposed via `Show...Msg` without changing the engine core.
-- A headless mode can be implemented by providing an alternate `mud.UI` interface implementation.
+- New UI widgets can be added to `ui/tui/widget` and exposed via `Show...Msg` without changing the engine core.
+- A headless mode can be implemented by providing an alternate `ui.UI` interface implementation.
 - Multiple concurrent sessions (tabs) are supported since no global state is shared.
 
 ## 7. Directory Structure
 
-- `cmd/`: Entry points (`rune`, `layout-test`)
-- `lua/`: Scripting engine and API definitions
-- `mud/`: Core interfaces and types
+- `cmd/rune/`: Entry point
+- `config/`: Config dir resolution (XDG/APPDATA)
+- `event/`: Session event types
+- `lua/`: Scripting engine, `rune._*` primitive registration, embedded Lua core (`lua/core/`)
 - `network/`: TCP and Telnet logic
-- `session/`: Main application controller
-- `ui/`: Bubble Tea TUI implementation  
-  - `components/`: Reusable widgets (Input, Picker, Status)  
-  - `layout/`: Layout definitions
+- `session/`: Main application controller (implements `lua.Host`)
+- `text/`: Line type, ANSI stripper, degraded-path colors
+- `timer/`: Timer scheduling service
+- `ui/`: UI interface and messages
+  - `tui/`: Bubble Tea implementation
+  - `tui/widget/`: Reusable widgets (Input, Picker, Viewport, Pane, Bar)
 
