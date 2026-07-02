@@ -12,14 +12,28 @@ rune.regex = {}
 -- {err = message, reported = bool} for invalid ones. Caching failures
 -- means a bad pattern is reported once instead of being recompiled and
 -- silently ignored on every line.
+--
+-- The cache is bounded: a script generating patterns dynamically
+-- (e.g. interpolating names into rune.regex.match) would otherwise
+-- grow it forever. At the cap the whole cache resets - trigger/alias
+-- patterns recompile on their next match, which is cheap, and the
+-- common case (a stable set of patterns) never hits the cap.
+local MAX_CACHED_PATTERNS = 512
+
 local cache = {}
+local cache_size = 0
 
 local function lookup(pattern)
     local entry = cache[pattern]
     if not entry then
+        if cache_size >= MAX_CACHED_PATTERNS then
+            cache = {}
+            cache_size = 0
+        end
         local re, err = rune._regex.compile(pattern)
         entry = re and { re = re } or { err = err }
         cache[pattern] = entry
+        cache_size = cache_size + 1
     end
     return entry
 end
