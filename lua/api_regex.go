@@ -16,7 +16,12 @@ func registerRegexType(L *glua.LState) {
 
 // regexIndex handles method calls on Regex userdata.
 func regexIndex(L *glua.LState) int {
-	re := L.CheckUserData(1).Value.(*regexp.Regexp)
+	ud := L.CheckUserData(1)
+	re, ok := ud.Value.(*regexp.Regexp)
+	if !ok {
+		L.ArgError(1, "regex expected")
+		return 0
+	}
 	method := L.CheckString(2)
 
 	switch method {

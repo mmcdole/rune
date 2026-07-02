@@ -41,6 +41,10 @@ type Engine struct {
 	// Watchdog
 	CallTimeout time.Duration // Time budget per Lua entry; see DefaultCallTimeout
 	inLua       bool          // True while inside a guarded Lua call (re-entrancy)
+
+	// True once the user has been warned that rune.hooks.call is
+	// missing and the client is degraded to raw pass-through.
+	hooksBrokenReported bool
 }
 
 // NewEngine creates an Engine with a Host interface.
@@ -102,6 +106,7 @@ func (e *Engine) Init() error {
 		Bottom: []ui.LayoutEntry{{Name: "input"}, {Name: "status"}},
 	}
 	e.bindFuncs = make(map[string]*glua.LFunction)
+	e.hooksBrokenReported = false
 
 	registerLineType(e.L)
 	e.registerAPIs()
@@ -205,9 +210,25 @@ func (e *Engine) DoFile(path string) error {
 
 // OnInput handles user typing.
 func (e *Engine) OnInput(text string) bool {
+	hooksCall, ok := e.getHooksCall()
+	if !ok {
+		e.reportHooksBroken()
+		// Degraded mode: keep the escape hatches working, pass
+		// everything else to the server as a plain telnet client.
+		switch text {
+		case "/quit":
+			e.host.Quit()
+		case "/reload":
+			e.host.Reload()
+		default:
+			e.host.Send(text)
+		}
+		return true
+	}
+
 	if err := e.guard(func() error {
 		return e.L.CallByParam(glua.P{
-			Fn:      e.getHooksCall(),
+			Fn:      hooksCall,
 			NRet:    1,
 			Protect: true,
 		}, glua.LString("input"), glua.LString(text))
@@ -226,11 +247,17 @@ func (e *Engine) OnInput(text string) bool {
 
 // OnOutput handles server text.
 func (e *Engine) OnOutput(line text.Line) (string, bool) {
+	hooksCall, ok := e.getHooksCall()
+	if !ok {
+		e.reportHooksBroken()
+		return line.Raw, true
+	}
+
 	lineUD := newLine(e.L, line)
 
 	if err := e.guard(func() error {
 		return e.L.CallByParam(glua.P{
-			Fn:      e.getHooksCall(),
+			Fn:      hooksCall,
 			NRet:    2,
 			Protect: true,
 		}, glua.LString("output"), lineUD)
@@ -250,11 +277,17 @@ func (e *Engine) OnOutput(line text.Line) (string, bool) {
 
 // OnPrompt handles server prompts.
 func (e *Engine) OnPrompt(line text.Line) string {
+	hooksCall, ok := e.getHooksCall()
+	if !ok {
+		e.reportHooksBroken()
+		return line.Raw
+	}
+
 	lineUD := newLine(e.L, line)
 
 	if err := e.guard(func() error {
 		return e.L.CallByParam(glua.P{
-			Fn:      e.getHooksCall(),
+			Fn:      hooksCall,
 			NRet:    2,
 			Protect: true,
 		}, glua.LString("prompt"), lineUD)
@@ -274,6 +307,16 @@ func (e *Engine) OnPrompt(line text.Line) string {
 
 // CallHook calls a hook event with string arguments.
 func (e *Engine) CallHook(event string, args ...string) {
+	hooksCall, ok := e.getHooksCall()
+	if !ok {
+		e.reportHooksBroken()
+		// Errors must never disappear, even with hooks broken.
+		if event == "error" {
+			e.host.Print("\033[31m[Error] " + strings.Join(args, " ") + "\033[0m")
+		}
+		return
+	}
+
 	luaArgs := make([]glua.LValue, len(args)+1)
 	luaArgs[0] = glua.LString(event)
 	for i, arg := range args {
@@ -282,7 +325,7 @@ func (e *Engine) CallHook(event string, args ...string) {
 
 	e.guard(func() error {
 		return e.L.CallByParam(glua.P{
-			Fn:      e.getHooksCall(),
+			Fn:      hooksCall,
 			NRet:    0,
 			Protect: true,
 		}, luaArgs...)
@@ -305,9 +348,31 @@ func (e *Engine) registerAPIs() {
 	e.registerInputFuncs()
 }
 
-func (e *Engine) getHooksCall() glua.LValue {
-	hooksTable := e.L.GetField(e.runeTable, "hooks").(*glua.LTable)
-	return e.L.GetField(hooksTable, "call")
+// getHooksCall returns rune.hooks.call, the Lua-side dispatcher for all
+// events. Returns false if the hook system is unavailable - because a
+// core script failed to load, or a user script clobbered rune.hooks.
+func (e *Engine) getHooksCall() (glua.LValue, bool) {
+	hooksTable, ok := e.L.GetField(e.runeTable, "hooks").(*glua.LTable)
+	if !ok {
+		return glua.LNil, false
+	}
+	call := e.L.GetField(hooksTable, "call")
+	if call.Type() != glua.LTFunction {
+		return glua.LNil, false
+	}
+	return call, true
+}
+
+// reportHooksBroken warns the user, once per VM generation, that the
+// hook system is unavailable and the client is running degraded.
+func (e *Engine) reportHooksBroken() {
+	if e.hooksBrokenReported {
+		return
+	}
+	e.hooksBrokenReported = true
+	e.host.Print("\033[31m[System] rune.hooks.call is unavailable - scripting disabled. " +
+		"Input and output pass through raw; /reload and /quit still work. " +
+		"Fix your scripts and /reload.\033[0m")
 }
 
 func expandTilde(path string) string {

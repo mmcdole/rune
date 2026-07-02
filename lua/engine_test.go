@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/drake/rune/text"
 )
 
 // TestWatchdogInterruptsRunawayScript verifies that a script stuck in an
@@ -48,6 +50,52 @@ func TestWatchdogStateUsableAfterInterrupt(t *testing.T) {
 	sent := host.DrainNetworkCalls()
 	if len(sent) != 1 || sent[0] != "still alive" {
 		t.Errorf("expected send after interrupt, got %v", sent)
+	}
+}
+
+// TestBrokenHooksDegradesGracefully verifies that destroying rune.hooks
+// from a user script does not crash the client: output passes through
+// raw, input goes to the server, and the escape hatches keep working.
+func TestBrokenHooksDegradesGracefully(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	if err := engine.DoString("sabotage", "rune.hooks = nil"); err != nil {
+		t.Fatalf("sabotage failed: %v", err)
+	}
+
+	// Output passes through unmodified
+	line := text.NewLine("You are standing in a field.")
+	got, show := engine.OnOutput(line)
+	if !show || got != line.Raw {
+		t.Errorf("expected raw pass-through, got %q show=%v", got, show)
+	}
+
+	// Input goes straight to the server
+	engine.OnInput("north")
+	if sent := host.DrainNetworkCalls(); len(sent) != 1 || sent[0] != "north" {
+		t.Errorf("expected raw send of input, got %v", sent)
+	}
+
+	// Escape hatches still work
+	engine.OnInput("/quit")
+	if !host.QuitCalled {
+		t.Error("expected /quit to reach host in degraded mode")
+	}
+	engine.OnInput("/reload")
+	if host.ReloadCalls != 1 {
+		t.Errorf("expected /reload to reach host in degraded mode, got %d calls", host.ReloadCalls)
+	}
+
+	// The warning is printed exactly once
+	warnings := 0
+	for _, p := range host.DrainPrintCalls() {
+		if strings.Contains(p, "rune.hooks.call is unavailable") {
+			warnings++
+		}
+	}
+	if warnings != 1 {
+		t.Errorf("expected exactly one degraded-mode warning, got %d", warnings)
 	}
 }
 
