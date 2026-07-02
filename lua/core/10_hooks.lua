@@ -1,5 +1,7 @@
 -- Hook Registry System
 -- Allows multiple handlers per event with priority ordering.
+-- Built on rune.registry (06_registry.lua) for handles, names,
+-- groups, and priorities.
 --
 -- API:
 --   rune.hooks.on(event, handler, opts?)  -- Attach handler to event
@@ -21,68 +23,43 @@
 --   "reloaded"    -- After script reload
 --   "error"       -- On system error
 
--- Handle metatable
-local Handle = {}
-Handle.__index = Handle
+-- Per-event dispatch index, maintained alongside the registry so
+-- rune.hooks.call doesn't scan unrelated events on every line.
+local by_event = {} -- event -> sorted array of data
 
-function Handle:remove()
-    local data = self._data
-    local event_handlers = registry[data.event]
-    if event_handlers then
-        for i, entry in ipairs(event_handlers) do
-            if entry.id == data.id then
-                table.remove(event_handlers, i)
+local function sort_handlers(handlers)
+    table.sort(handlers, function(a, b)
+        if a.priority ~= b.priority then
+            return a.priority < b.priority
+        end
+        return a.id < b.id
+    end)
+end
+
+local registry = rune.registry.new{
+    kind = "hook",
+    on_add = function(data)
+        local handlers = by_event[data.event]
+        if not handlers then
+            handlers = {}
+            by_event[data.event] = handlers
+        end
+        table.insert(handlers, data)
+        sort_handlers(handlers)
+    end,
+    on_remove = function(data)
+        local handlers = by_event[data.event]
+        if not handlers then
+            return
+        end
+        for i, entry in ipairs(handlers) do
+            if entry == data then
+                table.remove(handlers, i)
                 break
             end
         end
-    end
-
-    -- Remove from name lookup
-    if data.name and by_name[data.name] == self then
-        by_name[data.name] = nil
-    end
-
-    -- Remove from group
-    if data.group and by_group[data.group] then
-        by_group[data.group][self] = nil
-    end
-
-    return self
-end
-
-function Handle:disable()
-    self._data.enabled = false
-    return self
-end
-
-function Handle:enable()
-    self._data.enabled = true
-    return self
-end
-
-function Handle:name()
-    return self._data.name
-end
-
-function Handle:group()
-    return self._data.group
-end
-
--- Internal registries
-local registry = {}   -- { event = { {id, handler, priority, enabled, ...}, ... } }
-local by_name = {}    -- name -> handle
-local by_group = {}   -- group -> {handle -> true, ...}
-local next_id = 1
-
--- Sort handlers by priority (lower first), then by insertion order
-local function sort_handlers(handlers)
-    table.sort(handlers, function(a, b)
-        if a.priority == b.priority then
-            return a.id < b.id
-        end
-        return a.priority < b.priority
-    end)
-end
+    end,
+}
 
 -- Public API
 rune.hooks = {}
@@ -90,93 +67,24 @@ rune.hooks = {}
 -- Attach a handler to an event
 -- Returns: Handle with :remove(), :enable(), :disable(), :name(), :group()
 function rune.hooks.on(event, handler, opts)
-    opts = opts or {}
-
-    if not registry[event] then
-        registry[event] = {}
-    end
-
-    local id = next_id
-    next_id = next_id + 1
-
-    local entry = {
-        id = id,
+    return registry:add({
         event = event,
         handler = handler,
-        priority = opts.priority or 50,
-        enabled = true,
-        name = opts.name,
-        group = opts.group,
         source = rune.caller_source(1),
-    }
-
-    local handle = setmetatable({
-        _data = entry,
-    }, Handle)
-
-    -- Upsert: remove existing with same name
-    if entry.name and by_name[entry.name] then
-        by_name[entry.name]:remove()
-    end
-
-    table.insert(registry[event], entry)
-    sort_handlers(registry[event])
-
-    -- Track by name
-    if entry.name then
-        by_name[entry.name] = handle
-    end
-
-    -- Track by group
-    if entry.group then
-        if not by_group[entry.group] then
-            by_group[entry.group] = {}
-        end
-        by_group[entry.group][handle] = true
-    end
-
-    -- Store handle reference in entry
-    entry._handle = handle
-
-    return handle
+    }, opts)
 end
 
 -- Management by name
 function rune.hooks.disable(name)
-    local handle = by_name[name]
-    if handle then
-        handle:disable()
-        return true
-    end
-    return false
+    return registry:disable(name)
 end
 
 function rune.hooks.enable(name)
-    local handle = by_name[name]
-    if handle then
-        handle:enable()
-        return true
-    end
-    return false
+    return registry:enable(name)
 end
 
 function rune.hooks.remove(name)
-    local handle = by_name[name]
-    if handle then
-        handle:remove()
-        return true
-    end
-    return false
-end
-
--- An entry fires only if individually enabled AND its group's master
--- switch is on - the same two-level rule triggers, aliases, and timers
--- follow. rune.group loads after this file but exists by dispatch time.
-local function active(entry)
-    if not entry.enabled then
-        return false
-    end
-    return not rune.group or rune.group.is_enabled(entry.group)
+    return registry:remove(name)
 end
 
 -- Run a single handler protected. A failing handler is reported and
@@ -207,14 +115,10 @@ end
 --   return string   -> Replace the line for subsequent handlers
 --   return nil      -> Pass through unmodified
 function rune.hooks.call(event, ...)
-    local handlers = registry[event]
+    local handlers = by_event[event]
     if not handlers or #handlers == 0 then
         -- No handlers registered
-        if event == "output" then
-            -- Line object - return raw text
-            local line = select(1, ...)
-            return line:raw(), true
-        elseif event == "prompt" then
+        if event == "output" or event == "prompt" then
             local line = select(1, ...)
             return line:raw(), true
         elseif event == "input" then
@@ -223,7 +127,6 @@ function rune.hooks.call(event, ...)
         return
     end
 
-    -- Determine event type for return value handling
     if event == "output" or event == "prompt" then
         -- Output/prompt receive a Line object (:raw() and :clean()).
         -- True chaining: a handler returning a string replaces the line
@@ -232,7 +135,7 @@ function rune.hooks.call(event, ...)
         local line = select(1, ...)
 
         for _, entry in ipairs(handlers) do
-            if active(entry) then
+            if registry:active(entry) then
                 local result = run_handler(entry, line)
                 if result == false then
                     return "", false  -- gagged
@@ -249,7 +152,7 @@ function rune.hooks.call(event, ...)
         -- Any handler returning false stops processing
         local text = select(1, ...)
         for _, entry in ipairs(handlers) do
-            if active(entry) then
+            if registry:active(entry) then
                 local result = run_handler(entry, text)
                 if result == false then
                     return false  -- consumed/stopped
@@ -262,7 +165,7 @@ function rune.hooks.call(event, ...)
         -- System events (notifications) - all handlers run
         local args = {...}
         for _, entry in ipairs(handlers) do
-            if active(entry) then
+            if registry:active(entry) then
                 run_handler(entry, unpack(args))
             end
         end
@@ -272,77 +175,52 @@ end
 -- List all registered handlers
 function rune.hooks.list()
     local result = {}
-
-    for event, handlers in pairs(registry) do
-        for _, entry in ipairs(handlers) do
-            table.insert(result, {
-                event = event,
-                name = entry.name,
-                group = entry.group,
-                priority = entry.priority,
-                enabled = entry.enabled,
-                source = entry.source,
-            })
-        end
+    for _, entry in ipairs(registry:items()) do
+        table.insert(result, {
+            event = entry.event,
+            name = entry.name,
+            group = entry.group,
+            priority = entry.priority,
+            enabled = entry.enabled,
+            source = entry.source,
+        })
     end
-
     return result
 end
 
 -- Clear all handlers for an event (or all if no event specified)
 function rune.hooks.clear(event)
     if event then
-        -- Remove from by_name and by_group first
-        local handlers = registry[event]
-        if handlers then
-            for _, entry in ipairs(handlers) do
-                if entry.name then
-                    by_name[entry.name] = nil
-                end
-                if entry.group and by_group[entry.group] then
-                    by_group[entry.group][entry._handle] = nil
-                end
-            end
+        local handlers = by_event[event]
+        if not handlers then
+            return
         end
-        registry[event] = {}
+        local handles = {}
+        for _, entry in ipairs(handlers) do
+            handles[#handles + 1] = entry._handle
+        end
+        for _, handle in ipairs(handles) do
+            handle:remove()
+        end
     else
-        registry = {}
-        by_name = {}
-        by_group = {}
+        registry:clear()
     end
 end
 
 -- Check if any handlers are registered for an event
 function rune.hooks.has(event)
-    return registry[event] and #registry[event] > 0
+    return by_event[event] ~= nil and #by_event[event] > 0
 end
 
 -- Count handlers
 function rune.hooks.count(event)
     if event then
-        return registry[event] and #registry[event] or 0
+        return by_event[event] and #by_event[event] or 0
     end
-    local total = 0
-    for _, handlers in pairs(registry) do
-        total = total + #handlers
-    end
-    return total
+    return registry:count()
 end
 
 -- Group operations
 function rune.hooks.remove_group(group_name)
-    if not group_name or not by_group[group_name] then
-        return 0
-    end
-    local count = 0
-    -- Copy to avoid modifying while iterating
-    local items = {}
-    for handle in pairs(by_group[group_name]) do
-        items[#items + 1] = handle
-    end
-    for _, handle in ipairs(items) do
-        handle:remove()
-        count = count + 1
-    end
-    return count
+    return registry:remove_group(group_name)
 end

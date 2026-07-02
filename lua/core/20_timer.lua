@@ -1,11 +1,14 @@
 -- Timer System
 -- Timers execute actions after a delay or repeatedly at intervals.
+-- Built on rune.registry (06_registry.lua).
 --
 -- API:
 --   rune.timer.after(seconds, action, opts?)  -- One-shot timer
 --   rune.timer.every(seconds, action, opts?)  -- Repeating timer
 --
--- every() schedules the next firing seconds after the previous firing completes.
+-- every() uses fixed-interval scheduling: the next firing is
+-- scheduled the moment the previous one fires, regardless of how
+-- long the action takes to run.
 --
 -- Returns a handle with :disable(), :enable(), :cancel(), :name(), :group()
 --
@@ -16,107 +19,36 @@
 -- Action can be:
 --   - String: sent as command
 --   - Function: function(ctx)
---       ctx = {name, group, type, cancel()}
+--       ctx = {name, group, type, remove()}
 
--- Handle metatable
-local Handle = {}
-Handle.__index = Handle
-
-function Handle:disable()
-    self._data.enabled = false
-    return self
-end
-
-function Handle:enable()
-    self._data.enabled = true
-    return self
-end
-
-function Handle:remove()
-    local data = self._data
-    local registry = self._registry
-
-    -- Cancel the underlying timer
-    if data.id then
-        rune._timer.cancel(data.id)
-    end
-
-    -- Remove from main list
-    for i, item in ipairs(registry.list) do
-        if item == data then
-            table.remove(registry.list, i)
-            break
+local registry = rune.registry.new{
+    kind = "timer",
+    on_remove = function(data)
+        -- Stop the underlying Go timer when the entry goes away
+        if data.timer_id then
+            rune._timer.cancel(data.timer_id)
         end
-    end
-
-    -- Remove from name lookup
-    if data.name and registry.by_name[data.name] == self then
-        registry.by_name[data.name] = nil
-    end
-
-    -- Remove from group
-    if data.group and registry.by_group[data.group] then
-        registry.by_group[data.group][self] = nil
-    end
-
-    return self
-end
-
--- Alias: cancel is intuitive for timers
-Handle.cancel = Handle.remove
-
-function Handle:name()
-    return self._data.name
-end
-
-function Handle:group()
-    return self._data.group
-end
-
--- Internal registry
-local registry = {
-    list = {},        -- All timers
-    by_name = {},     -- name -> handle
-    by_group = {},    -- group -> {handle -> true, ...}
+    end,
 }
 
 -- Create a timer (internal)
 local function create_timer(seconds, action, opts, repeating)
-    opts = opts or {}
-
     local data = {
-        id = nil,  -- Set after scheduling
         seconds = seconds,
         action = action,
         repeating = repeating,
-        enabled = true,
-        name = opts.name,
-        group = opts.group,
         source = rune.caller_source(2),
     }
 
-    local handle = setmetatable({
-        _data = data,
-        _registry = registry,
-    }, Handle)
+    local handle = registry:add(data, opts)
+    handle.cancel = handle.remove -- :cancel() is intuitive for timers
 
-    -- If named, remove existing with same name (upsert)
-    if data.name and registry.by_name[data.name] then
-        registry.by_name[data.name]:remove()
-    end
-
-    -- Build the callback wrapper
     local function callback()
-        -- Check individual state
-        if not data.enabled then
-            return
-        end
-        -- Check group master switch
-        if not rune.group.is_enabled(data.group) then
+        -- Individual state AND group master switch
+        if not registry:active(data) then
             return
         end
 
-        -- Build context
         local ctx = {
             name = data.name,
             group = data.group,
@@ -126,7 +58,6 @@ local function create_timer(seconds, action, opts, repeating)
             handle:remove()
         end
 
-        -- Execute action
         if type(data.action) == "function" then
             local label = (data.name and ('Timer "' .. data.name .. '"') or "Timer") ..
                 (data.source and (" @" .. data.source) or "")
@@ -141,31 +72,11 @@ local function create_timer(seconds, action, opts, repeating)
         end
     end
 
-    -- Schedule the timer
     if repeating then
-        data.id = rune._timer.every(seconds, callback)
+        data.timer_id = rune._timer.every(seconds, callback)
     else
-        data.id = rune._timer.after(seconds, callback)
+        data.timer_id = rune._timer.after(seconds, callback)
     end
-
-    -- Add to main list
-    table.insert(registry.list, data)
-
-    -- Add to name lookup
-    if data.name then
-        registry.by_name[data.name] = handle
-    end
-
-    -- Add to group
-    if data.group then
-        if not registry.by_group[data.group] then
-            registry.by_group[data.group] = {}
-        end
-        registry.by_group[data.group][handle] = true
-    end
-
-    -- Store handle reference in data
-    data._handle = handle
 
     return handle
 end
@@ -185,30 +96,15 @@ end
 
 -- Management by name
 function rune.timer.disable(name)
-    local handle = registry.by_name[name]
-    if handle then
-        handle:disable()
-        return true
-    end
-    return false
+    return registry:disable(name)
 end
 
 function rune.timer.enable(name)
-    local handle = registry.by_name[name]
-    if handle then
-        handle:enable()
-        return true
-    end
-    return false
+    return registry:enable(name)
 end
 
 function rune.timer.remove(name)
-    local handle = registry.by_name[name]
-    if handle then
-        handle:remove()
-        return true
-    end
-    return false
+    return registry:remove(name)
 end
 
 -- Alias: cancel is intuitive for timers
@@ -217,8 +113,7 @@ rune.timer.cancel = rune.timer.remove
 -- List all timers - returns array of {seconds, mode, value, name, enabled, group}
 function rune.timer.list()
     local result = {}
-
-    for _, data in ipairs(registry.list) do
+    for _, data in ipairs(registry:items()) do
         table.insert(result, {
             seconds = data.seconds,
             mode = data.repeating and "every" or "after",
@@ -229,41 +124,20 @@ function rune.timer.list()
             source = data.source,
         })
     end
-
     return result
 end
 
 -- Clear all timers
 function rune.timer.clear()
-    -- Copy to avoid modifying while iterating
-    local items = {}
-    for _, data in ipairs(registry.list) do
-        items[#items + 1] = data._handle
-    end
-    for _, handle in ipairs(items) do
-        handle:remove()
-    end
+    registry:clear()
 end
 
 -- Count timers
 function rune.timer.count()
-    return #registry.list
+    return registry:count()
 end
 
 -- Group operations
 function rune.timer.remove_group(group_name)
-    if not group_name or not registry.by_group[group_name] then
-        return 0
-    end
-    local count = 0
-    -- Copy to avoid modifying while iterating
-    local items = {}
-    for handle in pairs(registry.by_group[group_name]) do
-        items[#items + 1] = handle
-    end
-    for _, handle in ipairs(items) do
-        handle:remove()
-        count = count + 1
-    end
-    return count
+    return registry:remove_group(group_name)
 end

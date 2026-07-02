@@ -1,5 +1,6 @@
 -- Alias System
 -- Aliases match user input and transform/expand it.
+-- Built on rune.registry (06_registry.lua).
 --
 -- API (literal matching):
 --   rune.alias.exact(key, action, opts?)      -- Match command word exactly (literal)
@@ -28,147 +29,37 @@
 --   ctx.args  = args string (exact only)
 --   ctx.matches = captures array (regex only)
 
--- Handle metatable
-local Handle = {}
-Handle.__index = Handle
+-- Exact-command index: command word -> data, kept in sync with the
+-- registry so exact lookup stays O(1).
+local exact = {}
 
-function Handle:disable()
-    self._data.enabled = false
-    return self
-end
-
-function Handle:enable()
-    self._data.enabled = true
-    return self
-end
-
-function Handle:remove()
-    local data = self._data
-    local registry = self._registry
-
-    if data.is_exact then
-        -- Remove from exact lookup
-        if registry.exact[data.pattern] == data then
-            registry.exact[data.pattern] = nil
-        end
-    else
-        -- Remove from regex list
-        for i, item in ipairs(registry.regex) do
-            if item == data then
-                table.remove(registry.regex, i)
-                break
+local registry = rune.registry.new{
+    kind = "alias",
+    on_add = function(data)
+        if data.is_exact then
+            -- Upsert by command word: replace any previous exact alias
+            local old = exact[data.pattern]
+            if old and old ~= data then
+                old._handle:remove()
             end
+            exact[data.pattern] = data
         end
-    end
-
-    -- Remove from name lookup
-    if data.name and registry.by_name[data.name] == self then
-        registry.by_name[data.name] = nil
-    end
-
-    -- Remove from group
-    if data.group and registry.by_group[data.group] then
-        registry.by_group[data.group][self] = nil
-    end
-
-    return self
-end
-
-function Handle:name()
-    return self._data.name
-end
-
-function Handle:group()
-    return self._data.group
-end
-
--- Internal registry
-local registry = {
-    exact = {},       -- key -> data (for fast command lookup)
-    regex = {},       -- Regex aliases, ordered by priority
-    by_name = {},     -- name -> handle
-    by_group = {},    -- group -> {handle -> true, ...}
+    end,
+    on_remove = function(data)
+        if data.is_exact and exact[data.pattern] == data then
+            exact[data.pattern] = nil
+        end
+    end,
 }
-
--- Sort regex aliases by priority (lower first), then by insertion order
-local function sort_regex()
-    table.sort(registry.regex, function(a, b)
-        if a.priority ~= b.priority then
-            return a.priority < b.priority
-        end
-        return a.id < b.id
-    end)
-end
-
--- ID counter for insertion order
-local next_id = 1
 
 -- Create an alias (internal)
 local function create_alias(pattern, action, opts, is_exact)
-    opts = opts or {}
-
-    local data = {
-        id = next_id,
+    return registry:add({
         pattern = pattern,
         action = action,
         is_exact = is_exact,
-        enabled = true,
-        priority = opts.priority or 50,
-        name = opts.name,
-        group = opts.group,
-        once = opts.once or false,
         source = rune.caller_source(2),
-    }
-    next_id = next_id + 1
-
-    local handle = setmetatable({
-        _data = data,
-        _registry = registry,
-    }, Handle)
-
-    -- If named, remove existing with same name (upsert)
-    if data.name and registry.by_name[data.name] then
-        registry.by_name[data.name]:remove()
-    end
-
-    -- Add to appropriate storage
-    if is_exact then
-        -- For exact aliases, also remove existing with same key (upsert by key)
-        if registry.exact[data.pattern] then
-            local old_data = registry.exact[data.pattern]
-            if old_data._handle then
-                -- Clean up old handle's name/group refs
-                if old_data.name and registry.by_name[old_data.name] == old_data._handle then
-                    registry.by_name[old_data.name] = nil
-                end
-                if old_data.group and registry.by_group[old_data.group] then
-                    registry.by_group[old_data.group][old_data._handle] = nil
-                end
-            end
-        end
-        registry.exact[data.pattern] = data
-    else
-        table.insert(registry.regex, data)
-        sort_regex()
-    end
-
-    -- Add to name lookup
-    if data.name then
-        registry.by_name[data.name] = handle
-    end
-
-    -- Add to group
-    if data.group then
-        if not registry.by_group[data.group] then
-            registry.by_group[data.group] = {}
-        end
-        registry.by_group[data.group][handle] = true
-    end
-
-    -- Store handle reference in data for removal
-    data._handle = handle
-
-    return handle
+    }, opts)
 end
 
 -- Public API
@@ -192,69 +83,48 @@ end
 
 -- Management by name
 function rune.alias.disable(name)
-    local handle = registry.by_name[name]
-    if handle then
-        handle:disable()
-        return true
-    end
-    return false
+    return registry:disable(name)
 end
 
 function rune.alias.enable(name)
-    local handle = registry.by_name[name]
-    if handle then
-        handle:enable()
-        return true
-    end
-    return false
+    return registry:enable(name)
 end
 
 function rune.alias.remove(name)
-    local handle = registry.by_name[name]
-    if handle then
-        handle:remove()
-        return true
-    end
-    return false
+    return registry:remove(name)
 end
 
 -- List all aliases - returns array of {match, mode, name, value, enabled, ...}
+-- Exact aliases first (sorted by key), then regex aliases in priority order.
 function rune.alias.list()
+    local function describe(data)
+        return {
+            match = data.pattern,
+            value = type(data.action) == "function" and "(function)" or tostring(data.action),
+            mode = data.is_exact and "exact" or "regex",
+            name = data.name,
+            enabled = data.enabled,
+            group = data.group,
+            once = data.once,
+            source = data.source,
+        }
+    end
+
     local result = {}
 
-    -- Exact aliases
     local exact_keys = {}
-    for k in pairs(registry.exact) do
+    for k in pairs(exact) do
         exact_keys[#exact_keys + 1] = k
     end
     table.sort(exact_keys)
-
     for _, key in ipairs(exact_keys) do
-        local data = registry.exact[key]
-        table.insert(result, {
-            match = key,
-            value = type(data.action) == "function" and "(function)" or tostring(data.action),
-            mode = "exact",
-            name = data.name,
-            enabled = data.enabled,
-            group = data.group,
-            once = data.once,
-            source = data.source,
-        })
+        table.insert(result, describe(exact[key]))
     end
 
-    -- Regex aliases
-    for _, data in ipairs(registry.regex) do
-        table.insert(result, {
-            match = data.pattern,
-            value = type(data.action) == "function" and "(function)" or tostring(data.action),
-            mode = "regex",
-            name = data.name,
-            enabled = data.enabled,
-            group = data.group,
-            once = data.once,
-            source = data.source,
-        })
+    for _, data in ipairs(registry:items()) do
+        if not data.is_exact then
+            table.insert(result, describe(data))
+        end
     end
 
     return result
@@ -262,19 +132,25 @@ end
 
 -- Clear all aliases
 function rune.alias.clear()
-    registry.exact = {}
-    registry.regex = {}
-    registry.by_name = {}
-    registry.by_group = {}
+    registry:clear()
 end
 
 -- Count aliases
 function rune.alias.count()
-    local count = 0
-    for _ in pairs(registry.exact) do
-        count = count + 1
+    return registry:count()
+end
+
+-- Run an alias action protected, with quarantine: an action failing
+-- repeatedly is disabled like any hook/trigger/timer action.
+-- Returns the action's result, or nil on failure.
+local function run_action(data, arg, ctx)
+    local label = 'Alias "' .. tostring(data.name or data.pattern) .. '"' ..
+        (data.source and (" @" .. data.source) or "")
+    local ok, result = rune.guarded_call(label, data, data.action, arg, ctx)
+    if ok then
+        return result
     end
-    return count + #registry.regex
+    return nil
 end
 
 -- Process input through aliases
@@ -284,9 +160,8 @@ end
 -- If processed is false, no alias matched
 function rune.alias.process(input)
     -- First try regex aliases (priority order) - uses Go regexp
-    for _, data in ipairs(registry.regex) do
-        -- Check individual state AND group master switch
-        if data.enabled and rune.group.is_enabled(data.group) then
+    for _, data in ipairs(registry:items()) do
+        if not data.is_exact and registry:active(data) then
             local matches = rune.regex.match(data.pattern, input)
             if matches then
                 local result = nil
@@ -299,19 +174,12 @@ function rune.alias.process(input)
                         type = "alias",
                         matches = matches,
                     }
-                    local ok, ret = pcall(data.action, matches, ctx)
-                    if not ok then
-                        local where = data.source and (" @" .. data.source) or ""
-                        rune.echo("[Alias Error]" .. where .. " " .. tostring(ret))
-                    else
-                        result = ret
-                    end
+                    result = run_action(data, matches, ctx)
                 elseif type(data.action) == "string" then
                     result = rune.substitute_captures(data.action, matches)
                 end
 
-                -- Handle once
-                if data.once and data._handle then
+                if data.once then
                     data._handle:remove()
                 end
 
@@ -323,9 +191,8 @@ function rune.alias.process(input)
     -- Then try exact aliases (command word match)
     local cmd, args = input:match("^(%S+)%s*(.*)")
     if cmd then
-        local data = registry.exact[cmd]
-        -- Check individual state AND group master switch
-        if data and data.enabled and rune.group.is_enabled(data.group) then
+        local data = exact[cmd]
+        if data and registry:active(data) then
             local result = nil
 
             if type(data.action) == "function" then
@@ -337,13 +204,7 @@ function rune.alias.process(input)
                     type = "alias",
                     args = args,
                 }
-                local ok, ret = pcall(data.action, args, ctx)
-                if not ok then
-                    local where = data.source and (" @" .. data.source) or ""
-                    rune.echo("[Alias Error]" .. where .. " " .. tostring(ret))
-                else
-                    result = ret
-                end
+                result = run_action(data, args, ctx)
             elseif type(data.action) == "string" then
                 -- Exact alias expansion: append args
                 if args and args ~= "" then
@@ -353,8 +214,7 @@ function rune.alias.process(input)
                 end
             end
 
-            -- Handle once
-            if data.once and data._handle then
+            if data.once then
                 data._handle:remove()
             end
 
@@ -367,19 +227,5 @@ end
 
 -- Group operations
 function rune.alias.remove_group(group_name)
-    if not group_name or not registry.by_group[group_name] then
-        return 0
-    end
-    local count = 0
-    -- Copy to avoid modifying while iterating
-    local items = {}
-    for handle in pairs(registry.by_group[group_name]) do
-        items[#items + 1] = handle
-    end
-    for _, handle in ipairs(items) do
-        handle:remove()
-        count = count + 1
-    end
-    return count
+    return registry:remove_group(group_name)
 end
-

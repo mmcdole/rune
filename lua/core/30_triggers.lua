@@ -1,5 +1,6 @@
 -- Trigger System
 -- Triggers match server output and execute actions.
+-- Built on rune.registry (06_registry.lua).
 --
 -- API (literal matching):
 --   rune.trigger.exact(line, action, opts?)      -- Exact line match (literal)
@@ -25,72 +26,7 @@
 --       matches = array of captures (empty for literal modes, populated for regex)
 --       ctx = {line, name, group, type, matches}
 
--- Handle metatable
-local Handle = {}
-Handle.__index = Handle
-
-function Handle:disable()
-    self._data.enabled = false
-    return self
-end
-
-function Handle:enable()
-    self._data.enabled = true
-    return self
-end
-
-function Handle:remove()
-    local data = self._data
-    local registry = self._registry
-
-    -- Remove from main list
-    for i, item in ipairs(registry.list) do
-        if item == data then
-            table.remove(registry.list, i)
-            break
-        end
-    end
-
-    -- Remove from name lookup
-    if data.name and registry.by_name[data.name] == self then
-        registry.by_name[data.name] = nil
-    end
-
-    -- Remove from group
-    if data.group and registry.by_group[data.group] then
-        registry.by_group[data.group][self] = nil
-    end
-
-    return self
-end
-
-function Handle:name()
-    return self._data.name
-end
-
-function Handle:group()
-    return self._data.group
-end
-
--- Internal registry
-local registry = {
-    list = {},        -- All triggers, ordered by priority then insertion
-    by_name = {},     -- name -> handle
-    by_group = {},    -- group -> {handle -> true, ...}
-}
-
--- Sort triggers by priority (lower first), then by insertion order
-local function sort_triggers()
-    table.sort(registry.list, function(a, b)
-        if a.priority ~= b.priority then
-            return a.priority < b.priority
-        end
-        return a.id < b.id
-    end)
-end
-
--- ID counter for insertion order
-local next_id = 1
+local registry = rune.registry.new{ kind = "trigger" }
 
 -- Match modes
 local MODE_EXACT = "exact"
@@ -101,54 +37,14 @@ local MODE_REGEX = "regex"
 -- Create a trigger (internal)
 local function create_trigger(pattern, action, opts, mode)
     opts = opts or {}
-
-    local data = {
-        id = next_id,
+    return registry:add({
         pattern = pattern,
         action = action,
         mode = mode,
-        enabled = true,
-        priority = opts.priority or 50,
-        name = opts.name,
-        group = opts.group,
-        once = opts.once or false,
         gag = opts.gag or false,
         raw = opts.raw or false,
         source = rune.caller_source(2),
-    }
-    next_id = next_id + 1
-
-    local handle = setmetatable({
-        _data = data,
-        _registry = registry,
-    }, Handle)
-
-    -- If named, remove existing with same name (upsert)
-    if data.name and registry.by_name[data.name] then
-        registry.by_name[data.name]:remove()
-    end
-
-    -- Add to main list
-    table.insert(registry.list, data)
-    sort_triggers()
-
-    -- Add to name lookup
-    if data.name then
-        registry.by_name[data.name] = handle
-    end
-
-    -- Add to group
-    if data.group then
-        if not registry.by_group[data.group] then
-            registry.by_group[data.group] = {}
-        end
-        registry.by_group[data.group][handle] = true
-    end
-
-    -- Store handle reference in data for removal
-    data._handle = handle
-
-    return handle
+    }, opts)
 end
 
 -- Public API
@@ -182,37 +78,21 @@ end
 
 -- Management by name
 function rune.trigger.disable(name)
-    local handle = registry.by_name[name]
-    if handle then
-        handle:disable()
-        return true
-    end
-    return false
+    return registry:disable(name)
 end
 
 function rune.trigger.enable(name)
-    local handle = registry.by_name[name]
-    if handle then
-        handle:enable()
-        return true
-    end
-    return false
+    return registry:enable(name)
 end
 
 function rune.trigger.remove(name)
-    local handle = registry.by_name[name]
-    if handle then
-        handle:remove()
-        return true
-    end
-    return false
+    return registry:remove(name)
 end
 
 -- List all triggers - returns array of {match, value, mode, name, enabled, ...}
 function rune.trigger.list()
     local result = {}
-
-    for _, data in ipairs(registry.list) do
+    for _, data in ipairs(registry:items()) do
         table.insert(result, {
             match = data.pattern,
             value = type(data.action) == "function" and "(function)" or tostring(data.action),
@@ -226,20 +106,17 @@ function rune.trigger.list()
             source = data.source,
         })
     end
-
     return result
 end
 
 -- Clear all triggers
 function rune.trigger.clear()
-    registry.list = {}
-    registry.by_name = {}
-    registry.by_group = {}
+    registry:clear()
 end
 
 -- Count triggers
 function rune.trigger.count()
-    return #registry.list
+    return registry:count()
 end
 
 -- Process triggers against a line (called by hooks)
@@ -256,39 +133,32 @@ function rune.trigger.process(line)
     -- Collect triggers to remove after processing (for once)
     local to_remove = {}
 
-    for _, data in ipairs(registry.list) do
-        -- Check individual state AND group master switch
-        if data.enabled and rune.group.is_enabled(data.group) then
+    for _, data in ipairs(registry:items()) do
+        if registry:active(data) then
             local matches = nil
             local match_line = data.raw and raw_line or clean_line
 
             if data.mode == MODE_EXACT then
-                -- Exact line match (literal)
                 if match_line == data.pattern then
                     matches = {}
                 end
             elseif data.mode == MODE_STARTS then
-                -- Prefix match (literal)
                 if match_line:sub(1, #data.pattern) == data.pattern then
                     matches = {}
                 end
             elseif data.mode == MODE_CONTAINS then
-                -- Substring match (literal)
                 if match_line:find(data.pattern, 1, true) then
                     matches = {}
                 end
             elseif data.mode == MODE_REGEX then
-                -- Go regexp match
                 matches = rune.regex.match(data.pattern, match_line)
             end
 
             if matches then
-                -- Handle gag option
                 if data.gag then
                     gagged = true
                 end
 
-                -- Build context
                 local ctx = {
                     line = line,  -- Line object with :raw() and :clean()
                     name = data.name,
@@ -297,14 +167,12 @@ function rune.trigger.process(line)
                     matches = matches,
                 }
 
-                -- Execute action
                 if data.action then
                     if type(data.action) == "function" then
                         local label = (data.name and ('Trigger "' .. data.name .. '"') or "Trigger") ..
                             (data.source and (" @" .. data.source) or "")
                         local ok, result = rune.guarded_call(label, data, data.action, matches, ctx)
                         if ok then
-                            -- Handle return values
                             if result == false then
                                 gagged = true
                             elseif type(result) == "string" then
@@ -320,7 +188,6 @@ function rune.trigger.process(line)
                     end
                 end
 
-                -- Handle once
                 if data.once then
                     to_remove[#to_remove + 1] = data._handle
                 end
@@ -341,19 +208,5 @@ end
 
 -- Group operations
 function rune.trigger.remove_group(group_name)
-    if not group_name or not registry.by_group[group_name] then
-        return 0
-    end
-    local count = 0
-    -- Copy to avoid modifying while iterating
-    local items = {}
-    for handle in pairs(registry.by_group[group_name]) do
-        items[#items + 1] = handle
-    end
-    for _, handle in ipairs(items) do
-        handle:remove()
-        count = count + 1
-    end
-    return count
+    return registry:remove_group(group_name)
 end
-
