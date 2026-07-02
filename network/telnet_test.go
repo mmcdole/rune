@@ -34,8 +34,8 @@ func TestParserHandlesSplitDoNegotiation(t *testing.T) {
 		t.Fatalf("expected no events yet, got %v", events)
 	}
 
-	// Second chunk provides the option byte; we should reply WILL NAWS.
-	events = parser.Receive([]byte{OptNAWS})
+	// Second chunk provides the option byte; we should reply WILL SGA.
+	events = parser.Receive([]byte{OptSGA})
 	var reply []byte
 	for _, ev := range events {
 		if ev.Kind == TelnetEventDataSend {
@@ -46,10 +46,39 @@ func TestParserHandlesSplitDoNegotiation(t *testing.T) {
 	if reply == nil {
 		t.Fatalf("expected a negotiation reply, got none")
 	}
-	expected := []byte{CmdIAC, CmdWILL, OptNAWS}
+	expected := []byte{CmdIAC, CmdWILL, OptSGA}
 	if !bytes.Equal(reply, expected) {
 		t.Fatalf("unexpected reply: want %v got %v", expected, reply)
 	}
+}
+
+// Ensure the default table refuses options the client does not
+// implement. Accepting MCCP without a decompressor corrupts the
+// stream; accepting TTYPE/NAWS leaves the server waiting for
+// subnegotiations that never come.
+func TestDefaultCompatibilityRefusesUnimplementedOptions(t *testing.T) {
+	for _, opt := range []byte{OptMCCP2, OptMCCP3, OptTTYPE, OptNAWS, OptGMCP, OptLinemode} {
+		parser := NewParser(DefaultCompatibility())
+
+		events := parser.Receive([]byte{CmdIAC, CmdWILL, opt})
+		assertReply(t, events, []byte{CmdIAC, CmdDONT, opt}, "WILL", opt)
+
+		events = parser.Receive([]byte{CmdIAC, CmdDO, opt})
+		assertReply(t, events, []byte{CmdIAC, CmdWONT, opt}, "DO", opt)
+	}
+}
+
+func assertReply(t *testing.T, events []TelnetEvent, want []byte, cmd string, opt byte) {
+	t.Helper()
+	for _, ev := range events {
+		if ev.Kind == TelnetEventDataSend {
+			if !bytes.Equal(ev.Data, want) {
+				t.Errorf("%s %d: want reply %v, got %v", cmd, opt, want, ev.Data)
+			}
+			return
+		}
+	}
+	t.Errorf("%s %d: expected a refusal reply, got none", cmd, opt)
 }
 
 func TestParser(t *testing.T) {

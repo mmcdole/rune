@@ -704,16 +704,16 @@ func (o *OutputBuffer) Clear() {
 	o.newData = false
 }
 
+// defaultCompatibility advertises ONLY options the client actually
+// implements. Advertising an option we cannot honor is worse than
+// refusing it: agreeing to MCCP means the server starts sending
+// compressed data we cannot decompress, agreeing to TTYPE/NAWS means
+// the server waits for subnegotiation replies that never come. Add
+// options here only together with their implementation.
 func defaultCompatibility() CompatibilityTable {
 	t := NewCompatibilityTable()
-	t.Support(OptMCCP2)
-	t.Support(OptMCCP3)
-	t.Support(OptEOR)
-	t.Support(OptEcho)
-	t.Support(OptSGA)
-	t.Support(OptNAWS)
-	t.Support(OptTTYPE)
-	t.Support(OptGMCP)
-	t.Support(OptLinemode)
+	t.Support(OptEcho) // WILL/WONT ECHO toggles local echo (client.go)
+	t.Support(OptSGA)  // Suppress Go Ahead: prompt mode detection
+	t.Support(OptEOR)  // End of Record: prompt termination
 	return t
 }
