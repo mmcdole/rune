@@ -101,7 +101,7 @@ func (e *Engine) RenderBar(name string, width int) (ui.BarContent, bool) {
 	e.L.Push(fn)
 	e.L.Push(glua.LNumber(width))
 	if err := e.guard(func() error { return e.L.PCall(1, 1, nil) }); err != nil {
-		e.CallHook("error", "bar render: "+err.Error())
+		e.reportError("bar '"+name+"'", err)
 		return ui.BarContent{}, false
 	}
 

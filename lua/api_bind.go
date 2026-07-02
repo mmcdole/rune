@@ -38,7 +38,7 @@ func (e *Engine) HandleKeyBind(key string) bool {
 	// Execute the callback
 	e.L.Push(fn)
 	if err := e.guard(func() error { return e.L.PCall(0, 0, nil) }); err != nil {
-		e.CallHook("error", "keybind: "+err.Error())
+		e.reportError("keybind '"+key+"'", err)
 	}
 	return true
 }

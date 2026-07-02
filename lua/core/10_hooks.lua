@@ -168,6 +168,22 @@ function rune.hooks.remove(name)
     return false
 end
 
+-- Run a single handler protected. A failing handler is reported and
+-- treated as returning nil (pass through), so one broken handler
+-- cannot abort the rest of the chain or kill trigger processing.
+-- Errors are echoed directly (not re-dispatched through the "error"
+-- event) to avoid recursion when an error handler itself fails.
+local function run_handler(entry, ...)
+    local ok, result = pcall(entry.handler, ...)
+    if ok then
+        return result
+    end
+    local label = entry.name and ('"' .. entry.name .. '"') or ("#" .. entry.id)
+    rune.echo("\027[31m[Hook Error]\027[0m " .. entry.event ..
+        " handler " .. label .. ": " .. tostring(result))
+    return nil
+end
+
 -- Call all handlers for an event
 -- For output/prompt: chains modifications, false gags
 -- For input: false stops processing
@@ -203,7 +219,7 @@ function rune.hooks.call(event, ...)
 
         for _, entry in ipairs(handlers) do
             if entry.enabled then
-                local result = entry.handler(line)
+                local result = run_handler(entry, line)
                 if result == false then
                     return "", false  -- gagged
                 elseif type(result) == "string" then
@@ -226,7 +242,7 @@ function rune.hooks.call(event, ...)
 
         for _, entry in ipairs(handlers) do
             if entry.enabled then
-                local result = entry.handler(line)
+                local result = run_handler(entry, line)
                 if result == false then
                     return "", false  -- gagged
                 elseif type(result) == "string" then
@@ -246,7 +262,7 @@ function rune.hooks.call(event, ...)
         local text = select(1, ...)
         for _, entry in ipairs(handlers) do
             if entry.enabled then
-                local result = entry.handler(text)
+                local result = run_handler(entry, text)
                 if result == false then
                     return false  -- consumed/stopped
                 end
@@ -259,7 +275,7 @@ function rune.hooks.call(event, ...)
         local args = {...}
         for _, entry in ipairs(handlers) do
             if entry.enabled then
-                entry.handler(unpack(args))
+                run_handler(entry, unpack(args))
             end
         end
     end

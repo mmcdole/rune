@@ -45,6 +45,10 @@ type Engine struct {
 	// True once the user has been warned that rune.hooks.call is
 	// missing and the client is degraded to raw pass-through.
 	hooksBrokenReported bool
+
+	// True while dispatching the "error" event, so failures inside
+	// error handlers print directly instead of recursing.
+	reportingError bool
 }
 
 // NewEngine creates an Engine with a Host interface.
@@ -137,7 +141,7 @@ func (e *Engine) OnTimer(id int, repeating bool) {
 
 	e.L.Push(fn)
 	if err := e.guard(func() error { return e.L.PCall(0, 0, nil) }); err != nil {
-		e.CallHook("error", "timer: "+err.Error())
+		e.reportError("timer callback", err)
 	}
 
 	if !repeating {
@@ -165,7 +169,7 @@ func (e *Engine) ExecutePickerCallback(id string, value string) {
 	e.L.Push(fn)
 	e.L.Push(glua.LString(value))
 	if err := e.guard(func() error { return e.L.PCall(1, 0, nil) }); err != nil {
-		e.CallHook("error", "picker callback: "+err.Error())
+		e.reportError("picker callback", err)
 	}
 }
 
@@ -233,6 +237,7 @@ func (e *Engine) OnInput(text string) bool {
 			Protect: true,
 		}, glua.LString("input"), glua.LString(text))
 	}); err != nil {
+		e.reportError("input dispatch", err)
 		return false
 	}
 
@@ -262,6 +267,7 @@ func (e *Engine) OnOutput(line text.Line) (string, bool) {
 			Protect: true,
 		}, glua.LString("output"), lineUD)
 	}); err != nil {
+		e.reportError("output dispatch", err)
 		return line.Raw, true
 	}
 
@@ -292,6 +298,7 @@ func (e *Engine) OnPrompt(line text.Line) string {
 			Protect: true,
 		}, glua.LString("prompt"), lineUD)
 	}); err != nil {
+		e.reportError("prompt dispatch", err)
 		return line.Raw
 	}
 
@@ -323,13 +330,15 @@ func (e *Engine) CallHook(event string, args ...string) {
 		luaArgs[i+1] = glua.LString(arg)
 	}
 
-	e.guard(func() error {
+	if err := e.guard(func() error {
 		return e.L.CallByParam(glua.P{
 			Fn:      hooksCall,
 			NRet:    0,
 			Protect: true,
 		}, luaArgs...)
-	})
+	}); err != nil {
+		e.reportError("'"+event+"' hook", err)
+	}
 }
 
 func (e *Engine) registerAPIs() {
@@ -361,6 +370,20 @@ func (e *Engine) getHooksCall() (glua.LValue, bool) {
 		return glua.LNil, false
 	}
 	return call, true
+}
+
+// reportError surfaces an engine-level error to the user through the
+// Lua "error" hook. Failures inside the error hook itself fall back to
+// direct printing rather than recursing.
+func (e *Engine) reportError(source string, err error) {
+	msg := source + ": " + err.Error()
+	if e.reportingError {
+		e.host.Print("\033[31m[Error] " + msg + "\033[0m")
+		return
+	}
+	e.reportingError = true
+	defer func() { e.reportingError = false }()
+	e.CallHook("error", msg)
 }
 
 // reportHooksBroken warns the user, once per VM generation, that the

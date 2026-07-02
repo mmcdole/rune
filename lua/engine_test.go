@@ -99,6 +99,43 @@ func TestBrokenHooksDegradesGracefully(t *testing.T) {
 	}
 }
 
+// TestBrokenHandlerIsIsolated verifies that a throwing output handler
+// is reported and skipped, while later handlers (including core trigger
+// processing) still run.
+func TestBrokenHandlerIsIsolated(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	setup := `
+		rune.hooks.on("output", function() error("boom") end, {priority = 10, name = "bad"})
+		rune.trigger.contains("field", "look")
+	`
+	if err := engine.DoString("setup", setup); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
+	got, show := engine.OnOutput(text.NewLine("You are standing in a field."))
+	if !show || got != "You are standing in a field." {
+		t.Errorf("expected line to pass through, got %q show=%v", got, show)
+	}
+
+	// Trigger registered after the broken handler still fired
+	if sent := host.DrainNetworkCalls(); len(sent) != 1 || sent[0] != "look" {
+		t.Errorf("expected trigger to fire despite broken handler, got %v", sent)
+	}
+
+	// The handler's error was reported with its name
+	reported := false
+	for _, p := range host.DrainPrintCalls() {
+		if strings.Contains(p, "[Hook Error]") && strings.Contains(p, `"bad"`) {
+			reported = true
+		}
+	}
+	if !reported {
+		t.Error("expected broken handler error to be echoed")
+	}
+}
+
 // TestWatchdogRunawayHookDoesNotHang verifies the watchdog also covers
 // the hook dispatch path (OnInput), not just direct script execution.
 func TestWatchdogRunawayHookDoesNotHang(t *testing.T) {
