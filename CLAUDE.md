@@ -26,6 +26,15 @@ Rune is a MUD (Multi-User Dungeon) client built with Go for system-level operati
 - **No blocking**: Each component runs independently with buffered channels
 - **Kernel philosophy**: Go is the kernel (I/O, Memory, Concurrency), Lua is user space (Logic, Features, Presentation)
 
+### Script Robustness
+
+- **Watchdog**: every Go→Lua entry runs under `Engine.guard` with a deadline (`Engine.CallTimeout`, default 5s). Runaway scripts (infinite loops) are interrupted with an error; the VM stays usable. Nested entries share the outermost deadline.
+- **Error convention**: Go primitives return `nil, err` for recoverable failures (send while disconnected, missing file, bad pattern); raising is reserved for programmer errors (wrong argument types). Engine-level failures route through `Engine.reportError` → the Lua `"error"` event, with a re-entrancy guard that falls back to direct printing.
+- **Handler isolation**: `rune.hooks.call` runs each handler under `pcall`; a throwing handler is reported and skipped, not allowed to abort the chain.
+- **Failure quarantine**: `rune.guarded_call(label, data, fn, ...)` tracks consecutive failures on a registry entry and disables it after 3 in a row. Used by hooks, trigger actions, and timer actions; bar renderers get the same treatment in Go (`maxBarFailures`).
+- **Degraded mode**: if `rune.hooks.call` is unavailable (core script failed, or a user script clobbered `rune.hooks`), the client degrades to a plain telnet client instead of crashing - output passes through raw, input goes to the server, and `/quit` + `/reload` still work.
+- **Source attribution**: hooks, triggers, aliases, and timers record the registering script's `file:line` (`rune.caller_source`); it appears in error messages and `/hooks`, `/triggers`, `/aliases`, `/timers` listings.
+
 ### Component Structure
 
 ```
@@ -71,13 +80,13 @@ Go provides internal primitives (`rune._*`), wrapped by Lua for the public API:
 
 **Core:**
 - `rune.send(text)` - Process aliases and send to server
-- `rune.send_raw(text)` - Bypass alias processing, write directly to socket
+- `rune.send_raw(text)` - Bypass alias processing, write directly to socket; returns `true` or `nil, err` (failures are echoed)
 - `rune.echo(text)` - Output text to local display
 - `rune.quit()` - Exit the client
 - `rune.connect(address)` - Connect to server
 - `rune.disconnect()` - Disconnect from server
 - `rune.reload()` - Reload all scripts
-- `rune.load(path)` - Load a Lua script
+- `rune.load(path)` - Load a Lua script; returns `true` or `nil, err`
 
 **Timers:**
 - `rune.timer.after(seconds, callback)` - Schedule delayed callback
@@ -87,7 +96,8 @@ Go provides internal primitives (`rune._*`), wrapped by Lua for the public API:
 - `rune.delay(seconds, action)` - Convenience: delay a command string or function
 
 **Regex:**
-- `rune.regex.match(pattern, text)` - Match using Go's regexp (cached)
+- `rune.regex.match(pattern, text)` - Match using Go's regexp (cached; invalid patterns are reported once and cached as failures)
+- `rune.regex.validate(pattern)` - Check a pattern; returns `true` or `nil, err`. `rune.trigger.regex` and `rune.alias.regex` validate eagerly and raise on bad patterns.
 
 **UI:**
 - `rune.pane.create(name)`, `rune.pane.write(name, text)`, `rune.pane.toggle(name)`, `rune.pane.clear(name)`
