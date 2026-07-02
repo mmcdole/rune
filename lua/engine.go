@@ -1,15 +1,22 @@
 package lua
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/drake/rune/text"
 	"github.com/drake/rune/ui"
 	glua "github.com/yuin/gopher-lua"
 )
+
+// DefaultCallTimeout bounds each entry into the Lua VM. A script that
+// exceeds it (e.g. an accidental infinite loop) is interrupted with an
+// error instead of hanging the event loop forever.
+const DefaultCallTimeout = 5 * time.Second
 
 // Engine wraps gopher-lua and manages the VM lifecycle.
 // It is a pure mechanism: it knows how to run Lua code and expose APIs.
@@ -30,6 +37,10 @@ type Engine struct {
 
 	// Key bindings
 	bindFuncs map[string]*glua.LFunction
+
+	// Watchdog
+	CallTimeout time.Duration // Time budget per Lua entry; see DefaultCallTimeout
+	inLua       bool          // True while inside a guarded Lua call (re-entrancy)
 }
 
 // NewEngine creates an Engine with a Host interface.
@@ -42,8 +53,33 @@ func NewEngine(host Host) *Engine {
 		barLayout: ui.LayoutConfig{
 			Bottom: []ui.LayoutEntry{{Name: "input"}, {Name: "status"}},
 		},
-		bindFuncs: make(map[string]*glua.LFunction),
+		bindFuncs:   make(map[string]*glua.LFunction),
+		CallTimeout: DefaultCallTimeout,
 	}
+}
+
+// guard runs fn under the watchdog: a deadline context is attached to
+// the VM so runaway scripts are interrupted instead of hanging the
+// event loop. Nested entries (Go APIs called from Lua that re-enter
+// the engine, e.g. rune._load) run under the outermost deadline.
+func (e *Engine) guard(fn func() error) error {
+	if e.inLua {
+		return fn()
+	}
+	e.inLua = true
+	ctx, cancel := context.WithTimeout(context.Background(), e.CallTimeout)
+	e.L.SetContext(ctx)
+	defer func() {
+		e.L.RemoveContext()
+		cancel()
+		e.inLua = false
+	}()
+
+	err := fn()
+	if err != nil && ctx.Err() != nil {
+		return fmt.Errorf("script interrupted after %v (runaway loop?): %w", e.CallTimeout, err)
+	}
+	return err
 }
 
 // Init initializes (or re-initializes) the Lua VM with fresh state.
@@ -95,7 +131,7 @@ func (e *Engine) OnTimer(id int, repeating bool) {
 	}
 
 	e.L.Push(fn)
-	if err := e.L.PCall(0, 0, nil); err != nil {
+	if err := e.guard(func() error { return e.L.PCall(0, 0, nil) }); err != nil {
 		e.CallHook("error", "timer: "+err.Error())
 	}
 
@@ -123,7 +159,7 @@ func (e *Engine) ExecutePickerCallback(id string, value string) {
 	delete(e.pickerCallbacks, id)
 	e.L.Push(fn)
 	e.L.Push(glua.LString(value))
-	if err := e.L.PCall(1, 0, nil); err != nil {
+	if err := e.guard(func() error { return e.L.PCall(1, 0, nil) }); err != nil {
 		e.CallHook("error", "picker callback: "+err.Error())
 	}
 }
@@ -141,7 +177,7 @@ func (e *Engine) DoString(name, code string) error {
 		return err
 	}
 	e.L.Push(fn)
-	return e.L.PCall(0, 0, nil)
+	return e.guard(func() error { return e.L.PCall(0, 0, nil) })
 }
 
 // DoFile executes a Lua file from the filesystem.
@@ -160,7 +196,7 @@ func (e *Engine) DoFile(path string) error {
 	newPath := dir + "/?.lua;" + oldPath
 	e.L.SetField(pkg, "path", glua.LString(newPath))
 
-	err = e.L.DoFile(absPath)
+	err = e.guard(func() error { return e.L.DoFile(absPath) })
 
 	e.L.SetField(pkg, "path", glua.LString(oldPath))
 
@@ -169,11 +205,13 @@ func (e *Engine) DoFile(path string) error {
 
 // OnInput handles user typing.
 func (e *Engine) OnInput(text string) bool {
-	if err := e.L.CallByParam(glua.P{
-		Fn:      e.getHooksCall(),
-		NRet:    1,
-		Protect: true,
-	}, glua.LString("input"), glua.LString(text)); err != nil {
+	if err := e.guard(func() error {
+		return e.L.CallByParam(glua.P{
+			Fn:      e.getHooksCall(),
+			NRet:    1,
+			Protect: true,
+		}, glua.LString("input"), glua.LString(text))
+	}); err != nil {
 		return false
 	}
 
@@ -190,11 +228,13 @@ func (e *Engine) OnInput(text string) bool {
 func (e *Engine) OnOutput(line text.Line) (string, bool) {
 	lineUD := newLine(e.L, line)
 
-	if err := e.L.CallByParam(glua.P{
-		Fn:      e.getHooksCall(),
-		NRet:    2,
-		Protect: true,
-	}, glua.LString("output"), lineUD); err != nil {
+	if err := e.guard(func() error {
+		return e.L.CallByParam(glua.P{
+			Fn:      e.getHooksCall(),
+			NRet:    2,
+			Protect: true,
+		}, glua.LString("output"), lineUD)
+	}); err != nil {
 		return line.Raw, true
 	}
 
@@ -212,11 +252,13 @@ func (e *Engine) OnOutput(line text.Line) (string, bool) {
 func (e *Engine) OnPrompt(line text.Line) string {
 	lineUD := newLine(e.L, line)
 
-	if err := e.L.CallByParam(glua.P{
-		Fn:      e.getHooksCall(),
-		NRet:    2,
-		Protect: true,
-	}, glua.LString("prompt"), lineUD); err != nil {
+	if err := e.guard(func() error {
+		return e.L.CallByParam(glua.P{
+			Fn:      e.getHooksCall(),
+			NRet:    2,
+			Protect: true,
+		}, glua.LString("prompt"), lineUD)
+	}); err != nil {
 		return line.Raw
 	}
 
@@ -238,11 +280,13 @@ func (e *Engine) CallHook(event string, args ...string) {
 		luaArgs[i+1] = glua.LString(arg)
 	}
 
-	e.L.CallByParam(glua.P{
-		Fn:      e.getHooksCall(),
-		NRet:    0,
-		Protect: true,
-	}, luaArgs...)
+	e.guard(func() error {
+		return e.L.CallByParam(glua.P{
+			Fn:      e.getHooksCall(),
+			NRet:    0,
+			Protect: true,
+		}, luaArgs...)
+	})
 }
 
 func (e *Engine) registerAPIs() {

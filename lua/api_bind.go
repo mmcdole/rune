@@ -37,7 +37,7 @@ func (e *Engine) HandleKeyBind(key string) bool {
 
 	// Execute the callback
 	e.L.Push(fn)
-	if err := e.L.PCall(0, 0, nil); err != nil {
+	if err := e.guard(func() error { return e.L.PCall(0, 0, nil) }); err != nil {
 		e.CallHook("error", "keybind: "+err.Error())
 	}
 	return true

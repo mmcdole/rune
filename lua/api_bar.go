@@ -100,7 +100,7 @@ func (e *Engine) RenderBar(name string, width int) (ui.BarContent, bool) {
 	// Call the Lua function with width
 	e.L.Push(fn)
 	e.L.Push(glua.LNumber(width))
-	if err := e.L.PCall(1, 1, nil); err != nil {
+	if err := e.guard(func() error { return e.L.PCall(1, 1, nil) }); err != nil {
 		e.CallHook("error", "bar render: "+err.Error())
 		return ui.BarContent{}, false
 	}
