@@ -40,6 +40,27 @@ function rune.guarded_call(label, data, fn, ...)
     return false, nil
 end
 
+-- Source attribution
+-- Returns "file:line" of the script frame `level` levels above the
+-- caller (1 = the caller's caller), or nil if unavailable. Registries
+-- use this to record which script registered a hook/trigger/alias, so
+-- error messages and listings can say whose code is involved.
+function rune.caller_source(level)
+    local getinfo = debug and debug.getinfo
+    if not getinfo then
+        return nil
+    end
+    local info = getinfo(level + 2, "Sl") -- +2 skips this fn and its caller
+    if not info or not info.source then
+        return nil
+    end
+    local src = info.source:gsub("^@", "")
+    if info.currentline and info.currentline > 0 then
+        return src .. ":" .. info.currentline
+    end
+    return src
+end
+
 -- Core function wrappers around Go primitives (rune._*)
 
 -- Send raw text to the server, bypassing alias processing.

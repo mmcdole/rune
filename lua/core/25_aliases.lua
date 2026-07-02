@@ -117,6 +117,7 @@ local function create_alias(pattern, action, opts, is_exact)
         name = opts.name,
         group = opts.group,
         once = opts.once or false,
+        source = rune.caller_source(2),
     }
     next_id = next_id + 1
 
@@ -238,6 +239,7 @@ function rune.alias.list()
             enabled = data.enabled,
             group = data.group,
             once = data.once,
+            source = data.source,
         })
     end
 
@@ -251,6 +253,7 @@ function rune.alias.list()
             enabled = data.enabled,
             group = data.group,
             once = data.once,
+            source = data.source,
         })
     end
 
@@ -298,7 +301,8 @@ function rune.alias.process(input)
                     }
                     local ok, ret = pcall(data.action, matches, ctx)
                     if not ok then
-                        rune.echo("[Alias Error] " .. tostring(ret))
+                        local where = data.source and (" @" .. data.source) or ""
+                        rune.echo("[Alias Error]" .. where .. " " .. tostring(ret))
                     else
                         result = ret
                     end
@@ -340,7 +344,8 @@ function rune.alias.process(input)
                 }
                 local ok, ret = pcall(data.action, args, ctx)
                 if not ok then
-                    rune.echo("[Alias Error] " .. tostring(ret))
+                    local where = data.source and (" @" .. data.source) or ""
+                    rune.echo("[Alias Error]" .. where .. " " .. tostring(ret))
                 else
                     result = ret
                 end

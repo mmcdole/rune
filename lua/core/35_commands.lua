@@ -121,8 +121,9 @@ rune.command.add("aliases", function(args)
         local flags = {}
         if a.once then flags[#flags + 1] = "once" end
         local flags_str = #flags > 0 and ("  " .. dim("(" .. table.concat(flags, ", ") .. ")")) or ""
-        rune.echo(string.format("  %s %-8s %s %s %s%s%s",
-            status, a.mode, yellow('"' .. a.match .. '"'), dim("->"), a.value, group_str, flags_str))
+        local src_str = a.source and ("  " .. dim("@" .. a.source)) or ""
+        rune.echo(string.format("  %s %-8s %s %s %s%s%s%s",
+            status, a.mode, yellow('"' .. a.match .. '"'), dim("->"), a.value, group_str, flags_str, src_str))
     end
 end, "List all aliases")
 
@@ -142,8 +143,9 @@ rune.command.add("triggers", function(args)
         if t.once then flags[#flags + 1] = "once" end
         if t.raw then flags[#flags + 1] = "raw" end
         local flags_str = #flags > 0 and ("  " .. dim("(" .. table.concat(flags, ", ") .. ")")) or ""
-        rune.echo(string.format("  %s %-8s %s %s %s%s%s",
-            status, t.mode, yellow('"' .. t.match .. '"'), dim("->"), t.value, group_str, flags_str))
+        local src_str = t.source and ("  " .. dim("@" .. t.source)) or ""
+        rune.echo(string.format("  %s %-8s %s %s %s%s%s%s",
+            status, t.mode, yellow('"' .. t.match .. '"'), dim("->"), t.value, group_str, flags_str, src_str))
     end
 end, "List all triggers")
 
@@ -184,9 +186,10 @@ rune.command.add("timers", function(args)
         local status = t.enabled and green("[on] ") or red("[off]")
         local group_str = t.group and ("  " .. cyan("<" .. t.group .. ">")) or ""
         local name_str = t.name and (" " .. dim("name:") .. t.name) or ""
+        local src_str = t.source and ("  " .. dim("@" .. t.source)) or ""
         local timing = string.format("%s %.1fs", t.mode, t.seconds)
-        rune.echo(string.format("  %s %-12s %s %s%s%s",
-            status, timing, dim("->"), t.value, group_str, name_str))
+        rune.echo(string.format("  %s %-12s %s %s%s%s%s",
+            status, timing, dim("->"), t.value, group_str, name_str, src_str))
     end
 end, "List all timers")
 
@@ -203,8 +206,9 @@ rune.command.add("hooks", function(args)
         local group_str = h.group and ("  " .. cyan("<" .. h.group .. ">")) or ""
         local name_str = h.name or "(anonymous)"
         local pri_str = dim("pri:") .. tostring(h.priority)
-        rune.echo(string.format("  %s %-12s %s %s %s%s",
-            status, h.event, pri_str, dim("->"), name_str, group_str))
+        local src_str = h.source and ("  " .. dim("@" .. h.source)) or ""
+        rune.echo(string.format("  %s %-12s %s %s %s%s%s",
+            status, h.event, pri_str, dim("->"), name_str, group_str, src_str))
     end
 end, "List all hooks")
 

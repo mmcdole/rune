@@ -107,6 +107,7 @@ function rune.hooks.on(event, handler, opts)
         enabled = true,
         name = opts.name,
         group = opts.group,
+        source = rune.caller_source(1),
     }
 
     local handle = setmetatable({
@@ -176,7 +177,8 @@ end
 -- Repeated failures disable the handler (see rune.guarded_call).
 local function run_handler(entry, ...)
     local label = "Hook " .. entry.event .. " " ..
-        (entry.name and ('"' .. entry.name .. '"') or ("#" .. entry.id))
+        (entry.name and ('"' .. entry.name .. '"') or ("#" .. entry.id)) ..
+        (entry.source and (" @" .. entry.source) or "")
     local ok, result = rune.guarded_call(label, entry, entry.handler, ...)
     if ok then
         return result
@@ -293,6 +295,7 @@ function rune.hooks.list()
                 group = entry.group,
                 priority = entry.priority,
                 enabled = entry.enabled,
+                source = entry.source,
             })
         end
     end

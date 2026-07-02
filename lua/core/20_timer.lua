@@ -92,6 +92,7 @@ local function create_timer(seconds, action, opts, repeating)
         enabled = true,
         name = opts.name,
         group = opts.group,
+        source = rune.caller_source(2),
     }
 
     local handle = setmetatable({
@@ -127,7 +128,8 @@ local function create_timer(seconds, action, opts, repeating)
 
         -- Execute action
         if type(data.action) == "function" then
-            local label = data.name and ('Timer "' .. data.name .. '"') or "Timer"
+            local label = (data.name and ('Timer "' .. data.name .. '"') or "Timer") ..
+                (data.source and (" @" .. data.source) or "")
             rune.guarded_call(label, data, data.action, ctx)
         elseif type(data.action) == "string" and data.action ~= "" then
             rune.send(data.action)
@@ -224,6 +226,7 @@ function rune.timer.list()
             name = data.name,
             enabled = data.enabled,
             group = data.group,
+            source = data.source,
         })
     end
 

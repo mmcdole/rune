@@ -114,6 +114,7 @@ local function create_trigger(pattern, action, opts, mode)
         once = opts.once or false,
         gag = opts.gag or false,
         raw = opts.raw or false,
+        source = rune.caller_source(2),
     }
     next_id = next_id + 1
 
@@ -222,6 +223,7 @@ function rune.trigger.list()
             gag = data.gag,
             once = data.once,
             raw = data.raw,
+            source = data.source,
         })
     end
 
@@ -296,7 +298,8 @@ function rune.trigger.process(line)
                 -- Execute action
                 if data.action then
                     if type(data.action) == "function" then
-                        local label = data.name and ('Trigger "' .. data.name .. '"') or "Trigger"
+                        local label = (data.name and ('Trigger "' .. data.name .. '"') or "Trigger") ..
+                            (data.source and (" @" .. data.source) or "")
                         local ok, result = rune.guarded_call(label, data, data.action, matches, ctx)
                         if ok then
                             -- Handle return values
