@@ -501,6 +501,12 @@ func (m *Model) sendOutbound(msg ui.UIEvent) {
 	select {
 	case m.outbound <- msg:
 	default:
+		// The session is not draining UI events. Dropping is the only
+		// safe option here (blocking would deadlock the render loop),
+		// but it must never be silent: a lost InputChangedMsg desyncs
+		// completion state, a lost PickerSelectMsg strands a picker
+		// callback. Make it visible so it can be reported.
+		m.scrollback.Append(text.Red("[WARNING] UI event dropped - engine lagging"))
 	}
 }
 
