@@ -169,6 +169,16 @@ function rune.hooks.remove(name)
     return false
 end
 
+-- An entry fires only if individually enabled AND its group's master
+-- switch is on - the same two-level rule triggers, aliases, and timers
+-- follow. rune.group loads after this file but exists by dispatch time.
+local function active(entry)
+    if not entry.enabled then
+        return false
+    end
+    return not rune.group or rune.group.is_enabled(entry.group)
+end
+
 -- Run a single handler protected. A failing handler is reported and
 -- treated as returning nil (pass through), so one broken handler
 -- cannot abort the rest of the chain or kill trigger processing.
@@ -220,7 +230,7 @@ function rune.hooks.call(event, ...)
         local modified_text = nil  -- Track if any handler modified the output
 
         for _, entry in ipairs(handlers) do
-            if entry.enabled then
+            if active(entry) then
                 local result = run_handler(entry, line)
                 if result == false then
                     return "", false  -- gagged
@@ -243,7 +253,7 @@ function rune.hooks.call(event, ...)
         local modified_text = nil
 
         for _, entry in ipairs(handlers) do
-            if entry.enabled then
+            if active(entry) then
                 local result = run_handler(entry, line)
                 if result == false then
                     return "", false  -- gagged
@@ -263,7 +273,7 @@ function rune.hooks.call(event, ...)
         -- Any handler returning false stops processing
         local text = select(1, ...)
         for _, entry in ipairs(handlers) do
-            if entry.enabled then
+            if active(entry) then
                 local result = run_handler(entry, text)
                 if result == false then
                     return false  -- consumed/stopped
@@ -276,7 +286,7 @@ function rune.hooks.call(event, ...)
         -- System events (notifications) - all handlers run
         local args = {...}
         for _, entry in ipairs(handlers) do
-            if entry.enabled then
+            if active(entry) then
                 run_handler(entry, unpack(args))
             end
         end

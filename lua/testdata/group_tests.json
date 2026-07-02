@@ -17,7 +17,9 @@
         "rune.group.enable('combat')"
       ],
       "output": "A goblin attacks you!",
-      "expected_commands": ["flee"]
+      "expected_commands": [
+        "flee"
+      ]
     },
     {
       "name": "Disable Stops Aliases",
@@ -26,7 +28,9 @@
         "rune.group.disable('combat')"
       ],
       "input": "k orc",
-      "expected_commands": ["k orc"]
+      "expected_commands": [
+        "k orc"
+      ]
     },
     {
       "name": "Enable Resumes Aliases",
@@ -36,7 +40,9 @@
         "rune.group.enable('combat')"
       ],
       "input": "k orc",
-      "expected_commands": ["kill orc"]
+      "expected_commands": [
+        "kill orc"
+      ]
     },
     {
       "name": "Remove Group Removes All Items",
@@ -57,7 +63,9 @@
         "rune.group.disable('combat')"
       ],
       "output": "Bob says hello",
-      "expected_commands": ["wave"]
+      "expected_commands": [
+        "wave"
+      ]
     },
     {
       "name": "No Group Not Affected",
@@ -66,7 +74,9 @@
         "rune.group.disable('combat')"
       ],
       "output": "A goblin attacks you!",
-      "expected_commands": ["flee"]
+      "expected_commands": [
+        "flee"
+      ]
     },
     {
       "name": "Preserves Individual State - Enabled Item",
@@ -76,7 +86,9 @@
         "rune.group.enable('combat')"
       ],
       "output": "A goblin attacks you!",
-      "expected_commands": ["flee"]
+      "expected_commands": [
+        "flee"
+      ]
     },
     {
       "name": "Preserves Individual State - Disabled Item Stays Disabled",
@@ -98,6 +110,27 @@
       "setup_lua": "local t = rune.trigger.contains('attack', 'flee', {group = 'combat'}); t:disable()",
       "output": "A goblin attacks you!",
       "expected_commands": []
+    },
+    {
+      "name": "Disable Stops Hooks",
+      "setup_lua": [
+        "rune.hooks.on('output', function(line) rune.send_raw('hookfired') end, {group = 'combat'})",
+        "rune.group.disable('combat')"
+      ],
+      "output": "A goblin attacks you!",
+      "expected_commands": []
+    },
+    {
+      "name": "Enable Resumes Hooks",
+      "setup_lua": [
+        "rune.hooks.on('output', function(line) rune.send_raw('hookfired') end, {group = 'combat'})",
+        "rune.group.disable('combat')",
+        "rune.group.enable('combat')"
+      ],
+      "output": "A goblin attacks you!",
+      "expected_commands": [
+        "hookfired"
+      ]
     }
   ]
 }
