@@ -8,9 +8,11 @@ const (
 	UserInput Type = iota
 	NetLine        // A complete line from server (ended with \n)
 	NetPrompt      // A partial line/prompt (no \n, possibly GA/EOR terminated)
+	NetGMCP        // An out-of-band GMCP message
 
 	// Control events
-	SysDisconnect // Connection closed
+	SysDisconnect  // Connection closed
+	SysGMCPEnabled // GMCP negotiated on the current connection
 
 	// Internal
 	AsyncResult // Deferred callback execution
@@ -35,6 +37,14 @@ type Payload interface {
 type Line string
 
 func (Line) eventPayload() {}
+
+// GMCP is the payload for NetGMCP events.
+type GMCP struct {
+	Package string // e.g. "Char.Vitals"
+	Data    string // raw JSON, may be empty
+}
+
+func (GMCP) eventPayload() {}
 
 // Callback is the payload for AsyncResult events.
 type Callback func()

@@ -56,3 +56,8 @@ func (s *Session) Disconnect() {
 func (s *Session) Send(data string) error {
 	return s.net.Send(data)
 }
+
+// GMCPSend implements lua.Host.
+func (s *Session) GMCPSend(pkg, data string) error {
+	return s.net.SendGMCP(pkg, data)
+}

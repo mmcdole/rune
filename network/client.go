@@ -1,9 +1,13 @@
 package network
 
 import (
+	"bufio"
+	"bytes"
+	"compress/zlib"
 	"context"
 	"crypto/tls"
 	"fmt"
+	"io"
 	"net"
 	"strings"
 	"sync"
@@ -22,6 +26,10 @@ type TCPClient struct {
 	// State protection
 	mu      sync.Mutex
 	current *connection // The currently active connection, or nil
+
+	// Last known window size, retained across connections so NAWS
+	// can answer immediately on the next connect.
+	width, height int
 }
 
 // outMsg is a queued write. line messages are user commands (CRLF
@@ -39,9 +47,25 @@ type connection struct {
 	parser *Parser
 	output *OutputBuffer
 
+	// Read source indirection for MCCP2. reader is what readLoop
+	// consumes: the socket normally, a zlib stream while compression
+	// is active. raw is the underlying byte source compression wraps -
+	// a byte-exact bufio.Reader once compression has run, so a clean
+	// zlib stream end resumes plain telnet without losing bytes.
+	// Only readLoop touches these after Connect returns.
+	reader     io.Reader
+	raw        io.Reader
+	zr         io.ReadCloser
+	compressed bool
+
+	// Identity negotiation responder (TTYPE/MTTS, NAWS, CHARSET, MNES)
+	hs *handshake
+
 	// Telnet mode tracking - separate flags allow proper reversion
 	willEOR atomic.Bool // Server indicated WILL EOR
 	willSGA atomic.Bool // Server indicated WILL SGA (Suppress Go Ahead)
+
+	gmcpActive atomic.Bool // GMCP negotiated on this connection
 
 	localEcho atomic.Bool
 
@@ -133,6 +157,9 @@ func (c *TCPClient) Connect(ctx context.Context, address string) error {
 	// Create the new connection object
 	cx := &connection{
 		conn:      conn,
+		reader:    conn,
+		raw:       conn,
+		hs:        newHandshake(useTLS, c.width, c.height),
 		parser:    NewParser(defaultCompatibility()),
 		output:    NewOutputBuffer(TelnetModeUnterminated),
 		sendQueue: make(chan outMsg, 4096),
@@ -179,6 +206,60 @@ func (c *TCPClient) Send(data string) error {
 	}
 }
 
+// SetWindowSize records the terminal size and, when NAWS is active on
+// the current connection, reports it to the server immediately.
+// The size is retained across connections so the next connect can
+// answer DO NAWS with real numbers.
+func (c *TCPClient) SetWindowSize(width, height int) {
+	c.mu.Lock()
+	c.width, c.height = width, height
+	cx := c.current
+	c.mu.Unlock()
+
+	if cx == nil {
+		return
+	}
+	frame := cx.hs.setWindowSize(width, height)
+	if frame == nil {
+		return
+	}
+	select {
+	case cx.sendQueue <- outMsg{data: frame}:
+	default:
+		// Send queue full - drop the resize report; the next resize
+		// (or reconnect) will correct it. Never block the UI path.
+	}
+}
+
+// SendGMCP sends a GMCP message: "Package.SubPackage" plus optional
+// raw JSON. Returns an error when disconnected or when the server has
+// not negotiated GMCP.
+func (c *TCPClient) SendGMCP(pkg, data string) error {
+	c.mu.Lock()
+	cx := c.current
+	c.mu.Unlock()
+
+	if cx == nil {
+		return fmt.Errorf("not connected")
+	}
+	if !cx.gmcpActive.Load() {
+		return fmt.Errorf("GMCP not negotiated on this connection")
+	}
+
+	payload := pkg
+	if data != "" {
+		payload += " " + data
+	}
+	frame := subnegFrame(OptGMCP, []byte(payload))
+
+	select {
+	case cx.sendQueue <- outMsg{data: frame}:
+		return nil
+	default:
+		return fmt.Errorf("send buffer full (network stalled?)")
+	}
+}
+
 // Output returns the stable output channel.
 func (c *TCPClient) Output() <-chan Output {
 	return c.outputChan
@@ -205,8 +286,24 @@ func (c *TCPClient) readLoop(cx *connection) {
 	buf := make([]byte, 4096)
 
 	for {
-		n, err := cx.conn.Read(buf)
+		n, err := cx.reader.Read(buf)
+
+		if n > 0 && !c.processIncoming(cx, buf[:n]) {
+			return
+		}
+
 		if err != nil {
+			// A clean zlib stream end is not a connection error: MCCP
+			// may terminate and the server resumes plain telnet. The
+			// byte-exact raw reader still holds any bytes that
+			// followed the compressed stream.
+			if cx.compressed && err == io.EOF {
+				cx.zr.Close()
+				cx.reader = cx.raw
+				cx.compressed = false
+				continue
+			}
+
 			// Check if we're still the active connection
 			c.mu.Lock()
 			isCurrent := (c.current == cx)
@@ -225,74 +322,174 @@ func (c *TCPClient) readLoop(cx *connection) {
 			}
 			return
 		}
+	}
+}
 
-		if n == 0 {
-			continue
-		}
+// processIncoming feeds bytes to the parser and dispatches the
+// resulting events. Returns false when the connection is done and the
+// read loop should exit.
+func (c *TCPClient) processIncoming(cx *connection, data []byte) bool {
+	// MCCP2 activation is deferred to the end of the batch: the parser
+	// stops parsing at IAC SB 86 IAC SE and hands back the remaining
+	// raw (compressed) bytes, so nothing after the marker is parsed.
+	startMCCP := false
+	var mccpRest []byte
 
-		for _, ev := range cx.parser.Receive(buf[:n]) {
-			switch ev.Kind {
-			case TelnetEventDataSend:
-				// Negotiation replies go through the send queue so a
-				// single goroutine owns the socket writes and their
-				// deadlines. Blocking here is fine: writeLoop drains
-				// continuously, and done unblocks us on teardown.
+	for _, ev := range cx.parser.Receive(data) {
+		switch ev.Kind {
+		case TelnetEventDataSend:
+			// Negotiation replies go through the send queue so a
+			// single goroutine owns the socket writes and their
+			// deadlines. Blocking here is fine: writeLoop drains
+			// continuously, and done unblocks us on teardown.
+			if !cx.enqueueRaw(ev.Data) {
+				return false
+			}
+
+		case TelnetEventDataReceive:
+			lines := cx.output.Receive(ev.Data)
+			for _, line := range lines {
 				select {
-				case cx.sendQueue <- outMsg{data: ev.Data}:
+				case c.outputChan <- Output{Kind: OutputLine, Payload: string(line)}:
 				case <-cx.done:
-					return
+					return false
 				}
-
-			case TelnetEventDataReceive:
-				lines := cx.output.Receive(ev.Data)
-				for _, line := range lines {
+			}
+			if cx.telnetMode() == TelnetModeUnterminated {
+				prompt := cx.output.Prompt(false)
+				if prompt != "" {
 					select {
-					case c.outputChan <- Output{Kind: OutputLine, Payload: string(line)}:
+					case c.outputChan <- Output{Kind: OutputPrompt, Payload: prompt}:
 					case <-cx.done:
-						return
+						return false
 					}
 				}
-				if cx.telnetMode() == TelnetModeUnterminated {
-					prompt := cx.output.Prompt(false)
+			}
+
+		case TelnetEventIAC:
+			if ev.Command == CmdGA || ev.Command == CmdEOR {
+				// GA/EOR commands indicate prompt termination for this message,
+				// but don't change the negotiated mode (that's done via WILL/WONT)
+				if cx.output.HasNewData() {
+					prompt := cx.output.Prompt(true)
 					if prompt != "" {
 						select {
 						case c.outputChan <- Output{Kind: OutputPrompt, Payload: prompt}:
 						case <-cx.done:
-							return
+							return false
 						}
 					}
+				} else {
+					// Just flush even if no new data
+					cx.output.Prompt(true)
 				}
-
-			case TelnetEventIAC:
-				if ev.Command == CmdGA || ev.Command == CmdEOR {
-					// GA/EOR commands indicate prompt termination for this message,
-					// but don't change the negotiated mode (that's done via WILL/WONT)
-					if cx.output.HasNewData() {
-						prompt := cx.output.Prompt(true)
-						if prompt != "" {
-							select {
-							case c.outputChan <- Output{Kind: OutputPrompt, Payload: prompt}:
-							case <-cx.done:
-								return
-							}
-						}
-					} else {
-						// Just flush even if no new data
-						cx.output.Prompt(true)
-					}
-				}
-
-			case TelnetEventNegotiation:
-				cx.applyNegotiation(ev.Command, ev.Option)
-
-			case TelnetEventSubnegotiation:
-				// No-op for now; surface via prompt when applicable
-
-			case TelnetEventDecompressImmediate:
-				// Compression not supported yet; ignore payload for now
 			}
+
+		case TelnetEventNegotiation:
+			cx.applyNegotiation(ev.Command, ev.Option)
+			for _, frame := range cx.hs.onNegotiation(ev.Command, ev.Option) {
+				if !cx.enqueueRaw(frame) {
+					return false
+				}
+			}
+			if ev.Option == OptGMCP {
+				switch ev.Command {
+				case CmdWILL, CmdDO:
+					if !cx.gmcpActive.Swap(true) {
+						select {
+						case c.outputChan <- Output{Kind: OutputGMCPEnabled}:
+						case <-cx.done:
+							return false
+						}
+					}
+				case CmdWONT, CmdDONT:
+					cx.gmcpActive.Store(false)
+				}
+			}
+
+		case TelnetEventSubnegotiation:
+			switch ev.Option {
+			case OptMCCP2:
+				startMCCP = true
+			case OptGMCP:
+				pkg, payload := splitGMCP(ev.Data)
+				if pkg != "" {
+					select {
+					case c.outputChan <- Output{Kind: OutputGMCP, Package: pkg, Payload: payload}:
+					case <-cx.done:
+						return false
+					}
+				}
+			default:
+				for _, frame := range cx.hs.onSubnegotiation(ev.Option, ev.Data) {
+					if !cx.enqueueRaw(frame) {
+						return false
+					}
+				}
+			}
+
+		case TelnetEventDecompressImmediate:
+			// Raw compressed bytes that followed IAC SB 86 IAC SE in
+			// the same read. Always the final event of a batch.
+			startMCCP = true
+			mccpRest = ev.Data
 		}
 	}
+
+	if startMCCP {
+		if err := cx.startDecompression(mccpRest); err != nil {
+			// The stream is unrecoverable without valid zlib data -
+			// close the socket; readLoop's error path reports the
+			// disconnect.
+			cx.conn.Close()
+			return true // let readLoop observe the read error
+		}
+	}
+	return true
+}
+
+// enqueueRaw queues protocol bytes for writeLoop. Returns false if the
+// connection is shutting down.
+func (cx *connection) enqueueRaw(data []byte) bool {
+	select {
+	case cx.sendQueue <- outMsg{data: data}:
+		return true
+	case <-cx.done:
+		return false
+	}
+}
+
+// startDecompression switches the read path to a zlib stream, seeded
+// with any compressed bytes that arrived in the activating read. The
+// underlying source becomes a byte-exact bufio.Reader, so zlib never
+// over-reads and a clean stream end can resume plain telnet.
+func (cx *connection) startDecompression(remaining []byte) error {
+	if cx.compressed {
+		return nil
+	}
+	src := bufio.NewReader(io.MultiReader(bytes.NewReader(remaining), cx.raw))
+	zr, err := zlib.NewReader(src)
+	if err != nil {
+		return err
+	}
+	cx.raw = src
+	cx.zr = zr
+	cx.reader = zr
+	cx.compressed = true
+	return nil
+}
+
+// splitGMCP separates "Package.SubPackage <json>" into the package
+// name and the raw JSON payload (which may be empty).
+func splitGMCP(data []byte) (pkg, payload string) {
+	msg := strings.TrimSpace(string(data))
+	if msg == "" {
+		return "", ""
+	}
+	if i := strings.IndexByte(msg, ' '); i >= 0 {
+		return msg[:i], strings.TrimSpace(msg[i+1:])
+	}
+	return msg, ""
 }
 
 // writeLoop handles outgoing data for a specific connection.

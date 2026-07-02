@@ -64,6 +64,7 @@ const (
 	OptAuthentication byte = 37
 	OptEncrypt        byte = 38
 	OptNewEnviron     byte = 39
+	OptCharset        byte = 42
 	OptMSSP           byte = 70
 	OptMCCP2          byte = 86
 	OptMCCP3          byte = 87
@@ -510,9 +511,16 @@ func (p *Parser) processSub(buf, remaining []byte) []TelnetEvent {
 		return nil
 	}
 
+	// Accept subnegotiations for options enabled on either side.
+	// Server-offered protocols (GMCP, MCCP) are enabled remotely
+	// (WILL from the server, DO from us); client-answered options
+	// (TTYPE, NAWS) are enabled locally (DO from the server, WILL
+	// from us). Both directions legitimately carry subnegotiations.
 	opt := buf[2]
 	entry := p.Options.Get(opt)
-	if !entry.Local || !entry.LocalState {
+	localOn := entry.Local && entry.LocalState
+	remoteOn := entry.Remote && entry.RemoteState
+	if !localOn && !remoteOn {
 		return nil
 	}
 
@@ -712,8 +720,14 @@ func (o *OutputBuffer) Clear() {
 // options here only together with their implementation.
 func defaultCompatibility() CompatibilityTable {
 	t := NewCompatibilityTable()
-	t.Support(OptEcho) // WILL/WONT ECHO toggles local echo (client.go)
-	t.Support(OptSGA)  // Suppress Go Ahead: prompt mode detection
-	t.Support(OptEOR)  // End of Record: prompt termination
+	t.Support(OptEcho)            // WILL/WONT ECHO toggles local echo (client.go)
+	t.Support(OptSGA)             // Suppress Go Ahead: prompt mode detection
+	t.Support(OptEOR)             // End of Record: prompt termination
+	t.SupportLocal(OptTTYPE)      // Terminal type + MTTS cycle (negotiate.go)
+	t.SupportLocal(OptNAWS)       // Window size reports (negotiate.go, client.go)
+	t.Support(OptCharset)         // UTF-8 charset negotiation (negotiate.go)
+	t.SupportLocal(OptNewEnviron) // MNES client identification (negotiate.go)
+	t.SupportRemote(OptMCCP2)     // Server->client zlib compression (client.go)
+	t.Support(OptGMCP)            // Out-of-band JSON messages (client.go, Lua rune.gmcp)
 	return t
 }

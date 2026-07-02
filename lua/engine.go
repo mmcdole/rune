@@ -2,6 +2,7 @@ package lua
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/mmcdole/rune/text"
 	"github.com/mmcdole/rune/ui"
+	"github.com/mmcdole/rune/version"
 	glua "github.com/yuin/gopher-lua"
 )
 
@@ -363,6 +365,41 @@ func (e *Engine) OnPrompt(line text.Line) string {
 	return modified.String()
 }
 
+// OnGMCP dispatches a GMCP message to Lua: the raw JSON is decoded
+// through the shared JSON bridge (api_store.go) so handlers receive a
+// real Lua value, plus the raw text for anyone who wants it.
+// Malformed JSON is reported once and the message dropped - a broken
+// server message must not take anything else down.
+func (e *Engine) OnGMCP(pkg, raw string) {
+	if e.L == nil {
+		return
+	}
+	dispatch, ok := e.getRuneFunc("gmcp", "_dispatch")
+	if !ok {
+		return // GMCP module unavailable (core failed to load)
+	}
+
+	var value glua.LValue = glua.LNil
+	if raw != "" {
+		var decoded any
+		if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+			e.reportError("gmcp "+pkg, fmt.Errorf("malformed JSON: %w", err))
+			return
+		}
+		value = goToLua(e.L, decoded)
+	}
+
+	if err := e.guard(func() error {
+		return e.L.CallByParam(glua.P{
+			Fn:      dispatch,
+			NRet:    0,
+			Protect: true,
+		}, glua.LString(pkg), value, glua.LString(raw))
+	}); err != nil {
+		e.reportError("gmcp dispatch", err)
+	}
+}
+
 // CallHook calls a hook event with string arguments.
 func (e *Engine) CallHook(event string, args ...string) {
 	hooksCall, ok := e.getHooksCall()
@@ -396,6 +433,10 @@ func (e *Engine) registerAPIs() {
 	e.runeTable = e.L.NewTable()
 	e.L.SetGlobal("rune", e.runeTable)
 
+	// Data fields (not API): the client version, single-sourced from
+	// the version package so TTYPE/MNES and /version cannot drift.
+	e.L.SetField(e.runeTable, "version", glua.LString(version.Number))
+
 	e.registerCoreFuncs()
 	e.registerTimerFuncs()
 	e.registerRegexFuncs()
@@ -408,6 +449,7 @@ func (e *Engine) registerAPIs() {
 	e.registerSessionFuncs()
 	e.registerStoreFuncs()
 	e.registerLogFuncs()
+	e.registerGMCPFuncs()
 }
 
 // getRuneFunc returns rune.<table>.<field> if it is a function.

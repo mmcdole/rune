@@ -29,6 +29,8 @@ type Network interface {
 	Connect(ctx context.Context, address string) error
 	Disconnect()
 	Send(data string) error
+	SendGMCP(pkg, data string) error
+	SetWindowSize(width, height int)
 	Output() <-chan network.Output
 	LocalEchoEnabled() bool
 }
@@ -188,6 +190,10 @@ func (s *Session) handleNetworkOutput(out network.Output) {
 		s.handleEvent(event.Event{Type: event.NetPrompt, Payload: event.Line(out.Payload)})
 	case network.OutputDisconnect:
 		s.handleEvent(event.Event{Type: event.SysDisconnect})
+	case network.OutputGMCP:
+		s.handleEvent(event.Event{Type: event.NetGMCP, Payload: event.GMCP{Package: out.Package, Data: out.Payload}})
+	case network.OutputGMCPEnabled:
+		s.handleEvent(event.Event{Type: event.SysGMCPEnabled})
 	}
 }
 
@@ -234,6 +240,14 @@ func (s *Session) handleEvent(ev event.Event) {
 			}
 		}
 		s.engine.OnInput(payload)
+
+	case event.NetGMCP:
+		if gmcp, ok := ev.Payload.(event.GMCP); ok {
+			s.engine.OnGMCP(gmcp.Package, gmcp.Data)
+		}
+
+	case event.SysGMCPEnabled:
+		s.engine.CallHook("gmcp_enabled")
 
 	case event.AsyncResult:
 		if cb, ok := ev.Payload.(event.Callback); ok && cb != nil {
@@ -361,6 +375,7 @@ func (s *Session) handleUIMessage(msg ui.UIEvent) {
 	case ui.WindowSizeChangedMsg:
 		s.clientState.Width = m.Width
 		s.clientState.Height = m.Height
+		s.net.SetWindowSize(m.Width, m.Height)
 		s.engine.UpdateState(s.clientState)
 		s.pushBarUpdates()
 	case ui.ScrollStateChangedMsg:

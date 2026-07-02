@@ -163,6 +163,14 @@ Two tiers - the name tells you the lifetime:
 | `rune.log.stop()` | Stop logging |
 | `rune.log.status()` | Active log path, or nil |
 
+### GMCP
+| Function | Description |
+|----------|-------------|
+| `rune.gmcp.on(package, handler, opts?)` | Handle a GMCP package (handler gets `data, package`) |
+| `rune.gmcp.send(package, value?)` | Send a message (value: JSON-able Lua value) |
+| `rune.gmcp.subscribe(package, version?)` | Declare interest (maintains `Core.Supports.Set`) |
+| `rune.gmcp.is_enabled()` | GMCP negotiated on this connection? |
+
 ### Style
 | Function | Description |
 |----------|-------------|
@@ -519,6 +527,8 @@ rune.hooks.on(event, handler, opts?)
 | `"reloaded"` | `function()` | After reload |
 | `"loaded"` | `function(path)` | After script load |
 | `"error"` | `function(msg)` | On system error |
+| `"gmcp"` | `function(package, data, raw)` | Every GMCP message (catch-all; see GMCP API) |
+| `"gmcp_enabled"` | `function()` | GMCP negotiated; the core handler sends `Core.Hello` |
 
 #### Return Values (Data Flow Only)
 
@@ -1024,6 +1034,69 @@ rune.hooks.on("output", function(line)
     rune.log.write(os.date("[%H:%M:%S] ") .. line:clean())
 end, { priority = 200 })
 ```
+
+---
+
+## GMCP API
+
+GMCP (Generic MUD Communication Protocol) carries structured
+out-of-band data - vitals, room info, comm channels - as
+`Package.SubPackage <json>` messages over telnet option 201. Go owns
+the transport and JSON conversion; everything below is Lua policy in
+`59_gmcp.lua`.
+
+### Receiving
+
+```lua
+-- Handle a specific package. data is the decoded JSON (table, string,
+-- number, boolean - or nil when the message has no body); package is
+-- the name as the server sent it. Matching is case-insensitive.
+rune.gmcp.on("Char.Vitals", function(data, package)
+    hp, maxhp = data.hp, data.maxhp
+    rune.ui.refresh_bars()
+end, { name = "vitals" })
+
+-- Catch-all: every message, plus the raw JSON text
+rune.hooks.on("gmcp", function(package, data, raw)
+    rune.dbg(package .. " " .. tostring(raw))
+end)
+```
+
+Handlers are registry-based: `opts` takes `name`, `group`, `priority`,
+handles have `:enable/:disable/:remove`, and a handler that keeps
+throwing is quarantined individually. `rune.gmcp.list()` returns them
+for `/gmcp`. Malformed JSON from the server is reported through the
+`"error"` event and dropped before reaching handlers.
+
+### Sending
+
+```lua
+rune.gmcp.send("Char.Skills.Get", { group = "combat" }) -- JSON-able value
+rune.gmcp.send("Core.Ping")                             -- bare package
+rune.gmcp.send_raw("Core.Hello", '{"client":"Rune"}')   -- pre-encoded (debug)
+```
+
+`send` returns `true`, or `nil + error` (not connected, GMCP not
+negotiated, unencodable value) and echoes the failure.
+
+### Subscriptions and the Handshake
+
+```lua
+rune.gmcp.subscribe("Char")        -- version defaults to 1
+rune.gmcp.subscribe("Room", 2)
+rune.gmcp.unsubscribe("Char")
+rune.gmcp.is_enabled()             -- negotiated on this connection?
+```
+
+Subscriptions maintain `Core.Supports.Set` (the full set is re-sent on
+every change, per the spec). When the server negotiates GMCP, the
+`"gmcp_enabled"` event fires and the core handler (named `gmcp-hello`)
+sends `Core.Hello {client, version}` plus the current subscription
+set - disable or replace it like any named hook. Subscribe at load
+time; the handshake picks it up on connect.
+
+`/gmcp` shows negotiation state, subscriptions, and handlers;
+`/gmcp send <package> [json]` sends a raw message for debugging.
 
 ---
 

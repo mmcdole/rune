@@ -1,8 +1,7 @@
 -- Core Configuration and Go Primitive Wrappers
 
--- The core scripts are embedded in the binary, so this constant is the
--- binary's version (shown by /version and the startup banner).
-rune.version = "0.1.0"
+-- rune.version is set by Go (single-sourced from the version package,
+-- which the telnet TTYPE/MNES responders also report) - data, not API.
 
 rune.config = {
     delimiter = ";"

@@ -48,6 +48,10 @@ type MockHost struct {
 
 	// Durable store capture (see Host.StoreSet); raw JSON values
 	StoreData map[string]string
+
+	// GMCP capture (see Host.GMCPSend)
+	GMCPSends []struct{ Package, Data string }
+	GMCPErr   error // when set, GMCPSend fails with this error
 }
 
 func NewMockHost() *MockHost {
@@ -86,6 +90,16 @@ func (m *MockHost) Disconnect() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.DisconnectCalls++
+}
+
+func (m *MockHost) GMCPSend(pkg, data string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.GMCPErr != nil {
+		return m.GMCPErr
+	}
+	m.GMCPSends = append(m.GMCPSends, struct{ Package, Data string }{pkg, data})
+	return nil
 }
 
 func (m *MockHost) Reload() {

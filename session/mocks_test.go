@@ -13,10 +13,13 @@ import (
 type mockNetwork struct {
 	mu         sync.Mutex
 	sent       []string
+	gmcpSent   []struct{ Package, Data string }
 	connected  bool
 	connectErr error
 	output     chan network.Output
 	localEcho  bool
+	windowW    int
+	windowH    int
 }
 
 var _ Network = (*mockNetwork)(nil)
@@ -56,6 +59,30 @@ func (m *mockNetwork) Send(data string) error {
 
 func (m *mockNetwork) Output() <-chan network.Output { return m.output }
 func (m *mockNetwork) LocalEchoEnabled() bool        { return m.localEcho }
+
+func (m *mockNetwork) SendGMCP(pkg, data string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.connected {
+		return errors.New("not connected")
+	}
+	m.gmcpSent = append(m.gmcpSent, struct{ Package, Data string }{pkg, data})
+	return nil
+}
+
+func (m *mockNetwork) SetWindowSize(width, height int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.windowW, m.windowH = width, height
+}
+
+func (m *mockNetwork) drainGMCPSent() []struct{ Package, Data string } {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	sent := m.gmcpSent
+	m.gmcpSent = nil
+	return sent
+}
 
 func (m *mockNetwork) drainSent() []string {
 	m.mu.Lock()

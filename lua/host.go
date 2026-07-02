@@ -14,6 +14,11 @@ type Host interface {
 	Connect(addr string)
 	Disconnect()
 
+	// GMCP: send an out-of-band message ("Package.SubPackage" plus
+	// optional raw JSON). Fails when disconnected or when the server
+	// has not negotiated GMCP.
+	GMCPSend(pkg, data string) error
+
 	// UI
 	Print(text string)
 	PaneCreate(name string)

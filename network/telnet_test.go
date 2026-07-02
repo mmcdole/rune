@@ -53,11 +53,11 @@ func TestParserHandlesSplitDoNegotiation(t *testing.T) {
 }
 
 // Ensure the default table refuses options the client does not
-// implement. Accepting MCCP without a decompressor corrupts the
-// stream; accepting TTYPE/NAWS leaves the server waiting for
-// subnegotiations that never come.
+// implement. Accepting MCCP3 without a compressor corrupts the
+// stream; accepting an option we cannot subnegotiate leaves the
+// server waiting for replies that never come.
 func TestDefaultCompatibilityRefusesUnimplementedOptions(t *testing.T) {
-	for _, opt := range []byte{OptMCCP2, OptMCCP3, OptTTYPE, OptNAWS, OptGMCP, OptLinemode} {
+	for _, opt := range []byte{OptMCCP3, OptMSSP, OptZMP, OptLinemode} {
 		parser := NewParser(DefaultCompatibility())
 
 		events := parser.Receive([]byte{CmdIAC, CmdWILL, opt})
@@ -65,6 +65,24 @@ func TestDefaultCompatibilityRefusesUnimplementedOptions(t *testing.T) {
 
 		events = parser.Receive([]byte{CmdIAC, CmdDO, opt})
 		assertReply(t, events, []byte{CmdIAC, CmdWONT, opt}, "DO", opt)
+	}
+}
+
+// Ensure the default table accepts the options the client implements,
+// in the direction each is actually used.
+func TestDefaultCompatibilityAcceptsImplementedOptions(t *testing.T) {
+	// Server-offered options: server sends WILL, we must DO.
+	for _, opt := range []byte{OptMCCP2, OptGMCP, OptEcho, OptSGA, OptEOR} {
+		parser := NewParser(DefaultCompatibility())
+		events := parser.Receive([]byte{CmdIAC, CmdWILL, opt})
+		assertReply(t, events, []byte{CmdIAC, CmdDO, opt}, "WILL", opt)
+	}
+
+	// Client-answered options: server sends DO, we must WILL.
+	for _, opt := range []byte{OptTTYPE, OptNAWS, OptCharset, OptNewEnviron} {
+		parser := NewParser(DefaultCompatibility())
+		events := parser.Receive([]byte{CmdIAC, CmdDO, opt})
+		assertReply(t, events, []byte{CmdIAC, CmdWILL, opt}, "DO", opt)
 	}
 }
 
