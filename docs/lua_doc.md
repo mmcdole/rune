@@ -67,6 +67,14 @@
 | `rune.hooks.clear(event?)` | Clear handlers |
 | `rune.hooks.remove_group(group)` | Remove all in group |
 
+### Slash Commands
+| Function | Description |
+|----------|-------------|
+| `rune.command.add(name, handler, desc?, opts?)` | Register a `/name` command |
+| `rune.command.remove(name)` | Remove by name |
+| `rune.command.enable/disable(name)` | Manage by name |
+| `rune.command.list()` | List all commands (drives `/help`) |
+
 ### Groups
 | Function | Description |
 |----------|-------------|
@@ -122,7 +130,6 @@
 |----------|-------------|
 | `rune.input.get()` / `rune.input.set(text)` | Input field text |
 | `rune.input.get_cursor()` / `rune.input.set_cursor(pos)` | Cursor position |
-| `rune.input.set_ghost(text)` | Ghost suggestion text |
 | `rune.input.open_editor(initial?)` | Edit in `$EDITOR`; returns text, ok |
 | `rune.input.word_left/word_right()` | Move cursor by word |
 | `rune.input.delete_word()` | Delete word before cursor |
@@ -469,6 +476,7 @@ rune.hooks.on(event, handler, opts?)
 | `"input"` | `function(text)` | User input before processing |
 | `"output"` | `function(line)` | Server output (line object) |
 | `"prompt"` | `function(line)` | Server prompt (line object) |
+| `"echo"` | `function(text)` | Local echo of typed input (plain string). The core handler at priority 100 adds the `"> "` prefix and color; return `false` to hide an echo, a string to restyle it. |
 
 **System Events** (notifications only):
 
@@ -503,7 +511,7 @@ end, {priority = 50})
 
 ## Groups
 
-Groups provide batch enable/disable over aliases, triggers, timers, and hooks.
+Groups provide batch enable/disable over aliases, triggers, timers, hooks, binds, bars, and slash commands.
 
 ### Two-Level Enable/Disable
 
@@ -546,6 +554,40 @@ rune.trigger.remove_group("combat")
 rune.timer.remove_group("combat")
 rune.hooks.remove_group("combat")
 ```
+
+---
+
+## Slash Commands
+
+Register `/name` commands. Built on the shared registry, so commands get
+upsert-by-name, source attribution, and the same failure quarantine as
+every other callback: a command that throws three times in a row is
+disabled individually (re-enable with `rune.command.enable`), and the
+input pipeline keeps working.
+
+```lua
+rune.command.add(name, handler, description?, opts?)
+-- handler = function(args)  -- args is everything after "/name "
+-- opts = {group = "string"}
+-- Returns a handle with :enable(), :disable(), :remove()
+
+rune.command.remove(name)         -- Remove by name
+rune.command.enable(name)         -- Re-enable (e.g. after quarantine)
+rune.command.disable(name)
+rune.command.get(name)            -- The raw handler, or nil
+rune.command.list()               -- Array of {name, description, enabled,
+                                  --   group, source}; drives /help and
+                                  --   the "/" picker
+```
+
+```lua
+rune.command.add("greet", function(args)
+    rune.send("say Hello, " .. (args ~= "" and args or "everyone") .. "!")
+end, "Greet someone")
+```
+
+`/help` is generated from this registry, so user-added commands appear
+in it automatically.
 
 ---
 
@@ -837,7 +879,6 @@ rune.input.get()             -- Get current input text
 rune.input.set(text)         -- Set input text (used by picker callbacks, etc.)
 rune.input.get_cursor()      -- Cursor position (clamped to the input length)
 rune.input.set_cursor(pos)   -- Move the cursor
-rune.input.set_ghost(text)   -- Dim suggestion text rendered after the input
 rune.input.open_editor(init) -- Open $EDITOR; returns edited_text, ok
 rune.input.word_left()       -- Move cursor to previous word boundary
 rune.input.word_right()      -- Move cursor to next word boundary

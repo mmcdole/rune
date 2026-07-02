@@ -67,12 +67,6 @@ func (s *Session) InputSetCursor(pos int) {
 	s.ui.InputSetCursor(pos)
 }
 
-// SetGhost implements lua.Host.
-// Sets ghost text for command-level suggestions.
-func (s *Session) SetGhost(text string) {
-	s.ui.SetGhost(text)
-}
-
 // OpenEditor implements lua.Host.
 func (s *Session) OpenEditor(initial string) (string, bool) {
 	return s.ui.OpenEditor(initial)

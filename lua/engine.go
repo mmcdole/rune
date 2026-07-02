@@ -52,10 +52,8 @@ func NewEngine(host Host) *Engine {
 	return &Engine{
 		host:            host,
 		pickerCallbacks: make(map[string]*glua.LFunction),
-		barLayout: ui.LayoutConfig{
-			Bottom: []ui.LayoutEntry{{Name: "input"}, {Name: "status"}},
-		},
-		CallTimeout: DefaultCallTimeout,
+		barLayout:       ui.DefaultLayoutConfig(),
+		CallTimeout:     DefaultCallTimeout,
 	}
 }
 
@@ -122,9 +120,7 @@ func (e *Engine) Init() error {
 	e.pickerCallbacks = make(map[string]*glua.LFunction)
 	e.pickerNextID = 0
 
-	e.barLayout = ui.LayoutConfig{
-		Bottom: []ui.LayoutEntry{{Name: "input"}, {Name: "status"}},
-	}
+	e.barLayout = ui.DefaultLayoutConfig()
 	e.hooksBrokenReported = false
 
 	registerLineType(e.L)
@@ -237,7 +233,7 @@ func (e *Engine) DoFile(path string) error {
 }
 
 // OnInput handles user typing.
-func (e *Engine) OnInput(text string) bool {
+func (e *Engine) OnInput(text string) {
 	hooksCall, ok := e.getHooksCall()
 	if !ok {
 		e.reportHooksBroken()
@@ -251,7 +247,7 @@ func (e *Engine) OnInput(text string) bool {
 		default:
 			e.host.Send(text)
 		}
-		return true
+		return
 	}
 
 	if err := e.guard(func() error {
@@ -262,16 +258,47 @@ func (e *Engine) OnInput(text string) bool {
 		}, glua.LString("input"), glua.LString(text))
 	}); err != nil {
 		e.reportError("input dispatch", err)
-		return false
+		return
 	}
 
-	ret := e.L.Get(-1)
+	// Pop the consumed/pass-through flag; routing is Lua's job, so
+	// nothing on the Go side acts on it.
 	e.L.Pop(1)
+}
 
-	if ret == glua.LFalse {
-		return false
+// OnEcho styles the local echo of typed input by dispatching the
+// "echo" hook: presentation belongs to Lua, so the "> " prefix and
+// color live in the core echo handler, and user handlers may rewrite
+// or hide the echo. Degraded mode falls back to Go-side styling so
+// input stays visible.
+func (e *Engine) OnEcho(input string) (string, bool) {
+	fallback := text.Green("> " + input)
+
+	hooksCall, ok := e.getHooksCall()
+	if !ok {
+		e.reportHooksBroken()
+		return fallback, true
 	}
-	return true
+
+	if err := e.guard(func() error {
+		return e.L.CallByParam(glua.P{
+			Fn:      hooksCall,
+			NRet:    2,
+			Protect: true,
+		}, glua.LString("echo"), glua.LString(input))
+	}); err != nil {
+		e.reportError("echo dispatch", err)
+		return fallback, true
+	}
+
+	show := e.L.Get(-1)
+	modified := e.L.Get(-2)
+	e.L.Pop(2)
+
+	if show == glua.LFalse {
+		return "", false
+	}
+	return modified.String(), true
 }
 
 // OnOutput handles server text.

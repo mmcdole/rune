@@ -126,6 +126,7 @@ function Registry:add(data, opts)
 end
 
 function Registry:_remove_data(data)
+    data.removed = true -- tombstone: skipped by active() in snapshots
     for i, item in ipairs(self.list) do
         if item == data then
             table.remove(self.list, i)
@@ -180,6 +181,19 @@ function Registry:items()
     return self.list
 end
 
+-- A shallow copy of the sorted item list. Dispatch loops that run
+-- user callbacks iterate over this: a callback that adds or removes
+-- items mutates the live list, and iterating it directly would skip
+-- or double-run neighbors. Additions during dispatch take effect on
+-- the next dispatch; removals are honored via the active() check.
+function Registry:snapshot()
+    local copy = {}
+    for i, data in ipairs(self.list) do
+        copy[i] = data
+    end
+    return copy
+end
+
 function Registry:count()
     return #self.list
 end
@@ -210,11 +224,11 @@ function Registry:remove_group(group_name)
     return #handles
 end
 
--- An item fires only if individually enabled AND its group's master
--- switch is on. rune.group loads after this file but exists by the
--- time anything dispatches.
+-- An item fires only if it has not been removed, is individually
+-- enabled, AND its group's master switch is on. rune.group loads
+-- after this file but exists by the time anything dispatches.
 function Registry:active(data)
-    if not data.enabled then
+    if data.removed or not data.enabled then
         return false
     end
     return not rune.group or rune.group.is_enabled(data.group)

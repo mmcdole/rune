@@ -28,12 +28,6 @@ function rune.input.set_cursor(pos)
     rune._input.set_cursor(pos)
 end
 
--- Ghost text (dim suggestion rendered after the input; Go just
--- renders, Lua is the source of truth for what to suggest)
-function rune.input.set_ghost(text)
-    rune._input.set_ghost(text)
-end
-
 -- Open $EDITOR with the given initial text.
 -- Returns edited_text, ok.
 function rune.input.open_editor(initial)
@@ -241,10 +235,10 @@ rune.bind("alt+right", function() rune.input.word_right() end)
 rune.bind("ctrl+left", function() rune.input.word_left() end)
 rune.bind("ctrl+right", function() rune.input.word_right() end)
 
--- Delete word keybindings
+-- Delete word keybindings. Most terminals send ctrl+backspace as
+-- ctrl+h, so that combination cannot be bound distinctly.
 rune.bind("ctrl+w", function() rune.input.delete_word() end)
 rune.bind("alt+backspace", function() rune.input.delete_word() end)
-rune.bind("ctrl+backspace", function() rune.input.delete_word() end)
 
 -- Editor mode (Ctrl+E opens $EDITOR)
 rune.bind("ctrl+e", function()
@@ -395,7 +389,7 @@ local function insert_completion(suggestion)
     rune.input.set_cursor(#before + #suggestion + #space)
 end
 
-local function update_ghost()
+local function update_matches()
     local word_start, word_end, prefix = find_word_at_cursor()
 
     if #prefix < 2 then
@@ -445,11 +439,11 @@ rune.hooks.on("input_changed", function()
         return
     end
 
-    -- 3. User typed something: exit cycling, update ghost
+    -- 3. User typed something: exit cycling, refresh matches
     completion_state.original = nil
     completion_state.expected = nil
-    update_ghost()
-end, { name = "_completion_ghost", priority = 100 })
+    update_matches()
+end, { name = "_completion_matches", priority = 100 })
 
 -- Cycle through completions (Tab = forward, Shift+Tab = backward)
 local function cycle(direction)

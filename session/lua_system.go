@@ -7,13 +7,16 @@ import (
 	"github.com/drake/rune/text"
 )
 
-// Quit implements lua.SystemService.
+// Quit implements lua.Host.
 func (s *Session) Quit() {
 	s.ui.Quit()
 }
 
-// Reload implements lua.SystemService.
+// Reload implements lua.Host.
 // Must be deferred because it destroys the currently executing Lua state.
+// The send is non-blocking by necessity: Reload runs ON the session
+// goroutine (called from inside a Lua dispatch), so blocking on the
+// events channel here would deadlock the loop that drains it.
 func (s *Session) Reload() {
 	s.engine.CallHook("reloading")
 	select {
@@ -32,7 +35,7 @@ func (s *Session) Reload() {
 	}
 }
 
-// Load implements lua.SystemService.
+// Load implements lua.Host.
 func (s *Session) Load(path string) {
 	if path == "" {
 		s.ui.Print(text.Red("Load Failed: empty path"))

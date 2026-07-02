@@ -27,7 +27,6 @@ type Host interface {
 	// Input primitives
 	InputGetCursor() int
 	InputSetCursor(pos int)
-	SetGhost(text string) // Ghost text for command suggestions
 	OpenEditor(initial string) (string, bool)
 
 	// Pane scrolling

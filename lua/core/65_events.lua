@@ -3,8 +3,11 @@
 -- The status bar (75_ui.lua) renders reactively from rune.state, so
 -- these handlers only produce the scrollback notices.
 
-rune.hooks.on("ready", function()
-    -- Boot complete; nothing to do by default
+-- Local echo styling. This is the only place the "> " prefix and its
+-- color exist; return false from an earlier-priority handler to hide
+-- an echo, or a string to restyle it.
+rune.hooks.on("echo", function(text)
+    return rune.style.green("> " .. text)
 end, { priority = 100 })
 
 rune.hooks.on("connecting", function(addr)

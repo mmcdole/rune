@@ -215,7 +215,11 @@ func (s *Session) handleEvent(ev event.Event) {
 			s.AddToHistory(payload)
 		}
 		if s.net.LocalEchoEnabled() {
-			s.ui.Echo(payload)
+			// Styling (and the choice to show the echo at all) is
+			// Lua policy, dispatched through the "echo" hook.
+			if styled, show := s.engine.OnEcho(payload); show {
+				s.ui.Echo(styled)
+			}
 		}
 		s.engine.OnInput(payload)
 

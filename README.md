@@ -11,7 +11,7 @@ Rune combines Go's performance and concurrency with Lua's flexibility for script
 - **Timers** - One-shot and repeating timers with named management
 - **Hooks** - Event system for connecting to input/output pipeline
 - **Groups** - Master switches to enable/disable sets of aliases/triggers/timers
-- **Tab Completion** - Word cache from server output with ghost text
+- **Tab Completion** - Word cache from server output with match cycling
 - **History** - Zsh-style prefix-matching navigation
 - **Panes** - Multiple output buffers with scrollback
 - **Reactive Status Bar** - Customizable status display

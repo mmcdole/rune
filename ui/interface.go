@@ -5,7 +5,6 @@ package ui
 type UI interface {
 	Run() error
 	Quit()
-	Done() <-chan struct{}
 
 	// Input/Output
 	Input() <-chan string
@@ -29,7 +28,6 @@ type UI interface {
 
 	// Input primitives for Lua
 	InputSetCursor(pos int)
-	SetGhost(text string) // Ghost text for command suggestions
 	OpenEditor(initial string) (string, bool)
 
 	// Pane scrolling primitives for Lua

@@ -10,6 +10,10 @@
 -- scheduled the moment the previous one fires, regardless of how
 -- long the action takes to run.
 --
+-- Disabling suppresses firing. A repeating timer keeps its schedule
+-- and resumes on re-enable; a one-shot whose moment passes while
+-- disabled is removed - its wake-up is spent and cannot recur.
+--
 -- Returns a handle with :disable(), :enable(), :cancel(), :name(), :group()
 --
 -- Options:
@@ -51,6 +55,12 @@ local function create_timer(seconds, action, opts, repeating)
     local function callback()
         -- Individual state AND group master switch
         if not registry:active(data) then
+            -- The Go wake-up for a one-shot is spent: it can never
+            -- fire again, so remove the entry rather than leaving a
+            -- zombie in the registry that re-enabling cannot revive.
+            if not data.repeating then
+                handle:remove()
+            end
             return
         end
 

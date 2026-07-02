@@ -7,7 +7,10 @@ import (
 	"github.com/drake/rune/event"
 )
 
-// Connect implements lua.NetworkService.
+// Connect implements lua.Host.
+// The dial runs in its own goroutine; unlike Reload, that goroutine
+// may block on the events channel (lossless delivery) because the
+// session loop keeps draining while the dial is in flight.
 func (s *Session) Connect(addr string) {
 	s.engine.CallHook("connecting", addr)
 	go func() {
@@ -38,7 +41,7 @@ func (s *Session) Connect(addr string) {
 	}()
 }
 
-// Disconnect implements lua.NetworkService.
+// Disconnect implements lua.Host.
 func (s *Session) Disconnect() {
 	s.engine.CallHook("disconnecting")
 	s.net.Disconnect()
@@ -49,7 +52,7 @@ func (s *Session) Disconnect() {
 	s.pushBarUpdates()
 }
 
-// Send implements lua.NetworkService.
+// Send implements lua.Host.
 func (s *Session) Send(data string) error {
 	return s.net.Send(data)
 }

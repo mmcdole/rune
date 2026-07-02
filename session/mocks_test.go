@@ -95,8 +95,6 @@ func (m *mockUI) Quit() {
 		close(m.done)
 	}
 }
-func (m *mockUI) Done() <-chan struct{} { return m.done }
-
 func (m *mockUI) Input() <-chan string        { return m.input }
 func (m *mockUI) Outbound() <-chan ui.UIEvent { return m.outbound }
 
@@ -135,7 +133,6 @@ func (m *mockUI) TogglePane(name string)                                        
 func (m *mockUI) ClearPane(name string)                                                          {}
 
 func (m *mockUI) InputSetCursor(pos int)                   {}
-func (m *mockUI) SetGhost(text string)                     {}
 func (m *mockUI) OpenEditor(initial string) (string, bool) { return "", false }
 
 func (m *mockUI) PaneScrollUp(name string, lines int)   {}

@@ -8,7 +8,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/drake/rune/text"
 	"github.com/drake/rune/ui"
 )
 
@@ -59,9 +58,10 @@ func (b *BubbleTeaUI) Print(text string) {
 	b.send(ui.PrintLineMsg(text))
 }
 
-// Echo appends user input to scrollback with local-echo styling.
+// Echo appends an already-styled local echo to scrollback. Styling is
+// Lua policy (the "echo" hook); this method is transport only.
 func (b *BubbleTeaUI) Echo(line string) {
-	b.send(ui.EchoLineMsg(text.Green("> " + line)))
+	b.send(ui.EchoLineMsg(line))
 }
 
 // SetPrompt updates the active server prompt (overlay at bottom).
@@ -111,11 +111,6 @@ func (b *BubbleTeaUI) Run() error {
 	close(b.msgQueue)
 
 	return err
-}
-
-// Done returns a channel that closes when the UI exits.
-func (b *BubbleTeaUI) Done() <-chan struct{} {
-	return b.done
 }
 
 // Quit signals the TUI to exit.
@@ -181,12 +176,6 @@ func (b *BubbleTeaUI) SetInput(text string) {
 // InputSetCursor sets the cursor position.
 func (b *BubbleTeaUI) InputSetCursor(pos int) {
 	b.send(ui.InputSetCursorMsg(pos))
-}
-
-// SetGhost sets the ghost text for command-level suggestions.
-// Go just renders; Lua is the source of truth for what to suggest.
-func (b *BubbleTeaUI) SetGhost(text string) {
-	b.send(ui.SetGhostMsg(text))
 }
 
 // OpenEditor opens $EDITOR with the given initial text.

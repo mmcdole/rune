@@ -1,28 +1,5 @@
 package ui
 
-// ConnectionState represents the current connection status.
-type ConnectionState int
-
-const (
-	StateDisconnected ConnectionState = iota
-	StateConnecting
-	StateConnected
-)
-
-// String returns a human-readable representation of the connection state.
-func (s ConnectionState) String() string {
-	switch s {
-	case StateDisconnected:
-		return "Disconnected"
-	case StateConnecting:
-		return "Connecting"
-	case StateConnected:
-		return "Connected"
-	default:
-		return "Unknown"
-	}
-}
-
 // BarContent holds the rendered content of a bar.
 type BarContent struct {
 	Left   string

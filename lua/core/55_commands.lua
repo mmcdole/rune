@@ -1,33 +1,97 @@
 -- Slash Command System
+-- Built on rune.registry (15_registry.lua), so commands get the same
+-- upsert-by-name, source attribution, and failure quarantine as every
+-- other callback registry. A command that keeps throwing is disabled
+-- individually - it can never take the core input hook down with it.
 
 -- Styling shorthands (see 05_style.lua)
 local green, red, yellow, cyan, dim =
     rune.style.green, rune.style.red, rune.style.yellow,
     rune.style.cyan, rune.style.gray
 
+local by_cmd = {} -- command name -> data
+
+local registry = rune.registry.new{
+    kind = "command",
+    on_add = function(data)
+        -- Upsert by command name: re-adding replaces the old handler
+        local old = by_cmd[data.command]
+        if old and old ~= data then
+            old._handle:remove()
+        end
+        by_cmd[data.command] = data
+    end,
+    on_remove = function(data)
+        if by_cmd[data.command] == data then
+            by_cmd[data.command] = nil
+        end
+    end,
+}
+
 rune.command = {}
-local commands = {}  -- Private storage: name -> {handler, description}
 
--- Add a slash command
--- rune.command.add(name, handler) or rune.command.add(name, handler, description)
-function rune.command.add(name, handler, description)
-    commands[name] = {
+-- Add a slash command. opts: group (see 15_registry.lua).
+-- Returns a handle with :enable/:disable/:remove.
+function rune.command.add(name, handler, description, opts)
+    return registry:add({
+        command = name,
         handler = handler,
-        description = description or ""
-    }
+        description = description or "",
+        source = rune.caller_source(1),
+    }, { name = name, group = opts and opts.group })
 end
 
--- Get a slash command handler
+-- Remove a slash command by name. Returns true if one existed.
+function rune.command.remove(name)
+    return registry:remove(name)
+end
+
+-- Get a slash command handler (unwrapped, no quarantine)
 function rune.command.get(name)
-    local cmd = commands[name]
-    return cmd and cmd.handler or nil
+    local data = by_cmd[name]
+    return data and data.handler or nil
 end
 
--- List all commands for the picker (returns array of {name, description})
+-- INTERNAL: run a command protected (called by the core input hook).
+-- Returns true if the name was a known command, even when it is
+-- disabled or its handler failed - the input is consumed either way.
+function rune.command.dispatch(name, args)
+    local data = by_cmd[name]
+    if not data then
+        return false
+    end
+    if not registry:active(data) then
+        rune.echo(red("[Error]") .. " /" .. name .. " is disabled" ..
+            " (re-enable with rune.command.enable)")
+        return true
+    end
+    local label = 'Command "/' .. name .. '"' ..
+        (data.source and (" @" .. data.source) or "")
+    rune.guarded_call(label, data, data.handler, args)
+    return true
+end
+
+-- Management by name
+function rune.command.enable(name)
+    return registry:enable(name)
+end
+
+function rune.command.disable(name)
+    return registry:disable(name)
+end
+
+-- List all commands for the picker and /help.
+-- Returns array of {name, description, enabled, group, source}.
 function rune.command.list()
     local result = {}
-    for name, cmd in pairs(commands) do
-        table.insert(result, {name = name, description = cmd.description})
+    for _, data in ipairs(registry:items()) do
+        table.insert(result, {
+            name = data.command,
+            description = data.description,
+            enabled = data.enabled,
+            group = data.group,
+            source = data.source,
+        })
     end
     -- Sort alphabetically
     table.sort(result, function(a, b) return a.name < b.name end)
@@ -262,32 +326,15 @@ rune.command.add("quit", function(args)
     rune.quit()
 end, "Exit the client")
 
--- /help - Show available commands
+-- /help - Show available commands, generated from the registry so
+-- user-added commands appear automatically and descriptions cannot
+-- drift from what the picker shows.
 rune.command.add("help", function(args)
-    rune.echo(green("[Connection]"))
-    rune.echo("  /connect <host> <port>  - Connect to server")
-    rune.echo("  /disconnect             - Disconnect")
-    rune.echo("  /reconnect              - Reconnect to last server")
-    rune.echo("")
-    rune.echo(green("[Scripts]"))
-    rune.echo("  /load <path>            - Load Lua script")
-    rune.echo("  /reload                 - Reload all scripts")
-    rune.echo("  /lua <code>             - Execute Lua code")
-    rune.echo("")
-    rune.echo(green("[Listing]"))
-    rune.echo("  /aliases                - List aliases")
-    rune.echo("  /triggers               - List triggers")
-    rune.echo("  /timers                 - List timers")
-    rune.echo("  /hooks                  - List hooks")
-    rune.echo("  /binds                  - List key bindings")
-    rune.echo("  /bars                   - List bar renderers")
-    rune.echo("  /groups                 - List groups")
-    rune.echo("")
-    rune.echo(green("[Sending]"))
-    rune.echo("  /raw <text>             - Send without alias expansion")
-    rune.echo("  /test <line>            - Test triggers with simulated line")
-    rune.echo("")
-    rune.echo(green("[Other]"))
-    rune.echo("  /quit                   - Exit")
-    rune.echo("  /help                   - Show this help")
+    local cmds = rune.command.list()
+    rune.echo(green("[Commands]") .. dim(" (" .. #cmds .. " total)"))
+    for _, c in ipairs(cmds) do
+        local status = c.enabled and "" or (" " .. red("[off]"))
+        rune.echo(string.format("  %-12s %s%s",
+            "/" .. c.name, c.description, status))
+    end
 end, "Show available commands")

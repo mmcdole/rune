@@ -133,7 +133,9 @@ function rune.trigger.process(line)
     -- Collect triggers to remove after processing (for once)
     local to_remove = {}
 
-    for _, data in ipairs(registry:items()) do
+    -- Snapshot: a trigger action that adds/removes triggers must not
+    -- perturb this dispatch pass (removals still honored via active()).
+    for _, data in ipairs(registry:snapshot()) do
         if registry:active(data) then
             local matches = nil
             local match_line = data.raw and raw_line or clean_line

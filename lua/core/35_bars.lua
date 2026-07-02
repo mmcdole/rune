@@ -48,7 +48,9 @@ end
 -- Returns { [name] = string | {left, center, right} } for active bars.
 function rune.bars._render_all(width)
     local out = {}
-    for _, data in ipairs(registry:items()) do
+    -- Snapshot: a renderer that (re)registers bars must not perturb
+    -- this render pass.
+    for _, data in ipairs(registry:snapshot()) do
         if registry:active(data) then
             local label = 'Bar "' .. data.bar .. '"' ..
                 (data.source and (" @" .. data.source) or "")

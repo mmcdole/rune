@@ -10,7 +10,8 @@ type UIEvent interface {
 // Used for all output: server lines, Lua prints, etc.
 type PrintLineMsg string
 
-// EchoLineMsg represents a local echo (user input) to append to scrollback.
+// EchoLineMsg represents a local echo (user input, already styled by
+// the Lua "echo" hook) to append to scrollback.
 type EchoLineMsg string
 
 // PromptMsg represents a server prompt (partial line without newline).
@@ -128,11 +129,6 @@ func (PickerSelectMsg) uiEvent() {}
 
 // InputSetCursorMsg sets the cursor position.
 type InputSetCursorMsg int
-
-// SetGhostMsg sets the ghost text for command-level suggestions.
-// Go just renders this as dim text if it prefix-matches the input.
-// Lua is the source of truth for what to suggest.
-type SetGhostMsg string
 
 // --- Pane Scrolling Messages (Session -> UI) ---
 

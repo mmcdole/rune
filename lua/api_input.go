@@ -31,16 +31,6 @@ func (e *Engine) registerInputFuncs() {
 		return 0
 	}))
 
-	// Ghost text primitive - Go just renders, Lua is source of truth
-	e.L.SetField(inp, "set_ghost", e.L.NewFunction(func(L *glua.LState) int {
-		text := ""
-		if L.Get(1) != glua.LNil {
-			text = L.CheckString(1)
-		}
-		e.host.SetGhost(text)
-		return 0
-	}))
-
 	// Editor mode primitive. The host call blocks in $EDITOR for as
 	// long as the user edits, so it runs outside the watchdog deadline.
 	e.L.SetField(inp, "open_editor", e.L.NewFunction(func(L *glua.LState) int {

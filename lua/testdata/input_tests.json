@@ -29,6 +29,31 @@
       "name": "Whitespace Between Semicolons",
       "input": ";   ;   ;",
       "expected_commands": ["", "", "", ""]
+    },
+    {
+      "name": "Repeat At Start",
+      "input": "#3 north",
+      "expected_commands": ["north", "north", "north"]
+    },
+    {
+      "name": "Repeat After Delimiter",
+      "input": "open gate;#2 south",
+      "expected_commands": ["open gate", "south", "south"]
+    },
+    {
+      "name": "Repeat Braced Group",
+      "input": "#2 {kill rat;loot}",
+      "expected_commands": ["kill rat", "loot", "kill rat", "loot"]
+    },
+    {
+      "name": "Repeat Mid-Text Passes Through",
+      "input": "say #3 cheers",
+      "expected_commands": ["say #3 cheers"]
+    },
+    {
+      "name": "Repeat Mid-Text With Real Repeat",
+      "input": "say meet at #4;#2 west",
+      "expected_commands": ["say meet at #4", "west", "west"]
     }
   ]
 } 

@@ -173,6 +173,86 @@ func TestFailingHookIsQuarantined(t *testing.T) {
 	}
 }
 
+// TestFailingCommandIsQuarantinedIndividually verifies that a slash
+// command throwing repeatedly is disabled by itself - its failures
+// must not accrue against the core input hook, which would take the
+// whole input pipeline (including /reload) down with it.
+func TestFailingCommandIsQuarantinedIndividually(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	setup := `rune.command.add("badcmd", function() error("boom") end, "broken")`
+	if err := engine.DoString("setup", setup); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
+	for i := 0; i < 3; i++ {
+		engine.OnInput("/badcmd")
+	}
+
+	disabled := false
+	for _, p := range host.DrainPrintCalls() {
+		if strings.Contains(p, "disabled after 3 consecutive errors") {
+			disabled = true
+		}
+	}
+	if !disabled {
+		t.Fatal("expected quarantine notice after 3 command failures")
+	}
+
+	// The input pipeline must still be alive: plain input sends, and
+	// other slash commands still dispatch.
+	engine.OnInput("north")
+	sent := host.DrainNetworkCalls()
+	if len(sent) != 1 || sent[0] != "north" {
+		t.Fatalf("input pipeline dead after command quarantine: sent %v", sent)
+	}
+
+	engine.OnInput("/badcmd")
+	sawDisabled := false
+	for _, p := range host.DrainPrintCalls() {
+		if strings.Contains(p, "is disabled") {
+			sawDisabled = true
+		}
+		if strings.Contains(p, "boom") {
+			t.Errorf("quarantined command still running: %q", p)
+		}
+	}
+	if !sawDisabled {
+		t.Error("expected disabled notice when invoking a quarantined command")
+	}
+}
+
+// TestEchoHookStylesAndGags verifies the "echo" event: the core
+// handler styles the echo, and a user handler returning false hides
+// it entirely.
+func TestEchoHookStylesAndGags(t *testing.T) {
+	engine, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	styled, show := engine.OnEcho("north")
+	if !show {
+		t.Fatal("default echo unexpectedly hidden")
+	}
+	if !strings.Contains(styled, "> north") {
+		t.Errorf("expected core styling with '> ' prefix, got %q", styled)
+	}
+
+	gag := `rune.hooks.on("echo", function(text)
+		if text == "secret" then return false end
+	end, {priority = 1})`
+	if err := engine.DoString("gag", gag); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
+	if _, show := engine.OnEcho("secret"); show {
+		t.Error("echo hook returning false should hide the echo")
+	}
+	if _, show := engine.OnEcho("hello"); !show {
+		t.Error("non-matching input should still echo")
+	}
+}
+
 // TestFailingBarIsQuarantined verifies that a bar renderer failing
 // repeatedly is disabled instead of erroring 4x/second forever, and
 // that re-registering it gives a fresh start.

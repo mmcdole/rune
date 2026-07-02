@@ -6,31 +6,36 @@ local MAX_RECURSION_DEPTH = 100
 -- INTERNAL: Expand #N repeat syntax
 -- e.g., "#6 north" becomes "north;north;north;north;north;north"
 -- e.g., "#3 {kill rat;loot}" becomes "kill rat;loot;kill rat;loot;kill rat;loot"
+--
+-- Repeats are anchored at command position (start of input, or right
+-- after a delimiter): "#3 north" is a repeat, but "say #3 cheers" is
+-- chat text and passes through untouched. The temporary leading ";"
+-- lets one pattern cover both anchor cases.
 local function expand_repeats(input)
-    local result = input
+    local result = ";" .. input
 
     -- Handle #N {braced content}
-    result = result:gsub("#(%d+)%s*{([^}]+)}", function(count, content)
+    result = result:gsub(";%s*#(%d+)%s*{([^}]+)}", function(count, content)
         local n = tonumber(count)
         local expanded = {}
         for i = 1, n do
             table.insert(expanded, content)
         end
-        return table.concat(expanded, ";")
+        return ";" .. table.concat(expanded, ";")
     end)
 
-    -- Handle #N single_command (word until ; or end)
-    result = result:gsub("#(%d+)%s+([^;{]+)", function(count, content)
+    -- Handle #N single_command (text until ; or end)
+    result = result:gsub(";%s*#(%d+)%s+([^;{]+)", function(count, content)
         local n = tonumber(count)
         local cmd = content:match("^%s*(.-)%s*$") -- trim
         local expanded = {}
         for i = 1, n do
             table.insert(expanded, cmd)
         end
-        return table.concat(expanded, ";")
+        return ";" .. table.concat(expanded, ";")
     end)
 
-    return result
+    return result:sub(2)
 end
 
 -- INTERNAL: Expand repeats and split by delimiter
@@ -94,13 +99,12 @@ end
 
 -- Register input handler
 rune.hooks.on("input", function(input)
-    -- Check for slash command first
+    -- Check for slash command first. Dispatch runs the handler under
+    -- its own quarantine, so a broken command is disabled individually
+    -- instead of its failures accruing against this core hook.
     local cmd, args = input:match("^/(%S+)%s*(.*)")
     if cmd then
-        local handler = rune.command.get(cmd)
-        if handler then
-            handler(args)
-        else
+        if not rune.command.dispatch(cmd, args) then
             rune.echo("[Error] Unknown command: /" .. cmd)
         end
         return false

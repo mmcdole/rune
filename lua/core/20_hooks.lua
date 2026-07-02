@@ -13,15 +13,23 @@
 --   group    = "string"   -- Group membership for bulk operations
 --   priority = 50         -- Execution order (lower = first, default 50)
 --
--- Events:
---   "input"       -- User input (return false to consume)
---   "output"      -- Server output (return false to gag, string to modify)
---   "prompt"      -- Server prompt (return false to gag, string to modify)
---   "connected"   -- After connection established
---   "disconnected"-- After disconnection
---   "reloading"   -- Before script reload
---   "reloaded"    -- After script reload
---   "error"       -- On system error
+-- Events (data-flow):
+--   "input"        -- User input (return false to consume)
+--   "output"       -- Server output line object (false gags, string rewrites)
+--   "prompt"       -- Server prompt line object (false gags, string rewrites)
+--   "echo"         -- Local echo of typed input, plain string (false hides,
+--                     string rewrites; core handler adds the "> " styling)
+-- Events (notifications):
+--   "ready"        -- Boot complete
+--   "connecting"   -- Dial started
+--   "connected"    -- After connection established
+--   "disconnecting"-- Disconnect requested
+--   "disconnected" -- After disconnection
+--   "reloading"    -- Before script reload
+--   "reloaded"     -- After script reload
+--   "loaded"       -- After a script file loads
+--   "error"        -- On system error
+--   "input_changed"-- Input line content changed while typing
 
 -- Per-event dispatch index, maintained alongside the registry so
 -- rune.hooks.call doesn't scan unrelated events on every line.
@@ -107,6 +115,8 @@ end
 -- Call all handlers for an event
 -- For output/prompt: chains modifications (each handler sees the
 --   previous handler's rewrite), false gags
+-- For echo: like output/prompt, but the argument is a plain string
+--   (the text the user typed), not a line object
 -- For input: false stops processing
 -- For sys events: all handlers run (notifications)
 --
@@ -115,16 +125,26 @@ end
 --   return string   -> Replace the line for subsequent handlers
 --   return nil      -> Pass through unmodified
 function rune.hooks.call(event, ...)
-    local handlers = by_event[event]
-    if not handlers or #handlers == 0 then
+    local live = by_event[event]
+    if not live or #live == 0 then
         -- No handlers registered
         if event == "output" or event == "prompt" then
             local line = select(1, ...)
             return line:raw(), true
+        elseif event == "echo" then
+            return select(1, ...), true
         elseif event == "input" then
             return true
         end
         return
+    end
+
+    -- Iterate a snapshot: a handler that adds or removes hooks mutates
+    -- the live array, which would skip or double-run its neighbors.
+    -- Removals mid-dispatch are still honored via registry:active().
+    local handlers = {}
+    for i, entry in ipairs(live) do
+        handlers[i] = entry
     end
 
     if event == "output" or event == "prompt" then
@@ -147,6 +167,22 @@ function rune.hooks.call(event, ...)
         end
 
         return line:raw(), true
+
+    elseif event == "echo" then
+        -- Echo receives the typed text as a plain string. Rewrites
+        -- chain like output/prompt; false hides the echo entirely.
+        local text = select(1, ...)
+        for _, entry in ipairs(handlers) do
+            if registry:active(entry) then
+                local result = run_handler(entry, text)
+                if result == false then
+                    return "", false
+                elseif type(result) == "string" then
+                    text = result
+                end
+            end
+        end
+        return text, true
 
     elseif event == "input" then
         -- Any handler returning false stops processing

@@ -180,10 +180,6 @@ func (m *MockHost) InputSetCursor(pos int) {
 	// No-op for tests
 }
 
-func (m *MockHost) SetGhost(text string) {
-	// No-op for tests
-}
-
 func (m *MockHost) OpenEditor(initial string) (string, bool) {
 	if m.OpenEditorFn != nil {
 		return m.OpenEditorFn(initial)
