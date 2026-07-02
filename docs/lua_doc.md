@@ -78,7 +78,8 @@
 ### Regex
 | Function | Description |
 |----------|-------------|
-| `rune.regex.match(pattern, text)` | Match and return captures |
+| `rune.regex.match(pattern, text)` | Match and return captures (cached) |
+| `rune.regex.validate(pattern)` | Check a pattern: `true` or `nil, err` |
 | `rune.regex.compile(pattern)` | Compile for reuse |
 
 ### UI Layout
@@ -103,19 +104,53 @@
 ### Keybindings
 | Function | Description |
 |----------|-------------|
-| `rune.bind(key, callback)` | Register a keybinding |
+| `rune.bind(key, callback, opts?)` | Register a keybinding |
 | `rune.unbind(key)` | Remove a keybinding |
+| `rune.binds.list()` | List all binds (see `/binds`) |
+| `rune.binds.enable/disable/remove(name)` | Manage by name |
+| `rune.binds.remove_group(group)` | Remove all in group |
+
+### Bars (management)
+| Function | Description |
+|----------|-------------|
+| `rune.bars.list()` | List all bar renderers (see `/bars`) |
+| `rune.bars.enable/disable/remove(name)` | Manage by name |
+| `rune.bars.remove_group(group)` | Remove all in group |
 
 ### Input
 | Function | Description |
 |----------|-------------|
-| `rune.input.get()` | Get current input field text |
-| `rune.input.set(text)` | Set input field text |
+| `rune.input.get()` / `rune.input.set(text)` | Input field text |
+| `rune.input.get_cursor()` / `rune.input.set_cursor(pos)` | Cursor position |
+| `rune.input.set_ghost(text)` | Ghost suggestion text |
+| `rune.input.open_editor(initial?)` | Edit in `$EDITOR`; returns text, ok |
+| `rune.input.word_left/word_right()` | Move cursor by word |
+| `rune.input.delete_word()` | Delete word before cursor |
 
 ### History
 | Function | Description |
 |----------|-------------|
-| `rune.history.get()` | Get command history array |
+| `rune.history.get()` | Get command history array (oldest first) |
+| `rune.history.add(cmd)` | Append a command to history |
+
+### Persist
+| Function | Description |
+|----------|-------------|
+| `rune.persist.set(key, value)` | Store a string that survives `/reload` |
+| `rune.persist.get(key)` | Retrieve stored string, or nil |
+| `rune.persist.delete(key)` | Remove a key |
+
+### Style
+| Function | Description |
+|----------|-------------|
+| `rune.style.red(s)` etc. | Wrap text in ANSI color codes |
+
+Colors: `red green yellow blue magenta cyan white gray`. Attributes: `bold dim inverse`.
+
+### Lines
+| Function | Description |
+|----------|-------------|
+| `rune.line.new(text)` | Build a line object with `:raw()` and `:clean()` |
 
 ---
 
@@ -146,7 +181,7 @@ rune.disconnect()      -- Disconnect from server
 ### Scripts
 
 ```lua
-rune.load(path)   -- Load a Lua script, returns nil on success or error string
+rune.load(path)   -- Load a Lua script, returns true, or nil + error message
 rune.reload()     -- Clear state and reload all scripts
 ```
 
@@ -349,7 +384,7 @@ Function triggers can control line display:
 |--------|--------|
 | `nil` | Line passes through unchanged |
 | `false` | Gag the line (hide from display) |
-| `string` | Replace line with returned string |
+| `string` | Replace the line. Later triggers match against (and receive) the rewritten text. |
 
 ```lua
 rune.trigger.contains("spam", function()
@@ -384,6 +419,10 @@ Timers execute actions after a delay or repeatedly.
 rune.timer.after(seconds, action, opts?)  -- One-shot (fires once)
 rune.timer.every(seconds, action, opts?)  -- Repeating (fires every interval)
 ```
+
+`every()` uses fixed-interval scheduling: the next firing is scheduled
+the moment the previous one fires, regardless of how long the action
+takes.
 
 #### Self-Cancellation
 
@@ -450,12 +489,12 @@ rune.hooks.on(event, handler, opts?)
 |--------|--------|
 | `false` | Gag/stop |
 | `nil` | Pass through |
-| `string` | Replace text |
+| `string` | Replace the line. Rewrites chain: the next handler (in priority order) receives the rewritten line. |
 
 ```lua
 rune.hooks.on("output", function(line)
     if line:clean():match("tells you:") then
-        return "\027[36m" .. line:raw() .. "\027[0m"  -- Cyan
+        return rune.style.cyan(line:raw())
     end
 end, {priority = 50})
 ```
@@ -582,9 +621,9 @@ rune.ui.bar("status", function(width)
 
     local left
     if state.connected then
-        left = "\027[32m●\027[0m " .. state.address
+        left = rune.style.green("●") .. " " .. state.address
     else
-        left = "\027[90m● Disconnected\027[0m"
+        left = rune.style.gray("● Disconnected")
     end
 
     local right = state.scroll_mode == "scrolled"
@@ -595,12 +634,15 @@ rune.ui.bar("status", function(width)
 end)
 ```
 
-**Available state** (`rune.state`):
+**Available state** (`rune.state`, read-only - writes raise an error):
 - `connected` - Boolean connection status
 - `address` - Server address (e.g., "mud.example.com:23")
 - `scroll_mode` - "live" or "scrolled"
 - `scroll_lines` - New lines while scrolled
 - `width`, `height` - Terminal dimensions
+
+A bar renderer that errors on 3 consecutive renders is disabled (with
+a notice); re-register the bar to give it a fresh start.
 
 ### Panes (Push-Based)
 
@@ -724,9 +766,14 @@ Custom keyboard shortcuts that trigger Lua callbacks.
 ### API
 
 ```lua
-rune.bind(key, callback)   -- Register a keybinding
-rune.unbind(key)           -- Remove a keybinding
+rune.bind(key, callback, opts?)  -- Register a keybinding (opts: name, group)
+rune.unbind(key)                 -- Remove a keybinding
+rune.binds.list()                -- Inspect all binds (also: /binds)
 ```
+
+Binds are registry items like triggers: they support names, groups
+(a bind in a disabled group swallows its key), and record the
+registering script's file:line.
 
 ### Key Formats
 
@@ -735,28 +782,35 @@ rune.unbind(key)           -- Remove a keybinding
 | Single character | `"j"`, `"/"`, `"."` |
 | Ctrl combinations | `"ctrl+r"`, `"ctrl+t"`, `"ctrl+a"` |
 | Function keys | `"f1"` through `"f12"` |
-| Navigation | `"up"`, `"down"` |
+| Navigation | `"up"`, `"down"`, `"pageup"`, `"pagedown"`, `"home"`, `"end"`, `"escape"` |
 
-### Default Bindings
+### Key Policy
+
+- `enter` always submits input (owned by the client, not rebindable).
+- While a picker is open, `ctrl+c`/`esc` cancel it and other keys are
+  captured by the picker.
+- **Bound printable keys** (like `"j"`) fire only while the input line
+  is empty, so hotkeys don't break typing. Non-printable bound keys
+  always fire.
+- Everything else - including all the defaults below - is an ordinary
+  Lua bind and can be rebound or removed.
+
+### Default Bindings (defined in the Lua core; all rebindable)
 
 | Key | Action |
 |-----|--------|
 | `ctrl+r` | History search (modal picker) |
 | `ctrl+t` | Alias search (modal picker) |
 | `/` | Slash command autocomplete (inline picker) |
-
-### Built-in Navigation
-
-These keys are always active and cannot be rebound:
-
-| Key | Action |
-|-----|--------|
-| `enter` | Submit input |
-| `ctrl+c` | Quit (empty input) / Cancel / Clear |
-| `esc` | Cancel / Clear input |
+| `ctrl+c` | Clear input; on empty input, double-tap to quit |
+| `escape` | Clear input |
 | `ctrl+u` | Clear entire input line |
-| `ctrl+w` | Delete previous word |
-| `page up` / `page down` | Scroll output viewport |
+| `ctrl+w`, `alt+backspace`, `ctrl+backspace` | Delete previous word |
+| `up` / `down` | History navigation (prefix-matching) |
+| `alt+left` / `alt+right`, `ctrl+left` / `ctrl+right` | Word navigation |
+| `tab` / `shift+tab` | Completion cycling |
+| `ctrl+e` | Edit input in `$EDITOR` |
+| `pageup` / `pagedown` | Scroll output viewport |
 | `home` / `end` | Jump to top/bottom of output |
 
 ### Example
@@ -779,19 +833,56 @@ rune.bind("f5", function() rune.pane.toggle("combat") end)
 Control the input field programmatically.
 
 ```lua
-rune.input.get()      -- Get current input text
-rune.input.set(text)  -- Set input text (used by picker callbacks, etc.)
+rune.input.get()             -- Get current input text
+rune.input.set(text)         -- Set input text (used by picker callbacks, etc.)
+rune.input.get_cursor()      -- Cursor position (clamped to the input length)
+rune.input.set_cursor(pos)   -- Move the cursor
+rune.input.set_ghost(text)   -- Dim suggestion text rendered after the input
+rune.input.open_editor(init) -- Open $EDITOR; returns edited_text, ok
+rune.input.word_left()       -- Move cursor to previous word boundary
+rune.input.word_right()      -- Move cursor to next word boundary
+rune.input.delete_word()     -- Delete the word before the cursor
 ```
 
 ---
 
 ## History API
 
-Access command history.
+Access command history. The buffer is Go-owned, so it survives `/reload`.
 
 ```lua
 rune.history.get()    -- Returns array of past commands (oldest first)
+rune.history.add(cmd) -- Append a command (consecutive duplicates ignored)
 ```
+
+---
+
+## Persist API
+
+A small string store owned by the client. It survives `/reload` (the
+Lua VM is torn down and rebuilt) but not client exit - use a file
+under `rune.config_dir` for state that must survive restarts. The
+core uses it to remember the last connection address for `/reconnect`.
+
+```lua
+rune.persist.set(key, value)  -- Store a string
+rune.persist.get(key)         -- Returns the string, or nil
+rune.persist.delete(key)      -- Remove a key
+```
+
+---
+
+## Style API
+
+ANSI styling helpers - the idiomatic way to color output in scripts.
+
+```lua
+rune.echo(rune.style.red("[Alert]") .. " Low HP!")
+rune.echo(rune.style.bold(rune.style.cyan("nested works too")))
+```
+
+Colors: `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white`, `gray`.
+Attributes: `bold`, `dim`, `inverse`.
 
 ---
 
@@ -802,9 +893,15 @@ Rune uses Go's regexp syntax (not Lua patterns).
 ### Functions
 
 ```lua
-rune.regex.match(pattern, text)  -- Returns captures array or nil
+rune.regex.match(pattern, text)  -- Returns captures array or nil (cached)
+rune.regex.validate(pattern)     -- Returns true, or nil + error message
 rune.regex.compile(pattern)      -- Returns compiled regex or nil, error
 ```
+
+`match` caches compiled patterns (bounded; resets at 512 entries).
+Invalid patterns are reported once and then silently ignored -
+`rune.trigger.regex`/`rune.alias.regex` validate eagerly at
+registration so typos fail loudly instead.
 
 ### Match
 
@@ -900,7 +997,7 @@ end)
 ```lua
 rune.hooks.on("output", function(line)
     if line:clean():match("tells you:") then
-        return "\027[36m" .. line:raw() .. "\027[0m"
+        return rune.style.cyan(line:raw())
     end
 end, {name = "highlight_tells", priority = 50})
 ```

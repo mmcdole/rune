@@ -13,137 +13,146 @@ go run ./cmd/rune/
 
 # Run with user scripts
 ./rune user_script.lua another_script.lua
+
+# Tests
+go test ./...
 ```
 
 ## Architecture Overview
 
-Rune is a MUD (Multi-User Dungeon) client built with Go for system-level operations and Lua for business logic/scripting. It uses an **Actor Model architecture** where a single Orchestrator goroutine owns the Lua state and processes all events sequentially via channels.
+Rune is a MUD (Multi-User Dungeon) client built with Go for system-level operations and Lua for business logic/scripting. It uses an **Actor Model architecture** where a single Orchestrator goroutine (the Session) owns the Lua state and processes all events sequentially via channels.
 
 ### Core Design Principles
 
-- **Single Lua state ownership**: One goroutine (the Orchestrator) owns and accesses the Lua state
+- **Single Lua state ownership**: One goroutine (the Session) owns and accesses the Lua state
 - **Channel-based communication**: Thread safety through message passing, not mutexes
 - **No blocking**: Each component runs independently with buffered channels
 - **Kernel philosophy**: Go is the kernel (I/O, Memory, Concurrency), Lua is user space (Logic, Features, Presentation)
 
+### Go/Lua Boundary Conventions
+
+These rules keep the boundary consistent; follow them when adding APIs:
+
+- **Go registers only `rune._*` primitives** (`_send_raw`, `_timer`, `_input`, `_ui`, ...). Every public name (`rune.send`, `rune.input.get`, `rune.ui.bar`, ...) is defined in Lua, even when the wrapper is thin. The Lua core in `lua/core/` IS the public API surface. The only non-underscore field Go sets is `rune.config_dir` (data, not API).
+- **Registries live in Lua** on the shared factory (`rune.registry.new`, `06_registry.lua`). Hooks, timers, aliases, triggers, binds, and bars all get handles, upsert-by-name, groups, priorities, source attribution, and failure quarantine from one implementation. Go dispatches through internal entry points (`rune.hooks.call`, `rune.binds._dispatch`, `rune.bars._render_all`, `rune.timer._fire`).
+- **Presentation belongs to Lua** via `rune.style` (`01_style.lua`). Go colors only its last-resort degraded-path messages, through `text.Red`/`text.Green` - raw escape codes live in exactly one file per language.
+- **Key policy**: Go handles keys only while a UI-internal mode is active (picker capture/cancel) plus Enter-to-submit. Everything else is a Lua bind. Bound printable keys fire only when the input is empty; Go's scroll-key handler is a fallback for unbound keys (keeps degraded mode scrollable).
+- **Error convention**: Go primitives return `nil, err` for recoverable failures (send while disconnected, missing file, bad pattern); raising is reserved for programmer errors (wrong argument types).
+
 ### Script Robustness
 
-- **Watchdog**: every Go→Lua entry runs under `Engine.guard` with a deadline (`Engine.CallTimeout`, default 5s). Runaway scripts (infinite loops) are interrupted with an error; the VM stays usable. Nested entries share the outermost deadline.
-- **Error convention**: Go primitives return `nil, err` for recoverable failures (send while disconnected, missing file, bad pattern); raising is reserved for programmer errors (wrong argument types). Engine-level failures route through `Engine.reportError` → the Lua `"error"` event, with a re-entrancy guard that falls back to direct printing.
+- **Watchdog**: every Go→Lua entry runs under `Engine.guard` with a deadline (`Engine.CallTimeout`, default 5s). Runaway scripts are interrupted with an error; the VM stays usable. Nested entries share the outermost deadline. Host calls that legitimately block on the user (e.g. `open_editor` running `$EDITOR`) run under `Engine.pauseWatchdog`, which detaches the deadline and re-arms a fresh one.
 - **Handler isolation**: `rune.hooks.call` runs each handler under `pcall`; a throwing handler is reported and skipped, not allowed to abort the chain.
-- **Failure quarantine**: `rune.guarded_call(label, data, fn, ...)` tracks consecutive failures on a registry entry and disables it after 3 in a row. Used by hooks, trigger actions, and timer actions; bar renderers get the same treatment in Go (`maxBarFailures`).
+- **Failure quarantine**: `rune.guarded_call(label, data, fn, ...)` tracks consecutive failures on a registry entry and disables it after 3 in a row. Used by hooks, triggers, aliases, timers, binds, and bar renderers.
 - **Degraded mode**: if `rune.hooks.call` is unavailable (core script failed, or a user script clobbered `rune.hooks`), the client degrades to a plain telnet client instead of crashing - output passes through raw, input goes to the server, and `/quit` + `/reload` still work.
-- **Source attribution**: hooks, triggers, aliases, and timers record the registering script's `file:line` (`rune.caller_source`); it appears in error messages and `/hooks`, `/triggers`, `/aliases`, `/timers` listings.
+- **Source attribution**: registrations record the registering script's `file:line` (`rune.caller_source`); it appears in error messages and the `/hooks`, `/triggers`, `/aliases`, `/timers`, `/binds`, `/bars` listings.
+- **Engine-level failures** route through `Engine.reportError` → the Lua `"error"` event, with a re-entrancy guard that falls back to direct printing.
 
 ### Component Structure
 
 ```
 cmd/rune/main.go              - Bootstrap: creates Session and runs UI
-session/session.go            - Session: orchestrates event loop, implements lua.Host
+config/config.go              - Config dir resolution (XDG/APPDATA)
+event/event.go                - Session event types and payloads
+session/                      - Session: event loop, implements lua.Host
+  session.go                  - Orchestrator, Network interface, boot
+  lua_*.go                    - Host implementation (network, ui, timers,
+                                system, history, persist, state)
 lua/                          - Lua runtime package
-  engine.go                   - Engine: wraps gopher-lua, manages VM lifecycle
-  api_*.go                    - Go→Lua bindings (core, timer, regex, ui)
+  engine.go                   - Engine: wraps gopher-lua, watchdog, dispatch
+  api_*.go                    - rune._* primitive registration
   host.go                     - Host interface: bridge between Engine and Session
-  core/*.lua                  - Embedded Lua scripts (aliases, triggers, hooks, etc.)
-mud/types.go                  - Core interfaces (Network, UI), event types, action constants
-network/tcp_client.go         - TCP client with telnet protocol support
-network/telnet.go             - Telnet protocol buffer and negotiation
-ui/                           - UI implementations (console and TUI)
+  core/*.lua                  - Embedded Lua core (the public API)
+text/                         - Line type, ANSI stripper, degraded-path colors
+timer/service.go              - Timer service (scheduling only; callbacks in Lua)
+network/                      - TCP client, telnet parser, output buffering
+ui/                           - UI interface, messages, TUI implementation
 ```
 
 ### Event Flow
 
 ```
-User Input -> InputChan -> Orchestrator -> Lua on_input() -> NetSendChan -> Network
-Server Line -> ServerChan -> Orchestrator -> Lua on_output() -> RenderChan -> UI
-Server Prompt -> ServerChan -> Orchestrator -> Lua on_prompt() -> UI.RenderPrompt()
-Timer -> TimerChan -> Orchestrator -> Lua ExecuteCallback()
-Control -> EventChan -> Orchestrator -> CallHook() -> Lua on_sys_*()
+User Input -> UI input chan -> Session -> rune.hooks.call("input")  -> network
+Server Line -> net output   -> Session -> rune.hooks.call("output") -> UI print
+Server Prompt -> net output -> Session -> rune.hooks.call("prompt") -> UI prompt overlay
+Timer fire -> timer events  -> Session -> rune.timer._fire(id)
+Key bind -> UI outbound     -> Session -> rune.binds._dispatch(key)
+Bar tick (250ms)            -> Session -> rune.bars._render_all(width) -> UI bars
 ```
 
-### Event Types
+### Event Types (event/event.go)
 
 - `UserInput` - User typed input
 - `NetLine` - Complete line from server (ended with \n)
 - `NetPrompt` - Partial line/prompt (no \n, possibly GA/EOR terminated)
-- `SysQuit` - Quit the client
-- `SysConnect` - Connect to server (Payload = address)
-- `SysDisconnect` - Disconnect from server
-- `SysReload` - Reload all scripts
-- `SysLoadScript` - Load a script (Payload = path)
-- `Timer` - Timer callback
-- `AsyncResult` - Async work completion
+- `SysDisconnect` - Connection closed
+- `AsyncResult` - Deferred callback execution (used by reload and connect)
 
-### Lua API (rune namespace)
+## Lua Core Scripts (lua/core/, loaded in numeric order)
 
-Go provides internal primitives (`rune._*`), wrapped by Lua for the public API:
+- `00_init.lua` - Config, guarded_call, caller_source, line objects, capture substitution, primitive wrappers (send_raw, persist, history, rune.ui, rune.state proxy)
+- `01_style.lua` - `rune.style` ANSI helpers (the one place Lua writes escape codes)
+- `05_regex.lua` - Cached Go-regexp matching (bounded cache), `validate`
+- `06_registry.lua` - Shared registry factory (`rune.registry.new`)
+- `10_hooks.lua` - Hook registry + `rune.hooks.call` dispatcher
+- `15_groups.lua` - Group master switches
+- `17_binds.lua` - Key bindings (`rune.bind`, `rune.binds`)
+- `18_bars.lua` - Bar renderers (`rune.ui.bar`, `rune.bars`)
+- `20_timer.lua` - Timers (owns id→callback map; Go only schedules)
+- `25_aliases.lua` - Aliases (exact + regex)
+- `30_triggers.lua` - Triggers (exact/starts/contains/regex, gag, raw)
+- `35_commands.lua` - Slash commands
+- `40_send.lua` - Command expansion (`;` splitting, `#N` repeats), core input/output/prompt handlers
+- `45_events.lua` - Default system event handlers
+- `50_input.lua` - Input wrappers, history navigation, word ops, tab completion
+- `55_ui.lua` - Panes, status bar, default binds and pickers
 
-**Core:**
-- `rune.send(text)` - Process aliases and send to server
-- `rune.send_raw(text)` - Bypass alias processing, write directly to socket; returns `true` or `nil, err` (failures are echoed)
-- `rune.echo(text)` - Output text to local display
-- `rune.quit()` - Exit the client
-- `rune.connect(address)` - Connect to server
-- `rune.disconnect()` - Disconnect from server
-- `rune.reload()` - Reload all scripts
-- `rune.load(path)` - Load a Lua script; returns `true` or `nil, err`
+## Lua API (rune namespace) - highlights
 
-**Timers:**
-- `rune.timer.after(seconds, callback)` - Schedule delayed callback
-- `rune.timer.every(seconds, callback)` - Schedule repeating callback, returns timer ID
-- `rune.timer.cancel(id)` - Cancel a repeating timer
-- `rune.timer.cancel_all()` - Cancel all repeating timers
-- `rune.delay(seconds, action)` - Convenience: delay a command string or function
+Full reference: `docs/lua_doc.md`. Go primitives (`rune._*`) are internal.
 
-**Regex:**
-- `rune.regex.match(pattern, text)` - Match using Go's regexp (cached; invalid patterns are reported once and cached as failures)
-- `rune.regex.validate(pattern)` - Check a pattern; returns `true` or `nil, err`. `rune.trigger.regex` and `rune.alias.regex` validate eagerly and raise on bad patterns.
+- **Core**: `rune.send`, `rune.send_raw`, `rune.echo`, `rune.connect`, `rune.disconnect`, `rune.load`, `rune.reload`, `rune.quit`, `rune.config_dir`
+- **Registries** (all return handles with `:enable/:disable/:remove/:name/:group`; opts `{name, group, priority, once}`):
+  - `rune.alias.exact/regex(pattern, action, opts?)`
+  - `rune.trigger.exact/starts/contains/regex(pattern, action, opts?)` (+ `gag`, `raw` opts)
+  - `rune.timer.after/every(seconds, action, opts?)` - `every` is fixed-interval
+  - `rune.hooks.on(event, handler, opts?)`
+  - `rune.bind(key, callback, opts?)` / `rune.unbind(key)`
+  - `rune.ui.bar(name, render_fn, opts?)`
+- **Groups**: `rune.group.enable/disable/is_enabled/list` - an item fires only if itself enabled AND its group enabled (all registries honor this)
+- **Regex**: `rune.regex.match(pattern, text)` (cached), `rune.regex.validate(pattern)`, `rune.regex.compile(pattern)`. `trigger.regex`/`alias.regex` validate eagerly and raise on bad patterns.
+- **UI**: `rune.ui.layout{top=..., bottom=...}`, `rune.ui.refresh_bars()`, `rune.ui.picker.show(opts)`, `rune.pane.*`
+- **Input**: `rune.input.get/set/get_cursor/set_cursor/set_ghost/open_editor/word_left/word_right/delete_word`
+- **State**: `rune.state` (read-only proxy: connected, address, scroll_mode, scroll_lines, width, height)
+- **Persist**: `rune.persist.set/get/delete` - Go-owned string store that survives `/reload` (not client exit)
+- **Style**: `rune.style.red/green/yellow/.../bold/dim/inverse`
+- **Lines**: output/prompt handlers receive line objects (`:raw()`, `:clean()`); `rune.line.new(text)` builds one
+- **History**: `rune.history.get/add`
 
-**UI:**
-- `rune.pane.create(name)`, `rune.pane.write(name, text)`, `rune.pane.toggle(name)`, `rune.pane.clear(name)`
-- `rune.ui.bar(name, render_fn)` - Register a reactive bar renderer
-- `rune.ui.layout({top=..., bottom=...})` - Set layout configuration
+### Hook Events
 
-**Config:**
-- `rune.config_dir` - Path to ~/.config/rune
+Data-flow (return `false` to gag/consume, string to rewrite - rewrites CHAIN to subsequent handlers): `"input"`, `"output"`, `"prompt"`.
+Notifications: `"ready"`, `"connecting"`, `"connected"`, `"disconnecting"`, `"disconnected"`, `"reloading"`, `"reloaded"`, `"loaded"`, `"error"`, `"input_changed"`.
 
-### Lua Hook Functions
+### Slash Commands
 
-Lua implements these for the Orchestrator to call:
-- `on_input(text)` - Handle user input
-- `on_output(text)` - Handle server output, return nil to gag
-- `on_prompt(text)` - Handle server prompts (optional)
-
-### System Hooks
-
-Go calls these to notify Lua of system events (defined in `00_init.lua`, users can override):
-- `on_sys_connecting(addr)` - Before connection attempt
-- `on_sys_connected(addr)` - After successful connection
-- `on_sys_disconnecting()` - Before disconnect
-- `on_sys_disconnected()` - After disconnect
-- `on_sys_reloading()` - Before script reload
-- `on_sys_reloaded()` - After script reload
-- `on_sys_loaded(path)` - After loading a script
-- `on_sys_error(msg)` - On any system error
-
-## Lua Scripting System
-
-Core scripts in `lua/core/` load in numeric order (00_, 10_, 20_, 30_, 40_, 50_, 60_) and provide:
-
-- **Aliases**: `rune.alias.add(key, value)`, `rune.alias.remove(key)`, `rune.alias.list()`, `rune.alias.get(key)`, `rune.alias.run(name, args)`
-- **Triggers**: `rune.trigger.add(pattern, action, {gag, enabled, regex})`, `rune.trigger.remove(id)`, `rune.trigger.list()`, `rune.trigger.enable(id, bool)`, `rune.trigger.process(line)`
-- **Commands**: Semicolon-separated, use `rune.delay()` for async timing in function aliases
-- **TinTin++ Syntax**: `#N command` expands to N repetitions (e.g., `#3 north` → `north;north;north`)
-- **Slash Commands**: `/connect`, `/disconnect`, `/reconnect`, `/load`, `/reload`, `/lua`, `/aliases`, `/triggers`, `/test`, `/rmtrigger`, `/help`, `/quit`
+`/connect`, `/disconnect`, `/reconnect`, `/load`, `/reload`, `/lua`, `/aliases`, `/triggers`, `/timers`, `/hooks`, `/binds`, `/bars`, `/groups`, `/raw`, `/test`, `/help`, `/quit`
 
 User scripts auto-load from `~/.config/rune/init.lua` at startup.
 
-## Current Development State
+## Testing
 
-- Test suite exists in `lua/testdata/` (JSON-driven tests)
-- UI uses TUI (Bubble Tea) by default
+- `lua/` - engine tests (watchdog, quarantine, degraded mode, dispatch round trips) + JSON-driven feature tests in `lua/testdata/*_tests.json`
+- `session/` - event-loop tests against mock Network/UI (prompt lifecycle, reload, echo negotiation)
+- `network/` - telnet parser and option negotiation tests
+- `timer/`, `text/` - unit tests
+
+## Telnet Notes
+
+The default compatibility table advertises ONLY implemented options (Echo, SGA, EOR). Never `Support()` an option without implementing its behavior - agreeing to MCCP/TTYPE/NAWS without an implementation breaks real servers. All socket writes go through the connection's single writeLoop.
 
 ## Dependencies
 
 - Go 1.25.4
 - github.com/yuin/gopher-lua v1.1.1
+- github.com/charmbracelet/bubbletea (TUI)

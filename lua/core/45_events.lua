@@ -1,11 +1,10 @@
 -- Default System Event Handlers
--- Users can add handlers or override with lower priority
-
--- Note: Status bar is now handled reactively by 70_status_bar.lua
--- It reads rune.state directly, so we don't need to call rune.status.set() here.
+-- Users can add handlers or override with lower priority.
+-- The status bar (55_ui.lua) renders reactively from rune.state, so
+-- these handlers only produce the scrollback notices.
 
 rune.hooks.on("ready", function()
-    -- Status bar renders from rune.state automatically
+    -- Boot complete; nothing to do by default
 end, { priority = 100 })
 
 rune.hooks.on("connecting", function(addr)
