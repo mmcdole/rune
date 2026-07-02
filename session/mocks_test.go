@@ -11,15 +11,16 @@ import (
 
 // mockNetwork implements Network without sockets.
 type mockNetwork struct {
-	mu         sync.Mutex
-	sent       []string
-	gmcpSent   []struct{ Package, Data string }
-	connected  bool
-	connectErr error
-	output     chan network.Output
-	localEcho  bool
-	windowW    int
-	windowH    int
+	mu          sync.Mutex
+	sent        []string
+	gmcpSent    []struct{ Package, Data string }
+	connected   bool
+	connectedTo []string // every Connect address, in order
+	connectErr  error
+	output      chan network.Output
+	localEcho   bool
+	windowW     int
+	windowH     int
 }
 
 var _ Network = (*mockNetwork)(nil)
@@ -38,7 +39,14 @@ func (m *mockNetwork) Connect(ctx context.Context, address string) error {
 		return m.connectErr
 	}
 	m.connected = true
+	m.connectedTo = append(m.connectedTo, address)
 	return nil
+}
+
+func (m *mockNetwork) dialed() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.connectedTo...)
 }
 
 func (m *mockNetwork) Disconnect() {
@@ -94,14 +102,15 @@ func (m *mockNetwork) drainSent() []string {
 
 // mockUI implements ui.UI, capturing display calls.
 type mockUI struct {
-	mu       sync.Mutex
-	printed  []string
-	echoed   []string
-	prompts  []string // every SetPrompt call, including clears
-	inputSet []string
-	input    chan string
-	outbound chan ui.UIEvent
-	done     chan struct{}
+	mu          sync.Mutex
+	printed     []string
+	echoed      []string
+	prompts     []string // every SetPrompt call, including clears
+	inputSet    []string
+	bindsPushed map[string]bool // last UpdateBinds payload
+	input       chan string
+	outbound    chan ui.UIEvent
+	done        chan struct{}
 }
 
 var _ ui.UI = (*mockUI)(nil)
@@ -150,8 +159,18 @@ func (m *mockUI) SetInput(text string) {
 }
 
 func (m *mockUI) UpdateBars(content map[string]ui.BarContent) {}
-func (m *mockUI) UpdateBinds(keys map[string]bool)            {}
-func (m *mockUI) UpdateLayout(top, bottom []ui.LayoutEntry)   {}
+func (m *mockUI) UpdateBinds(keys map[string]bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.bindsPushed = keys
+}
+func (m *mockUI) UpdateLayout(top, bottom []ui.LayoutEntry) {}
+
+func (m *mockUI) pushedBinds() map[string]bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.bindsPushed
+}
 
 func (m *mockUI) ShowPicker(title string, items []ui.PickerItem, callbackID string, inline bool) {}
 func (m *mockUI) CreatePane(name string)                                                         {}

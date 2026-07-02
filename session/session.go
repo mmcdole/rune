@@ -39,9 +39,10 @@ var _ Network = (*network.TCPClient)(nil)
 
 // Config holds session configuration
 type Config struct {
-	CoreScripts embed.FS // Embedded core Lua scripts
-	ConfigDir   string   // Path to ~/.config/rune
-	UserScripts []string // CLI script arguments
+	CoreScripts   embed.FS // Embedded core Lua scripts
+	ConfigDir     string   // Path to ~/.config/rune
+	UserScripts   []string // CLI script arguments
+	ConnectTarget string   // CLI connect target (world, host port, or address)
 }
 
 // Session is the central actor/orchestrator that owns the Lua state and
@@ -80,6 +81,7 @@ type Session struct {
 
 	// State
 	lastPrompt    string
+	connectTarget string // CLI connect target; consumed on first boot only
 	config        Config
 	clientState   lua.ClientState
 	currentInput  string // Tracked so Lua can query via rune.input.get()
@@ -104,6 +106,7 @@ func New(net Network, uiInstance ui.UI, cfg Config) *Session {
 
 	s.engine = lua.NewEngine(s)
 	s.clientState.ScrollMode = "live"
+	s.connectTarget = cfg.ConnectTarget
 	s.loadStore()
 
 	return s
@@ -271,12 +274,23 @@ func (s *Session) boot() error {
 	if err := s.loadCoreScripts(); err != nil {
 		return err
 	}
-	if err := s.loadUserScripts(); err != nil {
-		return err
-	}
+	// User scripts must never abort boot: a syntax error in a new
+	// user's first init.lua would otherwise skip the ready hook and
+	// the binds/layout push, leaving a half-dead client. Each failure
+	// is reported individually and the rest of boot proceeds.
+	s.loadUserScripts()
 	s.engine.CallHook("ready")
 	s.pushBindsAndLayout()
 	s.pushBarUpdates()
+
+	// CLI connect target: routed through the /connect command so a
+	// world name, "host port", or address all resolve identically.
+	// Consumed on the first boot only - /reload must not reconnect.
+	if s.connectTarget != "" {
+		target := s.connectTarget
+		s.connectTarget = ""
+		s.engine.OnInput("/connect " + target)
+	}
 	return nil
 }
 
@@ -316,21 +330,31 @@ func (s *Session) loadCoreScripts() error {
 	return nil
 }
 
-// loadUserScripts loads init.lua and CLI-specified scripts.
-func (s *Session) loadUserScripts() error {
+// loadUserScripts loads init.lua and CLI-specified scripts. Failures
+// are reported per script and never propagate: the client must come
+// up fully functional (binds, bars, ready hook) around a broken user
+// script, so the user can fix it and /reload.
+func (s *Session) loadUserScripts() {
 	initPath := filepath.Join(s.config.ConfigDir, "init.lua")
 	if _, err := os.Stat(initPath); err == nil {
 		if err := s.engine.DoFile(initPath); err != nil {
-			return fmt.Errorf("init.lua: %w", err)
+			s.reportScriptError("init.lua", err)
 		}
 	}
 
 	for _, path := range s.config.UserScripts {
 		if err := s.engine.DoFile(path); err != nil {
-			return fmt.Errorf("%s: %w", path, err)
+			s.reportScriptError(path, err)
 		}
 	}
-	return nil
+}
+
+// reportScriptError surfaces a user-script load failure. Printed
+// directly (not via the "error" hook) so it is visible even when the
+// failed script broke the hook system.
+func (s *Session) reportScriptError(name string, err error) {
+	s.ui.Print(text.Red(fmt.Sprintf("[Script Error] %s: %v", name, err)))
+	s.ui.Print(text.Red("  the rest of the client loaded normally - fix the script and /reload"))
 }
 
 // handleKeyBind executes a Lua key binding.

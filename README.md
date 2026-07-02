@@ -35,6 +35,12 @@ Quality of life:
 
 ## Installation
 
+Download a binary for Linux, macOS, or Windows from the
+[releases page](https://github.com/mmcdole/rune/releases), unpack it,
+and put `rune` on your PATH.
+
+With Go installed, you can instead:
+
 ```bash
 go install github.com/mmcdole/rune/cmd/rune@latest
 ```
@@ -49,23 +55,24 @@ go build ./cmd/rune/
 
 ## Quick Start
 
+Connect straight from your shell:
+
 ```bash
-# Run rune
-./rune
-
-# Connect to a MUD
-/connect example.mud.com 4000
-
-# Save it as a world, and reconnect by name from now on
-/world add example example.mud.com 4000
-/connect example
-
-# Log the session
-/log start
-
-# Load a script
-/load myscript.lua
+rune mud.example.com 4000           # plain telnet
+rune tls://mud.example.com:4000     # TLS
 ```
+
+Then, inside the client:
+
+```
+/world add example mud.example.com 4000    save a bookmark
+/connect example                           connect by name (or later: rune example)
+/log start                                 log the session to a file
+/help                                      everything else
+```
+
+Coming from TinTin++, Mudlet, or Blightmud? See the
+[migration guide](docs/migrating.md).
 
 ## Configuration
 
@@ -74,19 +81,16 @@ User scripts are loaded from `~/.config/rune/init.lua` at startup.
 Example `init.lua`:
 
 ```lua
--- Auto-connect
-rune.connect("example.mud.com:4000")
-
 -- Simple alias
 rune.alias.exact("hp", "cast 'heal' self")
 
 -- Regex alias with captures
 rune.alias.regex("^kill (.+)$", "attack %1; murder %1")
 
--- Trigger to highlight damage
+-- Trigger: rewrite the line to highlight damage
 rune.trigger.contains("You are hit", function(matches, ctx)
-    rune.echo(rune.style.red(ctx.line:clean()))
-end, { gag = true })
+    return rune.style.red(ctx.line:clean())
+end)
 
 -- Repeating timer
 rune.timer.every(60, "save", { name = "autosave" })
@@ -111,7 +115,11 @@ end)
 | `/` | Slash command picker |
 | `Ctrl+E` | Open input in $EDITOR |
 | `PageUp/PageDown` | Scroll output |
+| `Mouse wheel` | Scroll output |
 | `Ctrl+C` (2x) | Quit |
+
+The mouse is captured for scrolling, so select text with **shift+drag**
+(the standard terminal convention, as in tmux or htop).
 
 ## Slash Commands
 
@@ -141,6 +149,7 @@ end)
 ## Documentation
 
 - [Lua API Reference](docs/lua_doc.md)
+- [Migrating from TinTin++/Mudlet/Blightmud](docs/migrating.md)
 - [Architecture Overview](docs/architecture.md)
 
 ## License

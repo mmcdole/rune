@@ -110,6 +110,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleTick()
 	case tea.KeyMsg:
 		return m.handleKey(msg)
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
 
 	// Session config updates
 	case ui.UpdateBindsMsg, ui.UpdateBarsMsg, ui.UpdateLayoutMsg:
@@ -277,6 +279,28 @@ func (m Model) handleShowPicker(msg ui.ShowPickerMsg) (tea.Model, tea.Cmd) {
 // Key policy: Go owns keys only while a UI-internal mode is active
 // (picker capture/cancel) plus Enter-to-submit; all other editing and
 // navigation policy lives in Lua binds. In normal mode a bound
+// wheelScrollLines is how far one mouse-wheel tick scrolls the main
+// viewport. Matches the common terminal-emulator default.
+const wheelScrollLines = 3
+
+// handleMouse scrolls the main viewport on wheel events. The terminal
+// mouse is captured for this (which is why text selection needs
+// shift+drag); everything else is ignored.
+func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if msg.Action != tea.MouseActionPress {
+		return m, nil
+	}
+	switch msg.Button {
+	case tea.MouseButtonWheelUp:
+		m.viewport.ScrollUp(wheelScrollLines)
+		m.updateScrollState()
+	case tea.MouseButtonWheelDown:
+		m.viewport.ScrollDown(wheelScrollLines)
+		m.updateScrollState()
+	}
+	return m, nil
+}
+
 // non-printable key always goes to Lua; a bound printable key goes to
 // Lua only when the input is empty (so "j" can be a hotkey without
 // breaking typing). Unbound scroll keys fall back to Go so scrollback

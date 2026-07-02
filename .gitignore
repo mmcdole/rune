@@ -1,5 +1,5 @@
-# Build artifacts
-rune
+# Build artifacts (anchored: a bare "rune" would swallow cmd/rune/)
+/rune
 layout-test
 *.out
 *.test
@@ -9,3 +9,4 @@ allcode.txt
 
 # Local files
 website-mockups/
+init.lua.old

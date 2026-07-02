@@ -3,6 +3,7 @@ package tui
 import (
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -199,10 +200,15 @@ func (b *BubbleTeaUI) OpenEditor(initial string) (string, bool) {
 	// Suspend TUI
 	b.program.ReleaseTerminal()
 
-	// Run editor
+	// Run editor. The fallback must exist on the platform: vi ships
+	// with effectively every Unix, notepad with every Windows.
 	editor := os.Getenv("EDITOR")
 	if editor == "" {
-		editor = "vim"
+		if runtime.GOOS == "windows" {
+			editor = "notepad"
+		} else {
+			editor = "vi"
+		}
 	}
 	cmd := exec.Command(editor, tmpPath)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
