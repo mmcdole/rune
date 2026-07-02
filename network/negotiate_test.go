@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"strconv"
 	"testing"
+
+	"github.com/mmcdole/rune/version"
 )
 
 // mttsPlain is the expected MTTS bitvector for a non-TLS connection:
@@ -159,7 +161,7 @@ func TestEnvironSendAllVariables(t *testing.T) {
 		payload = append(payload, []byte(value)...)
 	}
 	appendVar("CLIENT_NAME", "RUNE")
-	appendVar("CLIENT_VERSION", "0.1.0")
+	appendVar("CLIENT_VERSION", version.Number)
 	appendVar("CHARSET", "UTF-8")
 	appendVar("MTTS", strconv.Itoa(mttsPlain))
 	appendVar("TERMINAL_TYPE", "XTERM")

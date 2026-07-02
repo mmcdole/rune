@@ -160,6 +160,10 @@ User scripts auto-load from `~/.config/rune/init.lua` at startup.
 
 The default compatibility table advertises ONLY implemented options: Echo, SGA, EOR, TTYPE/MTTS, NAWS, CHARSET, NEW-ENVIRON/MNES (identity responders in `network/negotiate.go` - pure functions, byte-exact tests), MCCP2 (zlib read path in client.go; the source is a byte-exact `bufio.Reader`, so a clean stream end resumes plain telnet), and GMCP (option 201; framing in Go, policy in `59_gmcp.lua`). Never `Support()` an option without implementing its behavior - agreeing to an option without honoring its subnegotiations breaks real servers (MCCP3, MSSP, ZMP, Linemode stay refused). All socket writes go through the connection's single writeLoop. The parser accepts subnegotiations for options enabled on either side (server-offered GMCP/MCCP are remote; client-answered TTYPE/NAWS are local).
 
+## Releasing
+
+Versions come from git tags: `git tag vX.Y.Z && git push --tags` runs the release workflow (goreleaser), which builds linux/darwin/windows binaries and stamps `version.Number` via ldflags. The in-repo default (`X.Y.Z-dev`) marks untagged builds. Tag only after the manual QA checklist passes.
+
 ## Dependencies
 
 - Go 1.25.4
