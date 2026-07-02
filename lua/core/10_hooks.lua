@@ -173,14 +173,14 @@ end
 -- cannot abort the rest of the chain or kill trigger processing.
 -- Errors are echoed directly (not re-dispatched through the "error"
 -- event) to avoid recursion when an error handler itself fails.
+-- Repeated failures disable the handler (see rune.guarded_call).
 local function run_handler(entry, ...)
-    local ok, result = pcall(entry.handler, ...)
+    local label = "Hook " .. entry.event .. " " ..
+        (entry.name and ('"' .. entry.name .. '"') or ("#" .. entry.id))
+    local ok, result = rune.guarded_call(label, entry, entry.handler, ...)
     if ok then
         return result
     end
-    local label = entry.name and ('"' .. entry.name .. '"') or ("#" .. entry.id)
-    rune.echo("\027[31m[Hook Error]\027[0m " .. entry.event ..
-        " handler " .. label .. ": " .. tostring(result))
     return nil
 end
 

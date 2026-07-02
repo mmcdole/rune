@@ -127,10 +127,8 @@ local function create_timer(seconds, action, opts, repeating)
 
         -- Execute action
         if type(data.action) == "function" then
-            local ok, err = pcall(data.action, ctx)
-            if not ok then
-                rune.echo("[Timer Error] " .. tostring(err))
-            end
+            local label = data.name and ('Timer "' .. data.name .. '"') or "Timer"
+            rune.guarded_call(label, data, data.action, ctx)
         elseif type(data.action) == "string" and data.action ~= "" then
             rune.send(data.action)
         end

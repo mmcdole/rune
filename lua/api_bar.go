@@ -1,10 +1,17 @@
 package lua
 
 import (
+	"fmt"
+
 	glua "github.com/yuin/gopher-lua"
 
 	"github.com/drake/rune/ui"
 )
+
+// maxBarFailures is the number of consecutive render errors after which
+// a bar is removed. Bars render 4x/second, so an always-failing
+// renderer would otherwise spam errors indefinitely.
+const maxBarFailures = 3
 
 // registerBarFuncs registers the rune.ui.bar API.
 func (e *Engine) registerBarFuncs() {
@@ -22,6 +29,7 @@ func (e *Engine) registerBarFuncs() {
 		name := L.CheckString(1)
 		fn := L.CheckFunction(2)
 		e.barFuncs[name] = fn
+		delete(e.barFailures, name) // Re-registering gives a fresh start
 		return 0
 	}))
 
@@ -101,9 +109,18 @@ func (e *Engine) RenderBar(name string, width int) (ui.BarContent, bool) {
 	e.L.Push(fn)
 	e.L.Push(glua.LNumber(width))
 	if err := e.guard(func() error { return e.L.PCall(1, 1, nil) }); err != nil {
-		e.reportError("bar '"+name+"'", err)
+		e.barFailures[name]++
+		if e.barFailures[name] >= maxBarFailures {
+			delete(e.barFuncs, name)
+			delete(e.barFailures, name)
+			e.reportError("bar '"+name+"'",
+				fmt.Errorf("removed after %d consecutive errors: %w", maxBarFailures, err))
+		} else {
+			e.reportError("bar '"+name+"'", err)
+		}
 		return ui.BarContent{}, false
 	}
+	delete(e.barFailures, name) // Success resets the failure streak
 
 	result := e.L.Get(-1)
 	e.L.Pop(1)

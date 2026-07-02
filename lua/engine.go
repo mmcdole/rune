@@ -32,8 +32,9 @@ type Engine struct {
 	pickerNextID    int
 
 	// Bar rendering
-	barFuncs  map[string]*glua.LFunction
-	barLayout ui.LayoutConfig
+	barFuncs    map[string]*glua.LFunction
+	barFailures map[string]int // Consecutive render failures per bar
+	barLayout   ui.LayoutConfig
 
 	// Key bindings
 	bindFuncs map[string]*glua.LFunction
@@ -58,6 +59,7 @@ func NewEngine(host Host) *Engine {
 		callbacks:       make(map[int]*glua.LFunction),
 		pickerCallbacks: make(map[string]*glua.LFunction),
 		barFuncs:        make(map[string]*glua.LFunction),
+		barFailures:     make(map[string]int),
 		barLayout: ui.LayoutConfig{
 			Bottom: []ui.LayoutEntry{{Name: "input"}, {Name: "status"}},
 		},
@@ -106,6 +108,7 @@ func (e *Engine) Init() error {
 	e.pickerNextID = 0
 
 	e.barFuncs = make(map[string]*glua.LFunction)
+	e.barFailures = make(map[string]int)
 	e.barLayout = ui.LayoutConfig{
 		Bottom: []ui.LayoutEntry{{Name: "input"}, {Name: "status"}},
 	}

@@ -290,10 +290,9 @@ function rune.trigger.process(line)
                 -- Execute action
                 if data.action then
                     if type(data.action) == "function" then
-                        local ok, result = pcall(data.action, matches, ctx)
-                        if not ok then
-                            rune.echo("[Trigger Error] " .. tostring(result))
-                        else
+                        local label = data.name and ('Trigger "' .. data.name .. '"') or "Trigger"
+                        local ok, result = rune.guarded_call(label, data, data.action, matches, ctx)
+                        if ok then
                             -- Handle return values
                             if result == false then
                                 gagged = true

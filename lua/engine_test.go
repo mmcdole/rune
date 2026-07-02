@@ -127,12 +127,65 @@ func TestBrokenHandlerIsIsolated(t *testing.T) {
 	// The handler's error was reported with its name
 	reported := false
 	for _, p := range host.DrainPrintCalls() {
-		if strings.Contains(p, "[Hook Error]") && strings.Contains(p, `"bad"`) {
+		if strings.Contains(p, `"bad"`) && strings.Contains(p, "boom") {
 			reported = true
 		}
 	}
 	if !reported {
 		t.Error("expected broken handler error to be echoed")
+	}
+}
+
+// TestFailingHookIsQuarantined verifies that a handler failing on every
+// line is disabled after the failure limit, stopping the error spam.
+func TestFailingHookIsQuarantined(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	setup := `rune.hooks.on("output", function() error("boom") end, {name = "bad"})`
+	if err := engine.DoString("setup", setup); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
+	for i := 0; i < 3; i++ {
+		engine.OnOutput(text.NewLine("a line"))
+	}
+
+	disabled := false
+	for _, p := range host.DrainPrintCalls() {
+		if strings.Contains(p, "disabled after 3 consecutive errors") {
+			disabled = true
+		}
+	}
+	if !disabled {
+		t.Fatal("expected quarantine notice after 3 failures")
+	}
+
+	// A quarantined handler no longer runs or reports
+	engine.OnOutput(text.NewLine("another line"))
+	for _, p := range host.DrainPrintCalls() {
+		if strings.Contains(p, "boom") {
+			t.Errorf("quarantined handler still reporting: %q", p)
+		}
+	}
+}
+
+// TestFailingBarIsRemoved verifies that a bar renderer failing
+// repeatedly is removed instead of erroring 4x/second forever.
+func TestFailingBarIsRemoved(t *testing.T) {
+	engine, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	setup := `rune.ui.bar("hp", function() error("boom") end)`
+	if err := engine.DoString("setup", setup); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
+	for i := 0; i < 3; i++ {
+		engine.RenderBar("hp", 80)
+	}
+	if engine.HasBar("hp") {
+		t.Error("expected failing bar to be removed after 3 errors")
 	}
 }
 
