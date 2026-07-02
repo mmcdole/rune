@@ -34,6 +34,9 @@ type MockHost struct {
 
 	// When set, Send fails with this error instead of recording the call
 	SendErr error
+
+	// When set, OpenEditor delegates here (e.g. to simulate a slow editor)
+	OpenEditorFn func(initial string) (string, bool)
 }
 
 func NewMockHost() *MockHost {
@@ -157,6 +160,9 @@ func (m *MockHost) SetGhost(text string) {
 }
 
 func (m *MockHost) OpenEditor(initial string) (string, bool) {
+	if m.OpenEditorFn != nil {
+		return m.OpenEditorFn(initial)
+	}
 	return "", false
 }
 

@@ -40,8 +40,9 @@ type Engine struct {
 	bindFuncs map[string]*glua.LFunction
 
 	// Watchdog
-	CallTimeout time.Duration // Time budget per Lua entry; see DefaultCallTimeout
-	inLua       bool          // True while inside a guarded Lua call (re-entrancy)
+	CallTimeout time.Duration      // Time budget per Lua entry; see DefaultCallTimeout
+	inLua       bool               // True while inside a guarded Lua call (re-entrancy)
+	guardCancel context.CancelFunc // Cancels the active watchdog context
 
 	// True once the user has been warned that rune.hooks.call is
 	// missing and the client is degraded to raw pass-through.
@@ -78,18 +79,43 @@ func (e *Engine) guard(fn func() error) error {
 	}
 	e.inLua = true
 	ctx, cancel := context.WithTimeout(context.Background(), e.CallTimeout)
+	e.guardCancel = cancel
 	e.L.SetContext(ctx)
 	defer func() {
 		e.L.RemoveContext()
-		cancel()
+		e.guardCancel()
+		e.guardCancel = nil
 		e.inLua = false
 	}()
 
 	err := fn()
-	if err != nil && ctx.Err() != nil {
+	// The active context may have been replaced by pauseWatchdog, so
+	// consult the VM's current context rather than the original.
+	if lctx := e.L.Context(); err != nil && lctx != nil && lctx.Err() != nil {
 		return fmt.Errorf("script interrupted after %v (runaway loop?): %w", e.CallTimeout, err)
 	}
 	return err
+}
+
+// pauseWatchdog runs fn with the watchdog deadline detached, then arms
+// a fresh full deadline for the remainder of the Lua entry. Use it for
+// host calls that legitimately block on the user (e.g. an external
+// $EDITOR): time spent there is not runaway script time, and without
+// this the expired deadline would kill the calling handler the moment
+// it resumed.
+func (e *Engine) pauseWatchdog(fn func()) {
+	if !e.inLua {
+		fn()
+		return
+	}
+	e.L.RemoveContext()
+	e.guardCancel()
+
+	fn()
+
+	ctx, cancel := context.WithTimeout(context.Background(), e.CallTimeout)
+	e.guardCancel = cancel
+	e.L.SetContext(ctx)
 }
 
 // Init initializes (or re-initializes) the Lua VM with fresh state.

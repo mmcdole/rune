@@ -292,6 +292,39 @@ func TestRegistrationsRecordSource(t *testing.T) {
 	}
 }
 
+// TestWatchdogPausedDuringBlockingHostCall verifies that time spent in
+// a blocking host call (the user sitting in $EDITOR) does not count
+// against the watchdog deadline: the handler must survive an editor
+// session longer than CallTimeout and keep its result.
+func TestWatchdogPausedDuringBlockingHostCall(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	engine.CallTimeout = 100 * time.Millisecond
+	host.OpenEditorFn = func(initial string) (string, bool) {
+		time.Sleep(300 * time.Millisecond) // longer than CallTimeout
+		return "edited text", true
+	}
+
+	script := `
+		local result, ok = rune.input.open_editor("draft")
+		assert(ok, "editor result lost")
+		rune.send_raw(result)
+	`
+	if err := engine.DoString("editor_test", script); err != nil {
+		t.Fatalf("handler killed after blocking host call: %v", err)
+	}
+	if sent := host.DrainNetworkCalls(); len(sent) != 1 || sent[0] != "edited text" {
+		t.Errorf("expected edited text to survive, got %v", sent)
+	}
+
+	// The re-armed deadline must still catch a runaway loop afterwards.
+	err := engine.DoString("runaway", "rune.input.open_editor(''); while true do end")
+	if err == nil || !strings.Contains(err.Error(), "interrupted") {
+		t.Errorf("watchdog not re-armed after pause: %v", err)
+	}
+}
+
 // TestWatchdogRunawayHookDoesNotHang verifies the watchdog also covers
 // the hook dispatch path (OnInput), not just direct script execution.
 func TestWatchdogRunawayHookDoesNotHang(t *testing.T) {

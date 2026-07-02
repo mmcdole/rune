@@ -39,10 +39,15 @@ func (e *Engine) registerInputFuncs() {
 		return 0
 	}))
 
-	// Editor mode primitive
+	// Editor mode primitive. The host call blocks in $EDITOR for as
+	// long as the user edits, so it runs outside the watchdog deadline.
 	e.L.SetField(inp, "open_editor", e.L.NewFunction(func(L *glua.LState) int {
 		initial := L.OptString(1, "")
-		result, ok := e.host.OpenEditor(initial)
+		var result string
+		var ok bool
+		e.pauseWatchdog(func() {
+			result, ok = e.host.OpenEditor(initial)
+		})
 		L.Push(glua.LString(result))
 		L.Push(glua.LBool(ok))
 		return 2
