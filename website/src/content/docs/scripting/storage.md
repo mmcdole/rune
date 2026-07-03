@@ -63,8 +63,8 @@ rune.world.list()
 rune.world.remove(name)
 ```
 
-The `opts` table is yours: the [auto-login recipe](/rune/cookbook/autologin/)
+The `opts` table is yours: the [auto-login recipe](/cookbook/autologin/)
 stores a character name per world and reads it back on connect.
 
-**Related:** [Slash command reference](/rune/reference/slash-commands/)
+**Related:** [Slash command reference](/reference/slash-commands/)
 for the full `/world` and `/connect` forms

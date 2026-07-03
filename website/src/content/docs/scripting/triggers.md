@@ -146,6 +146,6 @@ By name: `rune.trigger.disable/enable/remove(name)`, and
   with a notice instead of firing an error on every line. Fix the code,
   then re-enable it with `rune.trigger.enable(name)`.
 
-**Related:** [Aliases](/rune/scripting/aliases/),
-[Hooks & Events](/rune/scripting/hooks/),
-[Panes](/rune/interface/panes/)
+**Related:** [Aliases](/scripting/aliases/),
+[Hooks & Events](/scripting/hooks/),
+[Panes](/interface/panes/)

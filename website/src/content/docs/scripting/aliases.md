@@ -158,5 +158,5 @@ with its state, group, and the `file:line` that registered it.
 - Alias expansion recurses (an alias can produce another alias's input)
   with a depth limit of 100 to catch loops.
 
-**Related:** [Triggers](/rune/scripting/triggers/),
-[Groups](/rune/scripting/groups/)
+**Related:** [Triggers](/scripting/triggers/),
+[Groups](/scripting/groups/)

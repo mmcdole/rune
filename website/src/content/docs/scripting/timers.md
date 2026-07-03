@@ -91,5 +91,5 @@ again, which keeps reloads deterministic.
 - Sub-second intervals work (`rune.timer.every(0.25, ...)`), but every fire
   crosses into Lua, so keep fast timers cheap.
 
-**Related:** [Groups](/rune/scripting/groups/),
-[Hooks & Events](/rune/scripting/hooks/)
+**Related:** [Groups](/scripting/groups/),
+[Hooks & Events](/scripting/hooks/)

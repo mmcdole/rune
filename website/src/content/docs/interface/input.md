@@ -59,7 +59,7 @@ standard convention in terminal apps like tmux.
 
 Every binding below is registered with `rune.bind` in the core scripts.
 Rebind or remove any of them in your `init.lua`; see
-[Key Bindings](/rune/scripting/keybindings/). `Enter` is the one fixed
+[Key Bindings](/scripting/keybindings/). `Enter` is the one fixed
 key: it always submits the input line.
 
 | Key | Action |
@@ -77,6 +77,6 @@ key: it always submits the input line.
 | `Home` / `End` | Jump to top/bottom of output |
 | `Ctrl+C` | Clear input; twice on an empty line, quit |
 
-**Related:** [Key Bindings](/rune/scripting/keybindings/) for binding your
-own, [Pickers](/rune/interface/pickers/) for the overlay UI behind
+**Related:** [Key Bindings](/scripting/keybindings/) for binding your
+own, [Pickers](/interface/pickers/) for the overlay UI behind
 `Ctrl+R` and `/`

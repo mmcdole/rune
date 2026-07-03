@@ -3,9 +3,7 @@ import starlight from '@astrojs/starlight';
 
 // https://astro.build/config
 export default defineConfig({
-  // Project pages are served under the account's custom domain.
-  site: 'https://mattmcdole.com',
-  base: '/rune',
+  site: 'https://runemud.com',
   integrations: [
     starlight({
       title: 'ᚱune',

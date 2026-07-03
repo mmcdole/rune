@@ -45,5 +45,5 @@ Nothing is created until it's needed; a fresh install is just the binary.
 
 ## Next
 
-[Your First Session](/rune/getting-started/first-session/) covers
+[Your First Session](/getting-started/first-session/) covers
 connecting, bookmarks, and the basics of moving around.

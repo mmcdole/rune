@@ -56,4 +56,4 @@ replace them: `log-output`, `log-echo` (logging policy, priority 200),
 and `_completion_cache` / `_completion_input` (tab-completion word
 harvesting, priority 200).
 
-**Related:** [Hooks & Events](/rune/scripting/hooks/)
+**Related:** [Hooks & Events](/scripting/hooks/)

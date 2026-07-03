@@ -47,15 +47,15 @@ a separator rule, and the status bar below it.
 
 ## The pieces
 
-- **[Bars](/rune/interface/bars/)**: you write a render function, and rune
+- **[Bars](/interface/bars/)**: you write a render function, and rune
   calls it with the current width every 250ms. The built-in status bar is
   one of these.
-- **[Panes](/rune/interface/panes/)**: named buffers that show their most
+- **[Panes](/interface/panes/)**: named buffers that show their most
   recent lines. Write to them from triggers; toggle them from binds.
-- **[Pickers](/rune/interface/pickers/)**: fuzzy overlays for commands,
+- **[Pickers](/interface/pickers/)**: fuzzy overlays for commands,
   worlds, and anything your scripts want to offer.
 
-The [quake console recipe](/rune/cookbook/quake-console/) combines all of
+The [quake console recipe](/cookbook/quake-console/) combines all of
 this in one short script.
 
 ## Reactive state
@@ -65,6 +65,6 @@ current: `connected`, `address`, `scroll_mode`, `scroll_lines`, `width`,
 `height`. When your own state changes and a bar should reflect it now, call
 `rune.ui.refresh_bars()`.
 
-**Related:** [Bars](/rune/interface/bars/),
-[Panes](/rune/interface/panes/),
-[Pickers](/rune/interface/pickers/)
+**Related:** [Bars](/interface/bars/),
+[Panes](/interface/panes/),
+[Pickers](/interface/pickers/)

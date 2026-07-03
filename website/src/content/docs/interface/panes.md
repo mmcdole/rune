@@ -56,11 +56,11 @@ end)
 ```
 
 Bind a key to peek, as in the
-[quake console](/rune/cookbook/quake-console/) recipe:
+[quake console](/cookbook/quake-console/) recipe:
 
 ```lua
 rune.bind("`", function() rune.pane.toggle("chat") end)
 ```
 
-**Related:** [Layout & UI](/rune/interface/layout/),
-[Triggers](/rune/scripting/triggers/)
+**Related:** [Layout & UI](/interface/layout/),
+[Triggers](/scripting/triggers/)

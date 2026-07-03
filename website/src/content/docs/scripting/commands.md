@@ -78,5 +78,5 @@ with descriptions and sources.
 - Unknown commands report `[Error] Unknown command: /x` and are never sent
   to the server. Use `/raw /text` if a game actually wants a literal slash.
 
-**Related:** [Aliases](/rune/scripting/aliases/),
-[Slash command reference](/rune/reference/slash-commands/)
+**Related:** [Aliases](/scripting/aliases/),
+[Slash command reference](/reference/slash-commands/)

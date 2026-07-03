@@ -15,7 +15,7 @@ rune.ui.layout({ bottom = { "input", "clock", "status" } })
 ```
 
 A bar displays only if its name appears in the
-[layout](/rune/interface/layout/).
+[layout](/interface/layout/).
 
 ## Render results
 
@@ -30,7 +30,7 @@ Style freely with `rune.style`; bars are plain text.
 ## Examples
 
 A vitals bar fed by GMCP (full walkthrough in the
-[cookbook](/rune/cookbook/hp-bar/)):
+[cookbook](/cookbook/hp-bar/)):
 
 ```lua
 local vitals = {}
@@ -80,5 +80,5 @@ its state, group, and the `file:line` that registered it.
 - A renderer that errors three times in a row is quarantined like any other
   callback. Re-registering the name gives it a fresh start.
 
-**Related:** [Layout & UI](/rune/interface/layout/),
-[Panes](/rune/interface/panes/)
+**Related:** [Layout & UI](/interface/layout/),
+[Panes](/interface/panes/)

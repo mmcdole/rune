@@ -82,17 +82,17 @@ Everything lives under the `rune` table. Find the task, follow the link:
 
 | To do this | Use | Covered in |
 |---|---|---|
-| React to server output | `rune.trigger` | [Triggers](/rune/scripting/triggers/) |
-| Shorten commands you type | `rune.alias` | [Aliases](/rune/scripting/aliases/) |
-| Run something later, or on a schedule | `rune.timer` | [Timers](/rune/scripting/timers/) |
-| Intercept input, output, and client events | `rune.hooks` | [Hooks & Events](/rune/scripting/hooks/) |
-| Bind keys | `rune.bind` | [Key Bindings](/rune/scripting/keybindings/) |
-| Add your own `/commands` | `rune.command` | [Slash Commands](/rune/scripting/commands/) |
-| Handle GMCP data | `rune.gmcp` | [GMCP](/rune/scripting/gmcp/) |
-| Keep data across reloads or restarts | `rune.session`, `rune.store` | [Storage & Worlds](/rune/scripting/storage/) |
-| Toggle sets of things at once | `rune.group` | [Groups](/rune/scripting/groups/) |
-| Lay out panes, bars, and pickers | `rune.ui`, `rune.pane` | [Layout & UI](/rune/interface/layout/) |
-| Color and style text | `rune.style` | [Triggers](/rune/scripting/triggers/) |
+| React to server output | `rune.trigger` | [Triggers](/scripting/triggers/) |
+| Shorten commands you type | `rune.alias` | [Aliases](/scripting/aliases/) |
+| Run something later, or on a schedule | `rune.timer` | [Timers](/scripting/timers/) |
+| Intercept input, output, and client events | `rune.hooks` | [Hooks & Events](/scripting/hooks/) |
+| Bind keys | `rune.bind` | [Key Bindings](/scripting/keybindings/) |
+| Add your own `/commands` | `rune.command` | [Slash Commands](/scripting/commands/) |
+| Handle GMCP data | `rune.gmcp` | [GMCP](/scripting/gmcp/) |
+| Keep data across reloads or restarts | `rune.session`, `rune.store` | [Storage & Worlds](/scripting/storage/) |
+| Toggle sets of things at once | `rune.group` | [Groups](/scripting/groups/) |
+| Lay out panes, bars, and pickers | `rune.ui`, `rune.pane` | [Layout & UI](/interface/layout/) |
+| Color and style text | `rune.style` | [Triggers](/scripting/triggers/) |
 
 The registration functions all behave the same way: each returns a handle
 with `:enable()`, `:disable()`, and `:remove()`, and each accepts the same

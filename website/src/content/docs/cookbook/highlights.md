@@ -34,10 +34,10 @@ end
 
 - A trigger handler that returns a string rewrites the line; here, the
   whole line is re-colored. Later triggers match against the rewritten
-  text. See [Triggers](/rune/scripting/triggers/).
+  text. See [Triggers](/scripting/triggers/).
 - A `nil` action with `gag = true` silences the line with no handler at
   all.
-- The [groups](/rune/scripting/groups/) are the off switch: `/group gags
+- The [groups](/scripting/groups/) are the off switch: `/group gags
   off` when you suspect you're missing something, `/group highlights off`
   for screenshots.
 

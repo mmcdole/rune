@@ -54,5 +54,5 @@ rune.hooks.on("connected", function(addr)
 end)
 ```
 
-**Related:** [Hooks & Events](/rune/scripting/hooks/),
-[Triggers](/rune/scripting/triggers/)
+**Related:** [Hooks & Events](/scripting/hooks/),
+[Triggers](/scripting/triggers/)

@@ -41,7 +41,7 @@ across restarts.
 - `Ctrl+C` clears the input line; pressed twice on an empty line it quits.
 
 The full tour of the input line (editing keys, `Ctrl+E` into `$EDITOR`,
-the default keymap) is in [Input & History](/rune/interface/input/).
+the default keymap) is in [Input & History](/interface/input/).
 
 ## Log the session
 
@@ -57,4 +57,4 @@ because the echo is suppressed while the server hides input.
 ## Next
 
 When you're ready to make the client yours, head to
-[Scripting Basics](/rune/getting-started/scripting-basics/).
+[Scripting Basics](/getting-started/scripting-basics/).

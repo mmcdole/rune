@@ -41,15 +41,15 @@ rune.ui.layout({
 
 ## How it works
 
-- The [pane](/rune/interface/panes/) accumulates writes whether visible or
+- The [pane](/interface/panes/) accumulates writes whether visible or
   not; `` ` `` only toggles visibility. A bound printable key fires only on
   an empty input line, so typing backtick mid-sentence still works, and a
   hidden pane takes no screen space.
-- The [triggers](/rune/scripting/triggers/) mirror matching lines into the
+- The [triggers](/scripting/triggers/) mirror matching lines into the
   pane, restyled compactly. They don't gag, so chat still appears inline
   too. Add `return false` in the handlers to move messages instead of
   copying them.
-- The [layout](/rune/interface/layout/) docks the pane at the top, 10
+- The [layout](/interface/layout/) docks the pane at the top, 10
   lines tall.
 
 ## Variations

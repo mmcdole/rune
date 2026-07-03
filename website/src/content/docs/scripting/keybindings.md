@@ -57,7 +57,7 @@ rune.bind("ctrl+w", function() rune.input.delete_word() end)
 
 The default keymap (history navigation, pickers, completion, scrolling,
 `$EDITOR` editing) is registered with `rune.bind` in the core scripts;
-the full table is in [Input & History](/rune/interface/input/). Rebinding
+the full table is in [Input & History](/interface/input/). Rebinding
 a key in your `init.lua` replaces the default.
 
 ## Managing
@@ -75,6 +75,6 @@ with its state, group, and the `file:line` that registered it.
   disabled with a notice. Fix the code, then re-enable it with
   `rune.binds.enable(name)`.
 
-**Related:** [Input & History](/rune/interface/input/),
-[Pickers](/rune/interface/pickers/),
-[Groups](/rune/scripting/groups/)
+**Related:** [Input & History](/interface/input/),
+[Pickers](/interface/pickers/),
+[Groups](/scripting/groups/)

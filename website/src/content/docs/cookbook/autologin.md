@@ -5,7 +5,7 @@ description: Store a character name on each world bookmark and answer the login 
 
 World bookmarks accept extra fields, so you can store the character per
 world. Run this once (from `/lua` or `init.lua`; worlds persist in
-[`rune.store`](/rune/scripting/storage/)):
+[`rune.store`](/scripting/storage/)):
 
 ```lua
 rune.world.add("viking", "vikingmud.org:2001", { character = "Ragnar" })

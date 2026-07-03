@@ -51,6 +51,6 @@ a script builds temporary registrations.
 - A disabled bind swallows its key rather than letting it through to
   typing, so disabling a group of binds mutes those keys entirely.
 
-**Related:** [Aliases](/rune/scripting/aliases/),
-[Triggers](/rune/scripting/triggers/),
-[Timers](/rune/scripting/timers/)
+**Related:** [Aliases](/scripting/aliases/),
+[Triggers](/scripting/triggers/),
+[Timers](/scripting/timers/)

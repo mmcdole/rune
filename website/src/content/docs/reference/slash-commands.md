@@ -50,5 +50,5 @@ add. `/` on an empty line opens the fuzzy picker over the same registry.
 | `/version` | Client version |
 | `/quit` | Exit |
 
-**Related:** [Slash Commands](/rune/scripting/commands/) for adding your own
+**Related:** [Slash Commands](/scripting/commands/) for adding your own
 

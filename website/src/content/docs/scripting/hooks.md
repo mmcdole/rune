@@ -31,7 +31,7 @@ For `output`, `prompt`, and `echo`, rewrites chain: a handler returning a
 string replaces the text for every subsequent handler, and `false` stops
 the chain (gags the line or hides the echo). For `input`, only `false`
 means anything. To rewrite input, use an
-[alias](/rune/scripting/aliases/).
+[alias](/scripting/aliases/).
 
 ```lua
 -- Timestamp every line, after triggers have run
@@ -94,6 +94,6 @@ its behavior through the same API.
 - Handlers may register or remove hooks mid-dispatch safely; the chain
   iterates a snapshot.
 
-**Related:** [Triggers](/rune/scripting/triggers/),
-[GMCP](/rune/scripting/gmcp/),
-[Hook events reference](/rune/reference/hook-events/)
+**Related:** [Triggers](/scripting/triggers/),
+[GMCP](/scripting/gmcp/),
+[Hook events reference](/reference/hook-events/)

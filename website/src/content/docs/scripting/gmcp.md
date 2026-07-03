@@ -86,5 +86,5 @@ end)
 - A handler that errors three times in a row is quarantined: it is disabled
   with a notice. Fix the code, then re-enable it by name.
 
-**Related:** [HP bar from GMCP](/rune/cookbook/hp-bar/),
-[Protocols reference](/rune/reference/protocols/)
+**Related:** [HP bar from GMCP](/cookbook/hp-bar/),
+[Protocols reference](/reference/protocols/)

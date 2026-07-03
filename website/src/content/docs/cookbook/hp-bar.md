@@ -36,11 +36,11 @@ rune.ui.layout({ bottom = { "vitals", "input", "status" } })
 
 ## How it works
 
-- The [GMCP](/rune/scripting/gmcp/) handler stores the data and calls
+- The [GMCP](/scripting/gmcp/) handler stores the data and calls
   `refresh_bars()`; the render function only formats. Keep that split, since
   renderers run four times a second.
 - `subscribe("Char")` asks the server for the whole `Char` package.
-- The layout line matters: a [bar](/rune/interface/bars/) shows only if a
+- The layout line matters: a [bar](/interface/bars/) shows only if a
   layout dock names it.
 - The bar turns red under 25% HP by swapping the style function.
 
