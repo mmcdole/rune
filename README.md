@@ -148,6 +148,9 @@ The mouse is captured for scrolling, so select text with **shift+drag**
 
 ## Documentation
 
+Full guides, cookbook recipes, and reference live at
+**[runemud.com](https://runemud.com)**. In-repo:
+
 - [Lua API Reference](docs/lua_doc.md)
 - [Migrating from TinTin++/Mudlet](docs/migrating.md)
 - [Architecture Overview](docs/architecture.md)
