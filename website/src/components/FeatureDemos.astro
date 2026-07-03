@@ -82,9 +82,10 @@
     <div class="fd-copy">
       <h2>Tab completion that learns</h2>
       <p>
-        Names the server has used complete after one appearance. Keep
-        pressing <span class="key">Tab</span> and the candidates rotate on
-        the status line; <span class="key">Shift+Tab</span> goes back.
+        Words the server has used complete after one appearance, player
+        names included. Keep pressing <span class="key">Tab</span> and the
+        candidates rotate on the status line;
+        <span class="key">Shift+Tab</span> goes back.
       </p>
     </div>
     <div class="fterm" data-demo="fdt">
@@ -355,10 +356,10 @@
     ];
     const HISTORY: Item[] = [
       { text: 'kill polar bear' },
-      { text: 'tell skadi ready when you are' },
+      { text: 'tell soblak ready when you are' },
       { text: 'get all from corpse' },
+      { text: 'tell dios got room in the party?' },
       { text: '/world add arctic mud.arctic.org 2700' },
-      { text: 'n' },
     ];
     const ALIASES: Item[] = [
       { text: 'ws', desc: 'wield sword;wear shield' },
@@ -438,7 +439,7 @@
     const mode = t.el('-ed-mode');
     const title = t.el('-title');
 
-    const START = 'tell skadi plan:';
+    const START = 'tell moreldir plan:';
     const MORE = ' meet at the icefall at dusk, bring rope, torches, and the sled';
 
     // Tildes fill the viewport the way real vim fills empty lines; extra
@@ -454,7 +455,7 @@
       editor.hidden = true;
       t.root.classList.remove('editor-open');
       title.textContent = 'rune — mud.arctic.org:2700';
-      t.print(magenta('Skadi tells you: what is the plan for tonight?'));
+      t.print(magenta('Moreldir tells you: what is the plan for tonight?'));
       await t.sleep(1300);
 
       await t.type(START);
@@ -492,9 +493,9 @@
       t.input.textContent = text;
       await t.sleep(1000);
       await t.submit();
-      t.print(magenta('You tell Skadi: ' + text.slice('tell skadi '.length)));
+      t.print(magenta('You tell Moreldir: ' + text.slice('tell moreldir '.length)));
       await t.sleep(900);
-      t.print(magenta('Skadi tells you: see you there'));
+      t.print(magenta('Moreldir tells you: see you there'));
 
       if (reduced) return;
       await t.sleep(3000);
@@ -507,7 +508,7 @@
     const status = t.el('-status');
 
     const CONN = `${green('●')} mud.arctic.org:2700`;
-    const CANDS = ['tundra', 'tarok', 'tessa'];
+    const CANDS = ['kralk', 'knubo', 'knife'];
     // Completion takes over the LEFT status slot while cycling, exactly
     // like the real client's default status bar.
     const renderComp = (sel: number) => {
@@ -519,15 +520,15 @@
     for (;;) {
       t.clear();
       status.innerHTML = CONN;
-      t.print('Three travellers rest by the fire: ' + bold('Tundra') + ',');
-      t.print(bold('Tarok') + ' the smith, and a trader named ' + bold('Tessa') + '.');
+      t.print(bold('Kralk') + ' the smith hammers a knife blade at the forge');
+      t.print('while ' + bold('Knubo') + ' dozes against the wall.');
       t.print(dim('    There are two obvious exits: north and south'));
       t.print('');
       await t.sleep(1500);
 
-      await t.type('tell t');
+      await t.type('tell k');
       await t.sleep(450);
-      await t.showHint('Tab', 'complete names the server has used');
+      await t.showHint('Tab', 'complete words the server has used');
 
       // Each press replaces the word and rotates the highlight.
       for (let round = 0; round < 4; round++) {
@@ -537,14 +538,14 @@
         await t.sleep(850);
       }
 
-      // Settle on tundra, finish the message.
-      t.input.textContent = 'tell tundra';
+      // Settle on kralk, finish the message.
+      t.input.textContent = 'tell kralk';
       renderComp(0);
       await t.sleep(600);
       status.innerHTML = CONN;
-      await t.type(' are you heading north?');
+      await t.type(' how much for the axe?');
       await t.submit();
-      t.print(magenta('You tell Tundra: are you heading north?'));
+      t.print(magenta('You tell Kralk: how much for the axe?'));
 
       if (reduced) { renderComp(0); return; }
       await t.sleep(3000);
