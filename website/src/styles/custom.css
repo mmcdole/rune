@@ -55,6 +55,29 @@ h1[data-page-title],
   padding: 0.08em 0.35em;
 }
 
+/* Starlight's reset sets `code { overflow-wrap: anywhere }`, which lets short
+   inline-code chips (input, output, prompt) shatter mid-word — "outpu\nt" —
+   when an auto-layout table squeezes their column to min-content. Keep code
+   chips in tables whole; the table already scrolls on overflow. */
+.sl-markdown-content table code:not(pre code) {
+  overflow-wrap: normal;
+  word-break: keep-all;
+  white-space: nowrap;
+}
+
+/* On wide viewports Starlight docks the 45rem article against the right-hand
+   TOC (`--sl-content-margin-inline: auto 0`), piling all the slack into a big
+   empty gap between the left nav and the text. Give the article more room and
+   center it in its pane so the leftover splits into small, even margins. */
+:root {
+  --sl-content-width: 52rem;
+}
+@media (min-width: 72rem) {
+  .content-panel .sl-container {
+    margin-inline: auto;
+  }
+}
+
 /* Demote search to a compact icon button: the section nav is the
    header's primary affordance, search the secondary one. The header's
    middle column is 1fr wide, so right-align the icon within it to dock
