@@ -1,0 +1,44 @@
+---
+// SocialIcons override: prepend the section nav to the header's right
+// cluster, then render the default icons (GitHub).
+import Default from '@astrojs/starlight/components/SocialIcons.astro';
+
+const raw = import.meta.env.BASE_URL;
+const base = raw.endsWith('/') ? raw : raw + '/';
+
+const links = [
+  { label: 'Docs', href: `${base}getting-started/installation/` },
+  { label: 'Scripting', href: `${base}scripting/aliases/` },
+  { label: 'Cookbook', href: `${base}cookbook/quake-console/` },
+  { label: 'Reference', href: `${base}reference/slash-commands/` },
+];
+---
+
+<nav class="header-nav" aria-label="Site sections">
+  {links.map((l) => <a href={l.href}>{l.label}</a>)}
+</nav>
+<Default {...Astro.props} />
+
+<style>
+  .header-nav {
+    display: flex;
+    gap: 1.4rem;
+    align-items: center;
+    margin-inline-end: 0.5rem;
+    font-family: var(--sl-font-mono);
+    font-size: 0.875rem;
+  }
+  .header-nav a {
+    color: var(--sl-color-gray-2);
+    text-decoration: none;
+  }
+  .header-nav a:hover {
+    color: var(--sl-color-white);
+  }
+  /* The sidebar hamburger covers navigation on small screens */
+  @media (max-width: 850px) {
+    .header-nav {
+      display: none;
+    }
+  }
+</style>

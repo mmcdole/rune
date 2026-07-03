@@ -77,7 +77,7 @@ Answer `CLIENT_NAME`, `CLIENT_VERSION`, `CHARSET`, `MTTS`, and
 `IPADDRESS`-style variables per the MNES spec. Overlaps with
 TTYPE/MTTS; implement second and share the capability table.
 
-**Testing:** all four are pure request/response — table-driven parser
+**Testing:** all four are pure request/response: table-driven parser
 tests with recorded byte sequences, same style as `telnet_test.go`.
 
 ---

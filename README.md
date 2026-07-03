@@ -71,7 +71,7 @@ Then, inside the client:
 /help                                      everything else
 ```
 
-Coming from TinTin++, Mudlet, or Blightmud? See the
+Coming from TinTin++ or Mudlet? See the
 [migration guide](docs/migrating.md).
 
 ## Configuration
@@ -149,7 +149,7 @@ The mouse is captured for scrolling, so select text with **shift+drag**
 ## Documentation
 
 - [Lua API Reference](docs/lua_doc.md)
-- [Migrating from TinTin++/Mudlet/Blightmud](docs/migrating.md)
+- [Migrating from TinTin++/Mudlet](docs/migrating.md)
 - [Architecture Overview](docs/architecture.md)
 
 ## License

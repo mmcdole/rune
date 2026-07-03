@@ -140,7 +140,7 @@ Full reference: `docs/lua_doc.md`. Go primitives (`rune._*`) are internal.
 
 ### Hook Events
 
-Data-flow (return `false` to gag/consume, string to rewrite - rewrites CHAIN to subsequent handlers): `"input"`, `"output"`, `"prompt"`, `"echo"` (local echo of typed input; the core handler adds the `"> "` styling).
+Data-flow: `"output"`, `"prompt"`, `"echo"` support returning `false` to gag or a string to rewrite (rewrites CHAIN to subsequent handlers; the core `"echo"` handler adds the `"> "` styling). `"input"` supports only `false` (consume) - string returns are ignored, and the core input handler at priority 100 always consumes, so custom input handlers must register below 100.
 Notifications: `"ready"`, `"connecting"`, `"connected"`, `"disconnecting"`, `"disconnected"`, `"reloading"`, `"reloaded"`, `"loaded"`, `"error"`, `"input_changed"`, `"gmcp"` (catch-all: `package, data, raw`), `"gmcp_enabled"` (core handler sends Core.Hello).
 
 ### Slash Commands

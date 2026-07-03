@@ -1,15 +1,15 @@
-# Coming from TinTin++, Mudlet, or Blightmud
+# Coming from TinTin++ or Mudlet
 
-Rune's design bet is different from tintin's: there is no in-client
+Rune takes a different approach from tintin: there is no in-client
 command language. **Lua is the command language.** Aliases, triggers,
 and timers are defined in `~/.config/rune/init.lua` (auto-loaded at
 startup), and the edit loop is: change the file, `/reload`, keep
 playing. `/lua <code>` runs one-liners without touching a file.
 
-If you're used to typing `#alias {k} {kill %1}` mid-game, the honest
-trade: you lose one-command registration, you gain a real language -
-functions, state, modules - with the same line count for simple cases
-and vastly less pain for complex ones.
+If you're used to typing `#alias {k} {kill %1}` mid-game, the trade is
+this: you lose one-command registration, and you gain a real language
+(functions, state, modules) with the same line count for simple cases
+and much less pain for complex ones.
 
 ## Command map
 
@@ -32,8 +32,6 @@ and vastly less pain for complex ones.
 | `#write` | your scripts are already files |
 | tintin: `#3 north` | works as-is: `#3 north`, `#3 {kill rat;loot}` |
 | tintin: `;` separator | works as-is: `kill rat;loot` |
-| blightmud: `/connect host port` | works as-is (plus `tls`) |
-| blightmud: Lua API (`blight.*`) | same philosophy, different names: see the [Lua API reference](lua_doc.md) |
 | Mudlet: script editor | your `$EDITOR`; `Ctrl+E` edits the input line in it too |
 
 ## Capture references

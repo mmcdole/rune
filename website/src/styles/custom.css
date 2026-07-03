@@ -1,0 +1,76 @@
+/* Rune site theme: TokyoNight-derived ground, amber accent.
+   Matches the VHS recording theme so screenshots and site agree. */
+
+:root {
+  --sl-font: Charter, 'Bitstream Charter', Georgia, Cambria, serif;
+  --sl-font-mono: ui-monospace, 'JetBrains Mono', 'Cascadia Code', 'Fira Code', Menlo, Consolas, monospace;
+}
+
+:root[data-theme='dark'] {
+  --sl-color-accent-low: #3b2f1a;
+  --sl-color-accent: #e0af68;
+  --sl-color-accent-high: #f0cf9a;
+  --sl-color-bg: #14151f;
+  --sl-color-bg-nav: #1b1d2b;
+  --sl-color-bg-sidebar: #16171f;
+  --sl-color-hairline: #2a2d42;
+  --sl-color-hairline-light: #2a2d42;
+  --sl-color-text: #c9cede;
+  --sl-color-text-accent: #e0af68;
+  --sl-color-white: #e6e9f5;
+  --sl-color-gray-1: #c9cede;
+  --sl-color-gray-2: #a9afc4;
+  --sl-color-gray-3: #7a8099;
+  --sl-color-gray-5: #22243474;
+  --sl-color-gray-6: #1b1d2b;
+}
+
+:root[data-theme='light'] {
+  --sl-color-accent-low: #f4e3c2;
+  --sl-color-accent: #a5761f;
+  --sl-color-accent-high: #6e4e12;
+}
+
+/* Headings in mono: the site's typographic identity. */
+.sl-markdown-content h1,
+.sl-markdown-content h2,
+.sl-markdown-content h3,
+.sl-markdown-content h4,
+h1[data-page-title],
+.site-title {
+  font-family: var(--sl-font-mono);
+  letter-spacing: -0.01em;
+}
+
+.site-title {
+  color: var(--sl-color-accent);
+  font-weight: 700;
+  font-size: 1.45rem;
+}
+
+.sl-markdown-content code:not(pre code) {
+  background: var(--sl-color-gray-6);
+  border: 1px solid var(--sl-color-hairline);
+  border-radius: 4px;
+  padding: 0.08em 0.35em;
+}
+
+/* Demote search to a compact icon button: the section nav is the
+   header's primary affordance, search the secondary one. */
+site-search {
+  flex-grow: 0;
+  margin-inline-start: auto;
+}
+site-search button[data-open-modal] {
+  width: auto;
+  background: transparent;
+  border-color: transparent;
+  padding-inline: 0.5rem;
+}
+site-search button[data-open-modal] > span,
+site-search button[data-open-modal] > kbd {
+  display: none !important;
+}
+site-search button[data-open-modal]:hover {
+  border-color: var(--sl-color-hairline);
+}
