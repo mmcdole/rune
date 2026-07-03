@@ -15,9 +15,9 @@
         with their own items.
       </p>
       <p class="fd-keys">
-        <span class="key">/connect</span> worlds
-        <span class="key">Ctrl+R</span> history
-        <span class="key">Ctrl+T</span> aliases
+        <span class="fd-pair"><span class="key">/connect</span> worlds</span>
+        <span class="fd-pair"><span class="key">Ctrl+R</span> history</span>
+        <span class="fd-pair"><span class="key">Ctrl+T</span> aliases</span>
       </p>
     </div>
     <div class="fterm" data-demo="fdw">
@@ -114,14 +114,18 @@
     display: grid;
     grid-template-columns: minmax(260px, 4fr) minmax(340px, 6fr);
     gap: 40px;
-    align-items: center;
+    align-items: start;
   }
+  /* Flipped rows swap the columns too, so the terminal keeps the wide
+     column instead of shrinking into the copy column. */
+  .fd-row.flip { grid-template-columns: minmax(340px, 6fr) minmax(260px, 4fr); }
   .fd-row.flip .fd-copy { order: 2; }
   @media (max-width: 880px) {
-    .fd-row { grid-template-columns: 1fr; gap: 18px; }
+    .fd-row, .fd-row.flip { grid-template-columns: 1fr; gap: 18px; }
     .fd-row.flip .fd-copy { order: 0; }
   }
 
+  .fd-copy { padding-top: 6px; }
   .fd-copy h2 {
     font-family: var(--mono);
     font-size: 20px;
@@ -131,7 +135,8 @@
   }
   .fd-copy p { color: var(--muted); font-size: 15.5px; line-height: 1.6; margin: 0 0 12px; max-width: 44ch; }
   .fd-copy code { font-size: 13.5px; color: var(--cyan); background: none; }
-  .fd-keys { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+  .fd-keys { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; }
+  .fd-pair { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; color: var(--muted); font-size: 14px; }
   .key {
     font-family: var(--mono); font-size: 12px;
     color: var(--fg);
@@ -164,7 +169,7 @@
   .ftitle { margin-left: 8px; color: var(--muted); font-size: 11.5px; }
 
   .fbody-wrap { position: relative; }
-  .fbody { height: 218px; padding: 12px 16px 10px; overflow: hidden; }
+  .fbody { height: 180px; padding: 12px 16px 10px; overflow: hidden; }
   .fbody pre, .fpicker pre, .feditor pre {
     margin: 0; white-space: pre; background: none; border: none; padding: 0; font-size: inherit;
   }
@@ -194,7 +199,8 @@
     display: flex;
     flex-direction: column;
   }
-  .feditor pre { flex: 1; overflow: hidden; }
+  /* A real editor wraps long lines rather than clipping them. */
+  .feditor pre { flex: 1; overflow: hidden; white-space: pre-wrap; word-break: break-word; }
   .fed-mode {
     display: flex; justify-content: space-between; gap: 12px;
     font-size: 11.5px;
@@ -202,6 +208,8 @@
     color: var(--fg);
   }
 
+  /* Light scrim: the keycap labels the moment without blacking out the
+     content it is labeling. */
   .fhint {
     position: absolute;
     inset: 0;
@@ -211,8 +219,7 @@
     z-index: 3;
     opacity: 0;
     transition: opacity 0.3s ease;
-    background: rgba(20, 21, 31, 0.82);
-    backdrop-filter: blur(2px);
+    background: rgba(20, 21, 31, 0.55);
   }
   .fhint.show { opacity: 1; }
   .fhint-key {
@@ -231,14 +238,19 @@
 
   .finput { padding: 6px 16px; border-top: 1px solid var(--panel-edge); font-size: 12.5px; }
   .fcaret { color: var(--amber); }
-  .fcursor {
+  /* :global because the editor demo injects cursor spans at runtime;
+     scoped selectors would not match them. */
+  .fterm :global(.fcursor) {
     display: inline-block; width: 7px; height: 14px;
     background: var(--amber); vertical-align: text-bottom;
     animation: fblink 1.1s steps(1) infinite;
   }
+  /* One cursor at a time: the input line goes quiet while $EDITOR owns
+     the frame. */
+  .fterm.editor-open .finput :global(.fcursor) { visibility: hidden; }
   @keyframes fblink { 50% { opacity: 0; } }
   @media (prefers-reduced-motion: reduce) {
-    .fcursor { animation: none; }
+    .fterm :global(.fcursor) { animation: none; }
   }
   .fstatus {
     display: flex; justify-content: space-between; gap: 12px;
@@ -283,6 +295,7 @@
     const out = el('-out');
     const scroll = el('-scroll');
     const input = el('-input');
+    const root = out.closest('.fterm') as HTMLElement;
 
     const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, reduced ? 0 : ms));
     const print = (html: string) => {
@@ -306,7 +319,7 @@
       el('-hint-key').textContent = key;
       el('-hint-label').textContent = label;
       el('-hint').classList.add('show');
-      await sleep(1500);
+      await sleep(1100);
       el('-hint').classList.remove('show');
       await sleep(300);
     };
@@ -314,7 +327,7 @@
       out.textContent = '';
       input.textContent = '';
     };
-    return { el, out, input, sleep, print, type, submit, showHint, clear };
+    return { el, root, out, input, sleep, print, type, submit, showHint, clear };
   }
 
   function renderPicker(list: HTMLElement, items: Item[], sel: number) {
@@ -405,16 +418,15 @@
       t.print('You attack the polar bear!');
       await t.sleep(1300);
 
-      // Alias picker.
+      // Alias picker. The loop parks here with the picker open, so the
+      // at-rest frame still shows the feature.
       await t.showHint('Ctrl+T', 'browse your aliases');
       open('Aliases', ALIASES, 0);
       await t.sleep(1000);
       renderPicker(pickerList, ALIASES, 1);
-      await t.sleep(1400);
-      picker.hidden = true;
 
-      if (reduced) { open('Aliases', ALIASES, 1); return; }
-      await t.sleep(2600);
+      if (reduced) return;
+      await t.sleep(3400);
     }
   }
 
@@ -429,15 +441,18 @@
     const START = 'tell skadi plan:';
     const MORE = ' meet at the icefall at dusk, bring rope, torches, and the sled';
 
+    // Tildes fill the viewport the way real vim fills empty lines; extra
+    // rows are clipped by the fixed-height body.
     const renderBuf = (text: string, cursor: boolean) => {
       buf.innerHTML =
         esc(text) + (cursor ? '<span class="fcursor"></span>' : '') +
-        '\n' + dim('~\n~\n~\n~\n~');
+        '\n' + dim('~\n'.repeat(9).trimEnd());
     };
 
     for (;;) {
       t.clear();
       editor.hidden = true;
+      t.root.classList.remove('editor-open');
       title.textContent = 'rune — mud.arctic.org:2700';
       t.print(magenta('Skadi tells you: what is the plan for tonight?'));
       await t.sleep(1300);
@@ -446,8 +461,10 @@
       await t.sleep(500);
       await t.showHint('Ctrl+E', 'edit the line in $EDITOR');
 
-      // Editor takes over the viewport; the input line empties.
+      // Editor takes over the viewport; the input line empties and its
+      // cursor stops, so only the editor claims focus.
       t.input.textContent = '';
+      t.root.classList.add('editor-open');
       title.textContent = 'vim';
       mode.textContent = '-- INSERT --';
       renderBuf(START, true);
@@ -470,6 +487,7 @@
 
       // Back in the client with the full line ready to send.
       editor.hidden = true;
+      t.root.classList.remove('editor-open');
       title.textContent = 'rune — mud.arctic.org:2700';
       t.input.textContent = text;
       await t.sleep(1000);
@@ -503,6 +521,7 @@
       status.innerHTML = CONN;
       t.print('Three travellers rest by the fire: ' + bold('Tundra') + ',');
       t.print(bold('Tarok') + ' the smith, and a trader named ' + bold('Tessa') + '.');
+      t.print(dim('    There are two obvious exits: north and south'));
       t.print('');
       await t.sleep(1500);
 

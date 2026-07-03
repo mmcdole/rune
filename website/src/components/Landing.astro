@@ -17,12 +17,12 @@ const base = raw.endsWith('/') ? raw : raw + '/';
         A fast, modern MUD client with careful terminal ergonomics and a Lua
         API that goes all the way down.
       </p>
-      <p class="install"><span class="dollar">$</span> rune mud.example.com 4000</p>
       <div class="cta-row">
         <a class="btn primary" href={`${base}getting-started/installation/`}>Get started</a>
         <a class="btn" href="https://github.com/mmcdole/rune/releases">Download</a>
       </div>
-      <p class="platforms">LINUX · MACOS · WINDOWS — SINGLE BINARY, NO RUNTIME</p>
+      <p class="install"><span class="dollar">$</span> rune mud.example.com 4000</p>
+      <p class="platforms">LINUX · MACOS · WINDOWS · SINGLE BINARY, NO RUNTIME</p>
     </div>
 
     <div>
@@ -33,7 +33,7 @@ const base = raw.endsWith('/') ? raw : raw + '/';
           <button class="replay" id="demo-replay" type="button" title="Replay demo">↻ replay</button>
         </div>
         <div class="quake" id="demo-quake">
-          <div class="quake-label">chat console — ` to toggle</div>
+          <div class="quake-label">chat console · ` to toggle</div>
           <pre id="demo-quake-out"></pre>
         </div>
         <div class="body-wrap">
@@ -115,36 +115,36 @@ const base = raw.endsWith('/') ? raw : raw + '/';
   }
   @media (max-width: 880px) { .hero-grid { grid-template-columns: 1fr; } }
 
+  /* The wordmark leads the hero, full size. */
   .brand {
     font-family: var(--mono);
-    font-size: clamp(38px, 5vw, 52px);
+    font-size: clamp(44px, 5.4vw, 60px);
     font-weight: 700;
     color: var(--amber);
     letter-spacing: -0.02em;
     line-height: 1;
-    margin: 0 0 16px;
+    margin: 0 0 18px;
   }
   h1 {
     font-family: var(--mono);
-    font-size: clamp(24px, 3.4vw, 32px);
-    line-height: 1.2;
+    font-size: clamp(30px, 4.2vw, 42px);
+    line-height: 1.18;
     font-weight: 700;
-    margin: 0 0 14px;
+    margin: 0 0 16px;
     text-wrap: balance;
     letter-spacing: -0.01em;
   }
   h1 .accent { color: var(--amber); }
-  .sub { max-width: 46ch; color: var(--muted); font-size: 18px; margin: 0 0 26px; }
+  .sub { max-width: 46ch; color: #a9afc4; font-size: 18px; margin: 0 0 28px; }
 
-  .cta-row { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; margin-bottom: 12px; }
+  .cta-row { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; margin-bottom: 22px; }
+  /* A terminal snippet, not a third button: no pill chrome. */
   .install {
-    display: inline-block;
     font-family: var(--mono); font-size: 14px;
-    background: var(--panel); border: 1px solid var(--panel-edge);
-    border-radius: 6px; padding: 10px 16px; color: var(--fg);
-    margin: 0 0 16px;
+    color: var(--fg);
+    margin: 0 0 12px;
   }
-  .install .dollar { color: var(--amber); user-select: none; }
+  .install .dollar { color: var(--muted); user-select: none; }
   .btn {
     font-family: var(--mono); font-size: 14px;
     padding: 10px 18px; border-radius: 6px;
@@ -567,7 +567,7 @@ const base = raw.endsWith('/') ? raw : raw + '/';
       await sleep(1500);
 
       // Backtick: the cookbook's quake-style chat console.
-      await showHint('`', 'chat console — nine lines of Lua');
+      await showHint('`', 'chat console, in nine lines of Lua');
       quakeOut.innerHTML =
         // Everything that scrolled past below is captured here too,
         // topped up with older channel history. Capped at five lines,

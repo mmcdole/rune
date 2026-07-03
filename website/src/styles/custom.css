@@ -56,7 +56,12 @@ h1[data-page-title],
 }
 
 /* Demote search to a compact icon button: the section nav is the
-   header's primary affordance, search the secondary one. */
+   header's primary affordance, search the secondary one. The header's
+   middle column is 1fr wide, so right-align the icon within it to dock
+   it against the nav links instead of floating mid-header. */
+.header > .sl-flex:has(> site-search) {
+  justify-content: flex-end;
+}
 site-search {
   flex-grow: 0;
   margin-inline-start: auto;

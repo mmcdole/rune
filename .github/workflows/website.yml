@@ -1,9 +1,12 @@
 name: website
 
+# Deploys on every main push and on release tags, so cutting a release
+# always ships the current docs site. No paths filter: GitHub skips
+# path-filtered workflows on tag pushes.
 on:
   push:
     branches: [main]
-    paths: ["website/**"]
+    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
