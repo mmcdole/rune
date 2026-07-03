@@ -358,7 +358,7 @@
       { text: 'kill polar bear' },
       { text: 'tell soblak ready when you are' },
       { text: 'get all from corpse' },
-      { text: 'tell dios got room in the party?' },
+      { text: 'tell dios when is the restart?' },
       { text: '/world add arctic mud.arctic.org 2700' },
     ];
     const ALIASES: Item[] = [
@@ -439,7 +439,7 @@
     const mode = t.el('-ed-mode');
     const title = t.el('-title');
 
-    const START = 'tell moreldir plan:';
+    const START = 'tell tundra plan:';
     const MORE = ' meet at the icefall at dusk, bring rope, torches, and the sled';
 
     // Tildes fill the viewport the way real vim fills empty lines; extra
@@ -455,7 +455,7 @@
       editor.hidden = true;
       t.root.classList.remove('editor-open');
       title.textContent = 'rune — mud.arctic.org:2700';
-      t.print(magenta('Moreldir tells you: what is the plan for tonight?'));
+      t.print(magenta('Tundra tells you: what is the plan for tonight?'));
       await t.sleep(1300);
 
       await t.type(START);
@@ -493,9 +493,9 @@
       t.input.textContent = text;
       await t.sleep(1000);
       await t.submit();
-      t.print(magenta('You tell Moreldir: ' + text.slice('tell moreldir '.length)));
+      t.print(magenta('You tell Tundra: ' + text.slice('tell tundra '.length)));
       await t.sleep(900);
-      t.print(magenta('Moreldir tells you: see you there'));
+      t.print(magenta('Tundra tells you: see you there'));
 
       if (reduced) return;
       await t.sleep(3000);
@@ -521,7 +521,7 @@
       t.clear();
       status.innerHTML = CONN;
       t.print(bold('Kralk') + ' the smith hammers a knife blade at the forge');
-      t.print('while ' + bold('Knubo') + ' dozes against the wall.');
+      t.print('while ' + bold('Knubo') + ' scribbles quest-engine code on a slate.');
       t.print(dim('    There are two obvious exits: north and south'));
       t.print('');
       await t.sleep(1500);

@@ -391,9 +391,9 @@ const base = raw.endsWith('/') ? raw : raw + '/';
   const HISTORY = [
     { text: 'e' },
     { text: TELL },
-    { text: 'tell dios got room in the party?' },
+    { text: 'tell dios when is the restart?' },
     { text: 's' },
-    { text: 'tell knubo thanks for the heal' },
+    { text: 'tell knubo how goes the quest engine?' },
     { text: 'tell kralk how much for the axe?' },
     { text: '/connect vikingmud.org 2001' },
   ];
@@ -572,9 +572,9 @@ const base = raw.endsWith('/') ? raw : raw + '/';
         // Everything that scrolled past below is captured here too,
         // topped up with older channel history. Capped at five lines,
         // scrolling like the real pane.
-        `${amber('[Trade]')} ${name('Kralk')}: selling rune-etched axe, 5k\n` +
-        `${green('[Chat]')}  ${name('Moreldir')}: just fixed the bug where trolls dropped no loot\n` +
-        `${cyan('[Tell]')}  ${name('Tundra')}: meet me at the shore\n` +
+        `${green('[Chat]')}  ${name('Moreldir')}: fixed the bug where trolls dropped no loot\n` +
+        `${green('[Chat]')}  ${name('Knubo')}: quest engine rewrite is nearly done. so hyped\n` +
+        `${amber('[Trade]')} ${name('Kralk')}: someone is duping gold at the bank. I smell a cheater\n` +
         `${cyan('[Tell]')}  ${name('Tundra')}: hurry, the tide is turning\n` +
         `${cyan('[Tell]')}  ${name('Tundra')}: good, bring rope`;
       term.classList.add('chat-open');
@@ -585,11 +585,11 @@ const base = raw.endsWith('/') ? raw : raw + '/';
         quakeOut.innerHTML = lines.join('\n');
       };
       await sleep(1700);
-      chat(`${green('[Chat]')}  ${name('Soblak')}: I just discovered an infinite money hack!!`);
+      chat(`${cyan('[Tell]')}  ${name('Soblak')}: psst... I just discovered an infinite money glitch!!`);
       await sleep(1300);
-      chat(`${green('[Chat]')}  ${name('Soblak')} cackles with glee!`);
+      chat(`${cyan('[Tell]')}  ${name('Soblak')} cackles with glee!`);
       await sleep(1500);
-      chat(`${magenta('[Party]')} ${name('Tundra')}: everyone meet by the shore, Soblak is buying the ale`);
+      chat(`${green('[Chat]')}  ${name('Dios')}: the server is going down for a restart soon, wrap it up`);
       await sleep(3400);
     };
 
