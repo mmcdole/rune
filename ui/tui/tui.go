@@ -79,12 +79,19 @@ func (b *BubbleTeaUI) Input() <-chan string {
 func (b *BubbleTeaUI) Run() error {
 	model := NewModel(b.inputChan, b.outbound)
 
-	b.program = tea.NewProgram(
-		model,
+	opts := []tea.ProgramOption{
 		tea.WithAltScreen(),
 		tea.WithMouseCellMotion(),
-		tea.WithInputTTY(),
-	)
+	}
+	// On Windows, resize events only arrive through the console input
+	// reader, which bubbletea engages only when the input is os.Stdin
+	// itself. WithInputTTY opens CONIN$ as a separate handle, so bubbletea
+	// silently falls back to its ANSI reader and window resizes (and
+	// native mouse events) are never delivered.
+	if runtime.GOOS != "windows" {
+		opts = append(opts, tea.WithInputTTY())
+	}
+	b.program = tea.NewProgram(model, opts...)
 
 	// Single goroutine drains message queue to Bubble Tea.
 	// This can block on Send() without affecting producers.
