@@ -12,11 +12,14 @@ import (
 	"github.com/mmcdole/rune/ui/tui/widget"
 )
 
-// tickMsg drives the output flush: lines are batched within a 16ms
-// window to prevent excessive renders on fast MUD output.
+// tickMsg closes a 16ms output batch window: the first server line
+// after an idle period renders immediately and opens the window; lines
+// arriving inside it are batched to prevent excessive renders on fast
+// MUD output. Ticks are scheduled on demand only - an idle client has
+// no standing timer and zero wakeups.
 type tickMsg time.Time
 
-// doTick returns a command that sends a tickMsg after the given duration.
+// doTick returns a command that closes the batch window after 16ms.
 func doTick() tea.Cmd {
 	return tea.Tick(16*time.Millisecond, func(t time.Time) tea.Msg {
 		return tickMsg(t)
@@ -55,6 +58,11 @@ type Model struct {
 	outbound     chan<- ui.UIEvent
 	initialized  bool
 	pendingLines []string
+	// flushScheduled is true while a batch-window tick is outstanding.
+	// At most one tick is ever in flight: it is armed only on the
+	// idle->hot transition and re-armed only from handleTick while
+	// output is still flowing.
+	flushScheduled bool
 }
 
 // NewModel creates a new TUI model.
@@ -83,12 +91,10 @@ func NewModel(inputChan chan<- string, outbound chan<- ui.UIEvent) *Model {
 	return m
 }
 
-// Init implements tea.Model.
+// Init implements tea.Model. No standing tick: batch-window ticks are
+// scheduled on demand when server output arrives.
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(
-		tea.EnterAltScreen,
-		doTick(),
-	)
+	return tea.EnterAltScreen
 }
 
 // Update implements tea.Model.
@@ -168,9 +174,17 @@ func (m *Model) handleWindowSize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleTick flushes the pending line batch.
+// handleTick closes the current batch window: flushes any lines that
+// arrived inside it and re-arms the window only while output is still
+// flowing. A tick that finds nothing pending (output went quiet, or an
+// echo already flushed eagerly) ends the chain - back to zero wakeups.
 func (m *Model) handleTick() (tea.Model, tea.Cmd) {
+	m.flushScheduled = false
+	if len(m.pendingLines) == 0 {
+		return m, nil
+	}
 	m.flushPending()
+	m.flushScheduled = true
 	return m, doTick()
 }
 
@@ -229,7 +243,16 @@ func (m *Model) handleServerOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case ui.PrintLineMsg:
 		cleanLine := util.FilterClearSequences(string(msg))
-		m.pendingLines = append(m.pendingLines, cleanLine)
+		if m.flushScheduled {
+			// Inside a batch window: coalesce with the burst.
+			m.pendingLines = append(m.pendingLines, cleanLine)
+			return m, nil
+		}
+		// Idle: render this line now and open a batch window so a
+		// following burst coalesces instead of rendering line-by-line.
+		m.appendLines([]string{cleanLine})
+		m.flushScheduled = true
+		return m, doTick()
 	case ui.EchoLineMsg:
 		// Flush batched server lines first so the echo cannot render
 		// ahead of output that arrived before it.

@@ -21,8 +21,8 @@ func newTestModel(t *testing.T) *Model {
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = next.(*Model)
 
-	// EchoLineMsg appends to the scrollback immediately (PrintLineMsg
-	// batches until the next render tick).
+	// EchoLineMsg appends to the scrollback immediately and never
+	// opens a batch window, so no tick bookkeeping is needed here.
 	for i := 0; i < 100; i++ {
 		next, _ = m.Update(ui.EchoLineMsg(fmt.Sprintf("line %d", i)))
 		m = next.(*Model)
@@ -71,28 +71,115 @@ func TestMouseNonWheelEventsIgnored(t *testing.T) {
 	}
 }
 
-// TestEchoFlushesPendingServerLines verifies a local echo cannot render
-// ahead of server output that arrived before it: batched PrintLineMsg
-// lines must be flushed to the scrollback before the echo is appended.
-func TestEchoFlushesPendingServerLines(t *testing.T) {
+// newBareModel builds a sized model with an empty scrollback, for
+// tests that assert on exact line counts and ordering.
+func newBareModel(t *testing.T) *Model {
+	t.Helper()
+
 	inputChan := make(chan string, 16)
 	outbound := make(chan ui.UIEvent, 64)
 	m := NewModel(inputChan, outbound)
 
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	return next.(*Model)
+}
+
+// TestFirstLineRendersImmediately verifies the idle->hot transition: a
+// server line arriving with no batch window open is appended right
+// away (not parked until a tick) and opens a window for what follows.
+func TestFirstLineRendersImmediately(t *testing.T) {
+	m := newBareModel(t)
+
+	next, cmd := m.Update(ui.PrintLineMsg("hello"))
 	m = next.(*Model)
 
-	next, _ = m.Update(ui.PrintLineMsg("server line"))
+	if got := m.scrollback.Count(); got != 1 {
+		t.Fatalf("expected first line appended immediately, scrollback has %d lines", got)
+	}
+	if cmd == nil {
+		t.Fatal("expected first line to open a batch window (tick cmd)")
+	}
+}
+
+// TestBurstCoalescesInBatchWindow verifies lines arriving inside an
+// open batch window are held and flushed together on the tick.
+func TestBurstCoalescesInBatchWindow(t *testing.T) {
+	m := newBareModel(t)
+
+	next, _ := m.Update(ui.PrintLineMsg("line 1"))
+	m = next.(*Model)
+	next, _ = m.Update(ui.PrintLineMsg("line 2"))
+	m = next.(*Model)
+	next, _ = m.Update(ui.PrintLineMsg("line 3"))
+	m = next.(*Model)
+
+	if got := m.scrollback.Count(); got != 1 {
+		t.Fatalf("expected burst lines batched, scrollback has %d lines", got)
+	}
+
+	next, _ = m.Update(tickMsg{})
+	m = next.(*Model)
+
+	if got := m.scrollback.Count(); got != 3 {
+		t.Fatalf("expected tick to flush the batch, scrollback has %d lines", got)
+	}
+}
+
+// TestTickStopsWhenOutputGoesQuiet is the no-perpetual-tick regression
+// guard: a tick that flushed lines re-arms the window, and the first
+// tick that finds nothing pending ends the chain, so an idle client
+// has no standing timer.
+func TestTickStopsWhenOutputGoesQuiet(t *testing.T) {
+	m := newBareModel(t)
+
+	next, _ := m.Update(ui.PrintLineMsg("line 1"))
+	m = next.(*Model)
+	next, _ = m.Update(ui.PrintLineMsg("line 2"))
+	m = next.(*Model)
+
+	next, cmd := m.Update(tickMsg{})
+	m = next.(*Model)
+	if cmd == nil {
+		t.Fatal("expected tick with pending lines to re-arm the window")
+	}
+
+	next, cmd = m.Update(tickMsg{})
+	m = next.(*Model)
+	if cmd != nil {
+		t.Fatal("expected tick with nothing pending to stop the chain")
+	}
+}
+
+// TestEchoFlushesPendingServerLines verifies a local echo cannot render
+// ahead of server output that arrived before it: batched PrintLineMsg
+// lines must be flushed to the scrollback before the echo is appended,
+// and the now-empty trailing tick must not re-arm.
+func TestEchoFlushesPendingServerLines(t *testing.T) {
+	m := newBareModel(t)
+
+	next, _ := m.Update(ui.PrintLineMsg("line 1")) // immediate, opens window
+	m = next.(*Model)
+	next, _ = m.Update(ui.PrintLineMsg("line 2")) // batched
 	m = next.(*Model)
 	next, _ = m.Update(ui.EchoLineMsg("> look"))
 	m = next.(*Model)
 
-	if got := m.scrollback.Count(); got != 2 {
-		t.Fatalf("expected 2 scrollback lines, got %d", got)
+	if got := m.scrollback.Count(); got != 3 {
+		t.Fatalf("expected 3 scrollback lines, got %d", got)
 	}
-	if m.scrollback.At(0) != "server line" || m.scrollback.At(1) != "> look" {
-		t.Fatalf("echo reordered ahead of server output: %q, %q",
-			m.scrollback.At(0), m.scrollback.At(1))
+	for i, want := range []string{"line 1", "line 2", "> look"} {
+		if got := m.scrollback.At(i); got != want {
+			t.Fatalf("scrollback[%d] = %q, want %q (echo reordered?)", i, got, want)
+		}
+	}
+
+	next, cmd := m.Update(tickMsg{})
+	m = next.(*Model)
+	if cmd != nil {
+		t.Fatal("expected trailing tick after eager echo flush to stop the chain")
+	}
+	if got := m.scrollback.Count(); got != 3 {
+		t.Fatalf("trailing tick changed scrollback, got %d lines", got)
 	}
 }
 
