@@ -80,6 +80,31 @@ type Host interface {
 	LogWrite(text string)                 // appends one line; no-op when inactive
 	LogStatus() (string, bool)            // active log path, if any
 
+	// HTTP: perform req off the session goroutine and deliver the
+	// outcome back on it via Engine.OnHTTPResult with the same id.
+	// The id -> callback mapping is Lua state (lua/core/62_http.lua),
+	// so pending callbacks die with the VM on /reload; a late result
+	// for a stale id is dropped there.
+	HTTPRequest(id int, req HTTPRequest)
+
 	// State
 	OnConfigChange()
+}
+
+// HTTPRequest describes one request handed to Host.HTTPRequest.
+// Timeout <= 0 means the host's default.
+type HTTPRequest struct {
+	Method  string
+	URL     string
+	Body    string
+	Headers map[string]string
+	Timeout time.Duration
+}
+
+// HTTPResponse is a completed request's result, delivered back to Lua
+// through Engine.OnHTTPResult.
+type HTTPResponse struct {
+	Status  int
+	Body    string
+	Headers map[string]string
 }

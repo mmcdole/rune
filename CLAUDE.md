@@ -57,7 +57,8 @@ event/event.go                - Session event types and payloads
 session/                      - Session: event loop, implements lua.Host
   session.go                  - Orchestrator, Network interface, boot
   lua_*.go                    - Host implementation (network, ui, timers,
-                                system, history, session, store, log, state)
+                                system, history, session, store, log, http,
+                                state)
 lua/                          - Lua runtime package
   engine.go                   - Engine: wraps gopher-lua, watchdog, dispatch
   api_*.go                    - rune._* primitive registration
@@ -108,6 +109,7 @@ Bar tick (250ms)            -> Session -> rune.bars._render_all(width) -> UI bar
 - `58_worlds.lua` - World bookmarks (`rune.world`, `/world`, `/worlds`), stored durably via `rune.store`
 - `59_gmcp.lua` - GMCP policy (`rune.gmcp` handlers/subscriptions on the shared registry, the Core.Hello handshake on `"gmcp_enabled"`, `/gmcp`); Go owns the option-201 transport and JSON bridge
 - `60_send.lua` - Command expansion (`;` splitting, `#N` repeats anchored at command position), core input/output/prompt handlers
+- `62_http.lua` - Async HTTP (`rune.http.get/post`; owns the id→callback map, Go only performs requests)
 - `65_events.lua` - Default system event handlers (including the `"echo"` styler)
 - `70_input.lua` - Input wrappers, history navigation, word ops, tab completion
 - `75_ui.lua` - Panes, status bar, default binds and pickers
@@ -137,6 +139,7 @@ Go primitives (`rune._*`) are internal.
 - **Worlds**: `rune.world.add/remove/get/list` - named server bookmarks in `rune.store` under `"worlds"`; `/connect <name>` resolves them first, bare `/connect` opens a picker over them
 - **Logging**: `rune.log.start/stop/status/write` - session log to file. The handle is Go-owned (survives `/reload`, closed on exit); what gets written is Lua policy in `57_log.lua` (post-trigger output + input echo, ANSI-stripped; gagged lines and prompts excluded)
 - **GMCP**: `rune.gmcp.on(package, handler, opts?)` (registry-based: quarantine, groups, source attribution), `rune.gmcp.send(package, value?)` (JSON-able Lua values), `send_raw`, `subscribe/unsubscribe` (maintains `Core.Supports.Set`), `is_enabled`. Handlers get `(decoded_data, package)`; package matching is case-insensitive. Malformed server JSON is reported and dropped in Go
+- **HTTP**: `rune.http.get(url, opts?, callback?)` / `rune.http.post(url, body, opts?, callback?)` - async; Go performs the request off the session goroutine and the callback runs back on it via `AsyncResult` (under the watchdog). `callback(response, err)`; non-2xx is a response, not an error. Pending callbacks are Lua state and die on `/reload`. 30s default timeout, 5MB body cap, http/https only
 - **Style**: `rune.style.red/green/yellow/.../bold/dim/inverse`
 - **Lines**: output/prompt handlers receive line objects (`:raw()`, `:clean()`); `rune.line.new(text)` builds one
 - **History**: `rune.history.get/add`

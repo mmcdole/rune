@@ -53,6 +53,15 @@ type MockHost struct {
 	// GMCP capture (see Host.GMCPSend)
 	GMCPSends []struct{ Package, Data string }
 	GMCPErr   error // when set, GMCPSend fails with this error
+
+	// HTTP capture (see Host.HTTPRequest)
+	HTTPCalls []MockHTTPCall
+}
+
+// MockHTTPCall records one Host.HTTPRequest invocation.
+type MockHTTPCall struct {
+	ID  int
+	Req HTTPRequest
 }
 
 func NewMockHost() *MockHost {
@@ -243,6 +252,12 @@ func (m *MockHost) LogStatus() (string, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.LogPath, m.LogActive
+}
+
+func (m *MockHost) HTTPRequest(id int, req HTTPRequest) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.HTTPCalls = append(m.HTTPCalls, MockHTTPCall{ID: id, Req: req})
 }
 
 func (m *MockHost) GetInput() string {
