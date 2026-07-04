@@ -31,7 +31,7 @@
 --   "error"        -- On system error
 --   "input_changed"-- Input line content changed while typing
 --   "gmcp"         -- Every GMCP message: (package, data, raw);
---                     catch-all alongside rune.gmcp.on (59_gmcp.lua)
+--                     catch-all alongside rune.gmcp.on (70_gmcp.lua)
 --   "gmcp_enabled" -- GMCP negotiated; the core handler sends Core.Hello
 
 -- Per-event dispatch index, maintained alongside the registry so
