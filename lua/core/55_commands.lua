@@ -252,6 +252,7 @@ rune.command.add("triggers", function(args)
         if t.gag then flags[#flags + 1] = "gag" end
         if t.once then flags[#flags + 1] = "once" end
         if t.raw then flags[#flags + 1] = "raw" end
+        if t.span then flags[#flags + 1] = "span" end
         local flags_str = #flags > 0 and ("  " .. dim("(" .. table.concat(flags, ", ") .. ")")) or ""
         local src_str = t.source and ("  " .. dim("@" .. t.source)) or ""
         rune.echo(string.format("  %s %-8s %s %s %s%s%s%s",

@@ -77,6 +77,7 @@ Triggers take the [common options](/scripting/model/#options) — `name`,
 |---|---|
 | `gag` | Hides matching lines (no action required). |
 | `raw` | Matches against the raw line, ANSI codes included. |
+| `span` | Collects a multi-line message before firing. See [Multi-line triggers](#multi-line-triggers). |
 
 ## Examples
 
@@ -125,7 +126,54 @@ end)
 ```
 
 Test any of this without a server: `/test <line>` runs a line through your
-triggers and shows what would happen.
+triggers and shows what would happen. Multi-line spans collect across
+`/test` invocations, one line per call — handy for exercising them
+offline.
+
+## Multi-line triggers
+
+Plenty of server output spans lines: chat and tells that wrap, score
+sheets, who lists, quest logs, mail. A plain trigger only ever sees
+one line at a time; a `span` collects the block and fires the action
+once, with everything.
+
+For wrapped messages, the end of the block is usually a pattern on
+the final line — many LPMuds leave the channel's ANSI color reset on
+the last wrapped line (log raw output to find your server's marker):
+
+```lua
+rune.trigger.regex("^(\\w+) tells you: (.+)$", function(m, ctx)
+    rune.pane.write("chat", "[Tell] " .. m[1] .. ": " .. ctx.text)
+end, { span = { to = "\\x1b\\[0?m\\s*$", raw = true, max = 8 } })
+```
+
+`span.to` is the regex for the line that ends the message, inclusive.
+`span.raw` matches it against the raw line, since stripping removes
+escape codes. `span.max` (default 8) is the safety cap when the
+terminator never shows.
+
+For fixed-shape blocks, skip `to` and use `max` alone — the span
+collects exactly that many lines:
+
+```lua
+-- A score block that is always 4 lines
+rune.trigger.starts("You have scored", function(m, ctx)
+    parse_score(ctx.lines)
+end, { span = { max = 4 } })
+```
+
+In the action, `ctx.text` is the joined text and `ctx.lines` has the
+individual lines. The collected lines have already been displayed by
+the time the action runs, so return values do nothing; `gag = true`
+is the exception and hides every collected line as it arrives:
+
+```lua
+-- Silence a multi-line broadcast entirely
+rune.trigger.starts("The town crier bellows:", nil,
+    { gag = true, span = { to = "\\x1b\\[0?m\\s*$", raw = true } })
+```
+
+Full semantics: [rune.trigger reference](/reference/api/trigger/#multi-line-triggers).
 
 ## Managing
 
@@ -148,6 +196,8 @@ suite is in the [API reference](/reference/api/#managing). In the client,
   [rune.regex](/reference/api/regex/) for the syntax notes.
 - Prompts (partial lines) run through triggers too. Anchor with `^...$`
   when you only want complete lines.
+- A prompt ends any open multi-line span (the action fires with what
+  was collected), and `/reload` discards open spans.
 - A trigger that errors three times in a row is
   [quarantined](/scripting/model/#quarantine).
 

@@ -16,7 +16,8 @@ rune.trigger.regex(pattern, action, opts?)   -- Go regexp, with captures
 ```
 
 All constructors return a [handle](/reference/api/#handles) and accept
-the [common options](/reference/api/#options) plus `gag` and `raw`.
+the [common options](/reference/api/#options) plus `gag`, `raw`, and
+[`span`](#multi-line-triggers).
 
 ## Matching
 
@@ -63,6 +64,10 @@ with `:raw()` and `:clean()` — and its return value controls the line:
 | string | Line is rewritten; later triggers see the new text |
 | `false` | Line is gagged (hidden) |
 
+This table does not apply to [multi-line triggers](#multi-line-triggers):
+their actions fire after the collected lines have been displayed, so
+return values are ignored.
+
 ## Options
 
 Beyond the [common options](/reference/api/#options):
@@ -71,6 +76,53 @@ Beyond the [common options](/reference/api/#options):
 |---|---|---|---|
 | `gag` | bool | false | Hide the matching line (equivalent to returning `false`) |
 | `raw` | bool | false | Match against the raw line, ANSI codes included |
+| `span` | table | — | Collect a multi-line message; see [Multi-line triggers](#multi-line-triggers) |
+
+## Multi-line triggers
+
+Server output often spans lines — wrapped chat, score sheets, who
+lists, quest logs. A `span` collects the block: the trigger's pattern
+matches the first line as usual, following lines are appended, and
+the action fires **once** with the whole thing.
+
+```lua
+-- Terminator-delimited: a wrapped message ending in a color reset
+rune.trigger.regex("^(\\w+) tells you: (.+)$", function(matches, ctx)
+    forward("[Tell] " .. matches[1] .. ": " .. ctx.text)
+end, { name = "tells", span = { to = "\\x1b\\[0?m\\s*$", raw = true, max = 8 } })
+
+-- Fixed-count: a block that is always the same number of lines
+rune.trigger.starts("You have scored", parse_score, { span = { max = 4 } })
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `to` | string | — | Regex for the line that ends the span, inclusive. Validated at registration. Optional: without it the span always runs to `max`. |
+| `raw` | bool | false | Match `to` against the raw line — needed when the terminator is an escape code (like a trailing color reset) that stripping removes. Independent of the trigger-level `raw`, which governs pattern matching. |
+| `max` | number | 8 | Flush after this many lines, first line included. |
+
+In the action, `ctx.text` is the message text — the pattern's last
+capture (or the whole clean line for the literal modes), with each
+continuation line appended, space-joined. `ctx.lines` holds the
+collected [line objects](/reference/api/state-lines/), first line
+first. `matches` are the first line's captures, as usual; a string
+action substitutes them and is sent once, at completion.
+
+Behavior:
+
+- Lines display as they arrive, so the action's return value is
+  ignored — a span cannot rewrite. `gag = true` is the exception: it
+  hides every collected line as it arrives, first line included.
+- Collected lines still run through other triggers and hooks. A span
+  sees each line as this trigger would have — including rewrites from
+  higher-priority triggers.
+- A prompt ends any open span (the action fires with what was
+  collected). `/reload` discards open spans.
+- One open span per trigger: if the pattern matches again mid-span,
+  the previous message fires and a new span starts.
+- If the first line also matches `to`, the message is complete
+  immediately — single-line messages work with no special casing.
+- `once` removes the trigger after its first completed span.
 
 ## Managing
 
