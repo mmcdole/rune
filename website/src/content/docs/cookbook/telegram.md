@@ -1,6 +1,6 @@
 ---
 title: Forward Tells to Telegram
-description: Get pinged on your phone when someone tells you in-game, with the shell-safety details handled.
+description: Get pinged on your phone when someone tells you in-game, using the built-in HTTP API.
 ---
 
 Forward tells to Telegram for the times you're logged in but away from the
@@ -12,22 +12,28 @@ your shell.
 local TOKEN = os.getenv("TELEGRAM_TOKEN") or rune.store.get("telegram_token")
 local CHAT  = os.getenv("TELEGRAM_CHAT")  or rune.store.get("telegram_chat")
 
--- Quote untrusted text for POSIX sh. Game text goes into a shell
--- command here: without this, a hostile player could send you
--- '; rm -rf ~' as a tell.
-local function sh_quote(s)
-    return "'" .. s:gsub("'", "'\\''") .. "'"
+-- Percent-encode a value for a form body. Tell text is arbitrary
+-- game text; encoding makes it inert.
+local function urlencode(s)
+    return (s:gsub("[^%w%-%.%_%~]", function(c)
+        return string.format("%%%02X", string.byte(c))
+    end))
 end
 
 local function telegram(text)
     if not TOKEN or not CHAT then return end
-    local url = "https://api.telegram.org/bot" .. TOKEN .. "/sendMessage"
-    -- Fire-and-forget: the trailing & backgrounds curl so a slow
-    -- network never blocks the client.
-    os.execute("curl -s -o /dev/null --max-time 10" ..
-        " -d chat_id=" .. sh_quote(CHAT) ..
-        " --data-urlencode text=" .. sh_quote(text) ..
-        " " .. sh_quote(url) .. " >/dev/null 2>&1 &")
+    rune.http.post(
+        "https://api.telegram.org/bot" .. TOKEN .. "/sendMessage",
+        "chat_id=" .. urlencode(CHAT) .. "&text=" .. urlencode(text),
+        { headers = { ["Content-Type"] = "application/x-www-form-urlencoded" },
+          timeout = 10 },
+        function(resp, err)
+            if err then
+                rune.echo("[telegram] " .. err)
+            elseif resp.status ~= 200 then
+                rune.echo("[telegram] HTTP " .. resp.status)
+            end
+        end)
 end
 
 rune.trigger.regex("^(\\w+) tells you: (.+)$", function(m)
@@ -37,13 +43,15 @@ end, { name = "tells-to-telegram", group = "telegram" })
 
 ## How it works
 
-- **`sh_quote` is required.** Tell text is attacker-controlled input going
-  into a shell command, and the single-quote escape makes it inert. Keep
-  this habit for every script that shells out with game text.
-- **The trailing `&` keeps the client responsive.** Lua runs on the
-  client's event loop; a synchronous `curl` on a bad connection would
-  freeze the UI until the script watchdog killed the trigger. Backgrounded,
-  it never blocks.
+- **[`rune.http.post`](/reference/api/http/) is asynchronous.** The
+  request runs off the client's event loop and the callback runs back on
+  it, so a slow network never freezes the UI — no shell, no `curl`, and
+  it works the same on Windows.
+- **`urlencode` is still required.** Tell text is attacker-controlled
+  input going into a form body; percent-encoding keeps a hostile
+  player's `&chat_id=...` from becoming structure.
+- **The callback reports failures** instead of losing them. Drop it for
+  true fire-and-forget.
 - **Secrets:** the environment variable is the better home for the token,
   since `store.json` is plaintext on disk. The `rune.store` fallback is a
   convenience; use it knowing the trade-off.
@@ -64,7 +72,8 @@ rune.hooks.on("input", function()
 end, { priority = 10 })
 ```
 
-Platform note: `sh`, `&`, and `/dev/null` are POSIX. On Windows, run rune
-under WSL or adapt with `start /b curl ...`.
+Forward to any webhook the same way — Discord, Slack, ntfy.sh — by
+swapping the URL and body format (JSON bodies want a
+`Content-Type = "application/json"` header).
 
-**Related:** [Triggers](/scripting/triggers/) · [Hooks & Events](/scripting/hooks/) · [Groups](/scripting/groups/) · [Timers](/scripting/timers/)
+**Related:** [rune.http reference](/reference/api/http/) · [Triggers](/scripting/triggers/) · [Hooks & Events](/scripting/hooks/) · [Groups](/scripting/groups/) · [Timers](/scripting/timers/)
