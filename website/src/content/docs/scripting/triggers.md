@@ -1,6 +1,6 @@
 ---
 title: Triggers
-description: React to server output with four match modes and string or function actions that can rewrite, gag, and capture.
+description: React to server output with four match modes and string or function actions that run your own logic, send commands, and can rewrite or gag the line.
 ---
 
 A trigger fires when a line arrives from the server. Two decisions define
@@ -13,17 +13,23 @@ A string action is a canned response:
 rune.trigger.contains("You are hungry", "eat bread")
 ```
 
-A function can inspect the line and rewrite or hide it:
+A function runs your own logic when the line matches: make decisions, track
+state, send commands, call any API.
 
 ```lua
-rune.trigger.contains("You are hit", function(matches, ctx)
-    return rune.style.red(ctx.line:clean())  -- rewrite: highlight in red
+rune.trigger.regex("^Your health is (\\d+)%\\.$", function(m)
+    if tonumber(m[1]) < 30 then
+        rune.send("quaff heal")
+    end
 end)
 ```
 
-Use a string when a match should send commands and nothing else. Use a
-function when you need logic, state, or control over the line itself; only
-a function can rewrite or gag.
+A function can also shape the line itself: return a string to rewrite it
+(this is how you highlight) or `false` to gag it.
+
+Use a string when a match should send a fixed command and nothing else.
+Use a function whenever you need logic, state, or control over the line;
+only a function can do any of those.
 
 ## Creating
 
@@ -64,14 +70,13 @@ gagging are function-return features, plus the `gag` option.
 
 ## Options
 
+Triggers take the [common options](/scripting/model/#options) — `name`,
+`group`, `priority`, `once` — plus two of their own:
+
 | Option | Effect |
 |---|---|
 | `gag` | Hides matching lines (no action required). |
 | `raw` | Matches against the raw line, ANSI codes included. |
-| `name` | Unique name. Registering the same name again replaces the old trigger. |
-| `group` | Adds the trigger to a group. Toggle the set with `/group <name> on\|off`. |
-| `priority` | Order among triggers. Lower runs first (default 50). |
-| `once` | Fires a single time, then removes itself. |
 
 ## Examples
 
@@ -131,21 +136,22 @@ local h = rune.trigger.contains("hungry", "eat bread", { name = "auto-eat" })
 h:disable()  h:enable()  h:remove()
 ```
 
-By name: `rune.trigger.disable/enable/remove(name)`, and
-`rune.trigger.list()` returns everything registered. In the client,
+By name: `rune.trigger.disable/enable/remove(name)` — the full management
+suite is in the [API reference](/reference/api/#managing). In the client,
 `/triggers` shows every trigger with its state, mode, flags, group, and the
 `file:line` that registered it.
 
 ## Gotchas
 
 - Patterns are Go regexp (RE2), not Lua patterns: `\\d`, `\\w`, and `\\s`
-  work, backreferences and lookaround do not.
+  work, backreferences and lookaround do not — see
+  [rune.regex](/reference/api/regex/) for the syntax notes.
 - Prompts (partial lines) run through triggers too. Anchor with `^...$`
   when you only want complete lines.
-- A trigger that errors three times in a row is quarantined: it is disabled
-  with a notice instead of firing an error on every line. Fix the code,
-  then re-enable it with `rune.trigger.enable(name)`.
+- A trigger that errors three times in a row is
+  [quarantined](/scripting/model/#quarantine).
 
-**Related:** [Aliases](/scripting/aliases/),
+**Related:** [rune.trigger reference](/reference/api/trigger/),
+[Aliases](/scripting/aliases/),
 [Hooks & Events](/scripting/hooks/),
 [Panes](/interface/panes/)

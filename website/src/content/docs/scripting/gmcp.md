@@ -49,23 +49,20 @@ connect. Replace the handler if your server needs a different hello.
 
 ## Options
 
-Handlers ride the same registry as everything else:
-
-| Option | Effect |
-|---|---|
-| `name` | Unique name. Registering the same name again replaces the old handler. |
-| `group` | Adds the handler to a group. Toggle the set with `/group <name> on\|off`. |
-| `priority` | Order among handlers for the package. Lower runs first (default 50). |
+Handlers ride the same registry as everything else and take the
+[common options](/scripting/model/#options) `name`, `group`, and
+`priority` (order among handlers for the package).
 
 ## Managing
 
 Constructors return a handle with `:enable()`, `:disable()`, and
-`:remove()`. In the client, `/gmcp` lists negotiation state, subscriptions,
-and every handler with its source.
+`:remove()` — full signatures in the
+[rune.gmcp reference](/reference/api/gmcp/). In the client, `/gmcp` lists
+negotiation state, subscriptions, and every handler with its source.
 
 ## Debugging
 
-```
+```txt
 /gmcp                          -- negotiation state, subscriptions, handlers
 /gmcp send Char.Skills.Get {}  -- send raw JSON
 ```
@@ -83,8 +80,9 @@ end)
 
 - Malformed JSON from the server is reported once and dropped; it never
   reaches handlers.
-- A handler that errors three times in a row is quarantined: it is disabled
-  with a notice. Fix the code, then re-enable it by name.
+- A handler that errors three times in a row is
+  [quarantined](/scripting/model/#quarantine).
 
-**Related:** [HP bar from GMCP](/cookbook/hp-bar/),
+**Related:** [rune.gmcp reference](/reference/api/gmcp/),
+[HP bar from GMCP](/cookbook/hp-bar/),
 [Protocols reference](/reference/protocols/)

@@ -103,11 +103,12 @@ Full guides, cookbook recipes, and reference live at
 **[runemud.com](https://runemud.com)**:
 
 - [First session](https://runemud.com/getting-started/first-session/) and [scripting basics](https://runemud.com/getting-started/scripting-basics/)
+- [Lua API reference](https://runemud.com/reference/api/) — every `rune.*` namespace
 - [Slash commands](https://runemud.com/reference/slash-commands/) and [keyboard shortcuts](https://runemud.com/interface/input/)
 - [Migrating from another MUD client](https://runemud.com/getting-started/migrating/)
 
-In-repo references: the [Lua API](docs/lua_doc.md) and
-[architecture overview](docs/architecture.md).
+In-repo reference: the [architecture overview](docs/architecture.md).
+The API reference source lives at `website/src/content/docs/reference/api/`.
 
 ## License
 

@@ -1,7 +1,46 @@
 ---
-title: Hook Events
-description: Every event rune.hooks.on can attach to.
+title: rune.hooks
+description: Event handlers with priority ordering, plus the full catalog of data-flow and notification events.
 ---
+
+Hooks attach handlers to client events — input, output, connection
+lifecycle, GMCP, and more. For a task-oriented introduction, see
+[Hooks & Events](/scripting/hooks/).
+
+## Quick reference
+
+```lua
+rune.hooks.on(event, handler, opts?)   -- attach a handler to an event
+rune.hooks.enable(name)                -- re-enable a named handler
+rune.hooks.disable(name)               -- disable without unregistering
+rune.hooks.remove(name)                -- unregister a named handler
+rune.hooks.list()                      -- all handlers with event, priority, source
+rune.hooks.clear(event?)               -- remove handlers for one event, or all
+rune.hooks.has(event)                  -- true if the event has handlers
+rune.hooks.count(event?)               -- handlers for one event, or total
+rune.hooks.remove_group(group)         -- remove all handlers in a group
+```
+
+`on` returns a [handle](/reference/api/#handles) and accepts the
+[common options](/reference/api/#options) (`name`, `group`, `priority`).
+
+### rune.hooks.on
+
+```lua
+rune.hooks.on(event, handler, opts?) -> handle
+```
+
+- `event` (string) — an event name from the tables below.
+- `handler` (function) — receives the event's arguments; return values
+  matter only for data-flow events.
+- `opts` (table, optional) — [common options](/reference/api/#options).
+  `priority` defaults to 50; lower runs first.
+
+```lua
+rune.hooks.on("connected", function(addr)
+    rune.send("look")
+end, {name = "auto-look"})
+```
 
 ## Data-flow events
 
@@ -26,9 +65,12 @@ The core registers its own handlers at priority 100: command dispatch
 and `rune.send` on `input`, trigger processing on `output`/`prompt`,
 the `> ` styling on `echo`. For `output`/`prompt`/`echo`, register
 below 100 to run before the core, or above 100 to see its results
-(post-trigger rewrites; gagged lines never reach you). The core
-`input` handler always returns `false`, so `input` handlers must
-register below 100 to run at all.
+(post-trigger rewrites; gagged lines never reach you).
+
+:::caution
+The core `input` handler always returns `false`, so `input` handlers
+must register with a priority **below 100** to run at all.
+:::
 
 ## Notification events
 
@@ -56,4 +98,13 @@ replace them: `log-output`, `log-echo` (logging policy, priority 200),
 and `_completion_cache` / `_completion_input` (tab-completion word
 harvesting, priority 200).
 
-**Related:** [Hooks & Events](/scripting/hooks/)
+## Managing
+
+Standard registry management applies:
+`rune.hooks.enable/disable/remove(name)`, `.list()`, `.count()`,
+`.clear()`, `.remove_group(group)` — see
+[Registries](/reference/api/#managing). `/hooks` lists everything.
+
+**Related:** [Hooks & Events guide](/scripting/hooks/) ·
+[rune.trigger](/reference/api/trigger/) ·
+[rune.gmcp](/reference/api/gmcp/)

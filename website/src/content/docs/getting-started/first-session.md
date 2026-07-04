@@ -15,13 +15,13 @@ rune tls://mud.example.com:4000     # same thing
 
 Or start `rune` empty and connect from inside:
 
-```
+```txt
 /connect mud.example.com 4000
 ```
 
 ## Bookmark it
 
-```
+```txt
 /world add example mud.example.com 4000
 ```
 
@@ -45,7 +45,7 @@ the default keymap) is in [Input & History](/interface/input/).
 
 ## Log the session
 
-```
+```txt
 /log start              # writes to ~/.config/rune/logs/<timestamp>.log
 /log stop
 ```

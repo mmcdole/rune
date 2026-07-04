@@ -13,7 +13,7 @@ rune.alias.exact("cower", "hide",           { group = "coward" })
 rune.timer.every(5, "peek",                 { group = "coward" })
 ```
 
-```
+```txt
 /group coward off      -- everything above goes quiet
 /group coward on       -- and comes back, individual states preserved
 /groups                -- list groups and their state
@@ -51,6 +51,6 @@ a script builds temporary registrations.
 - A disabled bind swallows its key rather than letting it through to
   typing, so disabling a group of binds mutes those keys entirely.
 
-**Related:** [Aliases](/scripting/aliases/),
-[Triggers](/scripting/triggers/),
-[Timers](/scripting/timers/)
+**Related:** [rune.group reference](/reference/api/group/),
+[The Scripting Model](/scripting/model/),
+[Triggers](/scripting/triggers/)

@@ -65,3 +65,5 @@ lands in your session log either way.
 
 Avoid `rune.store.set("password", ...)`. `store.json` is plaintext on
 disk, and the convenience isn't worth it.
+
+**Related:** [Storage & Worlds](/scripting/storage/) · [Hooks & Events](/scripting/hooks/) · [Triggers](/scripting/triggers/)

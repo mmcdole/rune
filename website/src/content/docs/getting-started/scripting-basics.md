@@ -6,7 +6,7 @@ description: Where config lives, the edit/reload loop, and a map of the rune API
 Rune is configured in Lua. There is no separate trigger syntax or settings
 file. One script runs at startup, and everything is registered from it:
 
-```
+```txt
 ~/.config/rune/init.lua
 ```
 
@@ -51,7 +51,7 @@ When `init.lua` gets long, split it up with `require()`. Paths resolve
 relative to the requiring script, so files next to `init.lua` load without
 any path setup:
 
-```
+```txt
 ~/.config/rune/
 ├── init.lua
 ├── combat.lua
@@ -80,24 +80,26 @@ picked up on the next `/reload` just like edits to `init.lua`.
 
 Everything lives under the `rune` table. Find the task, follow the link:
 
-| To do this | Use | Covered in |
+| To do this | Guide | Full signatures |
 |---|---|---|
-| React to server output | `rune.trigger` | [Triggers](/scripting/triggers/) |
-| Shorten commands you type | `rune.alias` | [Aliases](/scripting/aliases/) |
-| Run something later, or on a schedule | `rune.timer` | [Timers](/scripting/timers/) |
-| Intercept input, output, and client events | `rune.hooks` | [Hooks & Events](/scripting/hooks/) |
-| Bind keys | `rune.bind` | [Key Bindings](/scripting/keybindings/) |
-| Add your own `/commands` | `rune.command` | [Slash Commands](/scripting/commands/) |
-| Handle GMCP data | `rune.gmcp` | [GMCP](/scripting/gmcp/) |
-| Keep data across reloads or restarts | `rune.session`, `rune.store` | [Storage & Worlds](/scripting/storage/) |
-| Toggle sets of things at once | `rune.group` | [Groups](/scripting/groups/) |
-| Lay out panes, bars, and pickers | `rune.ui`, `rune.pane` | [Layout & UI](/interface/layout/) |
-| Color and style text | `rune.style` | [Triggers](/scripting/triggers/) |
+| React to server output | [Triggers](/scripting/triggers/) | [`rune.trigger`](/reference/api/trigger/) |
+| Shorten commands you type | [Aliases](/scripting/aliases/) | [`rune.alias`](/reference/api/alias/) |
+| Run something later, or on a schedule | [Timers](/scripting/timers/) | [`rune.timer`](/reference/api/timer/) |
+| Intercept input, output, and client events | [Hooks & Events](/scripting/hooks/) | [`rune.hooks`](/reference/api/hooks/) |
+| Bind keys | [Key Bindings](/scripting/keybindings/) | [`rune.bind`](/reference/api/bind/) |
+| Add your own `/commands` | [Custom Commands](/scripting/commands/) | [`rune.command`](/reference/api/command/) |
+| Handle GMCP data | [GMCP](/scripting/gmcp/) | [`rune.gmcp`](/reference/api/gmcp/) |
+| Keep data across reloads or restarts | [Storage & Worlds](/scripting/storage/) | [Storage](/reference/api/storage/) |
+| Toggle sets of things at once | [Groups](/scripting/groups/) | [`rune.group`](/reference/api/group/) |
+| Lay out panes, bars, and pickers | [Layout & UI](/interface/layout/) | [`rune.ui`](/reference/api/ui/), [`rune.pane`](/reference/api/pane/) |
+| Log the session to a file | [Logging](/scripting/logging/) | [`rune.log`](/reference/api/log/) |
+| Color and style text | [Triggers](/scripting/triggers/) | [`rune.style`](/reference/api/style/) |
 
-The registration functions all behave the same way: each returns a handle
-with `:enable()`, `:disable()`, and `:remove()`, and each accepts the same
-options table with `name` (registering the same name again replaces the old
-entry), `group`, `priority`, and `once`.
+The registration functions all behave the same way — handles, a shared
+options table, groups, and error quarantine.
+[The Scripting Model](/scripting/model/) covers that machinery once, and
+the [API reference](/reference/api/) has full signatures for every
+`rune.*` namespace.
 
 ## The client itself is Lua
 
@@ -114,3 +116,9 @@ end, { priority = 50 })  -- runs before the default handler
 ```
 
 Anything the client does through this API, your scripts can override.
+
+## Next
+
+[The Scripting Model](/scripting/model/) explains the machinery every
+registration shares. Coming from TinTin++ or Mudlet? Start with
+[Migrating from Other Clients](/getting-started/migrating/).

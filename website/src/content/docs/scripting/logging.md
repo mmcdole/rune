@@ -5,7 +5,7 @@ description: Session transcripts that read like your screen, with a logging poli
 
 One command starts a transcript:
 
-```
+```txt
 /log start             -- ~/.config/rune/logs/<timestamp>.log
 /log start quest.log   -- or name it
 /log status
@@ -54,5 +54,6 @@ rune.hooks.on("connected", function(addr)
 end)
 ```
 
-**Related:** [Hooks & Events](/scripting/hooks/),
+**Related:** [rune.log reference](/reference/api/log/),
+[Hooks & Events](/scripting/hooks/),
 [Triggers](/scripting/triggers/)

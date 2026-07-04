@@ -68,17 +68,20 @@ too.
 
 ## Managing
 
-By name: `rune.bars.disable/enable/remove(name)`, and `rune.bars.list()`
-returns everything registered. In the client, `/bars` lists every bar with
-its state, group, and the `file:line` that registered it.
+By name: `rune.bars.disable/enable/remove(name)` — the full management
+suite is in the [API reference](/reference/api/#managing). In the client,
+`/bars` lists every bar with its state, group, and the `file:line` that
+registered it.
 
 ## Gotchas
 
 - Render functions run four times a second. Keep them cheap: precompute in
   the event that changes the data (as the GMCP example does), not in the
   renderer.
-- A renderer that errors three times in a row is quarantined like any other
-  callback. Re-registering the name gives it a fresh start.
+- A renderer that errors three times in a row is
+  [quarantined](/scripting/model/#quarantine) like any other callback.
+  Re-registering the name gives it a fresh start.
 
-**Related:** [Layout & UI](/interface/layout/),
+**Related:** [rune.ui reference](/reference/api/ui/),
+[Layout & UI](/interface/layout/),
 [Panes](/interface/panes/)

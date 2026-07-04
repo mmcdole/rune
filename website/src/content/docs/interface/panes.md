@@ -62,5 +62,6 @@ Bind a key to peek, as in the
 rune.bind("`", function() rune.pane.toggle("chat") end)
 ```
 
-**Related:** [Layout & UI](/interface/layout/),
+**Related:** [rune.pane reference](/reference/api/pane/),
+[Layout & UI](/interface/layout/),
 [Triggers](/scripting/triggers/)

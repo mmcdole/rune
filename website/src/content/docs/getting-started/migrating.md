@@ -10,7 +10,7 @@ one-liners without touching a file.
 
 A trigger you'd write like this in TinTin++:
 
-```
+```txt
 #action {%1 attacks you} {flee}
 ```
 
@@ -75,10 +75,14 @@ terminal-client muscle memory expects.
 
 ## Where things live
 
-| | |
-|---|---|
-| Config / scripts | `~/.config/rune/init.lua` (+ anything you `require`) |
-| Bookmarks & durable state | `~/.config/rune/store.json` (managed by `/world` and `rune.store`) |
-| Logs | `~/.config/rune/logs/` (via `/log`) |
+Everything lives under `~/.config/rune/` — the full path table is in
+[Installation](/getting-started/installation/#where-things-live). Your
+scripts go in `init.lua`; bookmarks and durable state in `store.json`.
 
-Full API: [lua_doc.md](https://github.com/mmcdole/rune/blob/main/docs/lua_doc.md).
+Full signatures for every `rune.*` namespace:
+[API reference](/reference/api/).
+
+## Next
+
+[Triggers](/scripting/triggers/) is where most ports start — match
+modes, captures, gagging, and rewriting in rune's terms.

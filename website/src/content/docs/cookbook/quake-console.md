@@ -59,3 +59,5 @@ rune.ui.layout({
 - `/group chat-console off` silences the mirroring without touching the
   pane or the bind.
 - For timestamps, prepend `style.gray(os.date("[%H:%M] "))` in `mirror`.
+
+**Related:** [Panes](/interface/panes/) · [Triggers](/scripting/triggers/) · [Key Bindings](/scripting/keybindings/) · [Layout & UI](/interface/layout/)

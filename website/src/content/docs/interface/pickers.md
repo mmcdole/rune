@@ -47,5 +47,6 @@ rune.bind("f3", function()
 end)
 ```
 
-**Related:** [Input & History](/interface/input/) for tab completion
+**Related:** [rune.ui.picker reference](/reference/api/picker/),
+[Input & History](/interface/input/) for tab completion
 and history navigation, [Key Bindings](/scripting/keybindings/)

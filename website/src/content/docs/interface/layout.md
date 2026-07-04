@@ -18,7 +18,7 @@ rune.ui.layout({
 Reading that: a chat pane docked on top; at the bottom, the input line,
 a separator rule, and the status bar below it.
 
-```
+```txt
 ┌─────────────────────────────┐
 │ chat pane (10 lines)        │  top dock
 ├─────────────────────────────┤
@@ -42,6 +42,8 @@ a separator rule, and the status bar below it.
   dock with `"input"`, because nothing re-adds the input line if you leave
   it out.
 - Unknown names are skipped; hidden panes and empty bars take no space.
+- A bar or pane renders only if a dock names it. Registering a renderer
+  or writing to a pane is not enough — the layout decides what appears.
 - The default layout is `bottom = { "input", "status" }`. You only need
   `rune.ui.layout` to change it.
 
@@ -65,6 +67,7 @@ current: `connected`, `address`, `scroll_mode`, `scroll_lines`, `width`,
 `height`. When your own state changes and a bar should reflect it now, call
 `rune.ui.refresh_bars()`.
 
-**Related:** [Bars](/interface/bars/),
+**Related:** [rune.ui reference](/reference/api/ui/),
+[Bars](/interface/bars/),
 [Panes](/interface/panes/),
 [Pickers](/interface/pickers/)

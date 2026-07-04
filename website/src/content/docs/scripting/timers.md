@@ -39,10 +39,8 @@ previous one fires, regardless of how long your callback takes.
 
 ## Options
 
-| Option | Effect |
-|---|---|
-| `name` | Unique name. Registering the same name again replaces the old timer. |
-| `group` | Adds the timer to a group. Toggle the set with `/group <name> on\|off`. |
+Timers take the [common options](/scripting/model/#options) `name`
+(same-name registration replaces) and `group`.
 
 ## Examples
 
@@ -73,9 +71,10 @@ h:disable()  h:enable()  h:cancel()   -- :cancel() is an alias for :remove()
 ```
 
 By name: `rune.timer.disable/enable/remove(name)` (`rune.timer.cancel` is
-the same as `remove`), and `rune.timer.list()` returns everything
-registered. In the client, `/timers` shows every timer with its state, mode
-and interval, action, group, name, and the `file:line` that registered it.
+the same as `remove`) — the full management suite is in the
+[API reference](/reference/api/#managing). In the client, `/timers` shows
+every timer with its state, mode and interval, action, group, name, and
+the `file:line` that registered it.
 
 Timers are cleared on `/reload` and re-registered when your scripts load
 again, which keeps reloads deterministic.
@@ -84,12 +83,13 @@ again, which keeps reloads deterministic.
 
 - Timer callbacks run on the client's event loop under the same watchdog as
   everything else: a callback stuck in a loop is interrupted, and one that
-  keeps erroring is quarantined.
+  keeps erroring is [quarantined](/scripting/model/#quarantine).
 - Disabling suppresses firing. A repeating timer keeps its schedule and
   resumes on re-enable. A one-shot whose moment passes while disabled is
   removed; its wake-up is spent, and re-enabling cannot revive it.
 - Sub-second intervals work (`rune.timer.every(0.25, ...)`), but every fire
   crosses into Lua, so keep fast timers cheap.
 
-**Related:** [Groups](/scripting/groups/),
+**Related:** [rune.timer reference](/reference/api/timer/),
+[Groups](/scripting/groups/),
 [Hooks & Events](/scripting/hooks/)

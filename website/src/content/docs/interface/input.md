@@ -14,9 +14,12 @@ editing. None of it needs configuration, and all of it can be rebound.
 |---|---|
 | `Ctrl+U` | Clear the input line |
 | `Escape` | Clear the input line |
-| `Ctrl+W`, `Alt+Backspace`, `Ctrl+Backspace` | Delete the word before the cursor |
+| `Ctrl+W`, `Alt+Backspace` | Delete the word before the cursor |
 | `Alt+Left`/`Alt+Right`, `Ctrl+Left`/`Ctrl+Right` | Move the cursor by word |
 | `Ctrl+C` | Clear the input line; pressed twice on an empty line, quit |
+
+(Most terminals send `Ctrl+Backspace` as `Ctrl+H`, so it can't be bound
+distinctly — use `Ctrl+W` or `Alt+Backspace` to delete words.)
 
 ## Edit in $EDITOR
 
@@ -57,26 +60,13 @@ standard convention in terminal apps like tmux.
 
 ## The default keymap
 
-Every binding below is registered with `rune.bind` in the core scripts.
-Rebind or remove any of them in your `init.lua`; see
-[Key Bindings](/scripting/keybindings/). `Enter` is the one fixed
-key: it always submits the input line.
+Every default binding is registered with `rune.bind` in the core scripts —
+rebind or remove any of them in your `init.lua` (see
+[Key Bindings](/scripting/keybindings/)). `Enter` is the one fixed key: it
+always submits the input line. The full keymap table is in the
+[rune.bind reference](/reference/api/bind/#default-keymap).
 
-| Key | Action |
-|---|---|
-| `Up` / `Down` | History navigation (prefix-matching) |
-| `Ctrl+R` | History search (picker) |
-| `Ctrl+T` | Alias search (picker) |
-| `/` | Slash command picker (on an empty line) |
-| `Tab` / `Shift+Tab` | Completion cycling |
-| `Ctrl+E` | Edit input in `$EDITOR` |
-| `Ctrl+U`, `Escape` | Clear the input line |
-| `Ctrl+W`, `Alt+Backspace`, `Ctrl+Backspace` | Delete previous word |
-| `Alt+Left`/`Alt+Right`, `Ctrl+Left`/`Ctrl+Right` | Word navigation |
-| `PageUp` / `PageDown` | Scroll output |
-| `Home` / `End` | Jump to top/bottom of output |
-| `Ctrl+C` | Clear input; twice on an empty line, quit |
-
-**Related:** [Key Bindings](/scripting/keybindings/) for binding your
+**Related:** [rune.input reference](/reference/api/input/),
+[Key Bindings](/scripting/keybindings/) for binding your
 own, [Pickers](/interface/pickers/) for the overlay UI behind
 `Ctrl+R` and `/`

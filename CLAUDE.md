@@ -114,7 +114,10 @@ Bar tick (250ms)            -> Session -> rune.bars._render_all(width) -> UI bar
 
 ## Lua API (rune namespace) - highlights
 
-Full reference: `docs/lua_doc.md`. Go primitives (`rune._*`) are internal.
+Full reference: `website/src/content/docs/reference/api/` (one page per
+namespace; published at runemud.com/reference/api/). A new public `rune.*`
+function must be added there or `lua/api_docs_coverage_test.go` fails.
+Go primitives (`rune._*`) are internal.
 
 - **Core**: `rune.send`, `rune.send_raw`, `rune.echo`, `rune.connect`, `rune.disconnect`, `rune.load`, `rune.reload`, `rune.quit`, `rune.config_dir`, `rune.version`. Connect addresses take an optional scheme: `host:port` (plain, default), `tls://host:port`, `tls+insecure://host:port` (self-signed certs)
 - **Registries** (all return handles with `:enable/:disable/:remove/:name/:group`; opts `{name, group, priority, once}`):

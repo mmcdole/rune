@@ -66,4 +66,7 @@ rune.ui.bar("swings", function() return "swings: " .. swings end)
 rune.ui.layout({ bottom = { "swings", "input", "status" } })
 ```
 
-The layout line is required: a bar renders only if a layout dock names it.
+The layout line is required: a bar renders only if a
+[layout](/interface/layout/) dock names it.
+
+**Related:** [Triggers](/scripting/triggers/) · [Groups](/scripting/groups/) · [Bars](/interface/bars/)

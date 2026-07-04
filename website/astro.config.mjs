@@ -4,6 +4,9 @@ import starlight from '@astrojs/starlight';
 // https://astro.build/config
 export default defineConfig({
   site: 'https://runemud.com',
+  redirects: {
+    '/reference/hook-events/': '/reference/api/hooks/',
+  },
   integrations: [
     starlight({
       title: 'ᚱune',
@@ -30,12 +33,13 @@ export default defineConfig({
         {
           label: 'Scripting',
           items: [
-            { label: 'Aliases', slug: 'scripting/aliases' },
+            { label: 'The Scripting Model', slug: 'scripting/model' },
             { label: 'Triggers', slug: 'scripting/triggers' },
+            { label: 'Aliases', slug: 'scripting/aliases' },
             { label: 'Timers', slug: 'scripting/timers' },
             { label: 'Hooks & Events', slug: 'scripting/hooks' },
             { label: 'Key Bindings', slug: 'scripting/keybindings' },
-            { label: 'Slash Commands', slug: 'scripting/commands' },
+            { label: 'Custom Commands', slug: 'scripting/commands' },
             { label: 'Groups', slug: 'scripting/groups' },
             { label: 'GMCP', slug: 'scripting/gmcp' },
             { label: 'Storage & Worlds', slug: 'scripting/storage' },
@@ -65,8 +69,32 @@ export default defineConfig({
         {
           label: 'Reference',
           items: [
+            {
+              label: 'Lua API',
+              collapsed: true,
+              items: [
+                { label: 'Overview', slug: 'reference/api' },
+                { label: 'Core', slug: 'reference/api/core' },
+                { label: 'State & Lines', slug: 'reference/api/state-lines' },
+                { label: 'rune.style', slug: 'reference/api/style' },
+                { label: 'rune.regex', slug: 'reference/api/regex' },
+                { label: 'rune.trigger', slug: 'reference/api/trigger' },
+                { label: 'rune.alias', slug: 'reference/api/alias' },
+                { label: 'rune.timer', slug: 'reference/api/timer' },
+                { label: 'rune.hooks', slug: 'reference/api/hooks' },
+                { label: 'rune.bind', slug: 'reference/api/bind' },
+                { label: 'rune.command', slug: 'reference/api/command' },
+                { label: 'rune.group', slug: 'reference/api/group' },
+                { label: 'rune.gmcp', slug: 'reference/api/gmcp' },
+                { label: 'rune.input', slug: 'reference/api/input' },
+                { label: 'Storage', slug: 'reference/api/storage' },
+                { label: 'rune.log', slug: 'reference/api/log' },
+                { label: 'rune.ui', slug: 'reference/api/ui' },
+                { label: 'rune.ui.picker', slug: 'reference/api/picker' },
+                { label: 'rune.pane', slug: 'reference/api/pane' },
+              ],
+            },
             { label: 'Slash Commands', slug: 'reference/slash-commands' },
-            { label: 'Hook Events', slug: 'reference/hook-events' },
             { label: 'Protocols', slug: 'reference/protocols' },
           ],
         },

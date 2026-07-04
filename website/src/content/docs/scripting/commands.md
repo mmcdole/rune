@@ -1,5 +1,5 @@
 ---
-title: Slash Commands
+title: Custom Slash Commands
 description: Add your own /commands. They join /help and the command picker automatically.
 ---
 
@@ -25,9 +25,9 @@ as its registry name.
 
 ## Options
 
-| Option | Effect |
-|---|---|
-| `group` | Adds the command to a group. Toggle the set with `/group <name> on\|off`. |
+Commands take the [common option](/scripting/model/#options) `group`.
+The command name doubles as the registry `name`, so re-adding a name
+replaces it.
 
 ## Examples
 
@@ -58,25 +58,20 @@ end, "Save, then exit")
 
 ## Managing
 
-```lua
-rune.command.remove(name)
-rune.command.enable(name)   rune.command.disable(name)
-rune.command.get(name)      -- the raw handler function
-rune.command.list()
-```
-
-In the client, `/help` lists every command, including script-added ones,
-with descriptions and sources.
+By name: `rune.command.enable/disable/remove(name)`, plus
+`rune.command.get(name)` for the raw handler — full signatures in the
+[rune.command reference](/reference/api/command/). In the client, `/help`
+lists every command, including script-added ones, with descriptions and
+sources.
 
 ## Gotchas
 
-- Commands are quarantined individually: a handler that errors three times
-  in a row is disabled with a notice and can never take down input
-  handling. A disabled command still consumes its input (with an error
-  message). Fix the code, then re-enable it with
-  `rune.command.enable(name)`.
+- Commands are [quarantined](/scripting/model/#quarantine) individually:
+  a broken handler can never take down input handling. A disabled command
+  still consumes its input (with an error message).
 - Unknown commands report `[Error] Unknown command: /x` and are never sent
   to the server. Use `/raw /text` if a game actually wants a literal slash.
 
-**Related:** [Aliases](/scripting/aliases/),
-[Slash command reference](/reference/slash-commands/)
+**Related:** [rune.command reference](/reference/api/command/),
+[Aliases](/scripting/aliases/),
+[Built-in slash commands](/reference/slash-commands/)

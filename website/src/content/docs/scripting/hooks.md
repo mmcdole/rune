@@ -50,10 +50,11 @@ end, { priority = 1 })
 
 ## Notification events
 
-All handlers run and returns are ignored: `ready`, `connecting` (address),
-`connected` (address), `disconnecting`, `disconnected`, `reloading`,
-`reloaded`, `loaded` (path), `error` (message), `input_changed`,
-`gmcp` (catch-all: `package, data, raw`), and `gmcp_enabled`.
+All handlers run and returns are ignored. The ones you'll reach for
+most: `connected` (address), `disconnected`, and `ready` (boot and
+reload complete). The full catalog — connection lifecycle, reload,
+errors, GMCP — is in the
+[rune.hooks reference](/reference/api/hooks/#notification-events).
 
 ```lua
 rune.hooks.on("connected", function(addr)
@@ -72,28 +73,26 @@ core `input` handler always consumes, so `input` handlers above priority
 
 ## Options
 
-| Option | Effect |
-|---|---|
-| `name` | Unique name. Registering the same name again replaces the old handler. |
-| `group` | Adds the handler to a group. Toggle the set with `/group <name> on\|off`. |
-| `priority` | Order among handlers for the event. Lower runs first (default 50). |
+Hooks take the [common options](/scripting/model/#options) `name`,
+`group`, and `priority` (order among handlers for the event, lower
+first, default 50).
 
 ## Managing
 
 Every constructor returns a handle with `:enable()`, `:disable()`, and
-`:remove()`. By name: `rune.hooks.disable/enable/remove(name)`, and
-`rune.hooks.list()` returns everything registered. In the client, `/hooks`
-lists every handler, including the core's own, since the client registers
-its behavior through the same API.
+`:remove()`. By name: `rune.hooks.disable/enable/remove(name)` — the full
+management suite is in the [API reference](/reference/api/#managing). In
+the client, `/hooks` lists every handler, including the core's own, since
+the client registers its behavior through the same API.
 
 ## Gotchas
 
 - A handler that throws is skipped for that line and reported once; it
-  cannot abort the chain. Three consecutive failures quarantine it. Fix the
-  code, then re-enable it with `rune.hooks.enable(name)`.
+  cannot abort the chain. Three consecutive failures
+  [quarantine](/scripting/model/#quarantine) it.
 - Handlers may register or remove hooks mid-dispatch safely; the chain
   iterates a snapshot.
 
-**Related:** [Triggers](/scripting/triggers/),
-[GMCP](/scripting/gmcp/),
-[Hook events reference](/reference/hook-events/)
+**Related:** [rune.hooks reference](/reference/api/hooks/),
+[Triggers](/scripting/triggers/),
+[GMCP](/scripting/gmcp/)

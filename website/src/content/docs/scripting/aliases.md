@@ -86,12 +86,9 @@ condition.
 
 ## Options
 
-| Option | Effect |
-|---|---|
-| `name` | Unique name. Registering the same name again replaces the old alias. |
-| `group` | Adds the alias to a group. Toggle the set with `/group <name> on\|off`. |
-| `priority` | Order among regex aliases. Lower runs first (default 50). |
-| `once` | Fires a single time, then removes itself. |
+Aliases take the [common options](/scripting/model/#options): `name`,
+`group`, `priority` (order among regex aliases), and `once`. No
+alias-specific extras.
 
 ## Examples
 
@@ -140,9 +137,10 @@ local h = rune.alias.exact("k", "kill", { name = "quick-kill" })
 h:disable()  h:enable()  h:remove()
 ```
 
-By name: `rune.alias.disable/enable/remove(name)`, and `rune.alias.list()`
-returns everything registered. In the client, `/aliases` shows every alias
-with its state, group, and the `file:line` that registered it.
+By name: `rune.alias.disable/enable/remove(name)` — the full management
+suite is in the [API reference](/reference/api/#managing). In the client,
+`/aliases` shows every alias with its state, group, and the `file:line`
+that registered it.
 
 ## Gotchas
 
@@ -152,11 +150,11 @@ with its state, group, and the `file:line` that registered it.
 - Patterns are Go regexp (RE2), not Lua patterns: `\\d` and `\\w` work,
   backreferences do not. Test a pattern with
   `/lua rune.echo(tostring(rune.regex.match("^k (.+)$", "k rat")[1]))`.
-- An alias that errors three times in a row is quarantined: it is disabled
-  with a notice instead of breaking your input on every line. Fix the code,
-  then re-enable it with `rune.alias.enable(name)`.
+- An alias that errors three times in a row is
+  [quarantined](/scripting/model/#quarantine).
 - Alias expansion recurses (an alias can produce another alias's input)
   with a depth limit of 100 to catch loops.
 
-**Related:** [Triggers](/scripting/triggers/),
+**Related:** [rune.alias reference](/reference/api/alias/),
+[Triggers](/scripting/triggers/),
 [Groups](/scripting/groups/)

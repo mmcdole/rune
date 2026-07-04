@@ -36,18 +36,12 @@ local prefs = rune.store.get("prefs") or {}
 ```
 
 `rune.store.set(key, nil)` (or `rune.store.delete(key)`) removes a key.
-Unstorable values (functions, cycles, mixed-key tables) return `nil, err`
-instead of writing. A corrupt file is preserved as `store.json.bak` at
-boot, never silently discarded.
-
-`store.json` is plaintext on disk, so keep passwords out of it. The
-auto-login recipe (linked below) shows alternatives.
 
 ## Worlds
 
 Named bookmarks, stored durably under the `"worlds"` key:
 
-```
+```txt
 /world add viking vikingmud.org 2001
 /world add secure mud.example.com 4000 tls
 /worlds
@@ -66,5 +60,16 @@ rune.world.remove(name)
 The `opts` table is yours: the [auto-login recipe](/cookbook/autologin/)
 stores a character name per world and reads it back on connect.
 
-**Related:** [Slash command reference](/reference/slash-commands/)
+## Gotchas
+
+- Unstorable values (functions, cycles, mixed-key tables) return
+  `nil, err` instead of writing — check the return when storing anything
+  built at runtime.
+- A corrupt `store.json` is preserved as `store.json.bak` at boot and
+  reported, never silently discarded.
+- `store.json` is plaintext on disk, so keep passwords out of it. The
+  [auto-login recipe](/cookbook/autologin/) shows alternatives.
+
+**Related:** [Storage reference](/reference/api/storage/),
+[Slash command reference](/reference/slash-commands/)
 for the full `/world` and `/connect` forms

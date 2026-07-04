@@ -29,12 +29,9 @@ normally; press `j` on an empty line and it acts as a hotkey.
 
 ## Options
 
-| Option | Effect |
-|---|---|
-| `name` | Unique name. Registering the same name again replaces the old bind. |
-| `group` | Adds the bind to a group. Toggle the set with `/group <name> on\|off`. |
-
-Rebinding a key always replaces whatever was on it, named or not.
+Binds take the [common options](/scripting/model/#options) `name` and
+`group`. Rebinding a key always replaces whatever was on it, named or
+not.
 
 ## Examples
 
@@ -57,24 +54,25 @@ rune.bind("ctrl+w", function() rune.input.delete_word() end)
 
 The default keymap (history navigation, pickers, completion, scrolling,
 `$EDITOR` editing) is registered with `rune.bind` in the core scripts;
-the full table is in [Input & History](/interface/input/). Rebinding
-a key in your `init.lua` replaces the default.
+the full table is in the [rune.bind reference](/reference/api/bind/#default-keymap).
+Rebinding a key in your `init.lua` replaces the default.
 
 ## Managing
 
-By name: `rune.binds.disable/enable/remove(name)`, and `rune.binds.list()`
-returns everything registered. In the client, `/binds` lists every binding
-with its state, group, and the `file:line` that registered it.
+By name: `rune.binds.disable/enable/remove(name)` — the full management
+suite is in the [API reference](/reference/api/#managing). In the client,
+`/binds` lists every binding with its state, group, and the `file:line`
+that registered it.
 
 ## Gotchas
 
 - A disabled bind (or one in a disabled group) swallows its key without
   running the callback; the key does not fall through to typing. Use
   `rune.unbind(key)` to give the key back to the input line.
-- A callback that errors three times in a row is quarantined: it is
-  disabled with a notice. Fix the code, then re-enable it with
-  `rune.binds.enable(name)`.
+- A callback that errors three times in a row is
+  [quarantined](/scripting/model/#quarantine).
 
-**Related:** [Input & History](/interface/input/),
+**Related:** [rune.bind reference](/reference/api/bind/),
+[Input & History](/interface/input/),
 [Pickers](/interface/pickers/),
 [Groups](/scripting/groups/)

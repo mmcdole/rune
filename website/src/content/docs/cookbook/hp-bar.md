@@ -51,3 +51,5 @@ rune.ui.layout({ bottom = { "vitals", "input", "status" } })
   change.
 - Field names (`sp`/`maxsp` here) vary by game; `/gmcp` and the catch-all
   `"gmcp"` hook show what yours sends.
+
+**Related:** [Bars](/interface/bars/) · [GMCP](/scripting/gmcp/) · [Layout & UI](/interface/layout/)

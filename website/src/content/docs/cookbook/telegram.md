@@ -66,3 +66,5 @@ end, { priority = 10 })
 
 Platform note: `sh`, `&`, and `/dev/null` are POSIX. On Windows, run rune
 under WSL or adapt with `start /b curl ...`.
+
+**Related:** [Triggers](/scripting/triggers/) · [Hooks & Events](/scripting/hooks/) · [Groups](/scripting/groups/) · [Timers](/scripting/timers/)
