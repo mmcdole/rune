@@ -8,7 +8,7 @@ import (
 //
 // Go only performs the request (off the session goroutine) and
 // delivers the outcome through Engine.OnHTTPResult; the Lua http
-// module (62_http.lua) owns the id -> callback mapping and all
+// module (80_http.lua) owns the id -> callback mapping and all
 // argument policy, so callback state lives in exactly one place and
 // dies with the VM on reload.
 func (e *Engine) registerHTTPFuncs() {

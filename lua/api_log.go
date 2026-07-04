@@ -4,7 +4,7 @@ import glua "github.com/yuin/gopher-lua"
 
 // registerLogFuncs registers rune._log.* primitives.
 // The public rune.log API and the hooks that decide what gets written
-// are defined in Lua (57_log.lua). Go only owns the file handle, so an
+// are defined in Lua (60_log.lua). Go only owns the file handle, so an
 // active log survives /reload.
 func (e *Engine) registerLogFuncs() {
 	log := e.L.NewTable()

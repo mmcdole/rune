@@ -74,7 +74,7 @@ type Host interface {
 
 	// Logging: Go owns the file handle so an active log survives
 	// /reload and is flushed/closed on exit. WHAT gets logged (which
-	// lines, stripping, headers) is Lua policy (lua/core/57_log.lua).
+	// lines, stripping, headers) is Lua policy (lua/core/60_log.lua).
 	LogStart(path string) (string, error) // opens (append); returns resolved path
 	LogStop() bool                        // closes; reports whether a log was open
 	LogWrite(text string)                 // appends one line; no-op when inactive
@@ -82,7 +82,7 @@ type Host interface {
 
 	// HTTP: perform req off the session goroutine and deliver the
 	// outcome back on it via Engine.OnHTTPResult with the same id.
-	// The id -> callback mapping is Lua state (lua/core/62_http.lua),
+	// The id -> callback mapping is Lua state (lua/core/80_http.lua),
 	// so pending callbacks die with the VM on /reload; a late result
 	// for a stale id is dropped there.
 	HTTPRequest(id int, req HTTPRequest)

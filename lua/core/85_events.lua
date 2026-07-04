@@ -1,6 +1,6 @@
 -- Default System Event Handlers
 -- Users can add handlers or override with lower priority.
--- The status bar (75_ui.lua) renders reactively from rune.state, so
+-- The status bar (95_ui.lua) renders reactively from rune.state, so
 -- these handlers only produce the scrollback notices.
 
 -- Local echo styling. This is the only place the "> " prefix and its
