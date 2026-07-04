@@ -99,7 +99,7 @@ function rune.command.list()
 end
 
 -- /connect - three forms, resolved in order:
---   no args              -> picker over saved worlds (58_worlds.lua)
+--   no args              -> picker over saved worlds (65_worlds.lua)
 --   <world name>         -> saved world's address
 --   <host> <port> [tls|tls+insecure], or a bare address ("host:port",
 --                           optionally with a scheme) -> direct

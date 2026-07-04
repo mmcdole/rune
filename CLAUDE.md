@@ -57,7 +57,8 @@ event/event.go                - Session event types and payloads
 session/                      - Session: event loop, implements lua.Host
   session.go                  - Orchestrator, Network interface, boot
   lua_*.go                    - Host implementation (network, ui, timers,
-                                system, history, session, store, log, state)
+                                system, history, session, store, log, http,
+                                state)
 lua/                          - Lua runtime package
   engine.go                   - Engine: wraps gopher-lua, watchdog, dispatch
   api_*.go                    - rune._* primitive registration
@@ -104,13 +105,14 @@ Bar tick (250ms)            -> Session -> rune.bars._render_all(width) -> UI bar
 - `45_aliases.lua` - Aliases (exact + regex)
 - `50_triggers.lua` - Triggers (exact/starts/contains/regex, gag, raw)
 - `55_commands.lua` - Slash commands (registry-based; `rune.command.dispatch` quarantines each command individually; `/help` is generated from the registry)
-- `57_log.lua` - Session logging (`rune.log`, the `log-output`/`log-echo` policy hooks, `/log`); the file handle is Go-owned so logging survives `/reload`
-- `58_worlds.lua` - World bookmarks (`rune.world`, `/world`, `/worlds`), stored durably via `rune.store`
-- `59_gmcp.lua` - GMCP policy (`rune.gmcp` handlers/subscriptions on the shared registry, the Core.Hello handshake on `"gmcp_enabled"`, `/gmcp`); Go owns the option-201 transport and JSON bridge
-- `60_send.lua` - Command expansion (`;` splitting, `#N` repeats anchored at command position), core input/output/prompt handlers
-- `65_events.lua` - Default system event handlers (including the `"echo"` styler)
-- `70_input.lua` - Input wrappers, history navigation, word ops, tab completion
-- `75_ui.lua` - Panes, status bar, default binds and pickers
+- `60_log.lua` - Session logging (`rune.log`, the `log-output`/`log-echo` policy hooks, `/log`); the file handle is Go-owned so logging survives `/reload`
+- `65_worlds.lua` - World bookmarks (`rune.world`, `/world`, `/worlds`), stored durably via `rune.store`
+- `70_gmcp.lua` - GMCP policy (`rune.gmcp` handlers/subscriptions on the shared registry, the Core.Hello handshake on `"gmcp_enabled"`, `/gmcp`); Go owns the option-201 transport and JSON bridge
+- `75_send.lua` - Command expansion (`;` splitting, `#N` repeats anchored at command position), core input/output/prompt handlers
+- `80_http.lua` - Async HTTP (`rune.http.get/post`; owns the id→callback map, Go only performs requests)
+- `85_events.lua` - Default system event handlers (including the `"echo"` styler)
+- `90_input.lua` - Input wrappers, history navigation, word ops, tab completion
+- `95_ui.lua` - Panes, status bar, default binds and pickers
 
 ## Lua API (rune namespace) - highlights
 
@@ -135,8 +137,9 @@ Go primitives (`rune._*`) are internal.
 - **State**: `rune.state` (read-only proxy: connected, address, scroll_mode, scroll_lines, width, height)
 - **Storage** (two Go-owned tiers; the name encodes the lifetime): `rune.session.set/get/delete` - string store that survives `/reload` but not exit; `rune.store.set/get/delete` - durable store backed by `<config>/store.json` (atomic write-through), values may be strings/numbers/booleans/JSON-able tables, `set(key, nil)` deletes, unstorable values return `nil, err`
 - **Worlds**: `rune.world.add/remove/get/list` - named server bookmarks in `rune.store` under `"worlds"`; `/connect <name>` resolves them first, bare `/connect` opens a picker over them
-- **Logging**: `rune.log.start/stop/status/write` - session log to file. The handle is Go-owned (survives `/reload`, closed on exit); what gets written is Lua policy in `57_log.lua` (post-trigger output + input echo, ANSI-stripped; gagged lines and prompts excluded)
+- **Logging**: `rune.log.start/stop/status/write` - session log to file. The handle is Go-owned (survives `/reload`, closed on exit); what gets written is Lua policy in `60_log.lua` (post-trigger output + input echo, ANSI-stripped; gagged lines and prompts excluded)
 - **GMCP**: `rune.gmcp.on(package, handler, opts?)` (registry-based: quarantine, groups, source attribution), `rune.gmcp.send(package, value?)` (JSON-able Lua values), `send_raw`, `subscribe/unsubscribe` (maintains `Core.Supports.Set`), `is_enabled`. Handlers get `(decoded_data, package)`; package matching is case-insensitive. Malformed server JSON is reported and dropped in Go
+- **HTTP**: `rune.http.get(url, opts?, callback?)` / `rune.http.post(url, body, opts?, callback?)` - async; Go performs the request off the session goroutine and the callback runs back on it via `AsyncResult` (under the watchdog). `callback(response, err)`; non-2xx is a response, not an error. Pending callbacks are Lua state and die on `/reload`. 30s default timeout, 5MB body cap, http/https only
 - **Style**: `rune.style.red/green/yellow/.../bold/dim/inverse`
 - **Lines**: output/prompt handlers receive line objects (`:raw()`, `:clean()`); `rune.line.new(text)` builds one
 - **History**: `rune.history.get/add`
@@ -161,7 +164,7 @@ User scripts auto-load from `~/.config/rune/init.lua` at startup.
 
 ## Telnet Notes
 
-The default compatibility table advertises ONLY implemented options: Echo, SGA, EOR, TTYPE/MTTS, NAWS, CHARSET, NEW-ENVIRON/MNES (identity responders in `network/negotiate.go` - pure functions, byte-exact tests), MCCP2 (zlib read path in client.go; the source is a byte-exact `bufio.Reader`, so a clean stream end resumes plain telnet), and GMCP (option 201; framing in Go, policy in `59_gmcp.lua`). Never `Support()` an option without implementing its behavior - agreeing to an option without honoring its subnegotiations breaks real servers (MCCP3, MSSP, ZMP, Linemode stay refused). All socket writes go through the connection's single writeLoop. The parser accepts subnegotiations for options enabled on either side (server-offered GMCP/MCCP are remote; client-answered TTYPE/NAWS are local).
+The default compatibility table advertises ONLY implemented options: Echo, SGA, EOR, TTYPE/MTTS, NAWS, CHARSET, NEW-ENVIRON/MNES (identity responders in `network/negotiate.go` - pure functions, byte-exact tests), MCCP2 (zlib read path in client.go; the source is a byte-exact `bufio.Reader`, so a clean stream end resumes plain telnet), and GMCP (option 201; framing in Go, policy in `70_gmcp.lua`). Never `Support()` an option without implementing its behavior - agreeing to an option without honoring its subnegotiations breaks real servers (MCCP3, MSSP, ZMP, Linemode stay refused). All socket writes go through the connection's single writeLoop. The parser accepts subnegotiations for options enabled on either side (server-offered GMCP/MCCP are remote; client-answered TTYPE/NAWS are local).
 
 ## Releasing
 

@@ -22,6 +22,7 @@ task-oriented introduction, start with
 | `rune.command` | [rune.command](/reference/api/command/) | Custom `/commands` |
 | `rune.group` | [rune.group](/reference/api/group/) | Batch enable/disable across registries |
 | `rune.gmcp` | [rune.gmcp](/reference/api/gmcp/) | GMCP handlers, sending, subscriptions |
+| `rune.http` | [rune.http](/reference/api/http/) | Async HTTP requests with callbacks |
 | `rune.input`, `rune.history` | [rune.input](/reference/api/input/) | The input line and command history |
 | `rune.session`, `rune.store`, `rune.world` | [Storage](/reference/api/storage/) | Session and durable storage; world bookmarks |
 | `rune.log` | [rune.log](/reference/api/log/) | Session logging |
