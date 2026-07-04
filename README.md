@@ -53,6 +53,9 @@ cd rune
 go build ./cmd/rune/
 ```
 
+See the [installation guide](https://runemud.com/getting-started/installation/)
+for details.
+
 ## Quick Start
 
 Connect straight from your shell:
@@ -71,31 +74,18 @@ Then, inside the client:
 /help                                      everything else
 ```
 
-Coming from TinTin++ or Mudlet? See the
-[migration guide](docs/migrating.md).
-
-## Configuration
-
-User scripts are loaded from `~/.config/rune/init.lua` at startup.
-
-Example `init.lua`:
+User scripts load from `~/.config/rune/init.lua` at startup:
 
 ```lua
--- Simple alias
-rune.alias.exact("hp", "cast 'heal' self")
-
--- Regex alias with captures
+-- Alias with regex captures
 rune.alias.regex("^kill (.+)$", "attack %1; murder %1")
 
--- Trigger: rewrite the line to highlight damage
+-- Trigger: highlight a line in red
 rune.trigger.contains("You are hit", function(matches, ctx)
     return rune.style.red(ctx.line:clean())
 end)
 
--- Repeating timer
-rune.timer.every(60, "save", { name = "autosave" })
-
--- GMCP: subscribe to vitals and react to them
+-- GMCP: warn on low health
 rune.gmcp.subscribe("Char")
 rune.gmcp.on("Char.Vitals", function(data)
     if data.hp and data.maxhp and data.hp < data.maxhp * 0.25 then
@@ -104,56 +94,20 @@ rune.gmcp.on("Char.Vitals", function(data)
 end)
 ```
 
-## Keyboard Shortcuts
-
-| Key | Action |
-|-----|--------|
-| `Up/Down` | History navigation (prefix-matching) |
-| `Tab` | Cycle through completions |
-| `Ctrl+R` | Search history |
-| `Ctrl+T` | Search aliases |
-| `/` | Slash command picker |
-| `Ctrl+E` | Open input in $EDITOR |
-| `PageUp/PageDown` | Scroll output |
-| `Mouse wheel` | Scroll output |
-| `Ctrl+C` (2x) | Quit |
-
-The mouse is captured for scrolling, so select text with **shift+drag**
-(the standard terminal convention, as in tmux or htop).
-
-## Slash Commands
-
-| Command | Description |
-|---------|-------------|
-| `/connect [world \| host port [tls\|tls+insecure] \| address]` | Connect; no arguments opens the world picker |
-| `/disconnect` | Close connection |
-| `/reconnect` | Reconnect to last server (survives restarts) |
-| `/world add\|remove\|list` | Manage world bookmarks |
-| `/worlds` | List saved worlds |
-| `/log start [file]\|stop\|status` | Log the session to a file |
-| `/load <path>` | Load a Lua script |
-| `/reload` | Reload all scripts |
-| `/lua <code>` | Execute Lua inline |
-| `/aliases`, `/triggers`, `/timers` | List registrations |
-| `/hooks`, `/binds`, `/bars` | List registrations |
-| `/groups` | List groups and their state |
-| `/group <name> on\|off` | Toggle a group |
-| `/gmcp [send <package> [json]]` | GMCP status, or send a message for debugging |
-| `/raw <text>` | Send without alias expansion |
-| `/echo <text>` | Print locally (never sent to the server) |
-| `/test <line>` | Simulate server output against your triggers |
-| `/version` | Show client version |
-| `/help` | Show all commands |
-| `/quit` | Exit |
+The [scripting basics](https://runemud.com/getting-started/scripting-basics/)
+guide picks up from here.
 
 ## Documentation
 
 Full guides, cookbook recipes, and reference live at
-**[runemud.com](https://runemud.com)**. In-repo:
+**[runemud.com](https://runemud.com)**:
 
-- [Lua API Reference](docs/lua_doc.md)
-- [Migrating from TinTin++/Mudlet](docs/migrating.md)
-- [Architecture Overview](docs/architecture.md)
+- [First session](https://runemud.com/getting-started/first-session/) and [scripting basics](https://runemud.com/getting-started/scripting-basics/)
+- [Slash commands](https://runemud.com/reference/slash-commands/) and [keyboard shortcuts](https://runemud.com/interface/input/)
+- [Migrating from another MUD client](https://runemud.com/getting-started/migrating/)
+
+In-repo references: the [Lua API](docs/lua_doc.md) and
+[architecture overview](docs/architecture.md).
 
 ## License
 
