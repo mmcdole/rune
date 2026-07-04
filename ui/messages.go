@@ -108,6 +108,10 @@ type ShowPickerMsg struct {
 	// Inline mode: picker filters based on input content, doesn't trap keys.
 	// Modal mode (default): picker captures keyboard and has its own search field.
 	Inline bool
+	// DismissOnSpace closes an inline picker as soon as the input contains
+	// a space - for pickers over single-token items (slash commands) where
+	// a space means the user has committed and is typing arguments.
+	DismissOnSpace bool
 }
 
 // SetInputMsg sets the input line content.

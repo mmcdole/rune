@@ -70,3 +70,145 @@ func TestMouseNonWheelEventsIgnored(t *testing.T) {
 		t.Fatal("non-wheel mouse event moved the viewport")
 	}
 }
+
+// newInlinePickerModel builds a model with an inline picker open over a
+// command-style item list and the input seeded with text, returning the
+// outbound channel so tests can observe picker cancel messages.
+func newInlinePickerModel(t *testing.T, dismissOnSpace bool, input string) (Model, chan ui.UIEvent) {
+	t.Helper()
+
+	inputChan := make(chan string, 16)
+	outbound := make(chan ui.UIEvent, 64)
+	m := NewModel(inputChan, outbound)
+
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = next.(Model)
+
+	next, _ = m.Update(ui.ShowPickerMsg{
+		Items: []ui.PickerItem{
+			{Text: "/connect", Value: "/connect"},
+			{Text: "/disconnect", Value: "/disconnect"},
+		},
+		CallbackID:     "cb1",
+		Inline:         true,
+		DismissOnSpace: dismissOnSpace,
+	})
+	m = next.(Model)
+
+	next, _ = m.Update(ui.SetInputMsg(input))
+	m = next.(Model)
+
+	if m.inputMode != ModePickerInline {
+		t.Fatalf("expected inline picker mode after setup, got %v", m.inputMode)
+	}
+	drainPickerCancels(outbound) // discard setup noise
+	return m, outbound
+}
+
+// drainPickerCancels empties the outbound channel and returns any
+// picker cancellation messages (Accepted == false) it contained.
+func drainPickerCancels(outbound chan ui.UIEvent) []ui.PickerSelectMsg {
+	var cancels []ui.PickerSelectMsg
+	for {
+		select {
+		case ev := <-outbound:
+			if sel, ok := ev.(ui.PickerSelectMsg); ok && !sel.Accepted {
+				cancels = append(cancels, sel)
+			}
+		default:
+			return cancels
+		}
+	}
+}
+
+// TestInlinePickerDismissesOnSpace verifies a dismiss_on_space picker
+// closes (mode reset + callback cancelled) as soon as the user types a
+// space to start arguments - the fix for issue #3.
+func TestInlinePickerDismissesOnSpace(t *testing.T) {
+	m, outbound := newInlinePickerModel(t, true, "/connect")
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}})
+	m = next.(Model)
+
+	if m.inputMode != ModeNormal {
+		t.Fatalf("expected picker to dismiss on space, mode = %v", m.inputMode)
+	}
+	cancels := drainPickerCancels(outbound)
+	if len(cancels) != 1 || cancels[0].CallbackID != "cb1" {
+		t.Fatalf("expected one cancel for cb1, got %v", cancels)
+	}
+	if got := m.input.Value(); got != "/connect " {
+		t.Fatalf("expected input to keep the typed space, got %q", got)
+	}
+}
+
+// TestInlinePickerWithoutDismissOnSpaceKeepsFiltering verifies the
+// space behavior is opt-in: a plain inline picker stays open.
+func TestInlinePickerWithoutDismissOnSpaceKeepsFiltering(t *testing.T) {
+	m, outbound := newInlinePickerModel(t, false, "/connect")
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}})
+	m = next.(Model)
+
+	if m.inputMode != ModePickerInline {
+		t.Fatalf("expected picker to stay open, mode = %v", m.inputMode)
+	}
+	if cancels := drainPickerCancels(outbound); len(cancels) != 0 {
+		t.Fatalf("expected no cancel, got %v", cancels)
+	}
+}
+
+// TestInlinePickerNormalTypingKeepsFiltering verifies ordinary
+// characters do not close the picker.
+func TestInlinePickerNormalTypingKeepsFiltering(t *testing.T) {
+	m, outbound := newInlinePickerModel(t, true, "/con")
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	m = next.(Model)
+
+	if m.inputMode != ModePickerInline {
+		t.Fatalf("expected picker to stay open, mode = %v", m.inputMode)
+	}
+	if cancels := drainPickerCancels(outbound); len(cancels) != 0 {
+		t.Fatalf("expected no cancel, got %v", cancels)
+	}
+}
+
+// TestInlinePickerClosesCleanlyOnEmptiedInput is a regression test for
+// the stuck-mode bug: backspacing the input to empty used to hide the
+// picker at the widget level while leaving the model in
+// ModePickerInline with the Lua callback never cancelled.
+func TestInlinePickerClosesCleanlyOnEmptiedInput(t *testing.T) {
+	m, outbound := newInlinePickerModel(t, true, "/")
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	m = next.(Model)
+
+	if m.input.Value() != "" {
+		t.Fatalf("expected empty input after backspace, got %q", m.input.Value())
+	}
+	if m.inputMode != ModeNormal {
+		t.Fatalf("expected mode reset after input emptied, mode = %v", m.inputMode)
+	}
+	cancels := drainPickerCancels(outbound)
+	if len(cancels) != 1 || cancels[0].CallbackID != "cb1" {
+		t.Fatalf("expected one cancel for cb1, got %v", cancels)
+	}
+}
+
+// TestInlinePickerDismissesOnLuaEditWithSpace verifies Lua-driven input
+// edits (rune.input.set) honor dismiss_on_space too.
+func TestInlinePickerDismissesOnLuaEditWithSpace(t *testing.T) {
+	m, outbound := newInlinePickerModel(t, true, "/connect")
+
+	next, _ := m.Update(ui.SetInputMsg("/connect vikingmud.org 2001"))
+	m = next.(Model)
+
+	if m.inputMode != ModeNormal {
+		t.Fatalf("expected picker to dismiss, mode = %v", m.inputMode)
+	}
+	cancels := drainPickerCancels(outbound)
+	if len(cancels) != 1 || cancels[0].CallbackID != "cb1" {
+		t.Fatalf("expected one cancel for cb1, got %v", cancels)
+	}
+}

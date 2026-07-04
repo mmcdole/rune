@@ -206,11 +206,14 @@ rune.bind("/", function()
     end
 
     -- Open picker in inline mode
-    -- The picker filters based on full input content
+    -- The picker filters based on full input content; once the user
+    -- commits to a command and types a space to start its arguments,
+    -- filtering command names is pure noise, so the picker dismisses.
     rune.ui.picker.show({
         items = items,
         mode = "inline",
         match_description = true,
+        dismiss_on_space = true,
         on_select = function(val)
             -- Selection completes - the UI already set input to "/command "
         end

@@ -32,8 +32,8 @@ func (s *Session) PaneClear(name string) {
 }
 
 // ShowPicker implements lua.Host.
-func (s *Session) ShowPicker(title string, items []ui.PickerItem, callbackID string, inline bool) {
-	s.ui.ShowPicker(title, items, callbackID, inline)
+func (s *Session) ShowPicker(opts ui.ShowPickerMsg) {
+	s.ui.ShowPicker(opts)
 }
 
 // GetInput implements lua.Host.

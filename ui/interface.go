@@ -20,7 +20,7 @@ type UI interface {
 	UpdateLayout(top, bottom []LayoutEntry)
 
 	// Components
-	ShowPicker(title string, items []PickerItem, callbackID string, inline bool)
+	ShowPicker(opts ShowPickerMsg)
 	CreatePane(name string)
 	WritePane(name, text string)
 	TogglePane(name string)

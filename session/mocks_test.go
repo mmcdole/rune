@@ -172,7 +172,7 @@ func (m *mockUI) pushedBinds() map[string]bool {
 	return m.bindsPushed
 }
 
-func (m *mockUI) ShowPicker(title string, items []ui.PickerItem, callbackID string, inline bool) {}
+func (m *mockUI) ShowPicker(opts ui.ShowPickerMsg) {}
 func (m *mockUI) CreatePane(name string)                                                         {}
 func (m *mockUI) WritePane(name, text string)                                                    {}
 func (m *mockUI) TogglePane(name string)                                                         {}

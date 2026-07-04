@@ -136,11 +136,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// inline picker is open; keep its filter in sync, and close
 		// the picker (cancelling its callback) when input is cleared.
 		if m.inputMode == ModePickerInline {
-			if string(msg) == "" {
-				m.closeInlinePicker()
-			} else {
-				m.input.UpdatePickerFilter()
-			}
+			m.syncInlinePickerFilter()
 		}
 		return m, nil
 
@@ -270,7 +266,7 @@ func (m Model) handleShowPicker(msg ui.ShowPickerMsg) (tea.Model, tea.Cmd) {
 	} else {
 		m.inputMode = ModePickerModal
 	}
-	m.input.ShowPicker(msg.Items, msg.Title, msg.CallbackID, msg.Inline)
+	m.input.ShowPicker(msg)
 	return m, nil
 }
 
@@ -439,7 +435,7 @@ func (m Model) handleInlinePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	newCursor := m.input.Position()
 	if newValue != oldValue {
 		m.sendOutbound(ui.InputChangedMsg{Text: newValue, Cursor: newCursor})
-		m.input.UpdatePickerFilter()
+		m.syncInlinePickerFilter()
 	} else if newCursor != oldCursor {
 		m.sendOutbound(ui.CursorMovedMsg{Cursor: newCursor})
 	}
@@ -462,6 +458,19 @@ func (m *Model) closeInlinePicker() {
 	m.inputMode = ModeNormal
 	m.sendOutbound(ui.PickerSelectMsg{CallbackID: m.input.PickerCallbackID(), Accepted: false})
 	m.input.HidePicker()
+}
+
+// syncInlinePickerFilter re-filters the inline picker after the input
+// changed; closes it when the input is cleared, or - for pickers that
+// opted in via dismiss_on_space - once the user types a space and moves
+// on to arguments.
+func (m *Model) syncInlinePickerFilter() {
+	val := m.input.Value()
+	if val == "" || (m.input.PickerDismissOnSpace() && strings.ContainsRune(val, ' ')) {
+		m.closeInlinePicker()
+		return
+	}
+	m.input.UpdatePickerFilter()
 }
 
 func (m Model) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

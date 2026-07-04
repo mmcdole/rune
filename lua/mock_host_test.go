@@ -23,6 +23,7 @@ type MockHost struct {
 	ReloadCalls     int
 	LoadCalls       []string
 	PaneCalls       []struct{ Op, Name, Data string }
+	PickerCalls     []ui.ShowPickerMsg
 	ScheduledTimers []struct {
 		ID       int
 		Duration time.Duration
@@ -152,8 +153,10 @@ func (m *MockHost) OnConfigChange() {
 	// No-op for tests - config change notifications not tracked
 }
 
-func (m *MockHost) ShowPicker(title string, items []ui.PickerItem, callbackID string, inline bool) {
-	// No-op for tests
+func (m *MockHost) ShowPicker(opts ui.ShowPickerMsg) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.PickerCalls = append(m.PickerCalls, opts)
 }
 
 func (m *MockHost) GetHistory() []string {

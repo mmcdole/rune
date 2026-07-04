@@ -764,7 +764,12 @@ rune.ui.picker.show({
     items = {...},                      -- Array of items (see formats below)
     on_select = function(value) end,    -- Callback when item selected
     mode = "modal",                     -- "modal" (default) or "inline"
-    match_description = false           -- Include description in fuzzy matching
+    match_description = false,          -- Include description in fuzzy matching
+    dismiss_on_space = false            -- Inline mode: close the picker once the
+                                        -- input contains a space. For pickers over
+                                        -- single-token items (slash commands),
+                                        -- where a space means the user has
+                                        -- committed and is typing arguments.
 })
 ```
 
@@ -824,6 +829,7 @@ rune.bind("/", function()
         items = items,
         mode = "inline",
         match_description = true,
+        dismiss_on_space = true,
         on_select = function(val) end
     })
 end)

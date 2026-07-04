@@ -19,6 +19,7 @@ func (e *Engine) registerPickerFuncs() {
 	//   on_select = function(value) end     -- called with selected value
 	//   mode = "inline"                     -- optional: "inline" or "modal" (default)
 	//   match_description = true            -- optional: include description in fuzzy matching
+	//   dismiss_on_space = true             -- optional (inline): close once input contains a space
 	// }
 	// Modal mode: picker captures keyboard and has its own search field.
 	// Inline mode: user types in main input, picker filters based on input content.
@@ -43,6 +44,13 @@ func (e *Engine) registerPickerFuncs() {
 			matchDesc = glua.LVAsBool(mdVal)
 		}
 
+		// Parse dismiss_on_space (optional - close an inline picker once the
+		// input contains a space; for pickers over single-token items)
+		dismissOnSpace := false
+		if dsVal := L.GetField(opts, "dismiss_on_space"); dsVal != glua.LNil {
+			dismissOnSpace = glua.LVAsBool(dsVal)
+		}
+
 		// Parse items
 		itemsVal := L.GetField(opts, "items")
 		itemsTbl, ok := itemsVal.(*glua.LTable)
@@ -64,7 +72,13 @@ func (e *Engine) registerPickerFuncs() {
 		callbackID := e.RegisterPickerCallback(onSelectFn)
 
 		// Call host to show the picker
-		e.host.ShowPicker(title, items, callbackID, inline)
+		e.host.ShowPicker(ui.ShowPickerMsg{
+			Title:          title,
+			Items:          items,
+			CallbackID:     callbackID,
+			Inline:         inline,
+			DismissOnSpace: dismissOnSpace,
+		})
 		return 0
 	}))
 }
