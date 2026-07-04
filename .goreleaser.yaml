@@ -30,4 +30,11 @@ checksum:
   name_template: checksums.txt
 
 changelog:
-  use: github-native
+  use: git
+  sort: asc
+  filters:
+    exclude:
+      - '^test:'
+      - '^chore:'
+      - '^ci:'
+      - '(?i)^merge '
