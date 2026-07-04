@@ -100,10 +100,7 @@ func (b *BubbleTeaUI) Run() error {
 			select {
 			case <-b.done:
 				return
-			case msg, ok := <-b.msgQueue:
-				if !ok {
-					return
-				}
+			case msg := <-b.msgQueue:
 				b.program.Send(msg)
 			}
 		}
@@ -112,11 +109,12 @@ func (b *BubbleTeaUI) Run() error {
 	// Run blocks until quit
 	_, err := b.program.Run()
 
-	// Signal shutdown and close queue
+	// Signal shutdown. The queue is deliberately never closed: send()
+	// races the done signal in a select, and closing the channel would
+	// turn a late Print from the session into a send-on-closed panic.
 	b.doneOnce.Do(func() {
 		close(b.done)
 	})
-	close(b.msgQueue)
 
 	return err
 }

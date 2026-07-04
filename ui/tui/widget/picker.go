@@ -207,6 +207,9 @@ func (p *Picker) renderItem(item ui.PickerItem, width int, selected bool, matche
 		prefix = "> "
 	}
 
+	// Match positions from the fuzzy scorer are rune indices into
+	// FilterValue() (text, or "text description"); index by rune, not
+	// byte, or highlights misalign on multi-byte input.
 	matchSet := make(map[int]bool, len(matches))
 	for _, pos := range matches {
 		matchSet[pos] = true
@@ -217,8 +220,9 @@ func (p *Picker) renderItem(item ui.PickerItem, width int, selected bool, matche
 	text := item.GetText()
 	desc := item.GetDescription()
 	matchDesc := item.MatchesDescription()
+	textRunes := []rune(text)
 
-	for idx, r := range text {
+	for idx, r := range textRunes {
 		ch := string(r)
 		if matchSet[idx] && selected {
 			result.WriteString(p.styles.OverlayMatchSelected.Render(ch))
@@ -239,8 +243,8 @@ func (p *Picker) renderItem(item ui.PickerItem, width int, selected bool, matche
 			result.WriteString(p.styles.OverlayNormal.Render(sep))
 		}
 
-		descOffset := len(text) + 1
-		for idx, r := range desc {
+		descOffset := len(textRunes) + 1
+		for idx, r := range []rune(desc) {
 			ch := string(r)
 			isMatch := matchDesc && matchSet[descOffset+idx]
 			if isMatch && selected {

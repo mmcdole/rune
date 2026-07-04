@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -13,7 +12,8 @@ import (
 	"github.com/mmcdole/rune/ui/tui/widget"
 )
 
-// tickMsg is used for periodic updates (line batching, clock refresh).
+// tickMsg drives the output flush: lines are batched within a 16ms
+// window to prevent excessive renders on fast MUD output.
 type tickMsg time.Time
 
 // doTick returns a command that sends a tickMsg after the given duration.
@@ -23,16 +23,9 @@ func doTick() tea.Cmd {
 	})
 }
 
-// InputMode represents the current input handling mode.
-type InputMode int
-
-const (
-	ModeNormal       InputMode = iota // Standard text input
-	ModePickerModal                   // Modal picker traps all keys
-	ModePickerInline                  // Inline picker filters based on input
-)
-
-// Model is the main Bubble Tea model for the TUI.
+// Model is the main Bubble Tea model for the TUI. It routes messages
+// between the session and the widgets; input-mode policy lives in the
+// inputController, layout and rendering in layout.go.
 type Model struct {
 	// Layout
 	widgets map[string]widget.Widget // all named widgets: input, separator, bars
@@ -42,10 +35,9 @@ type Model struct {
 	viewport   *widget.Viewport
 	input      *widget.Input
 	panes      *widget.PaneManager
-	styles     style.Styles
 
-	// Input mode
-	inputMode InputMode
+	// Input-mode state machine (normal / modal picker / inline picker)
+	inputCtl *inputController
 
 	// Push-based state from Session
 	boundKeys  map[string]bool
@@ -61,29 +53,28 @@ type Model struct {
 	height       int
 	inputChan    chan<- string
 	outbound     chan<- ui.UIEvent
-	quitting     bool
 	initialized  bool
 	pendingLines []string
 }
 
 // NewModel creates a new TUI model.
-func NewModel(inputChan chan<- string, outbound chan<- ui.UIEvent) Model {
+func NewModel(inputChan chan<- string, outbound chan<- ui.UIEvent) *Model {
 	styles := style.DefaultStyles()
 	scrollback := widget.NewScrollbackBuffer(100000)
 	viewport := widget.NewViewport(scrollback)
 	input := widget.NewInput(styles)
 	panes := widget.NewPaneManager(styles)
 
-	m := Model{
+	m := &Model{
 		scrollback: scrollback,
 		viewport:   viewport,
 		input:      input,
 		panes:      panes,
-		styles:     styles,
 		inputChan:  inputChan,
 		outbound:   outbound,
 		widgets:    make(map[string]widget.Widget),
 	}
+	m.inputCtl = newInputController(input, m.sendOutbound, m.sendLine, m.isBound, m.handleScrollKey)
 
 	// Register static widgets
 	m.widgets["input"] = input
@@ -93,7 +84,7 @@ func NewModel(inputChan chan<- string, outbound chan<- ui.UIEvent) Model {
 }
 
 // Init implements tea.Model.
-func (m Model) Init() tea.Cmd {
+func (m *Model) Init() tea.Cmd {
 	return tea.Batch(
 		tea.EnterAltScreen,
 		doTick(),
@@ -101,7 +92,7 @@ func (m Model) Init() tea.Cmd {
 }
 
 // Update implements tea.Model.
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	// System
 	case tea.WindowSizeMsg:
@@ -109,7 +100,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		return m.handleTick()
 	case tea.KeyMsg:
-		return m.handleKey(msg)
+		m.inputCtl.HandleKey(msg)
+		return m, nil
 	case tea.MouseMsg:
 		return m.handleMouse(msg)
 
@@ -127,17 +119,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Input control
 	case ui.ShowPickerMsg:
-		return m.handleShowPicker(msg)
+		m.inputCtl.ShowPicker(msg)
+		return m, nil
 	case ui.SetInputMsg:
-		m.input.SetValue(string(msg))
-		m.input.CursorEnd()
-		m.sendOutbound(ui.InputChangedMsg{Text: string(msg), Cursor: m.input.Position()})
-		// Lua editing binds (ctrl+u, ctrl+w) change input while the
-		// inline picker is open; keep its filter in sync, and close
-		// the picker (cancelling its callback) when input is cleared.
-		if m.inputMode == ModePickerInline {
-			m.syncInlinePickerFilter()
-		}
+		m.inputCtl.SetText(string(msg))
 		return m, nil
 
 	// Input primitives (from Lua)
@@ -175,7 +160,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) handleWindowSize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleWindowSize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	m.width = msg.Width
 	m.height = msg.Height
 	m.initialized = true
@@ -183,17 +168,22 @@ func (m Model) handleWindowSize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleTick processes pending lines in a batch.
-// Lines are batched within a 16ms window to prevent excessive renders on fast MUD output.
-func (m Model) handleTick() (tea.Model, tea.Cmd) {
-	if len(m.pendingLines) > 0 {
-		m.appendLines(m.pendingLines)
-		m.pendingLines = nil
-	}
+// handleTick flushes the pending line batch.
+func (m *Model) handleTick() (tea.Model, tea.Cmd) {
+	m.flushPending()
 	return m, doTick()
 }
 
-func (m Model) handleConfigUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
+// flushPending appends all batched server lines to the scrollback.
+func (m *Model) flushPending() {
+	if len(m.pendingLines) == 0 {
+		return
+	}
+	m.appendLines(m.pendingLines)
+	m.pendingLines = nil
+}
+
+func (m *Model) handleConfigUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case ui.UpdateBindsMsg:
 		m.boundKeys = msg
@@ -207,34 +197,43 @@ func (m Model) handleConfigUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // syncBars updates the widgets map to match the current bar content.
-// Creates new Bar instances for new names, removes stale ones, updates existing ones.
+// Creates new Bar instances for new names, removes stale ones, updates
+// existing ones. A bar whose name collides with a built-in widget
+// ("input", "separator") is ignored rather than allowed to clobber it.
 func (m *Model) syncBars(content map[string]ui.BarContent) {
 	// Remove bars that no longer exist in content
 	for name := range m.barContent {
 		if _, exists := content[name]; !exists {
-			delete(m.widgets, name)
+			if _, isBar := m.widgets[name].(*widget.Bar); isBar {
+				delete(m.widgets, name)
+			}
 		}
 	}
 
 	// Add or update bars
 	for name, barContent := range content {
-		bar, exists := m.widgets[name]
+		w, exists := m.widgets[name]
 		if !exists {
-			bar = widget.NewBar(name)
-			m.widgets[name] = bar
+			w = widget.NewBar(name)
+			m.widgets[name] = w
 		}
-		bar.(*widget.Bar).SetContent(barContent)
+		if bar, isBar := w.(*widget.Bar); isBar {
+			bar.SetContent(barContent)
+		}
 	}
 
 	m.barContent = content
 }
 
-func (m Model) handleServerOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *Model) handleServerOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case ui.PrintLineMsg:
 		cleanLine := util.FilterClearSequences(string(msg))
 		m.pendingLines = append(m.pendingLines, cleanLine)
 	case ui.EchoLineMsg:
+		// Flush batched server lines first so the echo cannot render
+		// ahead of output that arrived before it.
+		m.flushPending()
 		m.appendLines([]string{string(msg)})
 	case ui.PromptMsg:
 		text := string(msg)
@@ -246,7 +245,7 @@ func (m Model) handleServerOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) handlePaneMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *Model) handlePaneMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case ui.PaneCreateMsg:
 		m.panes.Create(msg.Name)
@@ -260,21 +259,6 @@ func (m Model) handlePaneMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) handleShowPicker(msg ui.ShowPickerMsg) (tea.Model, tea.Cmd) {
-	if msg.Inline {
-		m.inputMode = ModePickerInline
-	} else {
-		m.inputMode = ModePickerModal
-	}
-	m.input.ShowPicker(msg)
-	return m, nil
-}
-
-// handleKey routes key presses.
-//
-// Key policy: Go owns keys only while a UI-internal mode is active
-// (picker capture/cancel) plus Enter-to-submit; all other editing and
-// navigation policy lives in Lua binds. In normal mode a bound
 // wheelScrollLines is how far one mouse-wheel tick scrolls the main
 // viewport. Matches the common terminal-emulator default.
 const wheelScrollLines = 3
@@ -282,7 +266,7 @@ const wheelScrollLines = 3
 // handleMouse scrolls the main viewport on wheel events. The terminal
 // mouse is captured for this (which is why text selection needs
 // shift+drag); everything else is ignored.
-func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if msg.Action != tea.MouseActionPress {
 		return m, nil
 	}
@@ -297,231 +281,26 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// non-printable key always goes to Lua; a bound printable key goes to
-// Lua only when the input is empty (so "j" can be a hotkey without
-// breaking typing). Unbound scroll keys fall back to Go so scrollback
-// stays usable even in degraded mode.
-func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Picker modes capture Ctrl+C/Esc as "cancel"
-	switch msg.Type {
-	case tea.KeyCtrlC, tea.KeyEsc:
-		if m.inputMode != ModeNormal {
-			m.inputMode = ModeNormal
-			cbID := m.input.PickerCallbackID()
-			m.input.HidePicker()
-			m.sendOutbound(ui.PickerSelectMsg{CallbackID: cbID, Accepted: false})
-			return m, nil
-		}
-		// Normal mode: fall through so the Lua binds decide
-		// (clear input, double-tap quit, ...)
-	}
-
-	switch m.inputMode {
-	case ModePickerModal:
-		return m.handlePickerKey(msg)
-	case ModePickerInline:
-		return m.handleInlinePickerKey(msg)
-	default:
-		return m.handleNormalKey(msg)
-	}
-}
-
-func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	keyStr := keyToString(msg)
-	if keyStr != "" && m.boundKeys[keyStr] {
-		// Alt-modified runes are chords, not typing: they never reach
-		// the input widget, so the empty-input guard doesn't apply.
-		isPrintable := msg.Type == tea.KeyRunes && !msg.Alt
-		if !isPrintable || m.input.Value() == "" {
-			m.sendOutbound(ui.ExecuteBindMsg(keyStr))
-			return m, nil
-		}
-	}
-
-	if msg.Type == tea.KeyEnter {
-		line := m.input.Value()
-		select {
-		case m.inputChan <- line:
-		default:
-			m.scrollback.Append(text.Red("[WARNING] Input dropped - engine lagging"))
-		}
-		m.input.Reset()
-		m.sendOutbound(ui.InputChangedMsg{Text: "", Cursor: 0})
-		return m, nil
-	}
-
-	// Unbound scroll keys: Go fallback (keeps degraded mode scrollable)
-	if m.handleScrollKey(msg.Type) {
-		return m, nil
-	}
-
-	// Forward to input
-	oldValue := m.input.Value()
-	oldCursor := m.input.Position()
-	m.input.UpdateTextInput(msg)
-
-	newValue := m.input.Value()
-	newCursor := m.input.Position()
-	if newValue != oldValue {
-		m.sendOutbound(ui.InputChangedMsg{Text: newValue, Cursor: newCursor})
-	} else if newCursor != oldCursor {
-		m.sendOutbound(ui.CursorMovedMsg{Cursor: newCursor})
-	}
-
-	return m, nil
-}
-
-// inlinePickerLocalKeys are navigation keys the inline picker handles
-// itself instead of forwarding to Lua binds.
-var inlinePickerLocalKeys = map[string]bool{
-	"up":   true,
-	"down": true,
-	"tab":  true,
-}
-
-func (m Model) handleInlinePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	keyStr := keyToString(msg)
-	// Don't send picker navigation keys to Lua - handle them locally
-	if keyStr != "" && m.boundKeys[keyStr] && !inlinePickerLocalKeys[keyStr] {
-		m.sendOutbound(ui.ExecuteBindMsg(keyStr))
-		return m, nil
-	}
-
-	switch msg.Type {
-	case tea.KeyUp:
-		m.input.PickerSelectUp()
-		return m, nil
-
-	case tea.KeyDown:
-		m.input.PickerSelectDown()
-		return m, nil
-
-	case tea.KeyTab:
-		if item, ok := m.input.PickerSelected(); ok {
-			m.input.SetValue(item.GetValue() + " ")
-			m.input.CursorEnd()
-			m.sendOutbound(ui.PickerSelectMsg{
-				CallbackID: m.input.PickerCallbackID(),
-				Value:      item.GetValue(),
-				Accepted:   true,
-			})
-		}
-		m.inputMode = ModeNormal
-		m.input.HidePicker()
-		return m, nil
-
-	case tea.KeyEnter:
-		if item, ok := m.input.PickerSelected(); ok {
-			m.sendOutbound(ui.PickerSelectMsg{
-				CallbackID: m.input.PickerCallbackID(),
-				Value:      item.GetValue(),
-				Accepted:   true,
-			})
-		}
-		m.inputMode = ModeNormal
-		m.input.HidePicker()
-		return m.submitInput()
-	}
-
-	if m.handleScrollKey(msg.Type) {
-		return m, nil
-	}
-
-	oldValue := m.input.Value()
-	oldCursor := m.input.Position()
-	m.input.UpdateTextInput(msg)
-
-	newValue := m.input.Value()
-	newCursor := m.input.Position()
-	if newValue != oldValue {
-		m.sendOutbound(ui.InputChangedMsg{Text: newValue, Cursor: newCursor})
-		m.syncInlinePickerFilter()
-	} else if newCursor != oldCursor {
-		m.sendOutbound(ui.CursorMovedMsg{Cursor: newCursor})
-	}
-
-	return m, nil
-}
-
-func (m Model) submitInput() (tea.Model, tea.Cmd) {
-	line := m.input.Value()
-	select {
-	case m.inputChan <- line:
-	default:
-		m.scrollback.Append(text.Red("[WARNING] Input dropped - engine lagging"))
-	}
-	m.input.Reset()
-	return m, nil
-}
-
-func (m *Model) closeInlinePicker() {
-	m.inputMode = ModeNormal
-	m.sendOutbound(ui.PickerSelectMsg{CallbackID: m.input.PickerCallbackID(), Accepted: false})
-	m.input.HidePicker()
-}
-
-// syncInlinePickerFilter re-filters the inline picker after the input
-// changed; closes it when the input is cleared, or - for pickers that
-// opted in via dismiss_on_space - once the user types a space and moves
-// on to arguments.
-func (m *Model) syncInlinePickerFilter() {
-	val := m.input.Value()
-	if val == "" || (m.input.PickerDismissOnSpace() && strings.ContainsRune(val, ' ')) {
-		m.closeInlinePicker()
-		return
-	}
-	m.input.UpdatePickerFilter()
-}
-
-func (m Model) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.Type {
-	case tea.KeyUp:
-		m.input.PickerSelectUp()
-		return m, nil
-
-	case tea.KeyDown:
-		m.input.PickerSelectDown()
-		return m, nil
-
-	case tea.KeyEnter, tea.KeyTab:
-		if item, ok := m.input.PickerSelected(); ok {
-			m.sendOutbound(ui.PickerSelectMsg{
-				CallbackID: m.input.PickerCallbackID(),
-				Value:      item.GetValue(),
-				Accepted:   true,
-			})
-		} else {
-			m.sendOutbound(ui.PickerSelectMsg{CallbackID: m.input.PickerCallbackID(), Accepted: false})
-		}
-		m.inputMode = ModeNormal
-		m.input.HidePicker()
-		return m, nil
-
-	case tea.KeyRunes:
-		m.input.PickerFilter(m.input.PickerQuery() + string(msg.Runes))
-		return m, nil
-
-	case tea.KeySpace:
-		m.input.PickerFilter(m.input.PickerQuery() + " ")
-		return m, nil
-
-	case tea.KeyBackspace:
-		query := m.input.PickerQuery()
-		if len(query) > 0 {
-			m.input.PickerFilter(query[:len(query)-1])
-		}
-		return m, nil
-	}
-
-	return m, nil
-}
-
 func (m *Model) appendLines(lines []string) {
 	for _, line := range lines {
 		m.scrollback.Append(line)
 	}
 	m.viewport.OnNewLines(len(lines))
 	m.updateScrollState()
+}
+
+// sendLine hands a submitted input line to the session, dropping (with
+// a visible warning) rather than blocking the render loop.
+func (m *Model) sendLine(line string) {
+	select {
+	case m.inputChan <- line:
+	default:
+		m.scrollback.Append(text.Red("[WARNING] Input dropped - engine lagging"))
+	}
+}
+
+func (m *Model) isBound(key string) bool {
+	return m.boundKeys[key]
 }
 
 func (m *Model) sendOutbound(msg ui.UIEvent) {
@@ -568,212 +347,4 @@ func (m *Model) handleScrollKey(keyType tea.KeyType) bool {
 	}
 	m.updateScrollState()
 	return true
-}
-
-func (m *Model) getLayout() ui.LayoutConfig {
-	if len(m.luaLayout.Top) > 0 || len(m.luaLayout.Bottom) > 0 {
-		return ui.LayoutConfig{
-			Top:    m.luaLayout.Top,
-			Bottom: m.luaLayout.Bottom,
-		}
-	}
-	return ui.DefaultLayoutConfig()
-}
-
-// getWidget returns the Widget for a given name.
-func (m *Model) getWidget(name string) widget.Widget {
-	// Check widgets map (input, separator, bars)
-	if w, ok := m.widgets[name]; ok {
-		return w
-	}
-
-	// Panes (PaneManager returns *Pane which implements Widget)
-	if m.panes.Exists(name) {
-		return m.panes.Get(name)
-	}
-
-	return nil
-}
-
-// sizeDock calculates sizes for dock widgets and returns total height.
-// Sets widget sizes as a side effect.
-func (m *Model) sizeDock(entries []ui.LayoutEntry) int {
-	totalHeight := 0
-
-	for _, entry := range entries {
-		w := m.getWidget(entry.Name)
-		if w == nil {
-			continue
-		}
-
-		preferred := w.PreferredHeight()
-		if preferred == 0 {
-			continue
-		}
-
-		h := entry.Height
-		if h == 0 {
-			h = preferred
-		}
-
-		w.SetSize(m.width, h)
-		totalHeight += h
-	}
-
-	return totalHeight
-}
-
-// renderDock renders a list of layout entries, returns combined view and total height.
-// Assumes sizes have already been set by recalculateLayout.
-func (m *Model) renderDock(entries []ui.LayoutEntry) (string, int) {
-	var parts []string
-	totalHeight := 0
-
-	for _, entry := range entries {
-		w := m.getWidget(entry.Name)
-		if w == nil {
-			continue
-		}
-
-		preferred := w.PreferredHeight()
-		if preferred == 0 {
-			continue
-		}
-
-		h := entry.Height
-		if h == 0 {
-			h = preferred
-		}
-
-		parts = append(parts, w.View())
-		totalHeight += h
-	}
-
-	return strings.Join(parts, "\n"), totalHeight
-}
-
-// View implements tea.Model.
-// Layout is calculated here to ensure it's always fresh when rendering.
-func (m Model) View() string {
-	if !m.initialized {
-		return "Loading..."
-	}
-
-	if m.quitting {
-		return ""
-	}
-
-	// Calculate layout fresh each render - guarantees no stale dimensions
-	cfg := m.getLayout()
-	topHeight := m.sizeDock(cfg.Top)
-	bottomHeight := m.sizeDock(cfg.Bottom)
-
-	viewportHeight := m.height - topHeight - bottomHeight
-	if viewportHeight < 1 {
-		viewportHeight = 1
-	}
-	m.viewport.SetSize(m.width, viewportHeight)
-
-	topView, _ := m.renderDock(cfg.Top)
-	bottomView, _ := m.renderDock(cfg.Bottom)
-
-	var parts []string
-	if topView != "" {
-		parts = append(parts, topView)
-	}
-	parts = append(parts, m.viewport.View())
-	if bottomView != "" {
-		parts = append(parts, bottomView)
-	}
-
-	return strings.Join(parts, "\n")
-}
-
-// keyNames maps Bubble Tea key types to string names for Lua bindings.
-var keyNames = map[tea.KeyType]string{
-	tea.KeyCtrlA:      "ctrl+a",
-	tea.KeyCtrlB:      "ctrl+b",
-	tea.KeyCtrlC:      "ctrl+c",
-	tea.KeyCtrlD:      "ctrl+d",
-	tea.KeyCtrlE:      "ctrl+e",
-	tea.KeyCtrlF:      "ctrl+f",
-	tea.KeyCtrlG:      "ctrl+g",
-	tea.KeyCtrlH:      "ctrl+h",
-	tea.KeyCtrlI:      "tab", // Same as KeyTab
-	tea.KeyShiftTab:   "shift+tab",
-	tea.KeyCtrlJ:      "ctrl+j",
-	tea.KeyCtrlK:      "ctrl+k",
-	tea.KeyCtrlL:      "ctrl+l",
-	tea.KeyCtrlM:      "ctrl+m",
-	tea.KeyCtrlN:      "ctrl+n",
-	tea.KeyCtrlO:      "ctrl+o",
-	tea.KeyCtrlP:      "ctrl+p",
-	tea.KeyCtrlQ:      "ctrl+q",
-	tea.KeyCtrlR:      "ctrl+r",
-	tea.KeyCtrlS:      "ctrl+s",
-	tea.KeyCtrlT:      "ctrl+t",
-	tea.KeyCtrlU:      "ctrl+u",
-	tea.KeyCtrlV:      "ctrl+v",
-	tea.KeyCtrlW:      "ctrl+w",
-	tea.KeyCtrlX:      "ctrl+x",
-	tea.KeyCtrlY:      "ctrl+y",
-	tea.KeyCtrlZ:      "ctrl+z",
-	tea.KeyF1:         "f1",
-	tea.KeyF2:         "f2",
-	tea.KeyF3:         "f3",
-	tea.KeyF4:         "f4",
-	tea.KeyF5:         "f5",
-	tea.KeyF6:         "f6",
-	tea.KeyF7:         "f7",
-	tea.KeyF8:         "f8",
-	tea.KeyF9:         "f9",
-	tea.KeyF10:        "f10",
-	tea.KeyF11:        "f11",
-	tea.KeyF12:        "f12",
-	tea.KeyUp:         "up",
-	tea.KeyDown:       "down",
-	tea.KeyLeft:       "left",
-	tea.KeyRight:      "right",
-	tea.KeyCtrlUp:     "ctrl+up",
-	tea.KeyCtrlDown:   "ctrl+down",
-	tea.KeyCtrlLeft:   "ctrl+left",
-	tea.KeyCtrlRight:  "ctrl+right",
-	tea.KeyShiftUp:    "shift+up",
-	tea.KeyShiftDown:  "shift+down",
-	tea.KeyShiftLeft:  "shift+left",
-	tea.KeyShiftRight: "shift+right",
-	tea.KeyEsc:        "escape",
-	tea.KeyBackspace:  "backspace",
-	tea.KeyDelete:     "delete",
-	tea.KeyInsert:     "insert",
-	tea.KeyPgUp:       "pageup",
-	tea.KeyPgDown:     "pagedown",
-	tea.KeyCtrlPgUp:   "ctrl+pageup",
-	tea.KeyCtrlPgDown: "ctrl+pagedown",
-	tea.KeyHome:       "home",
-	tea.KeyEnd:        "end",
-	tea.KeyCtrlHome:   "ctrl+home",
-	tea.KeyCtrlEnd:    "ctrl+end",
-	tea.KeyShiftHome:  "shift+home",
-	tea.KeyShiftEnd:   "shift+end",
-}
-
-// keyToString converts a key press to the name Lua binds use. The alt
-// modifier arrives as a flag on the base key (bubbletea reports alt+left
-// as KeyLeft with Alt set), so it is prefixed here; ctrl- and shift-
-// modified keys are distinct KeyTypes and come from the table.
-func keyToString(msg tea.KeyMsg) string {
-	var base string
-	if msg.Type == tea.KeyRunes && len(msg.Runes) > 0 {
-		base = string(msg.Runes)
-	} else {
-		base = keyNames[msg.Type]
-	}
-	if base == "" {
-		return ""
-	}
-	if msg.Alt {
-		return "alt+" + base
-	}
-	return base
 }

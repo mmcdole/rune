@@ -20,10 +20,8 @@ type Input struct {
 	styles    style.Styles
 
 	// State
-	pickerActive  bool
-	pickerCB      string // Callback ID for picker selection
-	pickerDismiss bool   // Close inline picker once input contains a space
-	width         int
+	pickerActive bool
+	width        int
 }
 
 // NewInput creates a new input widget.
@@ -126,17 +124,12 @@ func (i *Input) Reset() {
 
 // Picker access
 
-// PickerCallbackID returns the current picker callback ID.
-func (i *Input) PickerCallbackID() string {
-	return i.pickerCB
-}
-
-// ShowPicker displays the picker with items.
+// ShowPicker displays the picker with items. The picker's session-side
+// state (callback ID, dismiss-on-space) is owned by the input
+// controller; the widget only renders the overlay.
 func (i *Input) ShowPicker(opts ui.ShowPickerMsg) {
 	i.picker.SetItems(opts.Items)
-	i.pickerCB = opts.CallbackID
 	i.pickerActive = true
-	i.pickerDismiss = opts.DismissOnSpace
 
 	if opts.Inline {
 		i.picker.SetHeader("")
@@ -184,14 +177,8 @@ func (i *Input) PickerQuery() string {
 
 // UpdatePickerFilter updates filter based on input value. Closing the
 // picker when the input empties (or hits a space, for dismiss-on-space
-// pickers) is the model's job - it must also reset the input mode and
-// cancel the Lua callback.
+// pickers) is the input controller's job - it must also reset the
+// input mode and cancel the Lua callback.
 func (i *Input) UpdatePickerFilter() {
 	i.picker.Filter(i.textinput.Value())
-}
-
-// PickerDismissOnSpace reports whether the active picker asked to be
-// closed once the input contains a space.
-func (i *Input) PickerDismissOnSpace() bool {
-	return i.pickerDismiss
 }
