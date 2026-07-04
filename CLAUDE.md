@@ -122,7 +122,7 @@ Go primitives (`rune._*`) are internal.
 - **Core**: `rune.send`, `rune.send_raw`, `rune.echo`, `rune.connect`, `rune.disconnect`, `rune.load`, `rune.reload`, `rune.quit`, `rune.config_dir`, `rune.version`. Connect addresses take an optional scheme: `host:port` (plain, default), `tls://host:port`, `tls+insecure://host:port` (self-signed certs)
 - **Registries** (all return handles with `:enable/:disable/:remove/:name/:group`; opts `{name, group, priority, once}`):
   - `rune.alias.exact/regex(pattern, action, opts?)`
-  - `rune.trigger.exact/starts/contains/regex(pattern, action, opts?)` (+ `gag`, `raw` opts)
+  - `rune.trigger.exact/starts/contains/regex(pattern, action, opts?)` (+ `gag`, `raw`, `span` opts; `span = {to, raw, max}` collects a multi-line message and fires the action once with `ctx.text`/`ctx.lines`)
   - `rune.timer.after/every(seconds, action, opts?)` - `every` is fixed-interval
   - `rune.hooks.on(event, handler, opts?)`
   - `rune.bind(key, callback, opts?)` / `rune.unbind(key)`
