@@ -23,8 +23,6 @@ verifies certificates, and `tls+insecure://host:port` accepts self-signed
 ones (common on MUDs). Plain telnet is the default; `telnet://` is
 accepted explicitly.
 
-Refused (not implemented): MCCP3, MSSP, ZMP, MXP, MSP, LINEMODE. The
-[roadmap](https://github.com/mmcdole/rune/blob/main/docs/future.md) covers
-what's next: MSDP/MSSP, then MXP in stages.
+Refused (not implemented): MCCP3, MSSP, ZMP, MXP, MSP, LINEMODE.
 
 **Related:** [GMCP](/scripting/gmcp/)
