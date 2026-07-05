@@ -16,16 +16,24 @@ are guarding against is observable.
 | **E2E scenarios** | `test/e2e/scenarios/*.json` | User-visible behavior contracts through the live client (real event loop, real TCP, mocked terminal): one representative per feature, plus every regression from a reported bug. |
 | **E2E imperative Go** | `test/e2e/*_test.go` | Escape hatch when the step vocabulary can't express the case: exact byte frames beyond `expect_sent_bytes`, concurrency-only behavior, bespoke server scripting. |
 
-## Question 2 — Format: data or code
+## Question 2 — Format: Go tables in-process, scenario JSON at e2e
 
-JSON when the case fits the **existing** vocabulary (`lua/testdata/*_tests.json`
-schema at the Lua layer; the step verbs in `test/e2e/runner_test.go` at e2e).
-Variants are data, not code — adding a case must not require writing Go.
+Every in-process layer uses ordinary table-driven Go tests. A feature's
+variant matrix is a `[]featureCase` table in its feature file
+(`lua/trigger_test.go` is the model, run by `runFeatureCases`): typed,
+gofmt-ed, debuggable, and Lua setup reads naturally in raw strings.
+Adding a variant is adding a struct literal — data in the idiomatic Go
+sense, with no schema or loader between the case and the assertion.
 
-Needing a new verb or schema field to make a case fit is the signal to
-write Go instead. A verb earns schema admission only when roughly three
-scenarios would use it. This guard is what keeps the runners from
-becoming bad programming languages.
+JSON exists at exactly one layer: e2e scenarios, where the step
+vocabulary in `test/e2e/runner_test.go` describes multi-step user
+sessions across multiple channels (wire, scrollback, echo, prompt,
+input line) and the distance between the data and the harness is real.
+A case that fits the **existing** vocabulary is a scenario; needing a
+new verb or field is the signal to write imperative Go instead. A verb
+earns schema admission only when roughly three scenarios would use it.
+This guard is what keeps the runner from becoming a bad programming
+language.
 
 ## Determinism and speed
 
