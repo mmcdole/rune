@@ -334,6 +334,7 @@ func (c *TCPClient) processIncoming(cx *connection, data []byte) bool {
 	// raw (compressed) bytes, so nothing after the marker is parsed.
 	startMCCP := false
 	var mccpRest []byte
+	sawText := false
 
 	for _, ev := range cx.parser.Receive(data) {
 		switch ev.Kind {
@@ -347,22 +348,13 @@ func (c *TCPClient) processIncoming(cx *connection, data []byte) bool {
 			}
 
 		case TelnetEventDataReceive:
+			sawText = true
 			lines := cx.output.Receive(ev.Data)
 			for _, line := range lines {
 				select {
 				case c.outputChan <- Output{Kind: OutputLine, Payload: string(line)}:
 				case <-cx.done:
 					return false
-				}
-			}
-			if cx.telnetMode() == TelnetModeUnterminated {
-				prompt := cx.output.Prompt(false)
-				if prompt != "" {
-					select {
-					case c.outputChan <- Output{Kind: OutputPrompt, Payload: prompt}:
-					case <-cx.done:
-						return false
-					}
 				}
 			}
 
@@ -433,6 +425,22 @@ func (c *TCPClient) processIncoming(cx *connection, data []byte) bool {
 			// the same read. Always the final event of a batch.
 			startMCCP = true
 			mccpRest = ev.Data
+		}
+	}
+
+	// Unterminated-prompt peek runs once per batch, AFTER any GA/EOR in
+	// the same batch has consumed the buffer. Peeking inside the
+	// DataReceive case emitted "HP:100> " twice for a single
+	// "HP:100> " + IAC GA read - once from the peek, once from the GA
+	// flush - and the session committed the duplicate to scrollback.
+	if sawText && cx.telnetMode() == TelnetModeUnterminated {
+		prompt := cx.output.Prompt(false)
+		if prompt != "" {
+			select {
+			case c.outputChan <- Output{Kind: OutputPrompt, Payload: prompt}:
+			case <-cx.done:
+				return false
+			}
 		}
 	}
 
