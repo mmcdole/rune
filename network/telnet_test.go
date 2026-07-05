@@ -2,6 +2,7 @@ package network
 
 import (
 	"bytes"
+	"sync"
 	"testing"
 )
 
@@ -770,4 +771,32 @@ func TestOutputBufferClearResetsNewData(t *testing.T) {
 	if ob.Len() != 0 {
 		t.Error("Clear should empty buffer")
 	}
+}
+
+// TestOutputBufferConcurrentAccess pins the OutputBuffer data race:
+// the read loop parses into the buffer while the write loop calls
+// InputSent to drop a pending prompt. The suite runs under -race, so
+// unsynchronized access here fails deterministically.
+func TestOutputBufferConcurrentAccess(t *testing.T) {
+	buf := NewOutputBuffer(TelnetModeUnterminated)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { // read loop
+		defer wg.Done()
+		for i := 0; i < 1000; i++ {
+			buf.Receive([]byte("HP:100"))
+			buf.Prompt(false)
+			buf.Receive([]byte("> a line arrives\r\n"))
+		}
+	}()
+	go func() { // write loop
+		defer wg.Done()
+		for i := 0; i < 1000; i++ {
+			buf.InputSent()
+			buf.HasNewData()
+			buf.Len()
+		}
+	}()
+	wg.Wait()
 }

@@ -60,7 +60,11 @@ language.
 `regressions/` is only for entries whose sole reason to exist is a
 specific bug — reported by a user or discovered while working. If the
 reproduction turns out to be a general behavior contract, it belongs
-in the feature file instead.
+in the feature file instead. A bug the step vocabulary cannot express
+at all — a data race, batch-boundary emission — is pinned at the
+lowest layer that can express it: the OutputBuffer race and the
+duplicate-prompt batch are both pinned in `network/`
+(`TestOutputBufferConcurrentAccess`, `TestPromptEmittedOncePerGABatch`).
 
 ## What NOT to test
 

@@ -399,3 +399,49 @@ func TestGMCPSendRequiresNegotiation(t *testing.T) {
 		t.Fatal("expected error sending GMCP before negotiation")
 	}
 }
+
+// --- prompt emission ---
+
+// TestPromptEmittedOncePerGABatch pins the duplicate-prompt bug: a
+// line and a GA-terminated prompt arriving in one read must produce
+// exactly one prompt event. Before the fix, the unterminated-mode
+// peek fired per data event and the GA flush fired again, so the same
+// prompt went out twice and the session committed the duplicate.
+func TestPromptEmittedOncePerGABatch(t *testing.T) {
+	addr := telnetServer(t, func(t *testing.T, conn net.Conn) {
+		// Line + partial prompt + IAC GA in a single write.
+		conn.Write(append([]byte("the sun rises\r\nHP:100> "), CmdIAC, CmdGA))
+		// Marker line: once the client emits it, everything above has
+		// been fully processed.
+		conn.Write([]byte("marker\r\n"))
+
+		buf := make([]byte, 1)
+		conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+		conn.Read(buf)
+	})
+
+	c := connectLoopback(t, addr)
+
+	var prompts []string
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case out := <-c.Output():
+			switch out.Kind {
+			case OutputPrompt:
+				prompts = append(prompts, out.Payload)
+			case OutputLine:
+				if out.Payload == "marker" {
+					if len(prompts) != 1 || prompts[0] != "HP:100> " {
+						t.Fatalf("prompt events = %q, want exactly [\"HP:100> \"]", prompts)
+					}
+					return
+				}
+			case OutputDisconnect:
+				t.Fatal("connection dropped while waiting for marker")
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for marker line")
+		}
+	}
+}
