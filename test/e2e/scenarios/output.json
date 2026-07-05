@@ -1,0 +1,35 @@
+{
+  "description": "The server-output pipeline: a line arrives, hooks and triggers see it, and it prints, fires, gags, or rewrites. Trigger type/option variants live in lua/testdata/trigger_tests.json.",
+  "scenarios": [
+    {
+      "name": "trigger answers a server line on the wire",
+      "init_lua": ["rune.trigger.contains('goblin', 'kill goblin')"],
+      "steps": [
+        { "connect": true },
+        { "server_line": "a goblin arrives" },
+        { "expect_printed": "a goblin arrives" },
+        { "expect_sent": "kill goblin" }
+      ]
+    },
+    {
+      "name": "gagged lines never print",
+      "init_lua": ["rune.trigger.contains('secret', function() end, { gag = true })"],
+      "steps": [
+        { "connect": true },
+        { "server_line": "the secret door creaks" },
+        { "server_line": "an ordinary line", "note": "sync point: processed after the gagged line" },
+        { "expect_printed": "an ordinary line" },
+        { "expect_not_printed": "secret" }
+      ]
+    },
+    {
+      "name": "output rewrites chain to the screen",
+      "init_lua": ["rune.hooks.on('output', function(line) return (line:clean():gsub('rat', 'RAT')) end)"],
+      "steps": [
+        { "connect": true },
+        { "server_line": "a rat scurries past" },
+        { "expect_printed": "a RAT scurries past" }
+      ]
+    }
+  ]
+}

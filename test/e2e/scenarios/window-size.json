@@ -1,0 +1,18 @@
+{
+  "description": "Window size propagation: a UI resize reaches the server as a NAWS report and Lua as rune.state.width/height.",
+  "scenarios": [
+    {
+      "name": "a resize reaches the server as NAWS and Lua as rune.state",
+      "init_lua": ["rune.bind('f7', function() rune.echo('E2E-WIDTH=' .. tostring(rune.state.width)) end)"],
+      "steps": [
+        { "connect": true },
+        { "server_bytes": [255, 253, 31], "note": "IAC DO NAWS" },
+        { "expect_sent_bytes": [255, 251, 31], "note": "client agrees: IAC WILL NAWS" },
+        { "resize": { "width": 100, "height": 30 } },
+        { "expect_sent_bytes": [255, 250, 31, 0, 100, 0, 30, 255, 240], "note": "NAWS report 100x30" },
+        { "press": "f7" },
+        { "expect_printed": "E2E-WIDTH=100" }
+      ]
+    }
+  ]
+}

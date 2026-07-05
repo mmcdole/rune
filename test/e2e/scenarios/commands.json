@@ -1,0 +1,23 @@
+{
+  "description": "Slash command dispatch (55_commands.lua): commands are consumed locally, unknown commands report cleanly.",
+  "scenarios": [
+    {
+      "name": "slash commands never reach the server",
+      "steps": [
+        { "connect": true },
+        { "type": "/help" },
+        { "expect_printed": "/aliases", "note": "unique to /help output; the banner mentions /connect, so never assert that" },
+        { "type": "say marker", "note": "wire sync point" },
+        { "expect_sent": "say marker" },
+        { "expect_not_sent": "/help" }
+      ]
+    },
+    {
+      "name": "unknown commands report an error",
+      "steps": [
+        { "type": "/nosuchcommand" },
+        { "expect_printed": "Unknown command" }
+      ]
+    }
+  ]
+}

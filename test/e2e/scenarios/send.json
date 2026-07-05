@@ -1,0 +1,22 @@
+{
+  "description": "The input-to-wire pipeline (75_send.lua): the canary scenario plus command expansion. Expansion variants live in lua/testdata/send_tests.json.",
+  "scenarios": [
+    {
+      "name": "typed input reaches the server",
+      "steps": [
+        { "connect": true },
+        { "type": "north", "note": "the canary: if this fails, the whole pipeline is down" },
+        { "expect_sent": "north" }
+      ]
+    },
+    {
+      "name": "semicolons split into separate commands",
+      "steps": [
+        { "connect": true },
+        { "type": "say one;say two" },
+        { "expect_sent": "say one" },
+        { "expect_sent": "say two" }
+      ]
+    }
+  ]
+}

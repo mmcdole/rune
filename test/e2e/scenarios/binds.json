@@ -1,0 +1,13 @@
+{
+  "description": "Key binds (30_binds.lua): a wiring smoke test. Bind semantics (groups, quarantine, handles) live at the lua/ layer.",
+  "scenarios": [
+    {
+      "name": "a bound key runs its Lua action",
+      "init_lua": ["rune.bind('f6', function() rune.echo('E2E-BIND-FIRED') end)"],
+      "steps": [
+        { "press": "f6" },
+        { "expect_printed": "E2E-BIND-FIRED" }
+      ]
+    }
+  ]
+}
