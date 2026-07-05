@@ -8,14 +8,17 @@ One command starts a transcript:
 ```txt
 /log start             -- ~/.config/rune/logs/<timestamp>.log
 /log start quest.log   -- or name it
+/log start raw         -- keep the colors (view with `less -R`)
 /log status
 /log stop
 ```
 
-The log is ANSI-stripped and mirrors what you saw: server lines after
-triggers ran (rewrites logged as rewritten, gagged lines omitted) plus the
-local echo of what you typed. Prompts are skipped. Passwords stay out,
-because the echo doesn't fire while the server hides input.
+The log mirrors what you saw: server lines after triggers ran (rewrites
+logged as rewritten, gagged lines omitted) plus the local echo of what
+you typed. Prompts are skipped. Passwords stay out, because the echo
+doesn't fire while the server hides input. By default the log is
+ANSI-stripped so it reads anywhere; `raw` keeps the escape codes for a
+color-faithful transcript.
 
 An active log survives `/reload` (the file handle is owned by the client,
 not the Lua VM) and closes cleanly on exit.
@@ -23,10 +26,11 @@ not the Lua VM) and closes cleanly on exit.
 ## From Lua
 
 ```lua
-rune.log.start(path?)   -- returns the resolved path, or nil + error
-rune.log.stop()         -- returns true if a log was open
-rune.log.status()       -- active path or nil
-rune.log.write(text)    -- append a line directly (no-op when not logging)
+rune.log.start(path?, opts?)  -- returns the resolved path, or nil + error
+                              -- opts: { raw = true } keeps ANSI codes
+rune.log.stop()               -- returns true if a log was open
+rune.log.status()             -- active path or nil
+rune.log.write(text)          -- append a line directly (no-op when not logging)
 ```
 
 ## Changing the policy
