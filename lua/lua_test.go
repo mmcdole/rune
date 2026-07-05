@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -48,14 +49,8 @@ func setupTest(t *testing.T) (*Engine, *MockHost, func()) {
 			files = append(files, entry.Name())
 		}
 	}
-	// Sort for consistent load order
-	for i := 0; i < len(files)-1; i++ {
-		for j := i + 1; j < len(files); j++ {
-			if files[i] > files[j] {
-				files[i], files[j] = files[j], files[i]
-			}
-		}
-	}
+	// Sort for consistent load order (mirrors Session.loadCoreScripts)
+	sort.Strings(files)
 
 	for _, file := range files {
 		content, err := CoreScripts.ReadFile("core/" + file)
@@ -140,27 +135,13 @@ func assertCommands(t *testing.T, host *MockHost, expected []string) {
 	actualCommands := host.DrainNetworkCalls()
 
 	if len(actualCommands) != len(expected) {
-		// Only show debug output if there's a mismatch
-		fmt.Printf("\nExpected Commands (%d):\n", len(expected))
-		for i, cmd := range expected {
-			fmt.Printf("  %d: %q\n", i, cmd)
-		}
-
-		fmt.Printf("\nActual Commands (%d):\n", len(actualCommands))
-		for i, cmd := range actualCommands {
-			fmt.Printf("  %d: %q\n", i, cmd)
-		}
-
-		t.Errorf("expected %d commands, got %d", len(expected), len(actualCommands))
+		t.Errorf("expected %d commands %q, got %d %q",
+			len(expected), expected, len(actualCommands), actualCommands)
 		return
 	}
 
 	for i, exp := range expected {
 		if actualCommands[i] != exp {
-			// Show debug output for mismatched commands
-			fmt.Printf("\nMismatch at command %d:\n", i)
-			fmt.Printf("Expected: %q\n", exp)
-			fmt.Printf("Got:      %q\n", actualCommands[i])
 			t.Errorf("command %d: expected %q, got %q", i, exp, actualCommands[i])
 		}
 	}

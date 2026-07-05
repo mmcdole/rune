@@ -254,6 +254,14 @@
       ]
     },
     {
+      "name": "Capture With Percent Is Literal",
+      "setup_lua": "rune.trigger.regex('^You gain (\\\\S+) exp', 'say %1')",
+      "output": "You gain 50% exp",
+      "expected_commands": [
+        "say 50%"
+      ]
+    },
+    {
       "name": "Capture 10 Not Consumed As Capture 1",
       "setup_lua": [
         "rune.trigger.regex('^(a) (b) (c) (d) (e) (f) (g) (h) (i) (j)$', 'say %10 then %1')"
