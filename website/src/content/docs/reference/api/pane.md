@@ -23,16 +23,32 @@ rune.pane.scroll_to_bottom(name)       -- jump back to live
 Panes are push-based: you write lines as events happen, and the pane
 displays them — the opposite of [bars](/reference/api/ui/), which
 pull content from a render function. The buffer holds 1000 lines and
-auto-trims to the newest 500 when exceeded.
+auto-trims to the newest 500 when exceeded. Lines longer than the pane
+width soft-wrap at render time, so they re-fit on resize.
 
-Docked panes always show their newest lines; per-pane scrolling is not
-implemented. The `scroll_*` functions act only on the main output
-viewport, under the name `"main"` — that's how the default
-PageUp/PageDown/Home/End binds work:
+## Scrolling
+
+The `scroll_*` functions work on any pane by name. The special name
+`"main"` is the output viewport — that's what the default
+PageUp/PageDown/Home/End binds target:
 
 ```lua
-rune.pane.scroll_up("main", 20)
-rune.pane.scroll_to_bottom("main")
+rune.pane.scroll_up("main", 20)     -- the output viewport
+rune.pane.scroll_up("chat", 5)      -- a named pane's own buffer
+```
+
+A scrolled pane freezes on the history you're reading: new writes keep
+landing in the buffer and the pane's header shows
+`name · scroll +N` until you return with `scroll_down` or
+`scroll_to_bottom`. Hiding a pane (`toggle`) also returns it to the
+live tail. Scrolling counts logical lines (as written), not wrapped
+rows.
+
+Aim scrolling with binds:
+
+```lua
+rune.bind("shift+pageup",   function() rune.pane.scroll_up("chat", 5) end)
+rune.bind("shift+pagedown", function() rune.pane.scroll_down("chat", 5) end)
 ```
 
 :::note

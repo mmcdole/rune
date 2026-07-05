@@ -49,7 +49,7 @@ func (b *Bar) View() string {
 		if rightPad < 1 {
 			rightPad = 1
 		}
-		return left + strings.Repeat(" ", leftPad) + center + strings.Repeat(" ", rightPad) + right
+		return clipRow(left+strings.Repeat(" ", leftPad)+center+strings.Repeat(" ", rightPad)+right, b.width)
 	}
 
 	// Two-part layout
@@ -57,7 +57,7 @@ func (b *Bar) View() string {
 	if pad < 1 {
 		pad = 1
 	}
-	return left + strings.Repeat(" ", pad) + right
+	return clipRow(left+strings.Repeat(" ", pad)+right, b.width)
 }
 
 // SetSize implements Widget.
