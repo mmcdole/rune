@@ -1,0 +1,14 @@
+{
+  "description": "Aliases (45_aliases.lua): one wiring proof. Alias forms and edge cases live in lua/testdata/alias_tests.json.",
+  "scenarios": [
+    {
+      "name": "aliases expand before sending",
+      "init_lua": ["rune.alias.exact('gg', 'cast gate')"],
+      "steps": [
+        { "connect": true },
+        { "type": "gg" },
+        { "expect_sent": "cast gate" }
+      ]
+    }
+  ]
+}

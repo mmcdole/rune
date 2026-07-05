@@ -1,0 +1,27 @@
+{
+  "description": "GA-terminated prompt lifecycle: overlay display, commit-on-input, replacement by server lines. The second scenario also guards the duplicate-prompt-emission bug fixed in network/client.go (2026-07).",
+  "scenarios": [
+    {
+      "name": "GA prompt shows in the overlay and commits on input",
+      "steps": [
+        { "connect": true },
+        { "server_prompt": "HP:100> " },
+        { "expect_prompt": "HP:100>" },
+        { "type": "look" },
+        { "expect_printed": "HP:100>", "note": "prompt commits to scrollback when the user acts" },
+        { "expect_sent": "look" }
+      ]
+    },
+    {
+      "name": "a server line replaces the prompt without committing it",
+      "steps": [
+        { "connect": true },
+        { "server_prompt": "HP:90> " },
+        { "expect_prompt": "HP:90>" },
+        { "server_line": "the sun rises" },
+        { "expect_printed": "the sun rises" },
+        { "expect_not_printed": "HP:90>" }
+      ]
+    }
+  ]
+}

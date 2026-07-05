@@ -1,0 +1,17 @@
+{
+  "description": "Regression: the completion cache's input hook was registered at priority 200, above the consuming core send handler at 100, so it never ran - words the user typed never seeded tab completion.",
+  "scenarios": [
+    {
+      "name": "typed words seed the tab-completion cache",
+      "issue": "found 2026-07 while building lua/input_test.go; fixed by moving _completion_input to priority 50",
+      "steps": [
+        { "connect": true },
+        { "type": "brandish sword" },
+        { "expect_sent": "brandish sword", "note": "sync: input fully processed" },
+        { "input": { "text": "bra" } },
+        { "press": "tab" },
+        { "expect_input": "brandish " }
+      ]
+    }
+  ]
+}

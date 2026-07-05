@@ -1,0 +1,12 @@
+{
+  "description": "Timers (40_timers.lua): a wiring smoke test. Scheduling semantics live in timer/ and the lua/ layer.",
+  "scenarios": [
+    {
+      "name": "a scheduled timer runs its action",
+      "init_lua": ["rune.timer.after(0.05, function() rune.echo('E2E-TIMER-FIRED') end)"],
+      "steps": [
+        { "expect_printed": "E2E-TIMER-FIRED" }
+      ]
+    }
+  ]
+}

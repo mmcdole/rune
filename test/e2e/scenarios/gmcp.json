@@ -1,0 +1,41 @@
+{
+  "description": "GMCP (70_gmcp.lua policy over the Go option-201 transport): handshake, handler dispatch, and survival of malformed data. Handler semantics (quarantine, case-insensitivity, subscriptions) live at the lua/ layer.",
+  "scenarios": [
+    {
+      "name": "GMCP handshake and package handler dispatch",
+      "init_lua": ["rune.gmcp.on('Char.Name', function(data) rune.echo('E2E-NAME=' .. data.name) end)"],
+      "steps": [
+        { "connect": true },
+        { "server_bytes": [255, 251, 201], "note": "IAC WILL GMCP" },
+        { "expect_sent_bytes": [255, 253, 201], "note": "client agrees: IAC DO GMCP" },
+        { "expect_sent": "Core.Hello", "note": "gmcp_enabled hook sends the handshake" },
+        { "server_gmcp": "Char.Name {\"name\":\"Bob\"}" },
+        { "expect_printed": "E2E-NAME=Bob" }
+      ]
+    },
+    {
+      "name": "catch-all gmcp hook sees every package",
+      "init_lua": ["rune.hooks.on('gmcp', function(pkg, data) rune.echo('E2E-GMCP=' .. pkg) end)"],
+      "steps": [
+        { "connect": true },
+        { "server_bytes": [255, 251, 201] },
+        { "expect_sent": "Core.Hello", "note": "sync: GMCP negotiation fully processed" },
+        { "server_gmcp": "Room.Info {\"num\":42}" },
+        { "expect_printed": "E2E-GMCP=Room.Info" }
+      ]
+    },
+    {
+      "name": "malformed JSON is reported and the stream stays healthy",
+      "init_lua": ["rune.gmcp.on('Char.Name', function(data) rune.echo('E2E-NAME=' .. data.name) end)"],
+      "steps": [
+        { "connect": true },
+        { "server_bytes": [255, 251, 201] },
+        { "expect_sent": "Core.Hello" },
+        { "server_gmcp": "Char.Bad {broken json" },
+        { "expect_printed": "malformed JSON" },
+        { "server_gmcp": "Char.Name {\"name\":\"Ada\"}", "note": "the next well-formed message still dispatches" },
+        { "expect_printed": "E2E-NAME=Ada" }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "description": "Connection lifecycle: hooks on connect/disconnect, failure reporting, reconnection. The client must stay alive through all of it.",
+  "scenarios": [
+    {
+      "name": "connected and disconnected hooks fire; the client survives a server drop",
+      "init_lua": [
+        "rune.hooks.on('connected', function() rune.echo('E2E-CONNECTED') end)",
+        "rune.hooks.on('disconnected', function() rune.echo('E2E-DISCONNECTED') end)",
+        "rune.bind('f6', function() rune.echo('E2E-STILL-ALIVE') end)"
+      ],
+      "steps": [
+        { "connect": true },
+        { "expect_printed": "E2E-CONNECTED" },
+        { "server_close": true },
+        { "expect_printed": "E2E-DISCONNECTED" },
+        { "press": "f6", "note": "liveness: the client still responds after the drop" },
+        { "expect_printed": "E2E-STILL-ALIVE" }
+      ]
+    },
+    {
+      "name": "a refused connection is reported and the client stays alive",
+      "init_lua": [
+        "rune.bind('f6', function() rune.echo('E2E-STILL-ALIVE') end)"
+      ],
+      "steps": [
+        { "connect_refused": true },
+        { "expect_printed": "[Error]" },
+        { "press": "f6" },
+        { "expect_printed": "E2E-STILL-ALIVE" }
+      ]
+    },
+    {
+      "name": "/reconnect dials the last address",
+      "init_lua": [
+        "local n = 0",
+        "rune.hooks.on('connected', function() n = n + 1; rune.echo('E2E-CONNECTED-' .. n) end)",
+        "rune.hooks.on('disconnected', function() rune.echo('E2E-DISCONNECTED') end)"
+      ],
+      "steps": [
+        { "connect": true },
+        { "expect_printed": "E2E-CONNECTED-1" },
+        { "server_close": true },
+        { "expect_printed": "E2E-DISCONNECTED", "note": "sync: the drop is fully processed before reconnecting" },
+        { "type": "/reconnect" },
+        { "accept": true },
+        { "expect_printed": "E2E-CONNECTED-2" }
+      ]
+    }
+  ]
+}

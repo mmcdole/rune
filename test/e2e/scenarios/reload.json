@@ -1,0 +1,16 @@
+{
+  "description": "/reload: tears down the Lua VM mid-session and rebuilds it, re-running init.lua, without dropping the connection.",
+  "scenarios": [
+    {
+      "name": "/reload rebuilds the VM and re-runs init.lua",
+      "init_lua": ["rune.alias.exact('zz', 'say reloaded-alias')"],
+      "steps": [
+        { "connect": true },
+        { "type": "/reload" },
+        { "expect_printed": "Scripts reloaded" },
+        { "type": "zz", "note": "the alias only works if init.lua ran again on the new VM" },
+        { "expect_sent": "say reloaded-alias" }
+      ]
+    }
+  ]
+}

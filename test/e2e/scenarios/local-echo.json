@@ -1,0 +1,24 @@
+{
+  "description": "Local echo of typed input, controlled by server ECHO negotiation: off for password entry, back on afterward.",
+  "scenarios": [
+    {
+      "name": "local echo follows server ECHO negotiation both ways",
+      "steps": [
+        { "connect": true },
+        { "type": "hello" },
+        { "expect_echoed": "hello" },
+        { "expect_sent": "hello" },
+        { "server_bytes": [255, 251, 1], "note": "IAC WILL ECHO - password prompt style" },
+        { "expect_sent_bytes": [255, 253, 1], "note": "client agrees: IAC DO ECHO" },
+        { "type": "secretpass" },
+        { "expect_sent": "secretpass" },
+        { "expect_not_echoed": "secretpass" },
+        { "server_bytes": [255, 252, 1], "note": "IAC WONT ECHO - password entry over" },
+        { "expect_sent_bytes": [255, 254, 1], "note": "client acknowledges: IAC DONT ECHO" },
+        { "type": "visible again" },
+        { "expect_sent": "visible again" },
+        { "expect_echoed": "visible again" }
+      ]
+    }
+  ]
+}
