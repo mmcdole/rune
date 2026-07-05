@@ -160,7 +160,7 @@ User scripts auto-load from `~/.config/rune/init.lua` at startup.
 **`docs/testing.md` is the canonical decision guide** - read it before adding tests. The two questions, in order:
 
 1. **Layer** - test at the lowest layer that can express the failure: Go unit (in-package; byte-exact for protocol) → Lua layer (`lua/` - features, hooks, registries against MockHost) → session synchronous (`session/` - narrow charter: ordering/state assertions impossible elsewhere; should shrink, not grow) → e2e scenarios (`test/e2e/scenarios/*.json` - user-visible behavior contracts through the live client, one representative per feature) → e2e imperative Go (escape hatch).
-2. **Format** - JSON when the case fits the EXISTING vocabulary (`lua/testdata/*_tests.json`; e2e step verbs in `runner_test.go`); needing a new verb/field means write Go instead. A verb earns schema admission only when ~3 scenarios would use it.
+2. **Format** - table-driven Go everywhere in-process (a feature's variant matrix is a `[]featureCase` table in its feature file; `lua/trigger_test.go` is the model). JSON exists at exactly one layer: e2e scenarios, and only when the case fits the EXISTING step vocabulary (`runner_test.go`) - needing a new verb/field means write imperative Go. A verb earns schema admission only when ~3 scenarios would use it.
 
 Rules: test files are named for the feature, not the harness; assert only scenario-unique text/markers (the startup banner mentions `/connect` - never assert it); sync by causality, never by sleeping; e2e always runs under `-race`. When a bug is reported, FIRST add `test/e2e/scenarios/regressions/<issue#|yyyy-mm>-slug.json`, watch it fail, then fix - optionally also pin the root cause with a lower-layer test.
 

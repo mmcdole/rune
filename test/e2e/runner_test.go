@@ -17,7 +17,7 @@ package e2e
 //
 // Conventions (docs/testing.md is the full decision guide):
 //   - One representative scenario per feature. E2E proves the wiring;
-//     the variant matrix lives in lua/testdata/*_tests.json.
+//     the variant matrix lives in the lua package's table-driven tests.
 //   - Assert only text that cannot appear at boot or from earlier
 //     steps: E2E-* markers or scenario-unique strings. The startup
 //     banner mentions /connect, /world, init.lua - never assert those.

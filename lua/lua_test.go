@@ -1,29 +1,11 @@
 package lua
 
 import (
-	"encoding/json"
-	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
-	"strings"
 	"testing"
 
 	"github.com/mmcdole/rune/text"
 )
-
-// testCase represents a single test case from JSON
-type testCase struct {
-	Name             string   `json:"name"`
-	SetupLua         any      `json:"setup_lua"`
-	Input            string   `json:"input,omitempty"`
-	Output           string   `json:"output,omitempty"`
-	ExpectedCommands []string `json:"expected_commands,omitempty"`
-}
-
-type testDataFile struct {
-	Tests []testCase `json:"tests"`
-}
 
 // setupTest creates a test environment and returns a cleanup function
 func setupTest(t *testing.T) (*Engine, *MockHost, func()) {
@@ -69,63 +51,39 @@ func setupTest(t *testing.T) (*Engine, *MockHost, func()) {
 	return engine, host, cleanup
 }
 
-func loadTestData(t *testing.T, filename string) testDataFile {
-	t.Helper()
-	data, err := os.ReadFile(filepath.Join("testdata", filename))
-	if err != nil {
-		t.Fatalf("Failed to read test data %s: %v", filename, err)
-	}
-
-	var testData testDataFile
-	if err := json.Unmarshal(data, &testData); err != nil {
-		t.Fatalf("Failed to parse test data %s: %v", filename, err)
-	}
-	return testData
+// featureCase is one semantic variant: register something in Lua,
+// feed a single line through the engine, and assert the commands that
+// reach the host, in order. Variant matrices are tables of these in
+// the feature's test file (trigger_test.go, alias_test.go, ...).
+type featureCase struct {
+	name   string
+	setup  string   // Lua run before the stimulus (raw string; may be multi-line)
+	input  string   // user input line, dispatched through the input hook
+	output string   // server line, dispatched through the output hook
+	want   []string // commands that must reach the host, in order
 }
 
-// executeSetupLua handles both string and []string Lua setup code
-func executeSetupLua(t *testing.T, engine *Engine, setup any) {
+func runFeatureCases(t *testing.T, cases []featureCase) {
 	t.Helper()
-	switch lua := setup.(type) {
-	case string:
-		if err := engine.L.DoString(lua); err != nil {
-			t.Fatalf("Failed to execute setup Lua code: %v", err)
-		}
-	case []interface{}:
-		for _, cmd := range lua {
-			if err := engine.L.DoString(cmd.(string)); err != nil {
-				t.Fatalf("Failed to execute setup Lua code: %v", err)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			engine, host, cleanup := setupTest(t)
+			defer cleanup()
+
+			if tc.setup != "" {
+				if err := engine.DoString("setup", tc.setup); err != nil {
+					t.Fatalf("setup failed: %v", err)
+				}
 			}
-		}
+			if tc.input != "" {
+				engine.OnInput(tc.input)
+			}
+			if tc.output != "" {
+				engine.OnOutput(text.NewLine(tc.output))
+			}
+			assertCommands(t, host, tc.want)
+		})
 	}
-}
-
-// executeTest runs a single test case and returns pass/fail status
-func executeTest(t *testing.T, feature string, tt testCase) {
-	t.Helper()
-	testName := fmt.Sprintf("%s/%s", feature, tt.Name)
-	t.Run(testName, func(t *testing.T) {
-		engine, host, cleanup := setupTest(t)
-		defer cleanup()
-
-		if tt.SetupLua != nil {
-			executeSetupLua(t, engine, tt.SetupLua)
-		}
-
-		if tt.Input != "" {
-			// Process user input through on_input hook
-			engine.OnInput(tt.Input)
-		}
-
-		if tt.Output != "" {
-			// Process server output through on_output hook
-			engine.OnOutput(text.NewLine(tt.Output))
-		}
-
-		if tt.ExpectedCommands != nil {
-			assertCommands(t, host, tt.ExpectedCommands)
-		}
-	})
 }
 
 // assertCommands verifies commands are received in order
@@ -143,27 +101,6 @@ func assertCommands(t *testing.T, host *MockHost, expected []string) {
 	for i, exp := range expected {
 		if actualCommands[i] != exp {
 			t.Errorf("command %d: expected %q, got %q", i, exp, actualCommands[i])
-		}
-	}
-}
-
-// TestFeatures runs all feature tests from JSON files
-func TestFeatures(t *testing.T) {
-	files, err := os.ReadDir("testdata")
-	if err != nil {
-		t.Fatalf("Failed to read testdata directory: %v", err)
-	}
-
-	for _, file := range files {
-		if !file.IsDir() && strings.HasSuffix(file.Name(), "_tests.json") {
-			feature := strings.TrimSuffix(file.Name(), "_tests.json")
-			t.Run(feature, func(t *testing.T) {
-				testData := loadTestData(t, file.Name())
-
-				for _, tt := range testData.Tests {
-					executeTest(t, feature, tt)
-				}
-			})
 		}
 	}
 }

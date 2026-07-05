@@ -1,5 +1,5 @@
 {
-  "description": "The input-to-wire pipeline (75_send.lua): the canary scenario plus command expansion. Expansion variants live in lua/testdata/send_tests.json.",
+  "description": "The input-to-wire pipeline (75_send.lua): the canary scenario plus command expansion. Expansion variants live in lua/send_test.go.",
   "scenarios": [
     {
       "name": "typed input reaches the server",
