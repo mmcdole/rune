@@ -1,6 +1,22 @@
 package widget
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/charmbracelet/x/ansi"
+	"github.com/mmcdole/rune/ui/tui/util"
+)
+
+// clipRow hard-truncates one row to the given width (ANSI-aware).
+// Every widget row must fit the terminal width: an overlong row wraps
+// at the terminal, adds a phantom physical line, and scrolls the whole
+// frame - corrupting the layout for everything above it.
+func clipRow(s string, width int) string {
+	if width < 1 || util.VisibleLen(s) <= width {
+		return s
+	}
+	return ansi.Truncate(s, width, "")
+}
 
 // Compile-time check that Viewport implements Widget
 var _ Widget = (*Viewport)(nil)
@@ -111,7 +127,7 @@ func (v *Viewport) View() string {
 			if contentHeight > 0 {
 				b.WriteByte('\n')
 			}
-			b.WriteString(v.prompt)
+			b.WriteString(clipRow(v.prompt, v.width))
 		}
 		v.cachedView = b.String()
 		v.cacheValid = true
@@ -142,12 +158,12 @@ func (v *Viewport) View() string {
 		if emptyLines > 0 || i > startIdx {
 			b.WriteByte('\n')
 		}
-		b.WriteString(v.buffer.At(i))
+		b.WriteString(clipRow(v.buffer.At(i), v.width))
 	}
 
 	if hasPrompt {
 		b.WriteByte('\n')
-		b.WriteString(v.prompt)
+		b.WriteString(clipRow(v.prompt, v.width))
 	}
 
 	v.cachedView = b.String()

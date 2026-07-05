@@ -23,19 +23,24 @@ rune.ui.layout({
 A docked pane renders a title header and a bottom border, which use two of
 its `height` lines. Panes start hidden; `toggle` shows them. A hidden pane
 keeps accumulating writes (the buffer is capped at 1000 lines), so toggling
-it back shows the recent history.
+it back shows the recent history. Lines longer than the pane width
+soft-wrap, and re-fit when the terminal resizes.
 
-Panes always show their newest lines; per-pane scrolling is not
-implemented. The `rune.pane.scroll_*` functions act on the main output
-viewport under the name `"main"`. This is how the default
-PageUp/PageDown/Home/End binds work:
+## Scrolling
+
+Every pane scrolls its own buffer; the special name `"main"` is the
+output viewport (that's what the default PageUp/PageDown/Home/End
+binds target). Aim a pane with binds of your own:
 
 ```lua
-rune.pane.scroll_up("main", 20)
-rune.pane.scroll_down("main", 20)
-rune.pane.scroll_to_top("main")
-rune.pane.scroll_to_bottom("main")
+rune.bind("shift+pageup",   function() rune.pane.scroll_up("chat", 5) end)
+rune.bind("shift+pagedown", function() rune.pane.scroll_down("chat", 5) end)
 ```
+
+While scrolled, the pane freezes on the history you're reading and its
+header shows `chat · scroll +N` as new lines land; `scroll_down` past
+the end (or `scroll_to_bottom`, or hiding the pane) returns it to live
+tailing.
 
 ## The mirror pattern
 

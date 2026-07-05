@@ -136,29 +136,39 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.input.SetCursor(int(msg))
 		return m, nil
 
-	// Pane scrolling (from Lua)
+	// Pane scrolling (from Lua). "main" is the output viewport; any
+	// other name scrolls that pane's own buffer. Unknown panes are
+	// ignored rather than auto-created.
 	case ui.PaneScrollUpMsg:
 		if msg.Name == "main" {
 			m.viewport.ScrollUp(msg.Lines)
 			m.updateScrollState()
+		} else if m.panes.Exists(msg.Name) {
+			m.panes.Get(msg.Name).ScrollUp(msg.Lines)
 		}
 		return m, nil
 	case ui.PaneScrollDownMsg:
 		if msg.Name == "main" {
 			m.viewport.ScrollDown(msg.Lines)
 			m.updateScrollState()
+		} else if m.panes.Exists(msg.Name) {
+			m.panes.Get(msg.Name).ScrollDown(msg.Lines)
 		}
 		return m, nil
 	case ui.PaneScrollToTopMsg:
 		if msg.Name == "main" {
 			m.viewport.GotoTop()
 			m.updateScrollState()
+		} else if m.panes.Exists(msg.Name) {
+			m.panes.Get(msg.Name).ScrollToTop()
 		}
 		return m, nil
 	case ui.PaneScrollToBottomMsg:
 		if msg.Name == "main" {
 			m.viewport.GotoBottom()
 			m.updateScrollState()
+		} else if m.panes.Exists(msg.Name) {
+			m.panes.Get(msg.Name).ScrollToBottom()
 		}
 		return m, nil
 	}
