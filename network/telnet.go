@@ -4,6 +4,7 @@ package network
 
 import (
 	"bytes"
+	"sync"
 )
 
 // Telnet command codes (op_command in libmudtelnet).
@@ -631,7 +632,10 @@ const (
 )
 
 // OutputBuffer buffers incoming data and splits it into lines.
+// The mutex is required: the read loop parses into the buffer while
+// the write loop calls InputSent to drop a pending prompt.
 type OutputBuffer struct {
+	mu      sync.Mutex
 	buffer  bytes.Buffer
 	mode    TelnetMode
 	newData bool
@@ -642,10 +646,14 @@ func NewOutputBuffer(mode TelnetMode) *OutputBuffer {
 }
 
 func (o *OutputBuffer) SetMode(mode TelnetMode) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
 	o.mode = mode
 }
 
 func (o *OutputBuffer) Receive(data []byte) []string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
 	o.buffer.Write(data)
 	o.newData = true
 	buf := o.buffer.Bytes()
@@ -678,6 +686,8 @@ func (o *OutputBuffer) Receive(data []byte) []string {
 
 // Prompt returns any pending (unterminated) text. Clears buffer if consume is true.
 func (o *OutputBuffer) Prompt(consume bool) string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
 	if o.buffer.Len() == 0 {
 		return ""
 	}
@@ -690,12 +700,16 @@ func (o *OutputBuffer) Prompt(consume bool) string {
 }
 
 func (o *OutputBuffer) HasNewData() bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
 	return o.newData
 }
 
 // InputSent clears the buffer in unterminated mode since the server
 // will reprint the prompt after echoing the input.
 func (o *OutputBuffer) InputSent() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
 	if o.mode == TelnetModeUnterminated {
 		o.buffer.Reset()
 		o.newData = false
@@ -703,10 +717,14 @@ func (o *OutputBuffer) InputSent() {
 }
 
 func (o *OutputBuffer) Len() int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
 	return o.buffer.Len()
 }
 
 func (o *OutputBuffer) Clear() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
 	o.buffer.Reset()
 	o.mode = TelnetModeUnterminated
 	o.newData = false
