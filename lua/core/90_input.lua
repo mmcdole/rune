@@ -416,12 +416,13 @@ rune.hooks.on("output", function(line)
     end
 end, { name = "_completion_cache", priority = 200 })
 
--- Add words from user input
+-- Add words from user input. Must run below priority 100: the core
+-- send handler consumes every input, which ends the hook chain.
 rune.hooks.on("input", function(text)
     for word in text:gmatch("[%w_'%-]+") do
         cache_add(word)
     end
-end, { name = "_completion_input", priority = 200 })
+end, { name = "_completion_input", priority = 50 })
 
 -- Smart input_changed hook: data-driven, no flags
 rune.hooks.on("input_changed", function()
