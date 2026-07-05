@@ -51,58 +51,10 @@ func contains(list []string, substr string) bool {
 	return false
 }
 
-func TestInputFlowsThroughLuaToNetwork(t *testing.T) {
-	s, net, _ := newTestSession(t)
-	net.connected = true
-
-	userInput(s, "north")
-	if sent := net.drainSent(); len(sent) != 1 || sent[0] != "north" {
-		t.Errorf("expected input to reach network, got %v", sent)
-	}
-}
-
-func TestAliasExpansionEndToEnd(t *testing.T) {
-	s, net, _ := newTestSession(t)
-	net.connected = true
-
-	if err := s.engine.DoString("setup", `rune.alias.exact("n", "north")`); err != nil {
-		t.Fatal(err)
-	}
-	userInput(s, "n")
-	if sent := net.drainSent(); len(sent) != 1 || sent[0] != "north" {
-		t.Errorf("expected alias expansion, got %v", sent)
-	}
-}
-
-func TestServerLinePrintedAndTriggersFire(t *testing.T) {
-	s, net, uiMock := newTestSession(t)
-	net.connected = true
-
-	if err := s.engine.DoString("setup", `rune.trigger.contains("attacks", "flee")`); err != nil {
-		t.Fatal(err)
-	}
-	serverLine(s, "A goblin attacks you!")
-
-	if printed := uiMock.drainPrinted(); !contains(printed, "goblin attacks") {
-		t.Errorf("expected server line printed, got %v", printed)
-	}
-	if sent := net.drainSent(); len(sent) != 1 || sent[0] != "flee" {
-		t.Errorf("expected trigger to fire, got %v", sent)
-	}
-}
-
-func TestGaggedLineNotPrinted(t *testing.T) {
-	s, _, uiMock := newTestSession(t)
-
-	if err := s.engine.DoString("setup", `rune.trigger.contains("secret", nil, {gag = true})`); err != nil {
-		t.Fatal(err)
-	}
-	serverLine(s, "a secret line")
-
-	if printed := uiMock.drainPrinted(); contains(printed, "secret") {
-		t.Errorf("gagged line was printed: %v", printed)
-	}
-}
+// Stimulus/response flows (input->network, aliases, triggers, gags,
+// local echo, slash commands) are covered end-to-end by the scenario
+// suite in test/e2e/scenarios/. The tests here assert synchronous internals
+// the scenario vocabulary cannot express.
 
 // A prompt must be committed to scrollback exactly once: when input is
 // submitted while it is displayed, or when a newer prompt replaces it.
@@ -131,23 +83,6 @@ func TestPromptCommitOrdering(t *testing.T) {
 	prompts := uiMock.drainPrompts()
 	if len(prompts) == 0 || prompts[len(prompts)-1] != "" {
 		t.Errorf("expected prompt overlay cleared after line, got %v", prompts)
-	}
-}
-
-func TestLocalEchoRespectsServerEchoMode(t *testing.T) {
-	s, net, uiMock := newTestSession(t)
-	net.connected = true
-
-	userInput(s, "hello")
-	if len(uiMock.echoed) != 1 {
-		t.Errorf("expected local echo, got %v", uiMock.echoed)
-	}
-
-	// Server took over echo (password entry) - no local echo
-	net.localEcho = false
-	userInput(s, "hunter2")
-	if len(uiMock.echoed) != 1 {
-		t.Errorf("expected no echo with server echo on, got %v", uiMock.echoed)
 	}
 }
 
@@ -201,19 +136,6 @@ func TestReloadIsDeferredAndRebuildsVM(t *testing.T) {
 	}
 	if err := s.engine.DoString("check", `assert(rune.hooks ~= nil)`); err != nil {
 		t.Errorf("scripting broken after reload: %v", err)
-	}
-}
-
-func TestSlashCommandDoesNotReachServer(t *testing.T) {
-	s, net, uiMock := newTestSession(t)
-	net.connected = true
-
-	userInput(s, "/help")
-	if sent := net.drainSent(); len(sent) != 0 {
-		t.Errorf("slash command leaked to server: %v", sent)
-	}
-	if printed := uiMock.drainPrinted(); !contains(printed, "/connect") {
-		t.Errorf("expected help output, got %v", printed)
 	}
 }
 

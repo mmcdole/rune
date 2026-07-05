@@ -56,6 +56,14 @@ type MockHost struct {
 
 	// HTTP capture (see Host.HTTPRequest)
 	HTTPCalls []MockHTTPCall
+
+	// Input line state (see Host.GetInput/SetInput); mirrors the real
+	// UI, where SetInput moves the cursor to the end of the text
+	InputText   string
+	InputCursor int
+
+	// Command history returned by GetHistory, oldest first
+	History []string
 }
 
 // MockHTTPCall records one Host.HTTPRequest invocation.
@@ -169,7 +177,9 @@ func (m *MockHost) ShowPicker(opts ui.ShowPickerMsg) {
 }
 
 func (m *MockHost) GetHistory() []string {
-	return nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.History...)
 }
 
 func (m *MockHost) SessionSet(key, value string) {
@@ -219,7 +229,9 @@ func (m *MockHost) StoreDelete(key string) error {
 }
 
 func (m *MockHost) AddToHistory(cmd string) {
-	// No-op for tests
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.History = append(m.History, cmd)
 }
 
 func (m *MockHost) LogStart(path string) (string, error) {
@@ -261,19 +273,34 @@ func (m *MockHost) HTTPRequest(id int, req HTTPRequest) {
 }
 
 func (m *MockHost) GetInput() string {
-	return "" // Return empty for tests
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.InputText
 }
 
 func (m *MockHost) SetInput(text string) {
-	// No-op for tests
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.InputText = text
+	m.InputCursor = len(text)
 }
 
 func (m *MockHost) InputGetCursor() int {
-	return 0
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.InputCursor
 }
 
 func (m *MockHost) InputSetCursor(pos int) {
-	// No-op for tests
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if pos < 0 {
+		pos = 0
+	}
+	if pos > len(m.InputText) {
+		pos = len(m.InputText)
+	}
+	m.InputCursor = pos
 }
 
 func (m *MockHost) OpenEditor(initial string) (string, bool) {
