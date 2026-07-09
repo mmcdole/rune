@@ -1,0 +1,70 @@
+{
+  "description": "Regression: OutputBuffer.Receive (since 29cd00a) dropped bare \\r as a line delimiter - the original ExtractLines split on \\n, \\r\\n, \\n\\r AND \\r. MUDs overwrite the pending prompt line with bare \\r; the embedded \\r reached the scrollback and the next line rendered at the tab stop over stale cells (ghost columns 0-7). Reported playing VikingMUD 2026-07-08 (tail CHANGES).",
+  "scenarios": [
+    {
+      "name": "bare CR is a line boundary, not an embedded control char",
+      "issue": "https://github.com/mmcdole/rune/issues/14",
+      "steps": [
+        {
+          "connect": true
+        },
+        {
+          "server_bytes": [
+            72,
+            80,
+            58,
+            49,
+            48,
+            48,
+            62,
+            32,
+            13,
+            9,
+            68,
+            101,
+            97,
+            100,
+            45,
+            102,
+            105,
+            108,
+            101,
+            32,
+            99,
+            108,
+            101,
+            97,
+            110,
+            117,
+            112,
+            44,
+            32,
+            112,
+            97,
+            114,
+            116,
+            32,
+            49,
+            13,
+            10
+          ],
+          "note": "mud overwrites its pending prompt with bare CR, then a tab-indented line"
+        },
+        {
+          "server_line": "sync marker",
+          "note": "sync: pipeline has advanced"
+        },
+        {
+          "expect_printed": "sync marker"
+        },
+        {
+          "expect_printed": "\tDead-file cleanup, part 1"
+        },
+        {
+          "expect_not_printed": "HP:100> \r\tDead-file",
+          "note": "the embedded-CR concatenation must not reach the scrollback"
+        }
+      ]
+    }
+  ]
+}
