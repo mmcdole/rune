@@ -140,7 +140,7 @@ func (p *Pane) PreferredHeight() int {
 // anchored on the same history (the offset grows with the buffer) and
 // the new line is counted for the header indicator.
 func (p *Pane) Write(text string) {
-	p.Lines = append(p.Lines, text)
+	p.Lines = append(p.Lines, util.ExpandTabs(text))
 	if p.offset > 0 {
 		p.offset++
 		p.newLines++
