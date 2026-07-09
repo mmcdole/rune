@@ -22,3 +22,33 @@ func FilterClearSequences(line string) string {
 	line = strings.ReplaceAll(line, "\x1b[1;1H", "") // Move cursor to 1,1
 	return line
 }
+
+// tabStop is the classic terminal tab width.
+const tabStop = 8
+
+// ExpandTabs replaces each tab with spaces up to the next 8-column tab
+// stop, measured in visible cells (ANSI sequences are zero-width). A raw
+// \t must never reach the renderer: bubbletea repaints only rows that
+// changed, and a tab makes the terminal skip cells without erasing them,
+// resurrecting content from the previous frame as ghost columns.
+func ExpandTabs(line string) string {
+	if !strings.Contains(line, "\t") {
+		return line
+	}
+	var b strings.Builder
+	col := 0
+	for {
+		i := strings.IndexByte(line, '\t')
+		if i < 0 {
+			b.WriteString(line)
+			return b.String()
+		}
+		seg := line[:i]
+		b.WriteString(seg)
+		col += VisibleLen(seg)
+		pad := tabStop - col%tabStop
+		b.WriteString(strings.Repeat(" ", pad))
+		col += pad
+		line = line[i+1:]
+	}
+}

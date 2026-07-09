@@ -252,7 +252,7 @@ func (m *Model) syncBars(content map[string]ui.BarContent) {
 func (m *Model) handleServerOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case ui.PrintLineMsg:
-		cleanLine := util.FilterClearSequences(string(msg))
+		cleanLine := util.ExpandTabs(util.FilterClearSequences(string(msg)))
 		if m.flushScheduled {
 			// Inside a batch window: coalesce with the burst.
 			m.pendingLines = append(m.pendingLines, cleanLine)
@@ -267,9 +267,9 @@ func (m *Model) handleServerOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Flush batched server lines first so the echo cannot render
 		// ahead of output that arrived before it.
 		m.flushPending()
-		m.appendLines([]string{string(msg)})
+		m.appendLines([]string{util.ExpandTabs(string(msg))})
 	case ui.PromptMsg:
-		text := string(msg)
+		text := util.ExpandTabs(string(msg))
 		if text != m.lastPrompt {
 			m.viewport.SetPrompt(text)
 			m.lastPrompt = text
