@@ -4,6 +4,7 @@ package network
 
 import (
 	"bytes"
+	"strings"
 	"sync"
 )
 
@@ -632,6 +633,14 @@ const (
 )
 
 // OutputBuffer buffers incoming data and splits it into lines.
+// Lines are delimited by \r\n, \n\r, \n, or a bare \r — the contract of the
+// original ExtractLines. Bare \r matters: muds return the carriage to
+// overwrite their pending prompt line, and an embedded \r that reaches the
+// UI renders the rest of the line over stale cells (ghost columns).
+// Fragmentation-safe: a \r that ends a read is held in the buffer until the
+// next read decides whether it pairs with a following \n, and a delimiter
+// pair split across reads is completed via pendingPartner instead of
+// emitting a spurious empty line.
 // The mutex is required: the read loop parses into the buffer while
 // the write loop calls InputSent to drop a pending prompt.
 type OutputBuffer struct {
@@ -639,6 +648,11 @@ type OutputBuffer struct {
 	buffer  bytes.Buffer
 	mode    TelnetMode
 	newData bool
+	// pendingPartner is the second byte of a delimiter pair whose first
+	// byte was already consumed at the end of a previous read ('\r' after
+	// an emitted \n, or '\n' after a held \r dropped by Prompt/InputSent).
+	// If the next read starts with it, it is swallowed.
+	pendingPartner byte
 }
 
 func NewOutputBuffer(mode TelnetMode) *OutputBuffer {
@@ -654,6 +668,15 @@ func (o *OutputBuffer) SetMode(mode TelnetMode) {
 func (o *OutputBuffer) Receive(data []byte) []string {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	if o.pendingPartner != 0 {
+		if len(data) > 0 && data[0] == o.pendingPartner {
+			data = data[1:]
+		}
+		o.pendingPartner = 0
+	}
+	if len(data) == 0 {
+		return nil
+	}
 	o.buffer.Write(data)
 	o.newData = true
 	buf := o.buffer.Bytes()
@@ -661,16 +684,26 @@ func (o *OutputBuffer) Receive(data []byte) []string {
 	last := 0
 
 	for i := 0; i < len(buf); i++ {
-		if i+1 < len(buf) {
-			if (buf[i] == '\r' && buf[i+1] == '\n') || (buf[i] == '\n' && buf[i+1] == '\r') {
-				lines = append(lines, string(buf[last:i]))
-				last = i + 2
-				i++
-				continue
-			}
-		}
-		if buf[i] == '\n' {
+		switch buf[i] {
+		case '\n':
 			lines = append(lines, string(buf[last:i]))
+			if i+1 < len(buf) && buf[i+1] == '\r' {
+				i++ // \n\r pair
+			} else if i+1 == len(buf) {
+				// the \r of an \n\r pair may arrive in the next read
+				o.pendingPartner = '\r'
+			}
+			last = i + 1
+		case '\r':
+			if i+1 == len(buf) {
+				// may be half of \r\n: hold it in the buffer until the
+				// next read shows its neighbor
+				break
+			}
+			lines = append(lines, string(buf[last:i]))
+			if buf[i+1] == '\n' {
+				i++ // \r\n pair
+			}
 			last = i + 1
 		}
 	}
@@ -685,6 +718,8 @@ func (o *OutputBuffer) Receive(data []byte) []string {
 }
 
 // Prompt returns any pending (unterminated) text. Clears buffer if consume is true.
+// A held trailing \r (a possible half of \r\n) is never part of the prompt
+// text; on consume its \n partner, if it arrives next, is still swallowed.
 func (o *OutputBuffer) Prompt(consume bool) string {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -692,9 +727,16 @@ func (o *OutputBuffer) Prompt(consume bool) string {
 		return ""
 	}
 	text := o.buffer.String()
+	heldCR := strings.HasSuffix(text, "\r")
+	if heldCR {
+		text = text[:len(text)-1]
+	}
 	if consume {
 		o.buffer.Reset()
 		o.newData = false
+		if heldCR {
+			o.pendingPartner = '\n'
+		}
 	}
 	return text
 }
@@ -711,6 +753,9 @@ func (o *OutputBuffer) InputSent() {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if o.mode == TelnetModeUnterminated {
+		if bytes.HasSuffix(o.buffer.Bytes(), []byte{'\r'}) {
+			o.pendingPartner = '\n' // dropped a held \r; swallow its pair
+		}
 		o.buffer.Reset()
 		o.newData = false
 	}
@@ -728,6 +773,7 @@ func (o *OutputBuffer) Clear() {
 	o.buffer.Reset()
 	o.mode = TelnetModeUnterminated
 	o.newData = false
+	o.pendingPartner = 0
 }
 
 // defaultCompatibility advertises ONLY options the client actually

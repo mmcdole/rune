@@ -466,6 +466,12 @@ func TestOutputBufferNewlineVariants(t *testing.T) {
 		{"LF", "a\nb\n", []string{"a", "b"}},
 		{"LFCR", "a\n\rb\n\r", []string{"a", "b"}},
 		{"Mixed", "a\r\nb\nc\n\r", []string{"a", "b", "c"}},
+		// Bare \r is a line boundary (prompt overwrite), never embedded.
+		// Regression: dropped in 29cd00a; ghost-column rendering on muds
+		// that overwrite the prompt line (issue #14, regressions/14-bare-cr-ghost-columns.json).
+		{"BareCR", "prompt> \rline\r\n", []string{"prompt> ", "line"}},
+		{"BareCRRun", "a\r\rb\n", []string{"a", "", "b"}},
+		{"BlankLines", "a\r\n\r\nb\r\n", []string{"a", "", "b"}},
 	}
 
 	for _, tt := range tests {
@@ -482,6 +488,61 @@ func TestOutputBufferNewlineVariants(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Delimiter pairs split across reads must neither delay lines nor emit
+// spurious empty ones, whatever the TCP fragmentation.
+func TestOutputBufferFragmentation(t *testing.T) {
+	tests := []struct {
+		name    string
+		packets []string
+		lines   []string // flattened across all Receive calls
+		prompt  string   // pending text afterwards
+	}{
+		{"CRLFSplit", []string{"abc\r", "\ndef\r\n"}, []string{"abc", "def"}, ""},
+		{"LFCRSplit", []string{"abc\n", "\rdef\n"}, []string{"abc", "def"}, ""},
+		{"BareCRThenText", []string{"abc\r", "def\r\n"}, []string{"abc", "def"}, ""},
+		{"HeldCRIsNotPrompt", []string{"abc\r"}, nil, "abc"},
+		{"CRLFBytewise", []string{"a", "\r", "\n", "b", "\r", "\n"}, []string{"a", "b"}, ""},
+		{"LFCRBytewise", []string{"a", "\n", "\r", "b", "\n"}, []string{"a", "b"}, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ob := NewOutputBuffer(TelnetModeUnterminated)
+			var lines []string
+			for _, p := range tt.packets {
+				lines = append(lines, ob.Receive([]byte(p))...)
+			}
+			if len(lines) != len(tt.lines) {
+				t.Fatalf("Expected lines %q, got %q", tt.lines, lines)
+			}
+			for i := range tt.lines {
+				if lines[i] != tt.lines[i] {
+					t.Errorf("Line %d: expected %q, got %q", i, tt.lines[i], lines[i])
+				}
+			}
+			if got := ob.Prompt(false); got != tt.prompt {
+				t.Errorf("Prompt: expected %q, got %q", tt.prompt, got)
+			}
+		})
+	}
+}
+
+// Consuming a prompt that ends in a held \r must still swallow the \n
+// half of the pair when it arrives in the next read.
+func TestOutputBufferPromptConsumeHeldCR(t *testing.T) {
+	ob := NewOutputBuffer(TelnetModeUnterminated)
+	if lines := ob.Receive([]byte("HP:10> \r")); len(lines) != 0 {
+		t.Fatalf("Expected no lines, got %q", lines)
+	}
+	if got := ob.Prompt(true); got != "HP:10> " {
+		t.Fatalf("Prompt: expected %q, got %q", "HP:10> ", got)
+	}
+	lines := ob.Receive([]byte("\nnext line\r\n"))
+	if len(lines) != 1 || lines[0] != "next line" {
+		t.Fatalf("Expected [next line], got %q", lines)
 	}
 }
 
