@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -343,5 +344,34 @@ func TestInlinePickerDismissesOnLuaEditWithSpace(t *testing.T) {
 	cancels := drainPickerCancels(outbound)
 	if len(cancels) != 1 || cancels[0].CallbackID != "cb1" {
 		t.Fatalf("expected one cancel for cb1, got %v", cancels)
+	}
+}
+
+// Regression #16: raw tabs must never reach the renderer. Bubbletea
+// repaints only changed rows; a row starting with \t makes the terminal
+// skip cells without erasing them, resurrecting the previous frame
+// (ghost columns). True paint verification is the manual tmux route -
+// this pins the model-layer guarantee that scrollback rows are tab-free.
+func TestPrintedTabsAreExpanded(t *testing.T) {
+	m := newTestModel(t)
+	next, _ := m.Update(ui.PrintLineMsg("\tDead-file cleanup"))
+	m = next.(*Model)
+	found := false
+	for i := 0; i < m.scrollback.Count(); i++ {
+		row := m.scrollback.At(i)
+		if row == "        Dead-file cleanup" {
+			found = true
+		}
+		if strings.Contains(row, "\t") {
+			t.Errorf("raw tab reached scrollback row %d: %q", i, row)
+		}
+	}
+	if !found {
+		t.Errorf("expanded row not found in scrollback")
+	}
+	next, _ = m.Update(ui.PromptMsg("HP\t> "))
+	m = next.(*Model)
+	if got := m.lastPrompt; got != "HP      > " {
+		t.Errorf("prompt = %q, want tab expanded", got)
 	}
 }
