@@ -50,25 +50,6 @@ type Engine struct {
 	reportingError bool
 }
 
-// InputMode controls how submitted input is interpreted by the Lua core.
-// It aliases the neutral input package's canonical submission mode.
-type InputMode = input.SubmissionMode
-
-const (
-	// InputModeCommand uses the normal input hook, including slash commands,
-	// aliases, repeats, and delimiter expansion.
-	InputModeCommand = input.ModeCommand
-
-	// InputModeVerbatim sends each LF-delimited line exactly as submitted.
-	InputModeVerbatim = input.ModeVerbatim
-)
-
-// InputContext describes the interpretation requested for one submission.
-// Its zero value preserves the traditional command-mode behavior.
-type InputContext struct {
-	Mode InputMode
-}
-
 // NewEngine creates an Engine with a Host interface.
 func NewEngine(host Host) *Engine {
 	return &Engine{
@@ -254,30 +235,47 @@ func (e *Engine) DoFile(path string) error {
 	return err
 }
 
-// OnInput handles user typing.
+// OnInput handles traditional command input. It remains as a convenience for
+// callers that do not need to construct an explicit submission.
 func (e *Engine) OnInput(text string) {
+	e.OnSubmission(input.Command(text))
+}
+
+// OnSubmission dispatches one immutable input snapshot through Lua. Every
+// input hook receives the same context shape; mode is always either "command"
+// or "verbatim". Verbatim submissions still traverse user input hooks, but
+// the core sender bypasses slash commands, aliases, repeats, and delimiters.
+func (e *Engine) OnSubmission(submission input.Submission) {
 	hooksCall, ok := e.getHooksCall()
 	if !ok {
 		e.reportHooksBroken()
-		// Degraded mode: keep the escape hatches working, pass
+		if submission.Mode == input.ModeVerbatim {
+			e.sendVerbatimFallback(submission.Text)
+			return
+		}
+
+		// Degraded command mode keeps the escape hatches working and passes
 		// everything else to the server as a plain telnet client.
-		switch text {
+		switch submission.Text {
 		case "/quit":
 			e.host.Quit()
 		case "/reload":
 			e.host.Reload()
 		default:
-			e.host.Send(text)
+			_ = e.host.Send(submission.Text)
 		}
 		return
 	}
+
+	ctx := e.L.NewTable()
+	ctx.RawSetString("mode", glua.LString(submission.Mode.String()))
 
 	if err := e.guard(func() error {
 		return e.L.CallByParam(glua.P{
 			Fn:      hooksCall,
 			NRet:    1,
 			Protect: true,
-		}, glua.LString("input"), glua.LString(text))
+		}, glua.LString("input"), glua.LString(submission.Text), ctx)
 	}); err != nil {
 		e.reportError("input dispatch", err)
 		return
@@ -285,44 +283,6 @@ func (e *Engine) OnInput(text string) {
 
 	// Pop the consumed/pass-through flag; routing is Lua's job, so
 	// nothing on the Go side acts on it.
-	e.L.Pop(1)
-}
-
-// OnInputWithContext handles a submission with explicit interpretation.
-// Command mode deliberately delegates to OnInput so existing callers retain
-// exactly the same behavior. Verbatim mode traverses the same input hook once
-// with context; the Lua core then bypasses command interpretation while user
-// observers and lifecycle hooks remain active.
-func (e *Engine) OnInputWithContext(text string, inputCtx InputContext) {
-	if inputCtx.Mode != InputModeVerbatim {
-		e.OnInput(text)
-		return
-	}
-
-	// Keep degraded-mode behavior available when user code clobbers the
-	// hook registry. Unlike command mode, slash-looking lines are data here.
-	hooksCall, ok := e.getHooksCall()
-	if !ok {
-		e.reportHooksBroken()
-		e.sendVerbatimFallback(text)
-		return
-	}
-
-	ctx := e.L.NewTable()
-	ctx.RawSetString("mode", glua.LString("verbatim"))
-
-	if err := e.guard(func() error {
-		return e.L.CallByParam(glua.P{
-			Fn:      hooksCall,
-			NRet:    1,
-			Protect: true,
-		}, glua.LString("input"), glua.LString(text), ctx)
-	}); err != nil {
-		e.reportError("verbatim input dispatch", err)
-		return
-	}
-
-	// Match OnInput: routing and consumption are Lua policy.
 	e.L.Pop(1)
 }
 

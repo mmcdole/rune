@@ -4,7 +4,11 @@ package lua
 // semicolon splitting and #N repeats. The e2e wiring proof lives in
 // test/e2e/scenarios/send.json.
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/mmcdole/rune/input"
+)
 
 func TestSendExpansion(t *testing.T) {
 	runFeatureCases(t, []featureCase{
@@ -76,8 +80,8 @@ func TestVerbatimInputPreservesLinesAndBypassesCommands(t *testing.T) {
 		t.Fatalf("setup failed: %v", err)
 	}
 
-	input := "  indented;still one line  \n\n/quit\n#2 north\naliased\ntrailing  \n"
-	engine.OnInputWithContext(input, InputContext{Mode: InputModeVerbatim})
+	draft := "  indented;still one line  \n\n/quit\n#2 north\naliased\ntrailing  \n"
+	engine.OnSubmission(input.Verbatim(draft))
 
 	assertCommands(t, host, []string{
 		"  indented;still one line  ",
@@ -97,7 +101,7 @@ func TestVerbatimInputSplitsOnlyOnLF(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 
-	engine.OnInputWithContext("one\r\ntwo\rthree", InputContext{Mode: InputModeVerbatim})
+	engine.OnSubmission(input.Verbatim("one\r\ntwo\rthree"))
 
 	assertCommands(t, host, []string{"one\r", "two\rthree"})
 }
@@ -110,7 +114,7 @@ func TestVerbatimInputDegradedModePreservesEmptyLines(t *testing.T) {
 		t.Fatalf("sabotage failed: %v", err)
 	}
 
-	engine.OnInputWithContext("first\n\n/quit\n", InputContext{Mode: InputModeVerbatim})
+	engine.OnSubmission(input.Verbatim("first\n\n/quit\n"))
 
 	assertCommands(t, host, []string{"first", "", "/quit", ""})
 	if host.QuitCalled {
@@ -122,17 +126,16 @@ func TestInputWithCommandContextKeepsNormalExpansion(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 
-	engine.OnInputWithContext("look;#2 north", InputContext{Mode: InputModeCommand})
+	engine.OnSubmission(input.Command("look;#2 north"))
 
 	assertCommands(t, host, []string{"look", "north", "north"})
 }
 
-func TestVerbatimInputHookReceivesContextAndCanConsume(t *testing.T) {
+func TestCommandInputHookReceivesContext(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 
 	if err := engine.DoString("setup", `
-		rune._input.send_verbatim = nil
 		rune.hooks.on("input", function(text, context)
 			rune.send_raw(context.mode .. "|" .. text)
 			return false
@@ -141,25 +144,57 @@ func TestVerbatimInputHookReceivesContextAndCanConsume(t *testing.T) {
 		t.Fatalf("setup failed: %v", err)
 	}
 
-	input := "first;second\n/quit"
-	engine.OnInputWithContext(input, InputContext{Mode: InputModeVerbatim})
-
-	// The observer receives the complete submission once. Returning false
-	// prevents the core verbatim sender from emitting either physical line.
-	assertCommands(t, host, []string{"verbatim|" + input})
+	// The convenience wrapper and explicit command submissions share the
+	// same uniform hook contract.
+	engine.OnInput("look")
+	assertCommands(t, host, []string{"command|look"})
 }
 
-func TestVerbatimCoreSenderCannotBeClobberedThroughExport(t *testing.T) {
+func TestVerbatimInputHookReceivesContextAndCanConsume(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 
-	if err := engine.DoString("setup", `rune._input.send_verbatim = nil`); err != nil {
+	if err := engine.DoString("setup", `
+		rune.hooks.on("input", function(text, context)
+			rune.send_raw(context.mode .. "|" .. text)
+			return false
+		end, { priority = 90 })
+	`); err != nil {
 		t.Fatalf("setup failed: %v", err)
 	}
 
-	engine.OnInputWithContext("one\ntwo", InputContext{Mode: InputModeVerbatim})
+	draft := "first;second\n/quit"
+	engine.OnSubmission(input.Verbatim(draft))
 
-	assertCommands(t, host, []string{"one", "two"})
+	// The observer receives the complete submission once. Returning false
+	// prevents the core verbatim sender from emitting either physical line.
+	assertCommands(t, host, []string{"verbatim|" + draft})
+}
+
+func TestInputHookCannotMutateVerbatimRouting(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	if err := engine.DoString("setup", `
+		rune.hooks.on("input", function(text, context)
+			local writable = pcall(function()
+				context.mode = "command"
+			end)
+			rune.send_raw(writable and "context-writable" or "context-readonly")
+			-- rawset can alter this handler's proxy, but every handler receives
+			-- a fresh view of the canonical mode.
+			rawset(context, "mode", "command")
+		end, { priority = 90 })
+	`); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
+	engine.OnSubmission(input.Verbatim("first;second\n/quit"))
+
+	assertCommands(t, host, []string{"context-readonly", "first;second", "/quit"})
+	if host.QuitCalled {
+		t.Fatal("mutating one hook context changed canonical verbatim routing")
+	}
 }
 
 func TestOneArgumentInputHookStillObservesVerbatim(t *testing.T) {
@@ -174,7 +209,7 @@ func TestOneArgumentInputHookStillObservesVerbatim(t *testing.T) {
 		t.Fatalf("setup failed: %v", err)
 	}
 
-	engine.OnInputWithContext("one\ntwo", InputContext{Mode: InputModeVerbatim})
+	engine.OnSubmission(input.Verbatim("one\ntwo"))
 
 	assertCommands(t, host, []string{"observed:one\ntwo", "one", "two"})
 }

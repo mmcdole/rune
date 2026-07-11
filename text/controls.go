@@ -29,11 +29,22 @@ func VisualizeTerminalRune(r rune, preserveTabs bool) rune {
 		return rune(0x2400) + r
 	case r == 0x7f:
 		return '␡'
-	case unicode.IsControl(r), unicode.Is(unicode.Zl, r), unicode.Is(unicode.Zp, r), isBidiControl(r):
+	case RequiresTerminalProjection(r):
 		return '�'
 	default:
 		return r
 	}
+}
+
+// RequiresTerminalProjection reports whether r must be replaced or escaped
+// before it is rendered directly in a terminal. It is also the shared
+// admission rule for Rune's lossless verbatim input path, keeping editing and
+// display policy from drifting apart.
+func RequiresTerminalProjection(r rune) bool {
+	return unicode.IsControl(r) ||
+		unicode.Is(unicode.Zl, r) ||
+		unicode.Is(unicode.Zp, r) ||
+		isBidiControl(r)
 }
 
 func isBidiControl(r rune) bool {

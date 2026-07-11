@@ -36,6 +36,7 @@ type inputController struct {
 	// session is the controller's.
 	pickerCB      string // Lua callback ID to settle on close
 	pickerDismiss bool   // close inline picker once input contains a space
+	historyRecall bool   // unmodified verbatim entry restored from history
 
 	notify  func(ui.UIEvent)            // outbound events to the session
 	submit  func(input.Submission) bool // transfer an immutable draft to the session
@@ -135,6 +136,7 @@ func (c *inputController) ShowPicker(opts ui.ShowPickerMsg) {
 // keep its filter in sync, and close the picker (cancelling its
 // callback) when the input is cleared.
 func (c *inputController) SetText(text string) {
+	c.historyRecall = false
 	wasPicker := c.mode == ModePickerInline || c.mode == ModePickerModal
 	wasInline := c.mode == ModePickerInline
 	c.input.SetValue(text)
@@ -152,7 +154,7 @@ func (c *inputController) SetText(text string) {
 		c.syncInlineFilter()
 		return
 	}
-	if !wasPicker || c.mode == ModeCompose {
+	if !wasPicker {
 		c.mode = ModeNormal
 	}
 }
@@ -162,6 +164,7 @@ func (c *inputController) SetText(text string) {
 // verbatim is forced even for one safe, non-empty physical line.
 func (c *inputController) SetSubmission(submission input.Submission) {
 	wasPicker := c.mode == ModePickerInline || c.mode == ModePickerModal
+	c.historyRecall = submission.Mode == input.ModeVerbatim
 
 	if submission.Mode == input.ModeVerbatim {
 		c.input.BeginCompose(submission.Text, utf8.RuneCountInString(submission.Text))
@@ -221,11 +224,27 @@ func (c *inputController) handleComposeKey(msg tea.KeyMsg) {
 		c.submitInput()
 		return
 	}
+	if c.historyRecall {
+		key := ""
+		delta := 0
+		switch msg.Type {
+		case tea.KeyUp:
+			key, delta = "up", -1
+		case tea.KeyDown:
+			key, delta = "down", 1
+		}
+		if key != "" && !c.input.CanMoveComposerVertically(delta) && c.isBound(key) {
+			c.notify(ui.ExecuteBindMsg(key))
+			return
+		}
+	}
 
 	oldValue := c.input.Value()
 	oldCursor := c.input.Position()
 	if c.input.UpdateComposer(msg) {
-		c.reportInputUpdate(oldValue, oldCursor)
+		if c.reportInputUpdate(oldValue, oldCursor) {
+			c.historyRecall = false
+		}
 		if !c.input.IsComposing() {
 			c.mode = ModeNormal
 		}
@@ -240,6 +259,7 @@ func (c *inputController) handleComposeKey(msg tea.KeyMsg) {
 }
 
 func (c *inputController) handlePaste(msg tea.KeyMsg) {
+	c.historyRecall = false
 	oldValue := c.input.Value()
 	oldCursor := c.input.Position()
 	wasInline := c.mode == ModePickerInline
@@ -262,6 +282,7 @@ func (c *inputController) handlePaste(msg tea.KeyMsg) {
 }
 
 func (c *inputController) insertComposerText(text string) {
+	c.historyRecall = false
 	oldValue := c.input.Value()
 	oldCursor := c.input.Position()
 	c.input.InsertPaste(text)
@@ -270,6 +291,7 @@ func (c *inputController) insertComposerText(text string) {
 }
 
 func (c *inputController) cancelCompose() {
+	c.historyRecall = false
 	c.input.Reset()
 	c.mode = ModeNormal
 	c.notify(ui.InputChangedMsg{Text: "", Cursor: 0})
@@ -431,5 +453,6 @@ func (c *inputController) submitInput() {
 	}
 	c.input.Reset()
 	c.mode = ModeNormal
+	c.historyRecall = false
 	c.notify(ui.InputChangedMsg{Text: "", Cursor: 0})
 }

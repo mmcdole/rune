@@ -477,6 +477,58 @@ func TestSetSubmissionForcesOneLineVerbatimComposer(t *testing.T) {
 	}
 }
 
+func TestRecalledVerbatimHistoryFallsThroughAtVisualBoundaries(t *testing.T) {
+	h := newControllerHarness()
+	h.bound["up"] = true
+	h.bound["down"] = true
+	h.ctl.input.SetSize(40, 0)
+	h.ctl.SetSubmission(input.Verbatim("one\ntwo"))
+	h.events = nil
+
+	// From the final visual row, Up remains a local cursor move.
+	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyUp})
+	if binds := h.executeBinds(); len(binds) != 0 {
+		t.Fatalf("interior Up delegated to history: %v", binds)
+	}
+
+	// At the first visual row, the next Up resumes Lua history navigation.
+	h.events = nil
+	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyUp})
+	if binds := h.executeBinds(); len(binds) != 1 || binds[0] != ui.ExecuteBindMsg("up") {
+		t.Fatalf("boundary Up binds = %v, want [up]", binds)
+	}
+
+	// Down mirrors the behavior: local inside the document, history at EOF.
+	h.events = nil
+	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyDown})
+	if binds := h.executeBinds(); len(binds) != 0 {
+		t.Fatalf("interior Down delegated to history: %v", binds)
+	}
+	h.events = nil
+	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyDown})
+	if binds := h.executeBinds(); len(binds) != 1 || binds[0] != ui.ExecuteBindMsg("down") {
+		t.Fatalf("boundary Down binds = %v, want [down]", binds)
+	}
+}
+
+func TestEditingRecalledVerbatimKeepsArrowsLocal(t *testing.T) {
+	h := newControllerHarness()
+	h.bound["up"] = true
+	h.ctl.SetSubmission(input.Verbatim("one line"))
+	h.events = nil
+
+	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("!")})
+	h.events = nil
+	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyUp})
+
+	if binds := h.executeBinds(); len(binds) != 0 {
+		t.Fatalf("edited recalled entry delegated Up to history: %v", binds)
+	}
+	if got := h.ctl.input.Value(); got != "one line!" {
+		t.Fatalf("edited recalled entry = %q, want %q", got, "one line!")
+	}
+}
+
 func TestSetSubmissionCommandOverridesStickyComposer(t *testing.T) {
 	h := newControllerHarness()
 	h.ctl.SetSubmission(input.Verbatim("same"))

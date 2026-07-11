@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattn/go-runewidth"
 
+	"github.com/mmcdole/rune/input"
 	"github.com/mmcdole/rune/text"
 )
 
@@ -39,16 +40,11 @@ func normalizeComposerText(text string) string {
 	return strings.ReplaceAll(text, "\r", "\n")
 }
 
-// RequiresComposer reports whether text contains structure or controls the
-// normal single-line textinput would destroy. The composer preserves the
-// canonical rune while projecting unsafe controls visibly at render time.
+// RequiresComposer reports whether the neutral input policy requires the
+// lossless editor. Kept as a widget-level name for the local call sites; the
+// admission rule itself belongs to the input package.
 func RequiresComposer(value string) bool {
-	for _, r := range value {
-		if text.VisualizeTerminalRune(r, false) != r {
-			return true
-		}
-	}
-	return false
+	return input.RequiresVerbatim(value)
 }
 
 func (c *Composer) Value() string {
@@ -369,9 +365,9 @@ type composerLayout struct {
 // Source tabs remain one rune but expand to cells at classic 8-column stops.
 // Every source insertion offset is retained on exactly one visual row so
 // vertical movement and cursor rendering never need to reverse-map strings.
-func buildComposerLayout(text []rune, cursor, width int) composerLayout {
+func buildComposerLayout(content []rune, cursor, width int) composerLayout {
 	lineCount := 1
-	for _, r := range text {
+	for _, r := range content {
 		if r == '\n' {
 			lineCount++
 		}
@@ -393,7 +389,7 @@ func buildComposerLayout(text []rune, cursor, width int) composerLayout {
 	lineStart := 0
 	for {
 		lineEnd := lineStart
-		for lineEnd < len(text) && text[lineEnd] != '\n' {
+		for lineEnd < len(content) && content[lineEnd] != '\n' {
 			lineEnd++
 		}
 
@@ -435,7 +431,7 @@ func buildComposerLayout(text []rune, cursor, width int) composerLayout {
 			if col >= contentWidth {
 				newContinuation()
 			}
-			r := text[offset]
+			r := content[offset]
 			if r == '\t' {
 				addPoint(offset)
 				padding := 8 - logicalCol%8
@@ -463,7 +459,7 @@ func buildComposerLayout(text []rune, cursor, width int) composerLayout {
 		}
 		addPoint(lineEnd)
 
-		if lineEnd == len(text) {
+		if lineEnd == len(content) {
 			break
 		}
 		line++

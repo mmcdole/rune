@@ -3,9 +3,8 @@ package e2e
 // End-to-end harness: a real Session.Run event loop driving a real
 // network.TCPClient against a scripted TCP server, with the mock UI
 // as the only test double. Scenario JSON files in scenarios/ run on
-// top of this via runner_test.go; imperative Go tests in this package
-// (none yet) use it directly for cases the step vocabulary cannot
-// express.
+// top of this via runner_test.go; imperative Go tests in this package use it
+// directly for cases the step vocabulary cannot express.
 
 import (
 	"bytes"

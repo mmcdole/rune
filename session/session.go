@@ -279,11 +279,7 @@ func (s *Session) handleSubmission(submission input.Submission) {
 		}
 	}
 
-	if submission.Mode == input.ModeVerbatim {
-		s.engine.OnInputWithContext(submission.Text, lua.InputContext{Mode: lua.InputModeVerbatim})
-		return
-	}
-	s.engine.OnInput(submission.Text)
+	s.engine.OnSubmission(submission)
 }
 
 // boot loads the VM state.

@@ -265,16 +265,30 @@ func (i *Input) ContinueCompose() {
 	i.discardPending = false
 }
 
+// CanMoveComposerVertically reports whether a one-row vertical move would
+// remain inside the current visual document. Controllers use the boundary to
+// hand unmodified recalled entries back to Lua history navigation.
+func (i *Input) CanMoveComposerVertically(delta int) bool {
+	if i.composer == nil || delta == 0 {
+		return false
+	}
+	layout := buildComposerLayout(i.composer.text, i.composer.cursor, i.width)
+	if delta < 0 {
+		return layout.cursorRow > 0
+	}
+	return layout.cursorRow < len(layout.rows)-1
+}
+
 func (i *Input) composerView() []string {
 	layout := buildComposerLayout(i.composer.text, i.composer.cursor, i.width)
 	bodyHeight := clampInt(len(layout.rows), 1, maxComposerBodyRows)
 	if i.height > 0 {
 		// The default layout gives us PreferredHeight. An explicit Lua layout
 		// height is also honored so View emits exactly the rows it was allotted.
-		bodyHeight = maxInt(1, i.height-2)
+		bodyHeight = max(1, i.height-2)
 	}
 
-	maxTop := maxInt(0, len(layout.rows)-bodyHeight)
+	maxTop := max(0, len(layout.rows)-bodyHeight)
 	i.composer.topRow = clampInt(i.composer.topRow, 0, maxTop)
 	if layout.cursorRow < i.composer.topRow {
 		i.composer.topRow = layout.cursorRow
@@ -293,13 +307,13 @@ func (i *Input) composerView() []string {
 	for n := 0; n < bodyHeight; n++ {
 		rowIndex := i.composer.topRow + n
 		if rowIndex >= len(layout.rows) {
-			rows = append(rows, strings.Repeat(" ", maxInt(0, i.width)))
+			rows = append(rows, strings.Repeat(" ", max(0, i.width)))
 			continue
 		}
 		rows = append(rows, i.renderComposerRow(layout, rowIndex))
 	}
 
-	help := "Enter verbatim · Ctrl+Enter newline · Ctrl+E edit · Esc discard"
+	help := "Enter verbatim · Ctrl+Enter newline · Esc discard"
 	if i.discardPending {
 		help = "Esc again discard · Any other key keep editing"
 	}
@@ -364,13 +378,6 @@ func (i *Input) composeFooter(help string) string {
 	}
 	fill := strings.Repeat("─", i.width-util.VisibleLen(label))
 	return i.styles.Muted.Render(label + fill)
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 // Picker access

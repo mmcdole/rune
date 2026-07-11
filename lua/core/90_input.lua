@@ -152,6 +152,39 @@ end
 rune.bind("up", history_up)
 rune.bind("down", history_down)
 
+-- History search (Ctrl+R). Keeping selection beside the navigation state
+-- lets an entry chosen from the picker continue naturally with Up/Down and
+-- return to the draft that was present before the picker opened.
+rune.bind("ctrl+r", function()
+    local history = rune._history.entries()
+    local draft = rune.input.get()
+
+    -- Reverse history for display (newest first).
+    local items = {}
+    for i = #history, 1, -1 do
+        local entry = history[i]
+        table.insert(items, {
+            text = entry.text,
+            desc = entry.mode == "verbatim" and "verbatim" or "",
+            value = tostring(i),
+        })
+    end
+
+    rune.ui.picker.show({
+        title = "History",
+        items = items,
+        on_select = function(index)
+            local history_index = tonumber(index)
+            local entry = history[history_index]
+            if entry then
+                history_state.index = #history - history_index + 1
+                history_state.draft = command_entry(draft)
+                restore_history_entry(entry)
+            end
+        end
+    })
+end)
+
 -- Reset on input submission
 rune.hooks.on("input", function(text)
     history_reset()

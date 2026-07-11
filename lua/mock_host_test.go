@@ -309,7 +309,12 @@ func (m *MockHost) SetInput(text string) {
 	defer m.mu.Unlock()
 	m.InputText = text
 	m.InputCursor = len(text)
-	if text == "" || m.InputMode != input.ModeVerbatim {
+	switch {
+	case text == "":
+		m.InputMode = input.ModeCommand
+	case m.InputMode == input.ModeVerbatim || input.RequiresVerbatim(text):
+		m.InputMode = input.ModeVerbatim
+	default:
 		m.InputMode = input.ModeCommand
 	}
 }

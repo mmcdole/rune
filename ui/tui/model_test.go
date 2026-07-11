@@ -200,6 +200,46 @@ func TestEchoExpandsPreservedTabsBeforeScrollback(t *testing.T) {
 	}
 }
 
+func TestOversizedVerbatimSubmissionIsRejectedAtomically(t *testing.T) {
+	m := newBareModel(t)
+
+	tooManyLines := input.Verbatim(strings.Repeat("\n", maxVerbatimLines))
+	if m.sendLine(tooManyLines) {
+		t.Fatal("over-line-limit verbatim submission was accepted")
+	}
+	tooManyBytes := input.Verbatim(strings.Repeat("x", maxVerbatimBytes+1))
+	if m.sendLine(tooManyBytes) {
+		t.Fatal("over-byte-limit verbatim submission was accepted")
+	}
+
+	if got := m.scrollback.Count(); got != 2 {
+		t.Fatalf("warning count = %d, want 2", got)
+	}
+	for n := 0; n < m.scrollback.Count(); n++ {
+		if warning := m.scrollback.At(n); !strings.Contains(warning, "Verbatim input not sent") {
+			t.Fatalf("warning %d = %q", n, warning)
+		}
+	}
+}
+
+func TestVerbatimSubmissionAtLimitsIsAccepted(t *testing.T) {
+	inputChan := make(chan input.Submission, 1)
+	m := NewModel(inputChan, make(chan ui.UIEvent, 8))
+	text := strings.Repeat("x", maxVerbatimBytes-(maxVerbatimLines-1)) +
+		strings.Repeat("\n", maxVerbatimLines-1)
+	submission := input.Verbatim(text)
+
+	if len(text) != maxVerbatimBytes {
+		t.Fatalf("test setup bytes = %d, want %d", len(text), maxVerbatimBytes)
+	}
+	if !m.sendLine(submission) {
+		t.Fatal("at-limit verbatim submission was rejected")
+	}
+	if got := <-inputChan; got != submission {
+		t.Fatalf("queued submission differs: got %+v", got)
+	}
+}
+
 // TestBarCannotClobberBuiltinWidget verifies a Lua bar named after a
 // built-in widget ("input", "separator") neither replaces it nor
 // deletes it when the bar is later removed.

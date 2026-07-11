@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -326,17 +327,30 @@ func (m *Model) appendLines(lines []string) {
 	m.updateScrollState()
 }
 
-// sendLine hands a submitted input line to the session, dropping (with
-// a visible warning) rather than blocking the render loop.
+// sendLine offers a submitted input snapshot to the session. It rejects
+// oversized verbatim drafts or a busy engine with a visible warning rather
+// than blocking the render loop; false tells the controller to retain them.
 func (m *Model) sendLine(submission input.Submission) bool {
+	if submission.Mode == input.ModeVerbatim {
+		lineCount := 1 + strings.Count(submission.Text, "\n")
+		if len(submission.Text) > maxVerbatimBytes || lineCount > maxVerbatimLines {
+			m.appendLines([]string{text.Red("[WARNING] Verbatim input not sent - limit is 1000 lines or 256 KiB")})
+			return false
+		}
+	}
 	select {
 	case m.inputChan <- submission:
 		return true
 	default:
-		m.scrollback.Append(text.Red("[WARNING] Input dropped - engine lagging"))
+		m.appendLines([]string{text.Red("[WARNING] Input not sent - engine lagging")})
 		return false
 	}
 }
+
+const (
+	maxVerbatimBytes = 256 * 1024
+	maxVerbatimLines = 1000
+)
 
 func (m *Model) isBound(key string) bool {
 	return m.boundKeys[key]

@@ -14,7 +14,7 @@
 --   priority = 50         -- Execution order (lower = first, default 50)
 --
 -- Events (data-flow):
---   "input"        -- User input: (text, context?); return false to consume
+--   "input"        -- User input: (text, context); return false to consume
 --   "output"       -- Server output line object (false gags, string rewrites)
 --   "prompt"       -- Server prompt line object (false gags, string rewrites)
 --   "echo"         -- Local echo of typed input, plain string (false hides,
@@ -115,6 +115,30 @@ local function run_handler(entry, ...)
     return nil
 end
 
+-- Input contexts describe an immutable submission snapshot. Each handler gets
+-- a fresh read-only proxy so even raw mutation cannot change the canonical
+-- mode observed by later handlers or by the core router.
+local function reject_input_context_write()
+    error("input context is read-only", 2)
+end
+
+local input_context_metatables = {
+    command = {
+        __index = { mode = "command" },
+        __newindex = reject_input_context_write,
+        __metatable = false,
+    },
+    verbatim = {
+        __index = { mode = "verbatim" },
+        __newindex = reject_input_context_write,
+        __metatable = false,
+    },
+}
+
+local function input_context(mode)
+    return setmetatable({}, input_context_metatables[mode] or input_context_metatables.command)
+end
+
 -- Call all handlers for an event
 -- For output/prompt: chains modifications (each handler sees the
 --   previous handler's rewrite), false gags
@@ -191,11 +215,12 @@ function rune.hooks.call(event, ...)
         -- Any handler returning false stops processing
         local text = select(1, ...)
         local context = select(2, ...)
+        local mode = context and context.mode or "command"
         for _, entry in ipairs(handlers) do
             if registry:active(entry) then
                 -- Existing one-argument handlers remain valid in Lua; they
-                -- simply ignore the optional submission context.
-                local result = run_handler(entry, text, context)
+                -- simply ignore the submission context.
+                local result = run_handler(entry, text, input_context(mode))
                 if result == false then
                     return false  -- consumed/stopped
                 end

@@ -94,10 +94,9 @@ end
 
 -- Send an entire submission without interpreting any of it as a Rune command.
 -- Only LF separates outbound lines; whitespace, CR bytes, delimiters, repeats,
--- slash commands, and empty lines remain data. The core hook closes over this
--- implementation so user code cannot accidentally break verbatim submission
--- by replacing the exported internal helper.
-local function send_verbatim(input, context)
+-- slash commands, and empty lines remain data. This is private core policy,
+-- closed over by the input hook rather than exposed on a Go-owned rune._ table.
+local function send_verbatim(input)
     local start = 1
     while true do
         local pos = input:find("\n", start, true)
@@ -110,9 +109,6 @@ local function send_verbatim(input, context)
     end
 end
 
--- INTERNAL API alias for scripts that deliberately need the same primitive.
-rune._input.send_verbatim = send_verbatim
-
 -- PUBLIC: Send commands to the MUD
 function rune.send(input)
     send_impl(input, 0)
@@ -123,8 +119,8 @@ rune.hooks.on("input", function(input, context)
     -- Verbatim is a submission policy, not a separate lifecycle: earlier
     -- input hooks still observe it and may consume it, but none of Rune's
     -- command syntax is applied once it reaches this core handler.
-    if context and context.mode == "verbatim" then
-        send_verbatim(input, context)
+    if context.mode == "verbatim" then
+        send_verbatim(input)
         return false
     end
 

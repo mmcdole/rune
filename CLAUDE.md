@@ -36,7 +36,7 @@ These rules keep the boundary consistent; follow them when adding APIs:
 - **Go registers only `rune._*` primitives** (`_send_raw`, `_timer`, `_input`, `_ui`, ...). Every public name (`rune.send`, `rune.input.get`, `rune.ui.bar`, ...) is defined in Lua, even when the wrapper is thin. The Lua core in `lua/core/` IS the public API surface. The only non-underscore fields Go sets are `rune.config_dir` and `rune.version` (data, not API; version is single-sourced from the `version` package so TTYPE/MNES cannot drift from `/version`).
 - **Registries live in Lua** on the shared factory (`rune.registry.new`, `15_registry.lua`). Hooks, timers, aliases, triggers, binds, bars, and slash commands all get handles, upsert-by-name, groups, priorities, source attribution, and failure quarantine from one implementation. Go dispatches through internal entry points (`rune.hooks.call`, `rune.binds._dispatch`, `rune.bars._render_all`, `rune.timer._fire`). Dispatch loops that keep iterating after a user callback runs iterate `Registry:snapshot()`, so callbacks may add/remove entries mid-dispatch safely.
 - **Presentation belongs to Lua** via `rune.style` (`05_style.lua`). Even the local-echo styling (`"> "` prefix) is a Lua handler on the `"echo"` hook. Go colors only its last-resort degraded-path messages, through `text.Red`/`text.Green` - raw escape codes live in exactly one file per language.
-- **Key policy**: Go handles keys only while a UI-internal mode is active (picker capture/cancel) plus Enter-to-submit. Everything else is a Lua bind. Bound printable keys fire only when the input is empty; Go's scroll-key handler is a fallback for unbound keys (keeps degraded mode scrollable).
+- **Key policy**: Go owns atomic bracketed paste, `Ctrl+Enter`/`Ctrl+J` newline insertion, Enter-to-submit, and editing/cancel keys while a UI-internal mode is active (picker or lossless composer). The ordinary one-line view stays unchanged and has no mode chrome. Application actions remain Lua binds; the composer delegates unhandled chords such as `Ctrl+E`. In normal input, bound printable keys fire only when the input is empty; Go's scroll-key handler is a fallback for unbound keys (keeps degraded mode scrollable).
 - **Error convention**: Go primitives return `nil, err` for recoverable failures (send while disconnected, missing file, bad pattern); raising is reserved for programmer errors (wrong argument types).
 
 ### Script Robustness
@@ -54,6 +54,7 @@ These rules keep the boundary consistent; follow them when adding APIs:
 cmd/rune/main.go              - Bootstrap: creates Session and runs UI
 config/config.go              - Config dir resolution (XDG/APPDATA)
 event/event.go                - Session event types and payloads
+input/                        - Neutral submission values and verbatim admission policy
 session/                      - Session: event loop, implements lua.Host
   session.go                  - Orchestrator, Network interface, boot
   lua_*.go                    - Host implementation (network, ui, timers,
@@ -75,7 +76,7 @@ ui/                           - UI interface, messages, TUI implementation
 ### Event Flow
 
 ```
-User Input -> UI input chan -> Session -> rune.hooks.call("input")  -> network
+User Submission -> UI input chan -> Session -> rune.hooks.call("input", text, {mode}) -> network
 Server Line -> net output   -> Session -> rune.hooks.call("output") -> UI print
 Server Prompt -> net output -> Session -> rune.hooks.call("prompt") -> UI prompt overlay
 Timer fire -> timer events  -> Session -> rune.timer._fire(id)
@@ -108,7 +109,7 @@ Bar tick (250ms)            -> Session -> rune.bars._render_all(width) -> UI bar
 - `60_log.lua` - Session logging (`rune.log`, the `log-output`/`log-echo` policy hooks, `/log`); the file handle is Go-owned so logging survives `/reload`
 - `65_worlds.lua` - World bookmarks (`rune.world`, `/world`, `/worlds`), stored durably via `rune.store`
 - `70_gmcp.lua` - GMCP policy (`rune.gmcp` handlers/subscriptions on the shared registry, the Core.Hello handshake on `"gmcp_enabled"`, `/gmcp`); Go owns the option-201 transport and JSON bridge
-- `75_send.lua` - Command expansion (`;` splitting, `#N` repeats anchored at command position), core input/output/prompt handlers
+- `75_send.lua` - Command expansion (`;` splitting, `#N` repeats anchored at command position), verbatim physical-line routing, core input/output/prompt handlers
 - `80_http.lua` - Async HTTP (`rune.http.get/post`; owns the id→callback map, Go only performs requests)
 - `85_events.lua` - Default system event handlers (including the `"echo"` styler)
 - `90_input.lua` - Input wrappers, history navigation, word ops, tab completion
@@ -133,7 +134,7 @@ Go primitives (`rune._*`) are internal.
 - **Groups**: `rune.group.enable/disable/is_enabled/list` - an item fires only if itself enabled AND its group enabled (all registries honor this)
 - **Regex**: `rune.regex.match(pattern, text)` (cached), `rune.regex.validate(pattern)`, `rune.regex.compile(pattern)`. `trigger.regex`/`alias.regex` validate eagerly and raise on bad patterns.
 - **UI**: `rune.ui.layout{top=..., bottom=...}`, `rune.ui.refresh_bars()`, `rune.ui.picker.show(opts)`, `rune.pane.*`
-- **Input**: `rune.input.get/set/get_cursor/set_cursor/open_editor/word_left/word_right/delete_word`
+- **Input**: `rune.input.get/set/get_cursor/set_cursor/open_editor/word_left/word_right/delete_word`. Structured paste/editor text uses a sticky verbatim composer; normal one-line input has no extra chrome. Successful editor reads normalize CRLF/bare CR, strip exactly one final LF, and otherwise preserve whitespace. Verbatim submission is atomically rejected above 1,000 physical lines or 256 KiB so the draft stays available.
 - **State**: `rune.state` (read-only proxy: connected, address, scroll_mode, scroll_lines, width, height)
 - **Storage** (two Go-owned tiers; the name encodes the lifetime): `rune.session.set/get/delete` - string store that survives `/reload` but not exit; `rune.store.set/get/delete` - durable store backed by `<config>/store.json` (atomic write-through), values may be strings/numbers/booleans/JSON-able tables, `set(key, nil)` deletes, unstorable values return `nil, err`
 - **Worlds**: `rune.world.add/remove/get/list` - named server bookmarks in `rune.store` under `"worlds"`; `/connect <name>` resolves them first, bare `/connect` opens a picker over them
@@ -142,11 +143,11 @@ Go primitives (`rune._*`) are internal.
 - **HTTP**: `rune.http.get(url, opts?, callback?)` / `rune.http.post(url, body, opts?, callback?)` - async; Go performs the request off the session goroutine and the callback runs back on it via `AsyncResult` (under the watchdog). `callback(response, err)`; non-2xx is a response, not an error. Pending callbacks are Lua state and die on `/reload`. 30s default timeout, 5MB body cap, http/https only
 - **Style**: `rune.style.red/green/yellow/.../bold/dim/inverse`
 - **Lines**: output/prompt handlers receive line objects (`:raw()`, `:clean()`); `rune.line.new(text)` builds one
-- **History**: `rune.history.get/add`
+- **History**: `rune.history.get/add`; internal entries retain command/verbatim mode so recall restores the composer, while public `get` remains a string compatibility view
 
 ### Hook Events
 
-Data-flow: `"output"`, `"prompt"`, `"echo"` support returning `false` to gag or a string to rewrite (rewrites CHAIN to subsequent handlers; the core `"echo"` handler adds the `"> "` styling). `"input"` supports only `false` (consume) - string returns are ignored, and the core input handler at priority 100 always consumes, so custom input handlers must register below 100.
+Data-flow: `"output"`, `"prompt"`, `"echo"` support returning `false` to gag or a string to rewrite (rewrites CHAIN to subsequent handlers; the core `"echo"` handler adds the `"> "` styling). Every `"input"` handler receives `(text, context)` exactly once per submission, with read-only `context.mode` always `"command"` or `"verbatim"`; verbatim `text` may contain LF. Input supports only `false` (consume) - string returns are ignored, and the core input handler at priority 100 always consumes, so custom input handlers must register below 100.
 Notifications: `"ready"`, `"connecting"`, `"connected"`, `"disconnecting"`, `"disconnected"`, `"reloading"`, `"reloaded"`, `"loaded"`, `"error"`, `"input_changed"`, `"gmcp"` (catch-all: `package, data, raw`), `"gmcp_enabled"` (core handler sends Core.Hello).
 
 ### Slash Commands

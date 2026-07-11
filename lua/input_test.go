@@ -161,6 +161,7 @@ func TestHistoryPickerRestoresVerbatimMode(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 	verbatim := "say hi;look\n\tsecond\x1b"
+	host.SetInput("draft")
 	host.HistoryEntries = []input.Submission{
 		input.Command("north"),
 		input.Verbatim(verbatim),
@@ -181,6 +182,12 @@ func TestHistoryPickerRestoresVerbatimMode(t *testing.T) {
 	engine.ExecutePickerCallback(picker.CallbackID, newest.Value)
 	assertInput(t, host, verbatim)
 	assertInputMode(t, host, input.ModeVerbatim)
+
+	// Picker recall adopts the same state as arrow-key recall, so Down from
+	// the newest entry returns to the original command draft and its mode.
+	engine.HandleKeyBind("down")
+	assertInput(t, host, "draft")
+	assertInputMode(t, host, input.ModeCommand)
 }
 
 func TestInputSetPreservesComposeButRestoreForcesMode(t *testing.T) {

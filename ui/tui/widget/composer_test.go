@@ -131,18 +131,33 @@ func TestComposerStaysVerbatimAfterLastStructureDeleted(t *testing.T) {
 	}
 }
 
-func TestEditorReplacementKeepsActiveComposerSticky(t *testing.T) {
+func TestSetValueAdmitsAndKeepsVerbatimSticky(t *testing.T) {
 	in := newComposerInput(40)
-	in.SetValue("one\ntwo")
-	in.SetValue("one;two")
 
+	// A command-mode input becomes verbatim when a replacement contains
+	// physical structure.
+	in.SetValue("one\ntwo")
+	if !in.IsComposing() {
+		t.Fatal("multiline SetValue did not enter verbatim mode")
+	}
+
+	// Once admitted, a non-empty plain replacement cannot silently change
+	// submission semantics.
+	in.SetValue("one;two")
 	if !in.IsComposing() || in.Value() != "one;two" {
 		t.Fatalf("plain editor result changed mode/value: composing=%v value=%q", in.IsComposing(), in.Value())
 	}
 
+	// Empty is the explicit reset back to ordinary command input.
 	in.SetValue("")
 	if in.IsComposing() || in.Value() != "" {
 		t.Fatalf("clearing input did not cancel composer: composing=%v value=%q", in.IsComposing(), in.Value())
+	}
+
+	// Terminal controls also require verbatim admission even without LF/TAB.
+	in.SetValue("safe\x1b[31m")
+	if !in.IsComposing() || in.Value() != "safe\x1b[31m" {
+		t.Fatalf("control SetValue was not admitted verbatim: composing=%v value=%q", in.IsComposing(), in.Value())
 	}
 }
 

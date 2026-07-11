@@ -50,19 +50,38 @@ For `output`, `prompt`, and `echo`: `nil` passes through, a string
 replaces the text for subsequent handlers (rewrites chain), and `false`
 stops the chain (gag or hide).
 
-For `input`: `false` consumes the line; other return values are ignored.
-Input handlers cannot rewrite by returning a string. Use `rune.input.set`,
-or call `rune.send` yourself and return `false`.
+For `input`: `false` consumes the submission; other return values are ignored.
+Input handlers cannot rewrite by returning a string. Use `rune.input.set`, or
+call `rune.send`/`rune.send_raw` yourself and return `false`.
 
 | Event | Handler receives | Fired |
 |---|---|---|
-| `input` | typed text | On every submitted input line |
+| `input` | submitted text, context | Once per submission, before command or verbatim routing |
 | `output` | line object (`:raw()`, `:clean()`) | On every complete server line |
 | `prompt` | line object | On prompt fragments (no newline, or GA/EOR terminated) |
-| `echo` | typed text | On local echo of submitted input; skipped while the server has echo suppressed (passwords) |
+| `echo` | typed text | On each physical line of local echo; skipped while the server has echo suppressed (passwords) |
 
-The core registers its own handlers at priority 100: command dispatch
-and `rune.send` on `input`, trigger processing on `output`/`prompt`,
+Every `input` handler receives `(text, context)`. The context is read-only, and
+`context.mode` is always `"command"` or `"verbatim"`:
+
+```lua
+rune.hooks.on("input", function(text, context)
+    if context.mode == "verbatim" then
+        -- text is the whole submission and may contain LF characters
+        local _, breaks = text:gsub("\n", "")
+        rune.echo("Sending " .. tostring(breaks + 1) .. " lines")
+    end
+end, { priority = 10 })
+```
+
+Command mode applies Rune aliases, separators, repeats, and slash commands in
+the core handler. Verbatim mode still passes through custom `input` handlers
+once, but the core treats only LF as a physical-line boundary and bypasses all
+command interpretation. Existing one-argument handlers remain valid because
+Lua ignores extra arguments.
+
+The core registers its own handlers at priority 100: command or verbatim
+routing on `input`, trigger processing on `output`/`prompt`,
 the `> ` styling on `echo`. For `output`/`prompt`/`echo`, register
 below 100 to run before the core, or above 100 to see its results
 (post-trigger rewrites; gagged lines never reach you).
