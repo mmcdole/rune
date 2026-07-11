@@ -145,8 +145,7 @@ func TestTickStopsWhenOutputGoesQuiet(t *testing.T) {
 		t.Fatal("expected tick with pending lines to re-arm the window")
 	}
 
-	next, cmd = m.Update(tickMsg{})
-	m = next.(*Model)
+	_, cmd = m.Update(tickMsg{})
 	if cmd != nil {
 		t.Fatal("expected tick with nothing pending to stop the chain")
 	}

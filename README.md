@@ -2,6 +2,9 @@
 
 A modern MUD client built with Go and Lua.
 
+[![CI](https://github.com/mmcdole/rune/actions/workflows/ci.yml/badge.svg)](https://github.com/mmcdole/rune/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/mmcdole/rune/graph/badge.svg)](https://codecov.io/gh/mmcdole/rune)
+
 Rune combines Go's performance and concurrency with Lua's flexibility for scripting. The architecture follows a kernel philosophy: Go handles I/O, memory, and concurrency while Lua handles logic, features, and presentation.
 
 ## Features
