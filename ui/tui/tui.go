@@ -232,7 +232,13 @@ func (b *BubbleTeaUI) OpenEditor(initial string) (string, bool) {
 	err = cmd.Run()
 
 	// Resume TUI
-	if restoreErr := b.program.RestoreTerminal(); err == nil && restoreErr != nil {
+	restoreErr := b.program.RestoreTerminal()
+	if restoreErr == nil {
+		// Bubble Tea disables mouse reporting in ReleaseTerminal but does
+		// not restore it in RestoreTerminal.
+		b.program.Send(tea.EnableMouseCellMotion())
+	}
+	if err == nil && restoreErr != nil {
 		err = restoreErr
 	}
 
