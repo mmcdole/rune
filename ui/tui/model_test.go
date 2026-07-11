@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/mmcdole/rune/input"
 	"github.com/mmcdole/rune/ui"
 	"github.com/mmcdole/rune/ui/tui/widget"
 )
@@ -15,7 +16,7 @@ import (
 func newTestModel(t *testing.T) *Model {
 	t.Helper()
 
-	inputChan := make(chan string, 16)
+	inputChan := make(chan input.Submission, 16)
 	outbound := make(chan ui.UIEvent, 64)
 	m := NewModel(inputChan, outbound)
 
@@ -77,7 +78,7 @@ func TestMouseNonWheelEventsIgnored(t *testing.T) {
 func newBareModel(t *testing.T) *Model {
 	t.Helper()
 
-	inputChan := make(chan string, 16)
+	inputChan := make(chan input.Submission, 16)
 	outbound := make(chan ui.UIEvent, 64)
 	m := NewModel(inputChan, outbound)
 
@@ -184,6 +185,21 @@ func TestEchoFlushesPendingServerLines(t *testing.T) {
 	}
 }
 
+func TestEchoExpandsPreservedTabsBeforeScrollback(t *testing.T) {
+	m := newBareModel(t)
+
+	next, _ := m.Update(ui.EchoLineMsg("> a\tb"))
+	m = next.(*Model)
+
+	got := m.scrollback.At(0)
+	if strings.ContainsRune(got, '\t') {
+		t.Fatalf("raw tab reached scrollback: %q", got)
+	}
+	if !strings.Contains(got, "b") || len(got) <= len("> a b") {
+		t.Fatalf("tab was not expanded for display: %q", got)
+	}
+}
+
 // TestBarCannotClobberBuiltinWidget verifies a Lua bar named after a
 // built-in widget ("input", "separator") neither replaces it nor
 // deletes it when the bar is later removed.
@@ -208,10 +224,10 @@ func TestBarCannotClobberBuiltinWidget(t *testing.T) {
 // newInlinePickerModel builds a model with an inline picker open over a
 // command-style item list and the input seeded with text, returning the
 // outbound channel so tests can observe picker cancel messages.
-func newInlinePickerModel(t *testing.T, dismissOnSpace bool, input string) (*Model, chan ui.UIEvent) {
+func newInlinePickerModel(t *testing.T, dismissOnSpace bool, initial string) (*Model, chan ui.UIEvent) {
 	t.Helper()
 
-	inputChan := make(chan string, 16)
+	inputChan := make(chan input.Submission, 16)
 	outbound := make(chan ui.UIEvent, 64)
 	m := NewModel(inputChan, outbound)
 
@@ -229,7 +245,7 @@ func newInlinePickerModel(t *testing.T, dismissOnSpace bool, input string) (*Mod
 	})
 	m = next.(*Model)
 
-	next, _ = m.Update(ui.SetInputMsg(input))
+	next, _ = m.Update(ui.SetInputMsg(initial))
 	m = next.(*Model)
 
 	if m.inputCtl.mode != ModePickerInline {
@@ -344,6 +360,19 @@ func TestInlinePickerDismissesOnLuaEditWithSpace(t *testing.T) {
 	cancels := drainPickerCancels(outbound)
 	if len(cancels) != 1 || cancels[0].CallbackID != "cb1" {
 		t.Fatalf("expected one cancel for cb1, got %v", cancels)
+	}
+}
+
+func TestSetInputSubmissionMessageForcesVerbatimMode(t *testing.T) {
+	m := newBareModel(t)
+	next, _ := m.Update(ui.SetInputSubmissionMsg(input.Verbatim("one line;still data")))
+	m = next.(*Model)
+
+	if m.inputCtl.mode != ModeCompose || !m.input.IsComposing() {
+		t.Fatal("explicit verbatim message did not enter composer")
+	}
+	if got := m.input.Value(); got != "one line;still data" {
+		t.Fatalf("input = %q", got)
 	}
 }
 

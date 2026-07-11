@@ -5,6 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/mmcdole/rune/input"
 	"github.com/mmcdole/rune/text"
 	"github.com/mmcdole/rune/ui"
 	"github.com/mmcdole/rune/ui/tui/style"
@@ -54,7 +55,7 @@ type Model struct {
 	lastPrompt   string
 	width        int
 	height       int
-	inputChan    chan<- string
+	inputChan    chan<- input.Submission
 	outbound     chan<- ui.UIEvent
 	initialized  bool
 	pendingLines []string
@@ -66,7 +67,7 @@ type Model struct {
 }
 
 // NewModel creates a new TUI model.
-func NewModel(inputChan chan<- string, outbound chan<- ui.UIEvent) *Model {
+func NewModel(inputChan chan<- input.Submission, outbound chan<- ui.UIEvent) *Model {
 	styles := style.DefaultStyles()
 	scrollback := widget.NewScrollbackBuffer(100000)
 	viewport := widget.NewViewport(scrollback)
@@ -129,6 +130,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case ui.SetInputMsg:
 		m.inputCtl.SetText(string(msg))
+		return m, nil
+	case ui.SetInputSubmissionMsg:
+		m.inputCtl.SetSubmission(input.Submission(msg))
 		return m, nil
 
 	// Input primitives (from Lua)
@@ -324,11 +328,13 @@ func (m *Model) appendLines(lines []string) {
 
 // sendLine hands a submitted input line to the session, dropping (with
 // a visible warning) rather than blocking the render loop.
-func (m *Model) sendLine(line string) {
+func (m *Model) sendLine(submission input.Submission) bool {
 	select {
-	case m.inputChan <- line:
+	case m.inputChan <- submission:
+		return true
 	default:
 		m.scrollback.Append(text.Red("[WARNING] Input dropped - engine lagging"))
+		return false
 	}
 }
 

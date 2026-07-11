@@ -1,5 +1,7 @@
 package ui
 
+import "github.com/mmcdole/rune/input"
+
 // UI defines the contract for the terminal display layer.
 // Implementation lives in the same package (BubbleTeaUI).
 type UI interface {
@@ -7,12 +9,13 @@ type UI interface {
 	Quit()
 
 	// Input/Output
-	Input() <-chan string
+	Input() <-chan input.Submission
 	Outbound() <-chan UIEvent
 	Print(text string)
 	Echo(text string)
 	SetPrompt(text string)
 	SetInput(text string)
+	SetInputSubmission(submission input.Submission)
 
 	// Updates
 	UpdateBars(content map[string]BarContent)

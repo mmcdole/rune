@@ -78,6 +78,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mmcdole/rune/input"
 	"github.com/mmcdole/rune/ui"
 )
 
@@ -248,7 +249,7 @@ func runStep(t *testing.T, c *client, st step, desc string) {
 		c.mud.conn.Close()
 
 	case st.Type != nil:
-		c.ui.input <- *st.Type
+		c.ui.input <- input.Command(*st.Type)
 	case st.Input != nil:
 		cursor := len(st.Input.Text)
 		if st.Input.Cursor != nil {

@@ -43,16 +43,24 @@ end
 
 local history_state = {
     index = 0,      -- 0 = at draft, 1..n = position in history (1 = newest)
-    draft = "",     -- saved input when entering history
+    draft = { text = "", mode = "command" },
 }
+
+local function command_entry(text)
+    return { text = text, mode = "command" }
+end
+
+local function restore_history_entry(entry)
+    rune._input.restore(entry.text, entry.mode)
+end
 
 local function history_reset()
     history_state.index = 0
-    history_state.draft = ""
+    history_state.draft = command_entry("")
 end
 
 local function history_up()
-    local history = rune.history.get()
+    local history = rune._history.entries()
     if #history == 0 then
         return
     end
@@ -61,17 +69,17 @@ local function history_up()
     if history_state.index > 0 then
         local current = rune.input.get()
         local expected = history[#history - history_state.index + 1]
-        if current ~= expected then
+        if current ~= expected.text then
             history_reset()
         end
     end
 
     -- Save draft on first navigation
     if history_state.index == 0 then
-        history_state.draft = rune.input.get()
+        history_state.draft = command_entry(rune.input.get())
     end
 
-    local prefix = history_state.draft
+    local prefix = history_state.draft.text
 
     -- Search backwards from current position
     local start = history_state.index + 1
@@ -83,9 +91,9 @@ local function history_up()
         -- Prefix matching: find next entry that starts with prefix
         for i = start, #history do
             local entry = history[#history - i + 1] -- history is oldest-first
-            if entry:sub(1, #prefix) == prefix then
+            if entry.text:sub(1, #prefix) == prefix then
                 history_state.index = i
-                rune.input.set(entry)
+                restore_history_entry(entry)
                 return
             end
         end
@@ -93,7 +101,7 @@ local function history_up()
     else
         -- No prefix: cycle through all history
         history_state.index = start
-        rune.input.set(history[#history - start + 1])
+        restore_history_entry(history[#history - start + 1])
     end
 end
 
@@ -102,40 +110,40 @@ local function history_down()
         return -- Already at draft
     end
 
-    local history = rune.history.get()
+    local history = rune._history.entries()
 
     -- If input was externally modified (Ctrl+C, manual edit), reset state
     local current = rune.input.get()
     local expected = history[#history - history_state.index + 1]
-    if current ~= expected then
+    if current ~= expected.text then
         history_reset()
         return -- Now at draft, can't go down further
     end
 
-    local prefix = history_state.draft
+    local prefix = history_state.draft.text
 
     if prefix ~= "" then
         -- Prefix matching: find next newer entry that starts with prefix
         for i = history_state.index - 1, 1, -1 do
             local entry = history[#history - i + 1]
-            if entry:sub(1, #prefix) == prefix then
+            if entry.text:sub(1, #prefix) == prefix then
                 history_state.index = i
-                rune.input.set(entry)
+                restore_history_entry(entry)
                 return
             end
         end
         -- No more matches - return to draft
         history_state.index = 0
-        rune.input.set(history_state.draft)
+        restore_history_entry(history_state.draft)
     else
         -- No prefix: cycle through history
         if history_state.index == 1 then
             -- Back to draft
             history_state.index = 0
-            rune.input.set(history_state.draft)
+            restore_history_entry(history_state.draft)
         else
             history_state.index = history_state.index - 1
-            rune.input.set(history[#history - history_state.index + 1])
+            restore_history_entry(history[#history - history_state.index + 1])
         end
     end
 end
@@ -244,9 +252,7 @@ rune.bind("alt+backspace", function() rune.input.delete_word() end)
 rune.bind("ctrl+e", function()
     local current = rune.input.get()
     local result, ok = rune.input.open_editor(current)
-    if ok and result ~= "" then
-        -- Join multi-line with semicolons
-        result = result:gsub("\n", "; ")
+    if ok then
         rune.input.set(result)
     end
 end)

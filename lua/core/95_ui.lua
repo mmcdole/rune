@@ -134,7 +134,7 @@ rune.ui.bar("status", function(width)
     return { left = left, right = right }
 end)
 
--- Set default layout: input line with status bar below
+-- Set default layout: intrinsic-height input area with status bar below
 -- This can be overridden by user's init.lua
 rune.ui.layout({
     bottom = { "input", "status" }
@@ -146,19 +146,27 @@ rune.ui.layout({
 
 -- History Search (Ctrl+R)
 rune.bind("ctrl+r", function()
-    local history = rune.history.get()
+    local history = rune._history.entries()
 
     -- Reverse history for display (newest first)
     local items = {}
     for i = #history, 1, -1 do
-        table.insert(items, history[i])
+        local entry = history[i]
+        table.insert(items, {
+            text = entry.text,
+            desc = entry.mode == "verbatim" and "verbatim" or "",
+            value = tostring(i),
+        })
     end
 
     rune.ui.picker.show({
         title = "History",
         items = items,
-        on_select = function(val)
-            rune.input.set(val)
+        on_select = function(index)
+            local entry = history[tonumber(index)]
+            if entry then
+                rune._input.restore(entry.text, entry.mode)
+            end
         end
     })
 end)

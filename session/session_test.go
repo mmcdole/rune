@@ -5,7 +5,9 @@ import (
 	"testing"
 
 	"github.com/mmcdole/rune/event"
+	"github.com/mmcdole/rune/input"
 	"github.com/mmcdole/rune/lua"
+	runetext "github.com/mmcdole/rune/text"
 )
 
 // newTestSession boots a Session against mocks with the real embedded
@@ -158,6 +160,66 @@ func TestHistoryDedupAndTrim(t *testing.T) {
 	}
 }
 
+func TestHistoryPreservesModeAndDedupesWholeSubmission(t *testing.T) {
+	s, _, _ := newTestSession(t)
+	s.historyLimit = 4
+
+	for _, entry := range []input.Submission{
+		input.Command("same"),
+		input.Command("same"), // exact adjacent duplicate
+		input.Verbatim("same"),
+		input.Verbatim("same"), // exact adjacent duplicate
+		input.Command("next"),
+	} {
+		s.addHistorySubmission(entry)
+	}
+
+	want := []input.Submission{
+		input.Command("same"),
+		input.Verbatim("same"),
+		input.Command("next"),
+	}
+	got := s.GetHistoryEntries()
+	if len(got) != len(want) {
+		t.Fatalf("structured history = %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("structured history[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+
+	// The compatibility API deliberately projects both differently-modeled
+	// entries to strings, even when that makes adjacent text look duplicated.
+	legacy := s.GetHistory()
+	if got, want := strings.Join(legacy, "|"), "same|same|next"; got != want {
+		t.Fatalf("legacy history = %q, want %q", got, want)
+	}
+
+	// Callers receive a copy, not Session's canonical backing slice.
+	got[0] = input.Command("mutated")
+	if s.GetHistoryEntries()[0].Text != "same" {
+		t.Fatal("GetHistoryEntries exposed mutable Session storage")
+	}
+}
+
+func TestSetInputSubmissionForwardsExplicitMode(t *testing.T) {
+	s, _, uiMock := newTestSession(t)
+	want := input.Verbatim("one line;still data")
+
+	s.SetInputSubmission(want)
+
+	if len(uiMock.inputModes) != 1 || uiMock.inputModes[0] != want {
+		t.Fatalf("explicit input updates = %+v, want [%+v]", uiMock.inputModes, want)
+	}
+	if got := s.GetInput(); got != want.Text {
+		t.Fatalf("Session input mirror = %q, want %q", got, want.Text)
+	}
+	if got, wantCursor := s.InputGetCursor(), len([]rune(want.Text)); got != wantCursor {
+		t.Fatalf("Session cursor mirror = %d, want %d", got, wantCursor)
+	}
+}
+
 func TestSendFailureReportedNotFatal(t *testing.T) {
 	s, net, uiMock := newTestSession(t)
 	net.connected = false // sends fail
@@ -165,5 +227,65 @@ func TestSendFailureReportedNotFatal(t *testing.T) {
 	userInput(s, "north")
 	if printed := uiMock.drainPrinted(); !contains(printed, "not connected") {
 		t.Errorf("expected send failure echoed, got %v", printed)
+	}
+}
+
+func TestVerbatimSubmissionPreservesPhysicalLines(t *testing.T) {
+	s, net, uiMock := newTestSession(t)
+	net.connected = true
+
+	text := "  say hi;look  \n\t#2 north\n\n/quit\ntrailing  "
+	s.handleSubmission(input.Verbatim(text))
+
+	want := []string{"  say hi;look  ", "\t#2 north", "", "/quit", "trailing  "}
+	got := net.drainSent()
+	if len(got) != len(want) {
+		t.Fatalf("sent %q, want %q", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("sent[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+
+	if history := s.GetHistory(); len(history) != 1 || history[0] != text {
+		t.Fatalf("history = %q, want one exact submission %q", history, text)
+	}
+	if history := s.GetHistoryEntries(); len(history) != 1 || history[0] != input.Verbatim(text) {
+		t.Fatalf("structured history = %+v, want one verbatim submission", history)
+	}
+	for _, echoed := range uiMock.drainEchoed() {
+		if strings.ContainsRune(echoed, '\n') {
+			t.Fatalf("echo contains embedded newline: %q", echoed)
+		}
+	}
+	select {
+	case <-uiMock.done:
+		t.Fatal("verbatim /quit was interpreted as a client command")
+	default:
+	}
+}
+
+func TestSubmissionEchoVisualizesControlsWithoutChangingWireData(t *testing.T) {
+	s, net, uiMock := newTestSession(t)
+	net.connected = true
+
+	raw := "safe\x1b]52;c;payload\a\tend\nnext\x00"
+	s.handleSubmission(input.Verbatim(raw))
+
+	wantSent := []string{"safe\x1b]52;c;payload\a\tend", "next\x00"}
+	if got := net.drainSent(); len(got) != len(wantSent) || got[0] != wantSent[0] || got[1] != wantSent[1] {
+		t.Fatalf("wire data = %q, want exact %q", got, wantSent)
+	}
+
+	echoed := uiMock.drainEchoed()
+	if len(echoed) != 2 {
+		t.Fatalf("echoed %d lines, want 2: %q", len(echoed), echoed)
+	}
+	plain := runetext.StripANSI(strings.Join(echoed, "\n"))
+	for _, want := range []string{"␛]52", "␇", "\t", "␀"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("safe echo missing %q: %q", want, plain)
+		}
 	}
 }

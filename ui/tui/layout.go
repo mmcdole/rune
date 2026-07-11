@@ -45,6 +45,10 @@ func (m *Model) layoutDock(entries []ui.LayoutEntry) (string, int) {
 			continue
 		}
 
+		// Width can affect intrinsic height (notably soft-wrapped composer
+		// text), so make the current width available before asking for it.
+		// Existing fixed-height widgets ignore the zero height.
+		w.SetSize(m.width, 0)
 		preferred := w.PreferredHeight()
 		if preferred == 0 {
 			continue

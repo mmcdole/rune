@@ -19,6 +19,21 @@ func (e *Engine) registerHistoryFuncs() {
 		return 1
 	}))
 
+	// rune._history.entries() - Returns structured history, oldest first.
+	// Mode is a stable string so Lua does not depend on Go enum values.
+	e.L.SetField(hist, "entries", e.L.NewFunction(func(L *glua.LState) int {
+		history := e.host.GetHistoryEntries()
+		tbl := L.NewTable()
+		for i, entry := range history {
+			item := L.NewTable()
+			item.RawSetString("text", glua.LString(entry.Text))
+			item.RawSetString("mode", glua.LString(entry.Mode.String()))
+			tbl.RawSetInt(i+1, item)
+		}
+		L.Push(tbl)
+		return 1
+	}))
+
 	// rune._history.add(cmd) - Add a command to history
 	e.L.SetField(hist, "add", e.L.NewFunction(func(L *glua.LState) int {
 		cmd := L.CheckString(1)

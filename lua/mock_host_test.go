@@ -4,6 +4,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mmcdole/rune/input"
 	"github.com/mmcdole/rune/ui"
 )
 
@@ -61,9 +62,11 @@ type MockHost struct {
 	// UI, where SetInput moves the cursor to the end of the text
 	InputText   string
 	InputCursor int
+	InputMode   input.SubmissionMode
 
 	// Command history returned by GetHistory, oldest first
-	History []string
+	History        []string
+	HistoryEntries []input.Submission
 }
 
 // MockHTTPCall records one Host.HTTPRequest invocation.
@@ -179,7 +182,27 @@ func (m *MockHost) ShowPicker(opts ui.ShowPickerMsg) {
 func (m *MockHost) GetHistory() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.HistoryEntries != nil {
+		result := make([]string, len(m.HistoryEntries))
+		for i, entry := range m.HistoryEntries {
+			result[i] = entry.Text
+		}
+		return result
+	}
 	return append([]string(nil), m.History...)
+}
+
+func (m *MockHost) GetHistoryEntries() []input.Submission {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.HistoryEntries != nil {
+		return append([]input.Submission(nil), m.HistoryEntries...)
+	}
+	result := make([]input.Submission, len(m.History))
+	for i, text := range m.History {
+		result[i] = input.Command(text)
+	}
+	return result
 }
 
 func (m *MockHost) SessionSet(key, value string) {
@@ -232,6 +255,9 @@ func (m *MockHost) AddToHistory(cmd string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.History = append(m.History, cmd)
+	if m.HistoryEntries != nil {
+		m.HistoryEntries = append(m.HistoryEntries, input.Command(cmd))
+	}
 }
 
 func (m *MockHost) LogStart(path string) (string, error) {
@@ -283,6 +309,17 @@ func (m *MockHost) SetInput(text string) {
 	defer m.mu.Unlock()
 	m.InputText = text
 	m.InputCursor = len(text)
+	if text == "" || m.InputMode != input.ModeVerbatim {
+		m.InputMode = input.ModeCommand
+	}
+}
+
+func (m *MockHost) SetInputSubmission(submission input.Submission) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.InputText = submission.Text
+	m.InputCursor = len(submission.Text)
+	m.InputMode = submission.Mode
 }
 
 func (m *MockHost) InputGetCursor() int {

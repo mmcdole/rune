@@ -65,3 +65,116 @@ func TestSendExpansion(t *testing.T) {
 		},
 	})
 }
+
+func TestVerbatimInputPreservesLinesAndBypassesCommands(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	if err := engine.DoString("setup", `
+		rune.alias.exact("aliased", "expanded")
+	`); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
+	input := "  indented;still one line  \n\n/quit\n#2 north\naliased\ntrailing  \n"
+	engine.OnInputWithContext(input, InputContext{Mode: InputModeVerbatim})
+
+	assertCommands(t, host, []string{
+		"  indented;still one line  ",
+		"",
+		"/quit",
+		"#2 north",
+		"aliased",
+		"trailing  ",
+		"",
+	})
+	if host.QuitCalled {
+		t.Fatal("verbatim /quit must be sent as data")
+	}
+}
+
+func TestVerbatimInputSplitsOnlyOnLF(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	engine.OnInputWithContext("one\r\ntwo\rthree", InputContext{Mode: InputModeVerbatim})
+
+	assertCommands(t, host, []string{"one\r", "two\rthree"})
+}
+
+func TestVerbatimInputDegradedModePreservesEmptyLines(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	if err := engine.DoString("sabotage", "rune.hooks = nil"); err != nil {
+		t.Fatalf("sabotage failed: %v", err)
+	}
+
+	engine.OnInputWithContext("first\n\n/quit\n", InputContext{Mode: InputModeVerbatim})
+
+	assertCommands(t, host, []string{"first", "", "/quit", ""})
+	if host.QuitCalled {
+		t.Fatal("degraded verbatim /quit must be sent as data")
+	}
+}
+
+func TestInputWithCommandContextKeepsNormalExpansion(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	engine.OnInputWithContext("look;#2 north", InputContext{Mode: InputModeCommand})
+
+	assertCommands(t, host, []string{"look", "north", "north"})
+}
+
+func TestVerbatimInputHookReceivesContextAndCanConsume(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	if err := engine.DoString("setup", `
+		rune._input.send_verbatim = nil
+		rune.hooks.on("input", function(text, context)
+			rune.send_raw(context.mode .. "|" .. text)
+			return false
+		end, { priority = 90 })
+	`); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
+	input := "first;second\n/quit"
+	engine.OnInputWithContext(input, InputContext{Mode: InputModeVerbatim})
+
+	// The observer receives the complete submission once. Returning false
+	// prevents the core verbatim sender from emitting either physical line.
+	assertCommands(t, host, []string{"verbatim|" + input})
+}
+
+func TestVerbatimCoreSenderCannotBeClobberedThroughExport(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	if err := engine.DoString("setup", `rune._input.send_verbatim = nil`); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
+	engine.OnInputWithContext("one\ntwo", InputContext{Mode: InputModeVerbatim})
+
+	assertCommands(t, host, []string{"one", "two"})
+}
+
+func TestOneArgumentInputHookStillObservesVerbatim(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	if err := engine.DoString("setup", `
+		rune.hooks.on("input", function(text)
+			rune.send_raw("observed:" .. text)
+		end, { priority = 90 })
+	`); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
+	engine.OnInputWithContext("one\ntwo", InputContext{Mode: InputModeVerbatim})
+
+	assertCommands(t, host, []string{"observed:one\ntwo", "one", "two"})
+}

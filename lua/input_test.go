@@ -8,6 +8,7 @@ package lua
 import (
 	"testing"
 
+	"github.com/mmcdole/rune/input"
 	"github.com/mmcdole/rune/text"
 )
 
@@ -29,6 +30,13 @@ func assertCursor(t *testing.T, host *MockHost, want int) {
 	t.Helper()
 	if got := host.InputGetCursor(); got != want {
 		t.Errorf("cursor = %d, want %d", got, want)
+	}
+}
+
+func assertInputMode(t *testing.T, host *MockHost, want input.SubmissionMode) {
+	t.Helper()
+	if got := host.InputMode; got != want {
+		t.Errorf("input mode = %s, want %s", got, want)
 	}
 }
 
@@ -104,6 +112,94 @@ func TestHistoryNavigationResetOnSubmit(t *testing.T) {
 	assertInput(t, host, "second") // back at the newest entry
 }
 
+func TestHistoryNavigationRestoresSubmissionMode(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+	host.HistoryEntries = []input.Submission{
+		input.Command("same"),
+		input.Verbatim("same"),
+	}
+
+	engine.HandleKeyBind("up")
+	assertInput(t, host, "same")
+	assertInputMode(t, host, input.ModeVerbatim)
+
+	// Equal text with a different mode is a distinct older entry.
+	engine.HandleKeyBind("up")
+	assertInput(t, host, "same")
+	assertInputMode(t, host, input.ModeCommand)
+
+	engine.HandleKeyBind("down")
+	assertInputMode(t, host, input.ModeVerbatim)
+	engine.HandleKeyBind("down")
+	assertInput(t, host, "")
+	assertInputMode(t, host, input.ModeCommand)
+}
+
+func TestHistoryStructuredAndLegacyAPIs(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+	host.HistoryEntries = []input.Submission{
+		input.Command("north"),
+		input.Verbatim("say hi;look"),
+	}
+
+	script := `
+		local legacy = rune.history.get()
+		assert(#legacy == 2 and legacy[1] == "north" and legacy[2] == "say hi;look")
+		local entries = rune._history.entries()
+		assert(#entries == 2)
+		assert(entries[1].text == "north" and entries[1].mode == "command")
+		assert(entries[2].text == "say hi;look" and entries[2].mode == "verbatim")
+	`
+	if err := engine.DoString("history_apis", script); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHistoryPickerRestoresVerbatimMode(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+	verbatim := "say hi;look\n\tsecond\x1b"
+	host.HistoryEntries = []input.Submission{
+		input.Command("north"),
+		input.Verbatim(verbatim),
+	}
+
+	engine.HandleKeyBind("ctrl+r")
+	if len(host.PickerCalls) != 1 {
+		t.Fatalf("picker calls = %d, want 1", len(host.PickerCalls))
+	}
+	picker := host.PickerCalls[0]
+	if len(picker.Items) != 2 {
+		t.Fatalf("picker items = %+v, want 2", picker.Items)
+	}
+	newest := picker.Items[0]
+	if newest.Text != verbatim || newest.Description != "verbatim" {
+		t.Fatalf("newest picker item = %+v, want labelled verbatim entry", newest)
+	}
+	engine.ExecutePickerCallback(picker.CallbackID, newest.Value)
+	assertInput(t, host, verbatim)
+	assertInputMode(t, host, input.ModeVerbatim)
+}
+
+func TestInputSetPreservesComposeButRestoreForcesMode(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+	host.SetInputSubmission(input.Verbatim("one line"))
+
+	if err := engine.DoString("sticky_set", `rune.input.set("edited")`); err != nil {
+		t.Fatal(err)
+	}
+	assertInput(t, host, "edited")
+	assertInputMode(t, host, input.ModeVerbatim)
+
+	if err := engine.DoString("force_command", `rune._input.restore("edited", "command")`); err != nil {
+		t.Fatal(err)
+	}
+	assertInputMode(t, host, input.ModeCommand)
+}
+
 func TestWordNavigationAndDelete(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
@@ -147,7 +243,7 @@ func TestClearInputBinds(t *testing.T) {
 	assertInput(t, host, "")
 }
 
-func TestEditorBindJoinsLinesWithSemicolons(t *testing.T) {
+func TestEditorBindPreservesEditedText(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 
@@ -155,12 +251,34 @@ func TestEditorBindJoinsLinesWithSemicolons(t *testing.T) {
 		if initial != "draft" {
 			t.Errorf("editor got initial %q, want %q", initial, "draft")
 		}
-		return "north\neast\nkill goblin", true
+		return "north\neast\n\tkill goblin  ", true
 	}
 	host.SetInput("draft")
 
 	engine.HandleKeyBind("ctrl+e")
-	assertInput(t, host, "north; east; kill goblin")
+	assertInput(t, host, "north\neast\n\tkill goblin  ")
+}
+
+func TestEditorBindCanClearInput(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	host.OpenEditorFn = func(string) (string, bool) { return "", true }
+	host.SetInput("discard me")
+
+	engine.HandleKeyBind("ctrl+e")
+	assertInput(t, host, "")
+}
+
+func TestCancelledEditorRetainsInput(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	host.OpenEditorFn = func(string) (string, bool) { return "", false }
+	host.SetInput("keep me")
+
+	engine.HandleKeyBind("ctrl+e")
+	assertInput(t, host, "keep me")
 }
 
 func TestTabCompletionFromServerOutput(t *testing.T) {

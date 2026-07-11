@@ -3,6 +3,7 @@ package lua
 import (
 	"time"
 
+	"github.com/mmcdole/rune/input"
 	"github.com/mmcdole/rune/ui"
 )
 
@@ -28,6 +29,7 @@ type Host interface {
 	ShowPicker(opts ui.ShowPickerMsg)
 	GetInput() string
 	SetInput(text string)
+	SetInputSubmission(submission input.Submission)
 
 	// Input primitives
 	InputGetCursor() int
@@ -54,6 +56,7 @@ type Host interface {
 
 	// History
 	GetHistory() []string
+	GetHistoryEntries() []input.Submission
 	AddToHistory(cmd string)
 
 	// Session store: a small Go-owned string store that survives

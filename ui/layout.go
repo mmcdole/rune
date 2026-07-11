@@ -10,7 +10,7 @@ type LayoutEntry struct {
 // Both docks can contain any mix of bars, panes, and built-in components.
 //
 // Built-in component names:
-//   - "input": the input line (1 line)
+//   - "input": the command line or multiline composer (intrinsic height)
 //   - "status": the status bar (1 line, fallback if no Lua bar registered)
 //   - "separator": a horizontal line (1 line)
 //

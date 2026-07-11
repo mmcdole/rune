@@ -3,6 +3,7 @@ package widget
 import (
 	"strings"
 
+	"github.com/mmcdole/rune/text"
 	"github.com/mmcdole/rune/ui"
 	"github.com/mmcdole/rune/ui/tui/style"
 	"github.com/mmcdole/rune/ui/tui/util"
@@ -166,16 +167,24 @@ func (p *Picker) PreferredHeight() int {
 // View renders the picker overlay.
 func (p *Picker) View() string {
 	var lines []string
+	overlay := p.styles.OverlayBorder
+	// Lipgloss Width includes padding but excludes the border. Derive both
+	// reservations from the style so later theme changes cannot introduce an
+	// uncounted soft-wrapped row.
+	frameWidth := max(1, p.width-overlay.GetHorizontalBorderSize())
+	contentWidth := max(1, frameWidth-overlay.GetHorizontalPadding())
 
 	if p.config.Header != "" {
-		header := p.styles.Muted.Render(p.config.Header) + p.query + "█"
-		lines = append(lines, header)
+		header := p.styles.Muted.Render(text.VisualizeTerminalControls(p.config.Header, false)) +
+			text.VisualizeTerminalControls(p.query, false) + "█"
+		lines = append(lines, clipRow(header, contentWidth))
 	}
 
 	if len(p.filtered) == 0 {
-		lines = append(lines, p.styles.Muted.Render("  "+p.config.EmptyText))
+		empty := "  " + text.VisualizeTerminalControls(p.config.EmptyText, false)
+		lines = append(lines, clipRow(p.styles.Muted.Render(empty), contentWidth))
 		content := strings.Join(lines, "\n")
-		return p.styles.OverlayBorder.Width(p.width - 4).Render(content)
+		return overlay.Width(frameWidth).Render(content)
 	}
 
 	start := p.scrollOff
@@ -193,12 +202,12 @@ func (p *Picker) View() string {
 			positions = p.matches[i].Positions
 		}
 
-		line := p.renderItem(item, p.width-4, selected, positions)
+		line := p.renderItem(item, contentWidth, selected, positions)
 		lines = append(lines, line)
 	}
 
 	content := strings.Join(lines, "\n")
-	return p.styles.OverlayBorder.Width(p.width - 4).Render(content)
+	return overlay.Width(frameWidth).Render(content)
 }
 
 func (p *Picker) renderItem(item ui.PickerItem, width int, selected bool, matches []int) string {
@@ -217,10 +226,10 @@ func (p *Picker) renderItem(item ui.PickerItem, width int, selected bool, matche
 
 	var result strings.Builder
 
-	text := item.GetText()
-	desc := item.GetDescription()
+	itemText := text.VisualizeTerminalControls(item.GetText(), false)
+	desc := text.VisualizeTerminalControls(item.GetDescription(), false)
 	matchDesc := item.MatchesDescription()
-	textRunes := []rune(text)
+	textRunes := []rune(itemText)
 
 	for idx, r := range textRunes {
 		ch := string(r)
@@ -266,5 +275,8 @@ func (p *Picker) renderItem(item ui.PickerItem, width int, selected bool, matche
 		prefixStyled = p.styles.OverlayNormal.Render(prefix)
 	}
 
-	return prefixStyled + result.String()
+	if width < 1 {
+		width = 1
+	}
+	return clipRow(prefixStyled+result.String(), width)
 }

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mmcdole/rune/input"
 	"github.com/mmcdole/rune/text"
 	"github.com/mmcdole/rune/ui"
 	"github.com/mmcdole/rune/version"
@@ -47,6 +48,25 @@ type Engine struct {
 	// True while dispatching the "error" event, so failures inside
 	// error handlers print directly instead of recursing.
 	reportingError bool
+}
+
+// InputMode controls how submitted input is interpreted by the Lua core.
+// It aliases the neutral input package's canonical submission mode.
+type InputMode = input.SubmissionMode
+
+const (
+	// InputModeCommand uses the normal input hook, including slash commands,
+	// aliases, repeats, and delimiter expansion.
+	InputModeCommand = input.ModeCommand
+
+	// InputModeVerbatim sends each LF-delimited line exactly as submitted.
+	InputModeVerbatim = input.ModeVerbatim
+)
+
+// InputContext describes the interpretation requested for one submission.
+// Its zero value preserves the traditional command-mode behavior.
+type InputContext struct {
+	Mode InputMode
 }
 
 // NewEngine creates an Engine with a Host interface.
@@ -268,12 +288,62 @@ func (e *Engine) OnInput(text string) {
 	e.L.Pop(1)
 }
 
+// OnInputWithContext handles a submission with explicit interpretation.
+// Command mode deliberately delegates to OnInput so existing callers retain
+// exactly the same behavior. Verbatim mode traverses the same input hook once
+// with context; the Lua core then bypasses command interpretation while user
+// observers and lifecycle hooks remain active.
+func (e *Engine) OnInputWithContext(text string, inputCtx InputContext) {
+	if inputCtx.Mode != InputModeVerbatim {
+		e.OnInput(text)
+		return
+	}
+
+	// Keep degraded-mode behavior available when user code clobbers the
+	// hook registry. Unlike command mode, slash-looking lines are data here.
+	hooksCall, ok := e.getHooksCall()
+	if !ok {
+		e.reportHooksBroken()
+		e.sendVerbatimFallback(text)
+		return
+	}
+
+	ctx := e.L.NewTable()
+	ctx.RawSetString("mode", glua.LString("verbatim"))
+
+	if err := e.guard(func() error {
+		return e.L.CallByParam(glua.P{
+			Fn:      hooksCall,
+			NRet:    1,
+			Protect: true,
+		}, glua.LString("input"), glua.LString(text), ctx)
+	}); err != nil {
+		e.reportError("verbatim input dispatch", err)
+		return
+	}
+
+	// Match OnInput: routing and consumption are Lua policy.
+	e.L.Pop(1)
+}
+
+// sendVerbatimFallback is the no-Lua escape hatch. strings.Split preserves
+// leading, adjacent, and trailing empty lines and treats only LF as a boundary.
+func (e *Engine) sendVerbatimFallback(input string) {
+	for _, line := range strings.Split(input, "\n") {
+		_ = e.host.Send(line)
+	}
+}
+
 // OnEcho styles the local echo of typed input by dispatching the
 // "echo" hook: presentation belongs to Lua, so the "> " prefix and
 // color live in the core echo handler, and user handlers may rewrite
 // or hide the echo. Degraded mode falls back to Go-side styling so
 // input stays visible.
 func (e *Engine) OnEcho(input string) (string, bool) {
+	// Echo is a presentation boundary. Preserve canonical submission bytes
+	// elsewhere, but never let pasted terminal controls reach either Lua
+	// styling or the degraded Go fallback as executable sequences.
+	input = text.VisualizeTerminalControls(input, true)
 	fallback := text.Green("> " + input)
 
 	hooksCall, ok := e.getHooksCall()

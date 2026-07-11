@@ -2,9 +2,11 @@ package tui
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/mmcdole/rune/input"
 	"github.com/mmcdole/rune/ui"
 	"github.com/mmcdole/rune/ui/tui/widget"
 )
@@ -14,6 +16,7 @@ type InputMode int
 
 const (
 	ModeNormal       InputMode = iota // Standard text input
+	ModeCompose                       // Lossless structured-text input
 	ModePickerModal                   // Modal picker traps all keys
 	ModePickerInline                  // Inline picker filters based on input
 )
@@ -34,16 +37,16 @@ type inputController struct {
 	pickerCB      string // Lua callback ID to settle on close
 	pickerDismiss bool   // close inline picker once input contains a space
 
-	notify  func(ui.UIEvent)       // outbound events to the session
-	submit  func(line string)      // deliver a submitted input line
-	isBound func(key string) bool  // key has a Lua bind
-	scroll  func(tea.KeyType) bool // Go scroll-key fallback; true if handled
+	notify  func(ui.UIEvent)            // outbound events to the session
+	submit  func(input.Submission) bool // transfer an immutable draft to the session
+	isBound func(key string) bool       // key has a Lua bind
+	scroll  func(tea.KeyType) bool      // Go scroll-key fallback; true if handled
 }
 
 func newInputController(
 	input *widget.Input,
 	notify func(ui.UIEvent),
-	submit func(string),
+	submit func(input.Submission) bool,
 	isBound func(string) bool,
 	scroll func(tea.KeyType) bool,
 ) *inputController {
@@ -58,26 +61,46 @@ func newInputController(
 
 // HandleKey routes key presses.
 //
-// Key policy: Go owns keys only while a UI-internal mode is active
-// (picker capture/cancel) plus Enter-to-submit; all other editing and
-// navigation policy lives in Lua binds. In normal mode a bound
+// Key policy: Go owns editing mechanics while a UI-internal mode is active
+// (picker capture/cancel and lossless composer editing), plus paste safety and
+// Enter-to-submit. Application actions remain Lua binds. In normal mode a bound
 // non-printable key always goes to Lua; a bound printable key goes to
 // Lua only when the input is empty (so "j" can be a hotkey without
 // breaking typing). Unbound scroll keys fall back to Go so scrollback
 // stays usable even in degraded mode.
 func (c *inputController) HandleKey(msg tea.KeyMsg) {
+	// Bracketed paste arrives atomically. Intercept it before binding
+	// dispatch so even a one-character paste can never fire a printable
+	// hotkey, and so structured text never passes through textinput's
+	// newline/tab sanitizer.
+	if msg.Paste && c.mode != ModePickerModal {
+		c.handlePaste(msg)
+		return
+	}
+	if c.mode == ModeCompose && msg.Type != tea.KeyEsc {
+		c.input.ContinueCompose()
+	}
+
 	// Picker modes capture Ctrl+C/Esc as "cancel". In normal mode they
-	// fall through so the Lua binds decide (clear input, double-tap
-	// quit, ...).
+	// fall through so the Lua binds decide (clear input, double-tap quit,
+	// ...). Compose mode owns Escape because it is an internal cancel.
 	switch msg.Type {
 	case tea.KeyCtrlC, tea.KeyEsc:
-		if c.mode != ModeNormal {
+		if c.mode == ModePickerModal || c.mode == ModePickerInline {
 			c.closePicker(false, "")
+			return
+		}
+		if c.mode == ModeCompose && msg.Type == tea.KeyEsc {
+			if c.input.ConfirmDiscard() {
+				c.cancelCompose()
+			}
 			return
 		}
 	}
 
 	switch c.mode {
+	case ModeCompose:
+		c.handleComposeKey(msg)
 	case ModePickerModal:
 		c.handleModalKey(msg)
 	case ModePickerInline:
@@ -90,6 +113,13 @@ func (c *inputController) HandleKey(msg tea.KeyMsg) {
 // ShowPicker enters the requested picker mode and records the callback
 // to settle when the picker closes.
 func (c *inputController) ShowPicker(opts ui.ShowPickerMsg) {
+	// Completion/history pickers are single-line concepts. If a script
+	// asks for one while a structured draft is active, settle its callback
+	// immediately instead of layering conflicting input modes.
+	if c.input.IsComposing() {
+		c.notify(ui.PickerSelectMsg{CallbackID: opts.CallbackID, Accepted: false})
+		return
+	}
 	if opts.Inline {
 		c.mode = ModePickerInline
 	} else {
@@ -105,15 +135,63 @@ func (c *inputController) ShowPicker(opts ui.ShowPickerMsg) {
 // keep its filter in sync, and close the picker (cancelling its
 // callback) when the input is cleared.
 func (c *inputController) SetText(text string) {
+	wasPicker := c.mode == ModePickerInline || c.mode == ModePickerModal
+	wasInline := c.mode == ModePickerInline
 	c.input.SetValue(text)
 	c.input.CursorEnd()
-	c.notify(ui.InputChangedMsg{Text: text, Cursor: c.input.Position()})
-	if c.mode == ModePickerInline {
+	c.notify(ui.InputChangedMsg{Text: c.input.Value(), Cursor: c.input.Position()})
+
+	if c.input.IsComposing() {
+		if wasPicker {
+			c.closePicker(false, "")
+		}
+		c.mode = ModeCompose
+		return
+	}
+	if wasInline {
 		c.syncInlineFilter()
+		return
+	}
+	if !wasPicker || c.mode == ModeCompose {
+		c.mode = ModeNormal
+	}
+}
+
+// SetSubmission restores a history entry with explicit interpretation.
+// Unlike SetText, an explicit command entry exits sticky compose mode, while
+// verbatim is forced even for one safe, non-empty physical line.
+func (c *inputController) SetSubmission(submission input.Submission) {
+	wasPicker := c.mode == ModePickerInline || c.mode == ModePickerModal
+
+	if submission.Mode == input.ModeVerbatim {
+		c.input.BeginCompose(submission.Text, utf8.RuneCountInString(submission.Text))
+	} else {
+		// Reset first so sticky compose state cannot reinterpret a recalled
+		// command entry that happens to have identical text.
+		c.input.Reset()
+		c.input.SetValue(submission.Text)
+		c.input.CursorEnd()
+	}
+	c.notify(ui.InputChangedMsg{Text: c.input.Value(), Cursor: c.input.Position()})
+
+	if wasPicker {
+		c.closePicker(false, "")
+	}
+	if c.input.IsComposing() {
+		c.mode = ModeCompose
+	} else {
+		c.mode = ModeNormal
 	}
 }
 
 func (c *inputController) handleNormalKey(msg tea.KeyMsg) {
+	// In Rune's terminal stack Ctrl+Enter is delivered as Ctrl+J. It is
+	// the explicit way to start a multiline draft without pasting.
+	if msg.Type == tea.KeyCtrlJ {
+		c.insertComposerText("\n")
+		return
+	}
+
 	keyStr := keyToString(msg)
 	if keyStr != "" && c.isBound(keyStr) {
 		// Alt-modified runes are chords, not typing: they never reach
@@ -138,6 +216,65 @@ func (c *inputController) handleNormalKey(msg tea.KeyMsg) {
 	c.forwardToInput(msg)
 }
 
+func (c *inputController) handleComposeKey(msg tea.KeyMsg) {
+	if msg.Type == tea.KeyEnter && !msg.Alt {
+		c.submitInput()
+		return
+	}
+
+	oldValue := c.input.Value()
+	oldCursor := c.input.Position()
+	if c.input.UpdateComposer(msg) {
+		c.reportInputUpdate(oldValue, oldCursor)
+		if !c.input.IsComposing() {
+			c.mode = ModeNormal
+		}
+		return
+	}
+
+	// Non-editing chords remain scriptable in compose mode. In
+	// particular, Ctrl+E keeps using the existing external-editor bind.
+	if keyStr := keyToString(msg); keyStr != "" && c.isBound(keyStr) {
+		c.notify(ui.ExecuteBindMsg(keyStr))
+	}
+}
+
+func (c *inputController) handlePaste(msg tea.KeyMsg) {
+	oldValue := c.input.Value()
+	oldCursor := c.input.Position()
+	wasInline := c.mode == ModePickerInline
+
+	c.input.InsertPaste(string(msg.Runes))
+	c.reportInputUpdate(oldValue, oldCursor)
+
+	if c.input.IsComposing() {
+		if wasInline {
+			// InputChangedMsg is deliberately emitted before the callback so
+			// Lua observes the newly pasted draft when cancellation runs.
+			c.closePicker(false, "")
+		}
+		c.mode = ModeCompose
+		return
+	}
+	if wasInline {
+		c.syncInlineFilter()
+	}
+}
+
+func (c *inputController) insertComposerText(text string) {
+	oldValue := c.input.Value()
+	oldCursor := c.input.Position()
+	c.input.InsertPaste(text)
+	c.mode = ModeCompose
+	c.reportInputUpdate(oldValue, oldCursor)
+}
+
+func (c *inputController) cancelCompose() {
+	c.input.Reset()
+	c.mode = ModeNormal
+	c.notify(ui.InputChangedMsg{Text: "", Cursor: 0})
+}
+
 // inlinePickerLocalKeys are navigation keys the inline picker handles
 // itself instead of forwarding to Lua binds.
 var inlinePickerLocalKeys = map[string]bool{
@@ -147,6 +284,14 @@ var inlinePickerLocalKeys = map[string]bool{
 }
 
 func (c *inputController) handleInlineKey(msg tea.KeyMsg) {
+	// Ctrl+Enter transitions from single-line completion into a structured
+	// draft. Treat it like a bracketed newline paste so the input update is
+	// visible to Lua before the picker callback is cancelled.
+	if msg.Type == tea.KeyCtrlJ {
+		c.handlePaste(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'\n'}, Paste: true})
+		return
+	}
+
 	keyStr := keyToString(msg)
 	// Don't send picker navigation keys to Lua - handle them locally
 	if keyStr != "" && c.isBound(keyStr) && !inlinePickerLocalKeys[keyStr] {
@@ -231,7 +376,12 @@ func (c *inputController) forwardToInput(msg tea.KeyMsg) bool {
 	oldValue := c.input.Value()
 	oldCursor := c.input.Position()
 	c.input.UpdateTextInput(msg)
+	return c.reportInputUpdate(oldValue, oldCursor)
+}
 
+// reportInputUpdate reports the current value/cursor relative to a snapshot.
+// It returns true when text changed.
+func (c *inputController) reportInputUpdate(oldValue string, oldCursor int) bool {
 	newValue := c.input.Value()
 	newCursor := c.input.Position()
 	if newValue != oldValue {
@@ -272,7 +422,14 @@ func (c *inputController) closePicker(accepted bool, value string) {
 // submitInput delivers the current input line and clears it, reporting
 // the cleared state so the session's tracked input cannot go stale.
 func (c *inputController) submitInput() {
-	c.submit(c.input.Value())
+	submission := input.Command(c.input.Value())
+	if c.input.IsComposing() {
+		submission = input.Verbatim(c.input.Value())
+	}
+	if !c.submit(submission) {
+		return
+	}
 	c.input.Reset()
+	c.mode = ModeNormal
 	c.notify(ui.InputChangedMsg{Text: "", Cursor: 0})
 }

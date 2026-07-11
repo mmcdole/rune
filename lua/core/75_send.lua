@@ -92,13 +92,42 @@ local function send_impl(input, depth)
     end
 end
 
+-- Send an entire submission without interpreting any of it as a Rune command.
+-- Only LF separates outbound lines; whitespace, CR bytes, delimiters, repeats,
+-- slash commands, and empty lines remain data. The core hook closes over this
+-- implementation so user code cannot accidentally break verbatim submission
+-- by replacing the exported internal helper.
+local function send_verbatim(input, context)
+    local start = 1
+    while true do
+        local pos = input:find("\n", start, true)
+        if not pos then
+            rune.send_raw(input:sub(start))
+            return
+        end
+        rune.send_raw(input:sub(start, pos - 1))
+        start = pos + 1
+    end
+end
+
+-- INTERNAL API alias for scripts that deliberately need the same primitive.
+rune._input.send_verbatim = send_verbatim
+
 -- PUBLIC: Send commands to the MUD
 function rune.send(input)
     send_impl(input, 0)
 end
 
 -- Register input handler
-rune.hooks.on("input", function(input)
+rune.hooks.on("input", function(input, context)
+    -- Verbatim is a submission policy, not a separate lifecycle: earlier
+    -- input hooks still observe it and may consume it, but none of Rune's
+    -- command syntax is applied once it reaches this core handler.
+    if context and context.mode == "verbatim" then
+        send_verbatim(input, context)
+        return false
+    end
+
     -- Check for slash command first. Dispatch runs the handler under
     -- its own quarantine, so a broken command is disabled individually
     -- instead of its failures accruing against this core hook.

@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/mmcdole/rune/input"
 	"github.com/mmcdole/rune/ui"
 )
 
@@ -17,7 +18,7 @@ import (
 // model/update/view event loop.
 type BubbleTeaUI struct {
 	program   *tea.Program
-	inputChan chan string
+	inputChan chan input.Submission
 
 	// Message queue - buffered channel drained by a single goroutine.
 	// This decouples callers from tea.Program.Send() which can block.
@@ -35,7 +36,7 @@ type BubbleTeaUI struct {
 // NewBubbleTeaUI creates a new Bubble Tea-based UI.
 func NewBubbleTeaUI() *BubbleTeaUI {
 	return &BubbleTeaUI{
-		inputChan: make(chan string, 2048),
+		inputChan: make(chan input.Submission, 2048),
 		msgQueue:  make(chan tea.Msg, 4096),
 		outbound:  make(chan ui.UIEvent, 256),
 		done:      make(chan struct{}),
@@ -71,7 +72,7 @@ func (b *BubbleTeaUI) SetPrompt(text string) {
 }
 
 // Input returns channel for user input.
-func (b *BubbleTeaUI) Input() <-chan string {
+func (b *BubbleTeaUI) Input() <-chan input.Submission {
 	return b.inputChan
 }
 
@@ -176,6 +177,11 @@ func (b *BubbleTeaUI) SetInput(text string) {
 	b.send(ui.SetInputMsg(text))
 }
 
+// SetInputSubmission restores input text with an explicit interpretation.
+func (b *BubbleTeaUI) SetInputSubmission(submission input.Submission) {
+	b.send(ui.SetInputSubmissionMsg(submission))
+}
+
 // --- Input Primitives for Lua ---
 
 // InputSetCursor sets the cursor position.
@@ -197,12 +203,19 @@ func (b *BubbleTeaUI) OpenEditor(initial string) (string, bool) {
 		return "", false
 	}
 	tmpPath := f.Name()
-	f.WriteString(initial)
-	f.Close()
 	defer os.Remove(tmpPath)
+	if _, err := f.WriteString(initial); err != nil {
+		_ = f.Close()
+		return "", false
+	}
+	if err := f.Close(); err != nil {
+		return "", false
+	}
 
 	// Suspend TUI
-	b.program.ReleaseTerminal()
+	if err := b.program.ReleaseTerminal(); err != nil {
+		return "", false
+	}
 
 	// Run editor. The fallback must exist on the platform: vi ships
 	// with effectively every Unix, notepad with every Windows.
@@ -219,7 +232,9 @@ func (b *BubbleTeaUI) OpenEditor(initial string) (string, bool) {
 	err = cmd.Run()
 
 	// Resume TUI
-	b.program.RestoreTerminal()
+	if restoreErr := b.program.RestoreTerminal(); err == nil && restoreErr != nil {
+		err = restoreErr
+	}
 
 	if err != nil {
 		return "", false
@@ -229,7 +244,17 @@ func (b *BubbleTeaUI) OpenEditor(initial string) (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	return strings.TrimSpace(string(content)), true
+	return normalizeEditorText(string(content)), true
+}
+
+// normalizeEditorText converts platform newlines and removes exactly one
+// trailing LF, which text editors conventionally use as the file terminator.
+// All user-authored indentation, trailing spaces, tabs, and additional blank
+// lines remain intact.
+func normalizeEditorText(content string) string {
+	content = strings.ReplaceAll(content, "\r\n", "\n")
+	content = strings.ReplaceAll(content, "\r", "\n")
+	return strings.TrimSuffix(content, "\n")
 }
 
 // --- Pane Scrolling Primitives for Lua ---

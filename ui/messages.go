@@ -1,5 +1,7 @@
 package ui
 
+import "github.com/mmcdole/rune/input"
+
 // UIEvent is implemented by all messages sent from UI to Session.
 // This provides compile-time type safety for the outbound channel.
 type UIEvent interface {
@@ -117,6 +119,11 @@ type ShowPickerMsg struct {
 // SetInputMsg sets the input line content.
 // Sent from Session when Lua calls rune.input.set().
 type SetInputMsg string
+
+// SetInputSubmissionMsg restores both draft text and interpretation.
+// History recall uses this for one-line verbatim entries that have no
+// structural character from which the UI could infer compose mode.
+type SetInputSubmissionMsg input.Submission
 
 // --- Picker Messages (UI -> Session) ---
 

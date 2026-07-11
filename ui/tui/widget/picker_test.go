@@ -5,8 +5,10 @@ import (
 	"strings"
 	"testing"
 
+	runetext "github.com/mmcdole/rune/text"
 	"github.com/mmcdole/rune/ui"
 	"github.com/mmcdole/rune/ui/tui/style"
+	"github.com/mmcdole/rune/ui/tui/util"
 )
 
 func newTestPicker(maxVisible int, texts ...string) *Picker {
@@ -120,5 +122,36 @@ func TestPickerPreferredHeight(t *testing.T) {
 	// 3 items + header + border.
 	if got := p.PreferredHeight(); got != 6 {
 		t.Errorf("PreferredHeight with header = %d, want 6", got)
+	}
+}
+
+func TestPickerRendersUntrustedTextAsOneSafeRow(t *testing.T) {
+	raw := "a\n\x1b]x\a\tz"
+	p := NewPicker(PickerConfig{MaxVisible: 5, Header: "History\n"}, style.DefaultStyles())
+	p.SetItems([]ui.PickerItem{{Text: raw, Description: "desc\x00\u202e", Value: raw}})
+	p.SetWidth(32)
+	p.Filter("\n\x1b")
+
+	view := p.View()
+	plain := runetext.StripANSI(view)
+	if strings.Contains(view, "\x1b]52") || strings.ContainsRune(view, '\a') || strings.ContainsRune(view, '\t') {
+		t.Fatalf("picker emitted terminal-active item/query text: %q", view)
+	}
+	for _, want := range []string{"␊", "␛", "␇", "␉", "␀", "�"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("safe picker view missing %q: %q", want, plain)
+		}
+	}
+	if rows := len(strings.Split(view, "\n")); rows != p.PreferredHeight() {
+		t.Fatalf("rendered rows = %d, PreferredHeight = %d: %q", rows, p.PreferredHeight(), plain)
+	}
+	for n, row := range strings.Split(view, "\n") {
+		if width := util.VisibleLen(row); width > 32 {
+			t.Fatalf("row %d width = %d, exceeds picker width: %q", n, width, row)
+		}
+	}
+	selected, ok := p.Selected()
+	if !ok || selected.Value != raw {
+		t.Fatalf("selected value = %q (%v), want exact raw value", selected.Value, ok)
 	}
 }

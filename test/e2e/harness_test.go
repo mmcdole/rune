@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mmcdole/rune/input"
 	"github.com/mmcdole/rune/lua"
 	"github.com/mmcdole/rune/network"
 	"github.com/mmcdole/rune/session"
@@ -149,7 +150,7 @@ type mockUI struct {
 	echoed   []string
 	prompts  []string // every SetPrompt call, including clears
 	inputSet []string
-	input    chan string
+	input    chan input.Submission
 	outbound chan ui.UIEvent
 	done     chan struct{}
 }
@@ -158,7 +159,7 @@ var _ ui.UI = (*mockUI)(nil)
 
 func newMockUI() *mockUI {
 	return &mockUI{
-		input:    make(chan string, 64),
+		input:    make(chan input.Submission, 64),
 		outbound: make(chan ui.UIEvent, 64),
 		done:     make(chan struct{}),
 	}
@@ -172,8 +173,8 @@ func (m *mockUI) Quit() {
 		close(m.done)
 	}
 }
-func (m *mockUI) Input() <-chan string        { return m.input }
-func (m *mockUI) Outbound() <-chan ui.UIEvent { return m.outbound }
+func (m *mockUI) Input() <-chan input.Submission { return m.input }
+func (m *mockUI) Outbound() <-chan ui.UIEvent    { return m.outbound }
 
 func (m *mockUI) Print(text string) {
 	m.mu.Lock()
@@ -197,6 +198,12 @@ func (m *mockUI) SetInput(text string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.inputSet = append(m.inputSet, text)
+}
+
+func (m *mockUI) SetInputSubmission(submission input.Submission) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.inputSet = append(m.inputSet, submission.Text)
 }
 
 func (m *mockUI) UpdateBars(content map[string]ui.BarContent) {}
@@ -309,7 +316,7 @@ func newClient(t *testing.T, initLua string) *client {
 // connect types /connect at the client and waits for the dial.
 func (c *client) connect() {
 	c.t.Helper()
-	c.ui.input <- "/connect " + c.mud.addr()
+	c.ui.input <- input.Command("/connect " + c.mud.addr())
 	c.mud.accept()
 }
 
@@ -319,7 +326,7 @@ func (c *client) connectRefused() {
 	c.t.Helper()
 	addr := c.mud.addr()
 	c.mud.ln.Close()
-	c.ui.input <- "/connect " + addr
+	c.ui.input <- input.Command("/connect " + addr)
 }
 
 // waitFor polls cond until it holds or the deadline passes.

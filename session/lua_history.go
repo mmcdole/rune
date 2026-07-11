@@ -1,24 +1,41 @@
 package session
 
+import "github.com/mmcdole/rune/input"
+
 // GetHistory implements lua.Host.
+// It is the compatibility projection used by rune.history.get().
 func (s *Session) GetHistory() []string {
-	result := make([]string, len(s.historyLines))
-	copy(result, s.historyLines)
+	result := make([]string, len(s.historyEntries))
+	for i, entry := range s.historyEntries {
+		result[i] = entry.Text
+	}
+	return result
+}
+
+// GetHistoryEntries implements lua.Host and preserves submission mode.
+func (s *Session) GetHistoryEntries() []input.Submission {
+	result := make([]input.Submission, len(s.historyEntries))
+	copy(result, s.historyEntries)
 	return result
 }
 
 // AddToHistory implements lua.Host.
+// The legacy Lua API adds ordinary command entries.
 func (s *Session) AddToHistory(cmd string) {
-	if cmd == "" {
+	s.addHistorySubmission(input.Command(cmd))
+}
+
+// addHistorySubmission records the immutable submission as one history item.
+// Adjacent entries dedupe only when both text and interpretation match.
+func (s *Session) addHistorySubmission(entry input.Submission) {
+	if entry.Text == "" {
 		return
 	}
-	// Don't add duplicates of the last command
-	if len(s.historyLines) > 0 && s.historyLines[len(s.historyLines)-1] == cmd {
+	if len(s.historyEntries) > 0 && s.historyEntries[len(s.historyEntries)-1] == entry {
 		return
 	}
-	s.historyLines = append(s.historyLines, cmd)
-	// Trim if over limit
-	if len(s.historyLines) > s.historyLimit {
-		s.historyLines = s.historyLines[len(s.historyLines)-s.historyLimit:]
+	s.historyEntries = append(s.historyEntries, entry)
+	if len(s.historyEntries) > s.historyLimit {
+		s.historyEntries = s.historyEntries[len(s.historyEntries)-s.historyLimit:]
 	}
 }

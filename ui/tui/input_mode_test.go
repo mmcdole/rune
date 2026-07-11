@@ -1,10 +1,13 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/mmcdole/rune/input"
+	runetext "github.com/mmcdole/rune/text"
 	"github.com/mmcdole/rune/ui"
 	"github.com/mmcdole/rune/ui/tui/style"
 	"github.com/mmcdole/rune/ui/tui/widget"
@@ -15,20 +18,48 @@ import (
 type controllerHarness struct {
 	ctl       *inputController
 	events    []ui.UIEvent
-	submitted []string
+	submitted []input.Submission
+	bound     map[string]bool
+	accept    bool
 }
 
 func newControllerHarness() *controllerHarness {
-	h := &controllerHarness{}
-	input := widget.NewInput(style.DefaultStyles())
+	h := &controllerHarness{
+		bound:  make(map[string]bool),
+		accept: true,
+	}
+	draftInput := widget.NewInput(style.DefaultStyles())
 	h.ctl = newInputController(
-		input,
+		draftInput,
 		func(ev ui.UIEvent) { h.events = append(h.events, ev) },
-		func(line string) { h.submitted = append(h.submitted, line) },
-		func(string) bool { return false },
+		func(submission input.Submission) bool {
+			h.submitted = append(h.submitted, submission)
+			return h.accept
+		},
+		func(key string) bool { return h.bound[key] },
 		func(tea.KeyType) bool { return false },
 	)
 	return h
+}
+
+func (h *controllerHarness) inputChanges() []ui.InputChangedMsg {
+	var out []ui.InputChangedMsg
+	for _, ev := range h.events {
+		if changed, ok := ev.(ui.InputChangedMsg); ok {
+			out = append(out, changed)
+		}
+	}
+	return out
+}
+
+func (h *controllerHarness) executeBinds() []ui.ExecuteBindMsg {
+	var out []ui.ExecuteBindMsg
+	for _, ev := range h.events {
+		if bind, ok := ev.(ui.ExecuteBindMsg); ok {
+			out = append(out, bind)
+		}
+	}
+	return out
 }
 
 func (h *controllerHarness) pickerSelects() []ui.PickerSelectMsg {
@@ -155,7 +186,7 @@ func TestSubmitReportsClearedInput(t *testing.T) {
 
 	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyEnter})
 
-	if len(h.submitted) != 1 || h.submitted[0] != "look north" {
+	if len(h.submitted) != 1 || h.submitted[0] != input.Command("look north") {
 		t.Fatalf("expected submit of %q, got %v", "look north", h.submitted)
 	}
 	if got := h.ctl.input.Value(); got != "" {
@@ -167,6 +198,297 @@ func TestSubmitReportsClearedInput(t *testing.T) {
 	ic, ok := h.events[0].(ui.InputChangedMsg)
 	if !ok || ic.Text != "" || ic.Cursor != 0 {
 		t.Fatalf("expected InputChangedMsg{Text: \"\", Cursor: 0}, got %+v", h.events[0])
+	}
+}
+
+// TestBracketedPasteBypassesPrintableBind guards the atomic-paste path: a
+// one-character paste must be inserted as data even when that same printable
+// key is configured as a hotkey for an empty input line.
+func TestBracketedPasteBypassesPrintableBind(t *testing.T) {
+	h := newControllerHarness()
+	h.bound["j"] = true
+
+	h.ctl.HandleKey(tea.KeyMsg{
+		Type:  tea.KeyRunes,
+		Runes: []rune{'j'},
+		Paste: true,
+	})
+
+	if got := h.ctl.input.Value(); got != "j" {
+		t.Fatalf("pasted input = %q, want %q", got, "j")
+	}
+	if h.ctl.input.IsComposing() {
+		t.Fatal("single-line paste should retain the ordinary input UI")
+	}
+	if binds := h.executeBinds(); len(binds) != 0 {
+		t.Fatalf("paste activated printable bind: %v", binds)
+	}
+	changes := h.inputChanges()
+	if len(changes) != 1 || changes[0].Text != "j" || changes[0].Cursor != 1 {
+		t.Fatalf("input changes = %+v, want one change to j at cursor 1", changes)
+	}
+}
+
+func TestOneLineControlPasteEntersComposerWithoutLosingData(t *testing.T) {
+	h := newControllerHarness()
+	raw := "say\x1b]52;c;x\a\x00"
+
+	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(raw), Paste: true})
+
+	if got := h.ctl.input.Value(); got != raw || !h.ctl.input.IsComposing() {
+		t.Fatalf("control paste = %q, composing=%v; want exact verbatim draft", got, h.ctl.input.IsComposing())
+	}
+	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if len(h.submitted) != 1 || h.submitted[0] != input.Verbatim(raw) {
+		t.Fatalf("control submission = %+v, want exact verbatim", h.submitted)
+	}
+}
+
+// TestMultilinePasteEntersComposerLosslessly verifies bracketed paste is
+// normalized only for newline convention. It must not submit or route source
+// semicolons through command expansion merely because text was pasted.
+func TestMultilinePasteEntersComposerLosslessly(t *testing.T) {
+	h := newControllerHarness()
+	pasted := "  player->command(\"turn on <channel>\");\r\n\t// PLAYER_SILENT  \r\n\r\nlast;  "
+	want := "  player->command(\"turn on <channel>\");\n\t// PLAYER_SILENT  \n\nlast;  "
+
+	h.ctl.HandleKey(tea.KeyMsg{
+		Type:  tea.KeyRunes,
+		Runes: []rune(pasted),
+		Paste: true,
+	})
+
+	if got := h.ctl.input.Value(); got != want {
+		t.Fatalf("pasted input:\n%q\nwant:\n%q", got, want)
+	}
+	if !h.ctl.input.IsComposing() {
+		t.Fatal("multiline paste did not enter composer")
+	}
+	if len(h.submitted) != 0 {
+		t.Fatalf("paste submitted without Enter: %+v", h.submitted)
+	}
+	changes := h.inputChanges()
+	if len(changes) != 1 || changes[0].Text != want || changes[0].Cursor != len([]rune(want)) {
+		t.Fatalf("input changes = %+v, want exact normalized draft", changes)
+	}
+}
+
+// TestCtrlJInsertsComposerNewline pins the portable terminal representation
+// of Ctrl+Enter. It inserts LF and transitions an ordinary draft into the
+// visible composer instead of submitting it or delegating to Lua.
+func TestCtrlJInsertsComposerNewline(t *testing.T) {
+	h := newControllerHarness()
+	h.bound["ctrl+j"] = true
+	h.ctl.SetText("hello")
+	h.events = nil
+
+	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyCtrlJ})
+
+	if got := h.ctl.input.Value(); got != "hello\n" {
+		t.Fatalf("input after Ctrl+J = %q, want %q", got, "hello\n")
+	}
+	if !h.ctl.input.IsComposing() {
+		t.Fatal("Ctrl+J newline did not enter composer")
+	}
+	if len(h.submitted) != 0 {
+		t.Fatalf("Ctrl+J submitted input: %+v", h.submitted)
+	}
+	if binds := h.executeBinds(); len(binds) != 0 {
+		t.Fatalf("Ctrl+J delegated to Lua instead of inserting LF: %v", binds)
+	}
+	changes := h.inputChanges()
+	if len(changes) != 1 || changes[0].Text != "hello\n" || changes[0].Cursor != 6 {
+		t.Fatalf("input changes = %+v, want hello\\n at cursor 6", changes)
+	}
+}
+
+func TestCtrlJLeavesInlinePickerForComposer(t *testing.T) {
+	h := newControllerHarness()
+	h.ctl.ShowPicker(ui.ShowPickerMsg{
+		Items:      pickerTestItems,
+		CallbackID: "cb",
+		Inline:     true,
+	})
+	h.ctl.SetText("/con")
+	h.events = nil
+
+	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyCtrlJ})
+
+	if got := h.ctl.input.Value(); got != "/con\n" {
+		t.Fatalf("input after Ctrl+J = %q, want %q", got, "/con\n")
+	}
+	if h.ctl.mode != ModeCompose || !h.ctl.input.IsComposing() {
+		t.Fatalf("Ctrl+J left mode %v, composing %v", h.ctl.mode, h.ctl.input.IsComposing())
+	}
+	selects := h.pickerSelects()
+	if len(selects) != 1 || selects[0].CallbackID != "cb" || selects[0].Accepted {
+		t.Fatalf("picker cancellation = %+v, want one cancelled cb", selects)
+	}
+	if len(h.events) < 2 {
+		t.Fatalf("events = %+v, want input update before picker cancellation", h.events)
+	}
+	if _, ok := h.events[0].(ui.InputChangedMsg); !ok {
+		t.Fatalf("first event = %T, want InputChangedMsg", h.events[0])
+	}
+}
+
+// TestComposerEnterSubmitsVerbatimExactAndClears verifies mode and content
+// cross the controller boundary together; command delimiters and whitespace
+// are still untouched when ownership transfers to the session.
+func TestComposerEnterSubmitsVerbatimExactAndClears(t *testing.T) {
+	h := newControllerHarness()
+	draft := "  say one; say two  \n\t#2 north  \n\n/quit"
+	h.ctl.SetText(draft)
+	h.events = nil
+
+	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyEnter})
+
+	want := input.Verbatim(draft)
+	if len(h.submitted) != 1 || h.submitted[0] != want {
+		t.Fatalf("submissions = %+v, want [%+v]", h.submitted, want)
+	}
+	if got := h.ctl.input.Value(); got != "" {
+		t.Fatalf("accepted draft was not cleared: %q", got)
+	}
+	if h.ctl.input.IsComposing() {
+		t.Fatal("accepted draft left composer active")
+	}
+	changes := h.inputChanges()
+	if len(changes) != 1 || changes[0].Text != "" || changes[0].Cursor != 0 {
+		t.Fatalf("input changes = %+v, want one cleared-state notification", changes)
+	}
+}
+
+func TestComposerModeStaysVerbatimAfterJoiningLines(t *testing.T) {
+	h := newControllerHarness()
+	h.ctl.SetText("one;\ntwo")
+	h.ctl.input.SetCursor(len([]rune("one;\n")))
+	h.events = nil
+
+	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyBackspace})
+	if got := h.ctl.input.Value(); got != "one;two" || !h.ctl.input.IsComposing() {
+		t.Fatalf("joined draft = %q, composing=%v; want sticky verbatim", got, h.ctl.input.IsComposing())
+	}
+
+	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if len(h.submitted) != 1 || h.submitted[0] != input.Verbatim("one;two") {
+		t.Fatalf("joined submission = %+v, want one verbatim literal", h.submitted)
+	}
+}
+
+// TestFailedComposerSubmissionRetainsDraft ensures backpressure cannot destroy
+// the text the user just tried to submit. No cleared-state notification is
+// valid until the receiver accepts ownership.
+func TestFailedComposerSubmissionRetainsDraft(t *testing.T) {
+	h := newControllerHarness()
+	h.accept = false
+	draft := "first;  \n\tsecond"
+	h.ctl.SetText(draft)
+	h.events = nil
+
+	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyEnter})
+
+	want := input.Verbatim(draft)
+	if len(h.submitted) != 1 || h.submitted[0] != want {
+		t.Fatalf("submission attempt = %+v, want [%+v]", h.submitted, want)
+	}
+	if got := h.ctl.input.Value(); got != draft {
+		t.Fatalf("failed submission changed draft to %q, want %q", got, draft)
+	}
+	if !h.ctl.input.IsComposing() {
+		t.Fatal("failed submission exited composer")
+	}
+	if changes := h.inputChanges(); len(changes) != 0 {
+		t.Fatalf("failed submission reported a text change: %+v", changes)
+	}
+}
+
+func TestComposerEscapeRequiresConfirmation(t *testing.T) {
+	h := newControllerHarness()
+	h.ctl.input.SetSize(80, 0)
+	draft := "first\nsecond"
+	h.ctl.SetText(draft)
+	h.events = nil
+
+	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	if got := h.ctl.input.Value(); got != draft || !h.ctl.input.IsComposing() {
+		t.Fatalf("first Escape discarded draft: value=%q composing=%v", got, h.ctl.input.IsComposing())
+	}
+	if !strings.Contains(runetext.StripANSI(h.ctl.input.View()), "Esc again discard") {
+		t.Fatalf("discard confirmation is not visible: %q", h.ctl.input.View())
+	}
+	if len(h.events) != 0 {
+		t.Fatalf("arming discard emitted state changes: %+v", h.events)
+	}
+
+	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	if got := h.ctl.input.Value(); got != "" || h.ctl.input.IsComposing() {
+		t.Fatalf("confirmed discard left value=%q composing=%v", got, h.ctl.input.IsComposing())
+	}
+	changes := h.inputChanges()
+	if len(changes) != 1 || changes[0].Text != "" {
+		t.Fatalf("confirmed discard changes = %+v", changes)
+	}
+}
+
+// TestCtrlEInComposerDelegatesToEditorBind verifies compose-local editing
+// does not swallow the existing external-editor binding.
+func TestCtrlEInComposerDelegatesToEditorBind(t *testing.T) {
+	h := newControllerHarness()
+	h.bound["ctrl+e"] = true
+	draft := "one\ntwo"
+	h.ctl.SetText(draft)
+	h.events = nil
+
+	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyCtrlE})
+
+	binds := h.executeBinds()
+	if len(binds) != 1 || binds[0] != ui.ExecuteBindMsg("ctrl+e") {
+		t.Fatalf("execute binds = %v, want [ctrl+e]", binds)
+	}
+	if got := h.ctl.input.Value(); got != draft {
+		t.Fatalf("Ctrl+E changed draft to %q, want %q", got, draft)
+	}
+	if len(h.submitted) != 0 {
+		t.Fatalf("Ctrl+E submitted input: %+v", h.submitted)
+	}
+}
+
+func TestSetSubmissionForcesOneLineVerbatimComposer(t *testing.T) {
+	h := newControllerHarness()
+	h.ctl.SetSubmission(input.Verbatim("say hello;look"))
+
+	if h.ctl.mode != ModeCompose || !h.ctl.input.IsComposing() {
+		t.Fatal("one-line verbatim history entry did not force compose mode")
+	}
+	if got := h.ctl.input.Value(); got != "say hello;look" {
+		t.Fatalf("restored input = %q", got)
+	}
+
+	// Ordinary script replacement while composing keeps interpretation sticky.
+	h.ctl.SetText("edited;still verbatim")
+	if h.ctl.mode != ModeCompose || !h.ctl.input.IsComposing() {
+		t.Fatal("ordinary SetText discarded restored verbatim mode")
+	}
+	h.submitted = nil
+	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if len(h.submitted) != 1 || h.submitted[0] != input.Verbatim("edited;still verbatim") {
+		t.Fatalf("submission = %+v, want sticky verbatim", h.submitted)
+	}
+}
+
+func TestSetSubmissionCommandOverridesStickyComposer(t *testing.T) {
+	h := newControllerHarness()
+	h.ctl.SetSubmission(input.Verbatim("same"))
+	h.ctl.SetSubmission(input.Command("same"))
+
+	if h.ctl.mode != ModeNormal || h.ctl.input.IsComposing() {
+		t.Fatal("explicit command recall did not leave sticky composer")
+	}
+	h.submitted = nil
+	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if len(h.submitted) != 1 || h.submitted[0] != input.Command("same") {
+		t.Fatalf("submission = %+v, want command", h.submitted)
 	}
 }
 

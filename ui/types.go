@@ -7,7 +7,9 @@ type BarContent struct {
 	Right  string
 }
 
-// PickerItem represents an item for picker/selection UI.
+// PickerItem represents an item for picker/selection UI. Text and Description
+// are unstyled presentation text and are made terminal-safe by the renderer;
+// Value is an opaque payload returned byte-for-byte on selection.
 type PickerItem struct {
 	Text        string
 	Description string

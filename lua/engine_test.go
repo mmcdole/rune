@@ -254,6 +254,36 @@ func TestEchoHookStylesAndGags(t *testing.T) {
 	}
 }
 
+func TestEchoVisualizesTerminalControlsBeforeHooksAndFallback(t *testing.T) {
+	engine, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	if err := engine.DoString("capture", `
+		rune.hooks.on("echo", function(text)
+			return "captured:" .. text
+		end, {priority = 1})
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	styled, show := engine.OnEcho("safe\x1b]52;c;x\a\tend")
+	if !show {
+		t.Fatal("safe echo unexpectedly hidden")
+	}
+	seen := text.StripANSI(styled)
+	if !strings.Contains(seen, "captured:safe␛]52") || !strings.Contains(seen, "␇") || !strings.ContainsRune(seen, '\t') {
+		t.Fatalf("styled echo did not visualize controls: %q", seen)
+	}
+
+	if err := engine.DoString("break-hooks", `rune.hooks = nil`); err != nil {
+		t.Fatal(err)
+	}
+	styled, show = engine.OnEcho("\x1b[2J\x00")
+	if !show || !strings.Contains(text.StripANSI(styled), "␛[2J␀") {
+		t.Fatalf("degraded echo is unsafe: %q (show=%v)", styled, show)
+	}
+}
+
 // TestFailingBarIsQuarantined verifies that a bar renderer failing
 // repeatedly is disabled instead of erroring 4x/second forever, and
 // that re-registering it gives a fresh start.

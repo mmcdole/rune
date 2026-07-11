@@ -14,7 +14,7 @@
 --   priority = 50         -- Execution order (lower = first, default 50)
 --
 -- Events (data-flow):
---   "input"        -- User input (return false to consume)
+--   "input"        -- User input: (text, context?); return false to consume
 --   "output"       -- Server output line object (false gags, string rewrites)
 --   "prompt"       -- Server prompt line object (false gags, string rewrites)
 --   "echo"         -- Local echo of typed input, plain string (false hides,
@@ -190,9 +190,12 @@ function rune.hooks.call(event, ...)
     elseif event == "input" then
         -- Any handler returning false stops processing
         local text = select(1, ...)
+        local context = select(2, ...)
         for _, entry in ipairs(handlers) do
             if registry:active(entry) then
-                local result = run_handler(entry, text)
+                -- Existing one-argument handlers remain valid in Lua; they
+                -- simply ignore the optional submission context.
+                local result = run_handler(entry, text, context)
                 if result == false then
                     return false  -- consumed/stopped
                 end

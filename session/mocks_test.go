@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 
+	"github.com/mmcdole/rune/input"
 	"github.com/mmcdole/rune/network"
 	"github.com/mmcdole/rune/ui"
 )
@@ -107,8 +108,9 @@ type mockUI struct {
 	echoed      []string
 	prompts     []string // every SetPrompt call, including clears
 	inputSet    []string
+	inputModes  []input.Submission
 	bindsPushed map[string]bool // last UpdateBinds payload
-	input       chan string
+	input       chan input.Submission
 	outbound    chan ui.UIEvent
 	done        chan struct{}
 }
@@ -117,7 +119,7 @@ var _ ui.UI = (*mockUI)(nil)
 
 func newMockUI() *mockUI {
 	return &mockUI{
-		input:    make(chan string, 64),
+		input:    make(chan input.Submission, 64),
 		outbound: make(chan ui.UIEvent, 64),
 		done:     make(chan struct{}),
 	}
@@ -131,8 +133,8 @@ func (m *mockUI) Quit() {
 		close(m.done)
 	}
 }
-func (m *mockUI) Input() <-chan string        { return m.input }
-func (m *mockUI) Outbound() <-chan ui.UIEvent { return m.outbound }
+func (m *mockUI) Input() <-chan input.Submission { return m.input }
+func (m *mockUI) Outbound() <-chan ui.UIEvent    { return m.outbound }
 
 func (m *mockUI) Print(text string) {
 	m.mu.Lock()
@@ -156,6 +158,13 @@ func (m *mockUI) SetInput(text string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.inputSet = append(m.inputSet, text)
+}
+
+func (m *mockUI) SetInputSubmission(submission input.Submission) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.inputSet = append(m.inputSet, submission.Text)
+	m.inputModes = append(m.inputModes, submission)
 }
 
 func (m *mockUI) UpdateBars(content map[string]ui.BarContent) {}
@@ -192,6 +201,14 @@ func (m *mockUI) drainPrinted() []string {
 	printed := m.printed
 	m.printed = nil
 	return printed
+}
+
+func (m *mockUI) drainEchoed() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	echoed := m.echoed
+	m.echoed = nil
+	return echoed
 }
 
 func (m *mockUI) drainPrompts() []string {

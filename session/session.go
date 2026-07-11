@@ -9,9 +9,11 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/mmcdole/rune/event"
+	"github.com/mmcdole/rune/input"
 	"github.com/mmcdole/rune/lua"
 	"github.com/mmcdole/rune/network"
 	"github.com/mmcdole/rune/text"
@@ -59,8 +61,8 @@ type Session struct {
 	engine *lua.Engine
 
 	// History
-	historyLines []string
-	historyLimit int
+	historyEntries []input.Submission
+	historyLimit   int
 
 	// Reload-surviving Lua state (see lua_session.go)
 	sessionStore map[string]string
@@ -93,15 +95,15 @@ func New(net Network, uiInstance ui.UI, cfg Config) *Session {
 	timerEvents := make(chan timer.Event, 256)
 
 	s := &Session{
-		net:          net,
-		ui:           uiInstance,
-		timer:        timer.NewService(timerEvents),
-		timerEvents:  timerEvents,
-		events:       make(chan event.Event, 256),
-		config:       cfg,
-		historyLines: make([]string, 0, 10000),
-		historyLimit: 10000,
-		sessionStore: make(map[string]string),
+		net:            net,
+		ui:             uiInstance,
+		timer:          timer.NewService(timerEvents),
+		timerEvents:    timerEvents,
+		events:         make(chan event.Event, 256),
+		config:         cfg,
+		historyEntries: make([]input.Submission, 0, 10000),
+		historyLimit:   10000,
+		sessionStore:   make(map[string]string),
 	}
 
 	s.engine = lua.NewEngine(s)
@@ -172,8 +174,8 @@ func (s *Session) processEvents(ctx context.Context) {
 			s.handleEvent(ev)
 		case netOut := <-s.net.Output():
 			s.handleNetworkOutput(netOut)
-		case line := <-s.ui.Input():
-			s.handleEvent(event.Event{Type: event.UserInput, Payload: event.Line(line)})
+		case submission := <-s.ui.Input():
+			s.handleSubmission(submission)
 		case evt := <-s.timerEvents:
 			s.engine.OnTimer(evt.ID)
 		case <-s.barTicker.C:
@@ -226,23 +228,7 @@ func (s *Session) handleEvent(ev event.Event) {
 
 	case event.UserInput:
 		payload := string(ev.Payload.(event.Line))
-		// Commit prompt to scrollback before processing input
-		if s.lastPrompt != "" {
-			s.ui.Print(s.lastPrompt)
-			s.lastPrompt = ""
-			s.ui.SetPrompt("")
-		}
-		if payload != "" {
-			s.AddToHistory(payload)
-		}
-		if s.net.LocalEchoEnabled() {
-			// Styling (and the choice to show the echo at all) is
-			// Lua policy, dispatched through the "echo" hook.
-			if styled, show := s.engine.OnEcho(payload); show {
-				s.ui.Echo(styled)
-			}
-		}
-		s.engine.OnInput(payload)
+		s.handleSubmission(input.Command(payload))
 
 	case event.NetGMCP:
 		if gmcp, ok := ev.Payload.(event.GMCP); ok {
@@ -260,6 +246,44 @@ func (s *Session) handleEvent(ev event.Event) {
 	case event.SysDisconnect:
 		s.Disconnect()
 	}
+}
+
+// handleSubmission processes an immutable input snapshot. Command submissions
+// retain Rune's normal aliases, delimiters, repeats, and slash commands;
+// verbatim submissions bypass that interpretation and send physical lines as
+// written.
+func (s *Session) handleSubmission(submission input.Submission) {
+	// Commit prompt to scrollback before processing input.
+	if s.lastPrompt != "" {
+		s.ui.Print(s.lastPrompt)
+		s.lastPrompt = ""
+		s.ui.SetPrompt("")
+	}
+	s.addHistorySubmission(submission)
+	if s.net.LocalEchoEnabled() {
+		lines := []string{submission.Text}
+		if submission.Mode == input.ModeVerbatim {
+			// Scrollback entries must be physical lines. An embedded LF in
+			// one entry would render extra terminal rows without the viewport
+			// accounting for them.
+			lines = strings.Split(submission.Text, "\n")
+		}
+		for _, line := range lines {
+			// Styling (and the choice to show the echo at all) is Lua
+			// policy, dispatched through the "echo" hook. Engine.OnEcho owns
+			// the safe display projection; canonical bytes remain untouched
+			// here for history and the wire.
+			if styled, show := s.engine.OnEcho(line); show {
+				s.ui.Echo(styled)
+			}
+		}
+	}
+
+	if submission.Mode == input.ModeVerbatim {
+		s.engine.OnInputWithContext(submission.Text, lua.InputContext{Mode: lua.InputModeVerbatim})
+		return
+	}
+	s.engine.OnInput(submission.Text)
 }
 
 // boot loads the VM state.

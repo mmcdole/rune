@@ -3,6 +3,7 @@ package session
 import (
 	"unicode/utf8"
 
+	"github.com/mmcdole/rune/input"
 	"github.com/mmcdole/rune/ui"
 )
 
@@ -45,6 +46,16 @@ func (s *Session) GetInput() string {
 func (s *Session) SetInput(text string) {
 	s.ui.SetInput(text)
 	s.currentInput = text
+	s.currentCursor = utf8.RuneCountInString(text)
+}
+
+// SetInputSubmission implements lua.Host. History recall uses it to restore
+// interpretation as well as text, including one-line verbatim drafts that
+// would otherwise look like ordinary command input.
+func (s *Session) SetInputSubmission(submission input.Submission) {
+	s.ui.SetInputSubmission(submission)
+	s.currentInput = submission.Text
+	s.currentCursor = utf8.RuneCountInString(submission.Text)
 }
 
 // InputGetCursor implements lua.Host.
