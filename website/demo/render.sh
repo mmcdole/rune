@@ -29,25 +29,19 @@ for name in "${tapes[@]}"; do
   echo "=== $name ==="
   pkill -f "demomud" 2>/dev/null || true
   sleep 0.3
-  # The hero connects to the "viking" world: /etc/hosts points
-  # vikingmud.org at 127.0.0.2, and an iptables DNAT rule rewrites
-  # 127.0.0.2:2001 -> :2101 because a real service (the mud-agent
-  # bridge) may own port 2001 on this machine. Everything else uses
-  # arctic on 2700. Verify the demo server answers before recording -
-  # without the hosts alias + DNAT rule, the hero tape would type into
-  # the REAL VikingMUD login prompt.
-  addr=":2700"
-  if [ "$name" = hero ]; then
-    addr="127.0.0.2:2101"
-    sudo -n iptables -t nat -C OUTPUT -d 127.0.0.2 -p tcp --dport 2001 \
-      -j DNAT --to-destination 127.0.0.2:2101 2>/dev/null || {
-      echo "hero: missing DNAT 127.0.0.2:2001->2101 (see comment)"; exit 1; }
-    getent hosts vikingmud.org | grep -q "^127.0.0.2" || {
-      echo "hero: /etc/hosts must map vikingmud.org to 127.0.0.2"; exit 1; }
-  fi
+  # The demo worlds carry real-looking addresses; RUNE_DIAL_OVERRIDES
+  # (a client dev seam, see network/client.go) reroutes them to the
+  # local demo server. Nothing outside this process is touched, and the
+  # real hosts are never dialed. High ports to dodge local services.
+  addr="127.0.0.1:42700"
+  [ "$name" = hero ] && addr="127.0.0.1:42001"
+  export RUNE_DIAL_OVERRIDES="vikingmud.org:2001=127.0.0.1:42001,mud.arctic.org:2700=127.0.0.1:42700"
   "$MUD_BIN" -addr "$addr" -scenario "$name" &
   MUD_PID=$!
   sleep 0.4
+  # A dead server means the tape would record against whatever else
+  # answers (or nothing). Refuse to continue.
+  kill -0 "$MUD_PID" 2>/dev/null || { echo "demo server failed to bind $addr"; exit 1; }
 
   cat tapes/_header.tape "tapes/$name.tape" > "$WORK/$name.tape"
   vhs "$WORK/$name.tape"
