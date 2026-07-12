@@ -216,10 +216,9 @@ func (s *Session) handleEvent(ev event.Event) {
 		s.ui.SetPrompt("")
 
 	case event.NetPrompt:
-		// Commit previous prompt to scrollback before showing new one
-		if s.lastPrompt != "" {
-			s.ui.Print(s.lastPrompt)
-		}
+		// Prompt events are cumulative snapshots of the current unterminated
+		// network line. A later snapshot replaces the overlay; committing the
+		// earlier one would turn socket read boundaries into visible lines.
 		payload := string(ev.Payload.(event.Line))
 		line := text.NewLine(payload)
 		modified := s.engine.OnPrompt(line)

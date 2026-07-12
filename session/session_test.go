@@ -58,8 +58,9 @@ func contains(list []string, substr string) bool {
 // suite in test/e2e/scenarios/. The tests here assert synchronous internals
 // the scenario vocabulary cannot express.
 
-// A prompt must be committed to scrollback exactly once: when input is
-// submitted while it is displayed, or when a newer prompt replaces it.
+// A prompt must be committed to scrollback exactly once, when input is
+// submitted while it is displayed. New prompt snapshots replace the overlay,
+// and a completed server line clears it without committing it.
 func TestPromptCommitOrdering(t *testing.T) {
 	s, net, uiMock := newTestSession(t)
 	net.connected = true
@@ -72,11 +73,30 @@ func TestPromptCommitOrdering(t *testing.T) {
 		t.Fatalf("prompt committed to scrollback too early: %v", printed)
 	}
 
-	// Submitting input commits the pending prompt before processing
+	// A growing unterminated line produces cumulative prompt snapshots. The
+	// latest snapshot replaces the overlay without committing the earlier one.
+	serverPrompt(s, "HP:100> ready")
+	if prompts := uiMock.drainPrompts(); len(prompts) != 1 || prompts[0] != "HP:100> ready" {
+		t.Fatalf("expected updated prompt overlay, got %v", prompts)
+	}
+	if printed := uiMock.drainPrinted(); len(printed) != 0 {
+		t.Fatalf("superseded prompt snapshot committed to scrollback: %v", printed)
+	}
+
+	// Submitting input commits only the latest pending prompt before processing.
 	userInput(s, "north")
 	printed := uiMock.drainPrinted()
-	if !contains(printed, "HP:100>") {
-		t.Errorf("expected pending prompt committed on input, got %v", printed)
+	promptCount := 0
+	for _, line := range printed {
+		if line == "HP:100>" {
+			t.Errorf("superseded prompt snapshot committed on input: %v", printed)
+		}
+		if line == "HP:100> ready" {
+			promptCount++
+		}
+	}
+	if promptCount != 1 {
+		t.Errorf("latest prompt committed %d times on input, want 1; got %v", promptCount, printed)
 	}
 
 	// A full server line ends the prompt overlay
