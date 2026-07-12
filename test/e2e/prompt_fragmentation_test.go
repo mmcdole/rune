@@ -5,7 +5,7 @@ import "testing"
 // TestFragmentedLineDoesNotCommitPromptSnapshots reproduces issue #25: the
 // VikingMUD inventory corruption reported by Moreldir on 2026-07-12. Viking's
 // wizard
-// I command builds one logical row with several write() calls. When those
+// "I" command builds one logical row with several write() calls. When those
 // writes arrive in separate socket reads, Rune exposes the growing tail as
 // prompt snapshots before the terminating CRLF arrives.
 //
