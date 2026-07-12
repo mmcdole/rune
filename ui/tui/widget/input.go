@@ -313,9 +313,9 @@ func (i *Input) composerView() []string {
 		rows = append(rows, i.renderComposerRow(layout, rowIndex))
 	}
 
-	help := "Enter verbatim · Ctrl+Enter newline · Esc discard"
+	help := "Enter send · Ctrl+Enter newline · Ctrl+E editor · Esc discard"
 	if i.discardPending {
-		help = "Esc again discard · Any other key keep editing"
+		help = "Esc again discards · any key keeps editing"
 	}
 	rows = append(rows, i.composeFooter(help))
 	return rows
@@ -372,12 +372,19 @@ func (i *Input) composeFooter(help string) string {
 	if i.width < 1 {
 		return ""
 	}
+	// The armed discard confirmation must register peripherally: the label
+	// switches to the Warning style the header already uses, while the rule
+	// fill stays quiet.
+	labelStyle := i.styles.Muted
+	if i.discardPending {
+		labelStyle = i.styles.Warning
+	}
 	label := " " + help + " "
 	if util.VisibleLen(label) >= i.width {
-		return i.styles.Muted.Render(clipRow(label, i.width))
+		return labelStyle.Render(clipRow(label, i.width))
 	}
 	fill := strings.Repeat("─", i.width-util.VisibleLen(label))
-	return i.styles.Muted.Render(label + fill)
+	return labelStyle.Render(label) + i.styles.Muted.Render(fill)
 }
 
 // Picker access
