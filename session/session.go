@@ -216,9 +216,13 @@ func (s *Session) handleEvent(ev event.Event) {
 		s.ui.SetPrompt("")
 
 	case event.NetPrompt:
-		// Prompt events are cumulative snapshots of the current unterminated
-		// network line. A later snapshot replaces the overlay; committing the
-		// earlier one would turn socket read boundaries into visible lines.
+		// A prompt snapshot replaces the overlay and is never committed to
+		// scrollback here. In unterminated mode snapshots are cumulative
+		// peeks of the growing line, so committing a superseded one would
+		// turn socket read boundaries into visible lines (issue #25); a
+		// GA/EOR prompt superseding another is a repaint and gets the same
+		// treatment. Only input submission commits the active prompt
+		// (handleSubmission).
 		payload := string(ev.Payload.(event.Line))
 		line := text.NewLine(payload)
 		modified := s.engine.OnPrompt(line)
