@@ -26,36 +26,22 @@ const base = raw.endsWith('/') ? raw : raw + '/';
     </div>
 
     <div>
-      <div class="term demo" id="demo" aria-label="Animated demo of a Rune session: connecting to a MUD, walking between rooms, tab completion, and searching history and aliases with pickers">
+      <div class="term demo" id="demo">
         <div class="term-bar">
           <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-          <span class="term-title" id="demo-title">rune</span>
+          <span class="term-title">rune</span>
           <button class="replay" id="demo-replay" type="button" title="Replay demo">↻ replay</button>
         </div>
-        <div class="quake" id="demo-quake">
-          <div class="quake-label">chat console · ` to toggle</div>
-          <pre id="demo-quake-out"></pre>
-        </div>
-        <div class="body-wrap">
-          <div class="term-body demo-body" id="demo-scroll">
-            <pre id="demo-out"></pre>
-          </div>
-          <div class="picker overlay" id="demo-picker" hidden>
-            <div class="picker-title" id="demo-picker-title">History</div>
-            <pre id="demo-picker-list"></pre>
-          </div>
-          <div class="hint" id="demo-hint">
-            <div>
-              <span class="hint-key" id="demo-hint-key">Ctrl+R</span>
-              <div class="hint-label" id="demo-hint-label">search history</div>
-            </div>
-          </div>
-        </div>
-        <div class="inputline"><span class="caret">&gt;</span> <span id="demo-input"></span><span class="cursor"></span></div>
-        <div class="statusline">
-          <span id="demo-status"><span class="c-dim">●</span> <span class="c-dim">Disconnected</span></span>
-          <span class="c-dim">LIVE</span>
-        </div>
+        <!-- Real client footage (see website/demo/): connecting to a MUD,
+             walking between rooms, tab completion, history search, and the
+             chat-console pane. Regenerate with website/demo/render.sh. -->
+        <video
+          id="demo-video"
+          src={`${base}demos/hero.mp4`}
+          poster={`${base}demos/hero-poster.jpg`}
+          autoplay muted loop playsinline preload="metadata"
+          aria-label="Recording of a Rune session: connecting to a MUD, walking between rooms, tab completion, searching history, and toggling a chat console pane"
+        ></video>
       </div>
     </div>
   </header>
@@ -101,10 +87,6 @@ const base = raw.endsWith('/') ? raw : raw + '/';
     --magenta: #bb9af7;
     --mono: var(--sl-font-mono);
     font-size: 17px;
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .landing .cursor { animation: none; }
-    .landing .quake, .landing .demo-body { transition: none; }
   }
 
   .hero-grid {
@@ -183,105 +165,7 @@ const base = raw.endsWith('/') ? raw : raw + '/';
     color: var(--muted); padding: 2px 6px;
   }
   .replay:hover { color: var(--fg); }
-  .term-body { padding: 14px 18px 12px; overflow-x: auto; }
-  .term-body pre, .quake pre { margin: 0; white-space: pre; background: none; border: none; padding: 0; font-size: inherit; }
-
-  /* The scrollback and chat console trade height so the terminal's
-     total footprint never changes while the demo runs. */
-  .demo-body { height: 340px; overflow: hidden; transition: height 0.35s ease; }
-  .term.chat-open .demo-body { height: 190px; }
-  .quake {
-    max-height: 0;
-    padding: 0 18px;
-    overflow: hidden;
-    border-bottom: 1px dashed transparent;
-    background: rgba(224, 175, 104, 0.035);
-    transition: max-height 0.35s ease, padding 0.35s ease;
-  }
-  .term.chat-open .quake {
-    max-height: 150px;
-    padding: 12px 18px;
-    border-bottom-color: var(--panel-edge);
-  }
-  .quake pre { min-height: 98px; }
-  .quake-label { color: var(--muted); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 6px; }
-
-  .inputline { padding: 7px 18px; border-top: 1px solid var(--panel-edge); font-size: 13px; }
-  .inputline .caret { color: var(--amber); }
-  .statusline {
-    display: flex; justify-content: space-between; gap: 12px;
-    padding: 7px 18px;
-    background: var(--panel);
-    border-top: 1px solid var(--panel-edge);
-    color: var(--muted); font-size: 12.5px;
-  }
-  /* Color utilities as :global — the demo injects these spans at
-     runtime, so they never receive Astro's build-time scope attribute
-     and scoped selectors would not match them. */
-  .term :global(.c-cyan) { color: var(--cyan); }
-  .term :global(.c-green) { color: var(--green); }
-  .term :global(.c-red) { color: var(--red); }
-  .term :global(.c-amber) { color: var(--amber); }
-  .term :global(.c-magenta) { color: var(--magenta); }
-  .term :global(.c-dim) { color: var(--muted); }
-  .term :global(.c-bold) { font-weight: 700; color: #e6e9f5; }
-  .term :global(.c-blue) { color: var(--blue); }
-  .cursor {
-    display: inline-block; width: 8px; height: 15px;
-    background: var(--amber); vertical-align: text-bottom;
-    animation: blink 1.1s steps(1) infinite;
-  }
-  @keyframes blink { 50% { opacity: 0; } }
-
-  /* Picker overlay: matches the client — a bordered box flush above
-     the input line, > marker plus row highlight on the selection. */
-  .body-wrap { position: relative; }
-  .picker.overlay {
-    position: absolute;
-    left: 10px; right: 10px;
-    bottom: 2px;
-    background: #16161e;
-    border: 1px solid var(--blue);
-    border-radius: 6px;
-    padding: 8px 8px;
-    overflow-x: auto;
-    z-index: 2;
-    box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.45);
-  }
-  .picker-title { color: var(--muted); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; margin: 0 4px 5px; }
-  .picker pre { margin: 0; white-space: pre; background: none; border: none; padding: 0; font-size: inherit; line-height: 1.55; }
-  .picker :global(.pick-sel) { background: rgba(122, 162, 247, 0.18); display: inline-block; width: 100%; }
-  .picker :global(.c-blue) { color: var(--blue); }
-  .picker :global(.c-dim) { color: var(--muted); }
-
-  /* Key hint overlay: big centered keycap naming what the "user" just
-     pressed. The scrim dims the scrollback so the label stays legible. */
-  .hint {
-    position: absolute;
-    inset: 0;
-    display: flex; align-items: center; justify-content: center;
-    text-align: center;
-    pointer-events: none;
-    z-index: 3;
-    opacity: 0;
-    transition: opacity 0.3s ease;
-    background: rgba(20, 21, 31, 0.82);
-    backdrop-filter: blur(2px);
-  }
-  .hint.show { opacity: 1; }
-  .hint-key {
-    display: inline-block;
-    font-family: var(--mono);
-    font-size: 30px; font-weight: 700;
-    color: var(--fg);
-    background: var(--panel);
-    border: 1px solid var(--panel-edge);
-    border-bottom-width: 3px;
-    border-radius: 10px;
-    padding: 10px 22px;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
-  }
-  .hint-label { margin-top: 12px; font-family: var(--mono); font-size: 13.5px; color: var(--amber); }
+  .term video { display: block; width: 100%; height: auto; }
 
   section { padding: 56px 0 8px; }
 
@@ -310,307 +194,18 @@ const base = raw.endsWith('/') ? raw : raw + '/';
 </style>
 
 <script>
-  // Hero demo: a scripted replay of a real session. Everything shown is
-  // real client behavior: the first-run welcome (85_events.lua), tab
-  // completion against words the server has used, the Ctrl+R history
-  // picker and Ctrl+T alias picker (95_ui.lua), local echo styling, and
-  // the status bar states.
-  const $ = (id: string) => document.getElementById(id)!;
-  const term = $('demo');
-  const out = $('demo-out');
-  const scroll = $('demo-scroll');
-  const input = $('demo-input');
-  const title = $('demo-title');
-  const status = $('demo-status');
-  const picker = $('demo-picker');
-  const pickerTitle = $('demo-picker-title');
-  const pickerList = $('demo-picker-list');
-  const hint = $('demo-hint');
-  const hintKey = $('demo-hint-key');
-  const hintLabel = $('demo-hint-label');
-  const quakeOut = $('demo-quake-out');
+  // The hero is real client footage (website/demo/render.sh). Autoplay
+  // is muted+looped; reduced-motion visitors get the poster frame and
+  // can start it themselves via the replay button.
+  const video = document.getElementById('demo-video') as HTMLVideoElement;
+  const replay = document.getElementById('demo-replay')!;
 
-  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  let run = 0; // generation token; replay bumps it to cancel the old loop
-
-  const dim = (s: string) => `<span class="c-dim">${s}</span>`;
-  const cyan = (s: string) => `<span class="c-cyan">${s}</span>`;
-  const green = (s: string) => `<span class="c-green">${s}</span>`;
-  const amber = (s: string) => `<span class="c-amber">${s}</span>`;
-  const blue = (s: string) => `<span class="c-blue">${s}</span>`;
-  const magenta = (s: string) => `<span class="c-magenta">${s}</span>`;
-  const name = (s: string) => `<span class="c-bold">${s}</span>`;
-  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
-
-  const ADDR = 'vikingmud.org:2001';
-  const PROMPT =
-    dim('[') + green('10232/274') + ' ' + cyan('X:482116') + ' ' +
-    amber('$40811686') + dim('][]:');
-  const exits = (s: string) => dim('    There are ') + s;
-
-  const WELCOME = [
-    '',
-    dim('Welcome! To get started:'),
-    dim('  connect:   ') + cyan('/connect &lt;host&gt; &lt;port&gt;') + dim('  (or ') + cyan('tls') + dim(' as a third argument)'),
-    dim('  bookmark:  ') + cyan('/world add &lt;name&gt; &lt;host&gt; &lt;port&gt;') + dim('  then ') + cyan('/connect &lt;name&gt;'),
-    dim('  scripting: ') + cyan('~/.config/rune/init.lua') + dim(' auto-loads at startup'),
-    dim('  docs:      ') + cyan('https://github.com/mmcdole/rune'),
-    '',
-  ];
-
-  const SHOP = [
-    'You are in a shop. You can buy or sell things here. To the',
-    'north is a counter. A ' + blue('blue forcefield') + ' blocks a doorway',
-    'behind it, and there is a sign on the wall. There is a',
-    'doorway with <span class="c-bold">ARMOURY</span> written above it to the east.',
-    exits(green('four') + dim(' obvious exits: ') + green('down, east, south and west')),
-    amber('A trashcan'),
-    amber('shopkeeper'),
-  ];
-
-  const ROAD = [
-    'A long road going through the village. The road continues',
-    'to the west. To the north is the shop, and to the south is',
-    'the adventurers guild. The road runs towards the shore to',
-    'the east.',
-    exits(green('four') + dim(' obvious exits: ') + green('east, north, south and west')),
-  ];
-
-  const SHORE = [
-    'You are on a road going out of the village. Eastroad runs',
-    'north from here, along the eastern perimeter of the city,',
-    'and to the south are some fields planted with all the crops',
-    'that the city needs. The main road runs towards the shore',
-    'to the east, and into the city to the west. There is a sign',
-    'on a pole here.',
-    exits(green('five') + dim(' obvious exits: ') + green('down, east, north, south and west')),
-  ];
-
-  const TELL = 'tell tundra on my way';
-
-  const HISTORY = [
-    { text: 'e' },
-    { text: TELL },
-    { text: 'tell dios when is the restart?' },
-    { text: 's' },
-    { text: 'tell knubo how goes the quest engine?' },
-    { text: 'tell kralk how much for the axe?' },
-    { text: '/connect vikingmud.org 2001' },
-  ];
-
-  const ALIASES = [
-    { text: 'ws', desc: 'wield sword;wear shield' },
-    { text: 'gac', desc: 'get all from corpse' },
-    { text: 'bs', desc: 'cast blindstrike at %1' },
-    { text: 'tt', desc: 'tell tundra %*' },
-  ];
-
-  function play(gen: number) {
-    const guard = () => {
-      if (gen !== run) throw new Error('stale');
-    };
-    const sleep = (ms: number) =>
-      new Promise<void>((r) => setTimeout(r, reduced ? 0 : ms)).then(guard);
-
-    const print = (html: string) => {
-      out.insertAdjacentHTML('beforeend', html + '\n');
-      scroll.scrollTop = scroll.scrollHeight;
-    };
-    const printAll = (lines: string[]) => lines.forEach(print);
-
-    const type = async (text: string) => {
-      for (const ch of text) {
-        input.textContent += ch;
-        await sleep(38 + Math.random() * 42);
-      }
-    };
-    // "Press Enter": echo whatever is in the input, client-style.
-    const submit = async () => {
-      await sleep(320);
-      const text = input.textContent ?? '';
-      input.textContent = '';
-      print(green('&gt; ' + esc(text)));
-    };
-    const enter = async (text: string) => {
-      await type(text);
-      await submit();
-    };
-
-    const showHint = async (key: string, label: string) => {
-      if (reduced) return;
-      hintKey.textContent = key;
-      hintLabel.textContent = label;
-      hint.classList.add('show');
-      await sleep(1600);
-      hint.classList.remove('show');
-      await sleep(350);
-    };
-
-    const renderPicker = (items: { text: string; desc?: string }[], sel: number) => {
-      pickerList.innerHTML = items
-        .map((it, i) => {
-          const label = blue(esc(it.text)) + (it.desc ? ' ' + dim('- ' + esc(it.desc)) : '');
-          return i === sel ? `<span class="pick-sel">${blue('&gt; ')}${label}</span>` : '  ' + label;
-        })
-        .join('\n');
-    };
-    const openPicker = (name: string, items: { text: string; desc?: string }[], sel = 0) => {
-      pickerTitle.textContent = name;
-      renderPicker(items, sel);
-      picker.hidden = false;
-    };
-    const closePicker = () => {
-      picker.hidden = true;
-    };
-
-    const reset = () => {
-      out.textContent = '';
-      input.textContent = '';
-      quakeOut.textContent = '';
-      term.classList.remove('chat-open');
-      picker.hidden = true;
-      hint.classList.remove('show');
-      title.textContent = 'rune';
-      status.innerHTML = `${dim('●')} ${dim('Disconnected')}`;
-    };
-
-    const once = async () => {
-      reset();
-      await sleep(700);
-
-      // First-run welcome (what a fresh install actually prints).
-      printAll(WELCOME);
-      await sleep(1600);
-
-      // Connect.
-      await enter('/connect vikingmud.org 2001');
-      print(`[System] Connecting to ${ADDR}...`);
-      await sleep(650);
-      print(`[System] Connected to ${ADDR}`);
-      title.textContent = `rune — ${ADDR}`;
-      status.innerHTML = `${green('●')} ${ADDR} · GMCP · MCCP2`;
-      await sleep(700);
-      print('');
-      print(amber('        ~ Welcome to VikingMUD ~'));
-      print(dim('     est. 1991 — www.vikingmud.org'));
-      await sleep(1100);
-
-      // Walk a few rooms.
-      print('');
-      printAll(SHOP);
-      print(PROMPT);
-      await sleep(1700);
-
-      await enter('s');
-      print('');
-      printAll(ROAD);
-      print(PROMPT);
-      await sleep(1400);
-
-      print(magenta('Tundra tells you: meet me at the shore'));
-      await sleep(1300);
-
-      // Tab: complete a name the server has used, then keep typing.
-      await type('tell tun');
-      await sleep(350);
-      await showHint('Tab', 'complete words the server has used');
-      input.innerHTML = 'tell tun' + cyan('dra') + '&nbsp;';
-      await sleep(650);
-      input.textContent = 'tell tundra ';
-      await type('on my way');
-      await submit();
-      print(magenta('You tell Tundra: on my way'));
-      print(PROMPT);
-      await sleep(1400);
-
-      await enter('e');
-      print('');
-      printAll(SHORE);
-      print(PROMPT);
-      await sleep(1600);
-
-      print(magenta('Tundra tells you: hurry, the tide is turning'));
-      await sleep(1400);
-
-      // Ctrl+R: fuzzy history search, recall the long tell.
-      await showHint('Ctrl+R', 'search command history');
-      openPicker('History', HISTORY);
-      await sleep(900);
-      // Filter narrows on every keystroke: 7 entries -> the tells -> one.
-      let q = '';
-      for (const ch of 'tell t') {
-        q += ch;
-        input.textContent = q;
-        renderPicker(HISTORY.filter((h) => h.text.includes(q)), 0);
-        await sleep(130 + Math.random() * 70);
-      }
-      await sleep(950);
-      closePicker();
-      input.textContent = TELL;
-      await sleep(800);
-      await submit();
-      print(magenta('You tell Tundra: on my way'));
-      await sleep(800);
-      print(magenta('Tundra tells you: good, bring rope'));
-      print(PROMPT);
-      await sleep(1500);
-
-      // Ctrl+T: alias browser.
-      await showHint('Ctrl+T', 'browse aliases');
-      openPicker('Aliases', ALIASES);
-      await sleep(1700);
-      closePicker();
-      await enter('ws');
-      print('You wield a viking sword.');
-      print('You wear a battered shield.');
-      print(PROMPT);
-      await sleep(1500);
-
-      // Backtick: the cookbook's quake-style chat console.
-      await showHint('`', 'chat console, in nine lines of Lua');
-      quakeOut.innerHTML =
-        // Everything that scrolled past below is captured here too,
-        // topped up with older channel history. Capped at five lines,
-        // scrolling like the real pane.
-        `${green('[Chat]')}  ${name('Moreldir')}: fixed the bug where trolls dropped no loot\n` +
-        `${green('[Chat]')}  ${name('Knubo')}: quest engine rewrite is nearly done. so hyped\n` +
-        `${amber('[Trade]')} ${name('Kralk')}: someone is duping gold at the bank. I smell a cheater\n` +
-        `${cyan('[Tell]')}  ${name('Tundra')}: hurry, the tide is turning\n` +
-        `${cyan('[Tell]')}  ${name('Tundra')}: good, bring rope`;
-      term.classList.add('chat-open');
-      const chat = (line: string) => {
-        const lines = quakeOut.innerHTML.split('\n');
-        lines.push(line);
-        while (lines.length > 5) lines.shift();
-        quakeOut.innerHTML = lines.join('\n');
-      };
-      await sleep(1700);
-      chat(`${cyan('[Tell]')}  ${name('Soblak')}: psst... I just discovered an infinite money glitch!!`);
-      await sleep(1300);
-      chat(`${cyan('[Tell]')}  ${name('Soblak')} cackles with glee!`);
-      await sleep(1500);
-      chat(`${green('[Chat]')}  ${name('Dios')}: the server is going down for a restart soon, wrap it up`);
-      await sleep(3400);
-    };
-
-    (async () => {
-      try {
-        if (reduced) {
-          // No animation: settle on a single representative frame.
-          await once();
-          return;
-        }
-        for (;;) await once();
-      } catch {
-        /* replay cancelled this loop */
-      }
-    })();
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    video.autoplay = false;
+    video.pause();
   }
-
-  $('demo-replay').addEventListener('click', () => {
-    run++;
-    play(run);
+  replay.addEventListener('click', () => {
+    video.currentTime = 0;
+    video.play();
   });
-
-  play(run);
 </script>

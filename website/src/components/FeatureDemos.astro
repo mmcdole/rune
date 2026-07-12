@@ -1,111 +1,107 @@
 ---
-// Focused mini-demos below the fact grid: each terminal loops one UI
-// feature (pickers, $EDITOR mode, tab completion). Same visual language
-// as the hero demo; each animation starts when scrolled into view.
+// Focused feature demos below the fact grid: real client footage
+// (website/demo/render.sh), one video per feature, wrapped in the same
+// terminal chrome as the hero. Videos play only while in view.
+const raw = import.meta.env.BASE_URL;
+const base = raw.endsWith('/') ? raw : raw + '/';
+
+const demos = [
+  {
+    id: 'pickers',
+    title: 'Pickers for everything',
+    body:
+      'Saved worlds, command history, your aliases, and every slash ' +
+      'command sit one keypress away, fuzzy-filtered as you type. ' +
+      'Scripts can open the same picker with their own items.',
+    keys: [
+      ['/connect', 'worlds'],
+      ['Ctrl+R', 'history'],
+      ['Ctrl+T', 'aliases'],
+    ],
+    term: 'rune',
+    aria:
+      'Recording: the world picker connects to a MUD, Ctrl+R filters ' +
+      'command history, and Ctrl+T browses aliases',
+  },
+  {
+    id: 'verbatim',
+    title: 'Multiline, sent verbatim',
+    body:
+      'Paste multiline text - or press Ctrl+Enter - and the input grows ' +
+      'into a composer with numbered lines. Enter sends the draft ' +
+      'exactly as written: no alias expansion, no splitting, no lost ' +
+      'blank lines. Boards and mail editors just work.',
+    keys: [
+      ['Ctrl+Enter', 'compose'],
+      ['Enter', 'send as written'],
+    ],
+    term: 'rune — mud.arctic.org:2700',
+    aria:
+      'Recording: Ctrl+Enter grows the input line into a multiline ' +
+      'composer and Enter sends each line to the server as written',
+  },
+  {
+    id: 'editor',
+    title: 'Your editor, mid-session',
+    body:
+      'When a draft deserves better than a one-line box, Ctrl+E opens ' +
+      'it in Vim, Emacs, or whatever $EDITOR points at. Save and quit, ' +
+      'and the whole letter lands back in the composer, ready to send.',
+    keys: [['Ctrl+E', 'edit in $EDITOR']],
+    term: 'rune — mud.arctic.org:2700',
+    aria:
+      'Recording: Ctrl+E opens the input in vim, a multi-line letter ' +
+      'is written and saved, and it returns to the composer to send',
+  },
+  {
+    id: 'tab',
+    title: 'Tab completion that learns',
+    body:
+      'Words the server has used complete after a single appearance - ' +
+      'player names included. Keep pressing Tab and the candidates ' +
+      'cycle on the status line; Shift+Tab goes back.',
+    keys: [
+      ['Tab', 'complete / cycle'],
+      ['Shift+Tab', 'back'],
+    ],
+    term: 'rune — mud.arctic.org:2700',
+    aria:
+      'Recording: Tab completes a name learned from server output and ' +
+      'repeated presses cycle the candidates on the status line',
+  },
+];
 ---
 
 <section class="fd">
-  <!-- Pickers: worlds, history, aliases -->
-  <div class="fd-row">
-    <div class="fd-copy">
-      <h2>Pickers for everything</h2>
-      <p>
-        Saved worlds, command history, and your aliases are one keypress
-        away, fuzzy-filtered as you type. Scripts can open the same picker
-        with their own items.
-      </p>
-      <p class="fd-keys">
-        <span class="fd-pair"><span class="key">/connect</span> worlds</span>
-        <span class="fd-pair"><span class="key">Ctrl+R</span> history</span>
-        <span class="fd-pair"><span class="key">Ctrl+T</span> aliases</span>
-      </p>
-    </div>
-    <div class="fterm" data-demo="fdw">
-      <div class="fterm-bar">
-        <span class="fdot"></span><span class="fdot"></span><span class="fdot"></span>
-        <span class="ftitle" id="fdw-title">rune</span>
-      </div>
-      <div class="fbody-wrap">
-        <div class="fbody" id="fdw-scroll"><pre id="fdw-out"></pre></div>
-        <div class="fpicker" id="fdw-picker" hidden>
-          <div class="fpicker-title" id="fdw-picker-title">Worlds</div>
-          <pre id="fdw-picker-list"></pre>
+  {
+    demos.map((d, i) => (
+      <div class={i % 2 ? 'fd-row flip' : 'fd-row'}>
+        <div class="fd-copy">
+          <h2>{d.title}</h2>
+          <p>{d.body}</p>
+          <p class="fd-keys">
+            {d.keys.map(([key, label]) => (
+              <span class="fd-pair">
+                <span class="key">{key}</span> {label}
+              </span>
+            ))}
+          </p>
         </div>
-        <div class="fhint" id="fdw-hint">
-          <div>
-            <span class="fhint-key" id="fdw-hint-key"></span>
-            <div class="fhint-label" id="fdw-hint-label"></div>
+        <div class="fterm">
+          <div class="fterm-bar">
+            <span class="fdot" /><span class="fdot" /><span class="fdot" />
+            <span class="ftitle">{d.term}</span>
           </div>
+          <video
+            src={`${base}demos/${d.id}.mp4`}
+            poster={`${base}demos/${d.id}-poster.jpg`}
+            muted loop playsinline preload="metadata"
+            aria-label={d.aria}
+          />
         </div>
       </div>
-      <div class="finput"><span class="fcaret">&gt;</span> <span id="fdw-input"></span><span class="fcursor"></span></div>
-      <div class="fstatus"><span id="fdw-status"><span class="c-dim">●</span> <span class="c-dim">Disconnected</span></span><span class="c-dim">LIVE</span></div>
-    </div>
-  </div>
-
-  <!-- Editor mode -->
-  <div class="fd-row flip">
-    <div class="fd-copy">
-      <h2>Editor mode</h2>
-      <p>
-        When a line outgrows the input box, <span class="key">Ctrl+E</span>
-        opens it in your own editor, whether that's Vim, Emacs, or whatever
-        <code>$EDITOR</code> points at. Save and quit, and the text lands
-        back on the input line, ready to send.
-      </p>
-    </div>
-    <div class="fterm" data-demo="fde">
-      <div class="fterm-bar">
-        <span class="fdot"></span><span class="fdot"></span><span class="fdot"></span>
-        <span class="ftitle" id="fde-title">rune — mud.arctic.org:2700</span>
-      </div>
-      <div class="fbody-wrap">
-        <div class="fbody" id="fde-scroll"><pre id="fde-out"></pre></div>
-        <div class="feditor" id="fde-editor" hidden>
-          <pre id="fde-ed-buf"></pre>
-          <div class="fed-mode"><span id="fde-ed-mode">-- INSERT --</span><span class="c-dim">rune-input</span></div>
-        </div>
-        <div class="fhint" id="fde-hint">
-          <div>
-            <span class="fhint-key" id="fde-hint-key"></span>
-            <div class="fhint-label" id="fde-hint-label"></div>
-          </div>
-        </div>
-      </div>
-      <div class="finput"><span class="fcaret">&gt;</span> <span id="fde-input"></span><span class="fcursor"></span></div>
-      <div class="fstatus"><span id="fde-status"><span class="c-green">●</span> mud.arctic.org:2700</span><span class="c-dim">LIVE</span></div>
-    </div>
-  </div>
-
-  <!-- Tab completion -->
-  <div class="fd-row">
-    <div class="fd-copy">
-      <h2>Tab completion that learns</h2>
-      <p>
-        Words the server has used complete after one appearance, player
-        names included. Keep pressing <span class="key">Tab</span> and the
-        candidates rotate on the status line;
-        <span class="key">Shift+Tab</span> goes back.
-      </p>
-    </div>
-    <div class="fterm" data-demo="fdt">
-      <div class="fterm-bar">
-        <span class="fdot"></span><span class="fdot"></span><span class="fdot"></span>
-        <span class="ftitle" id="fdt-title">rune — mud.arctic.org:2700</span>
-      </div>
-      <div class="fbody-wrap">
-        <div class="fbody" id="fdt-scroll"><pre id="fdt-out"></pre></div>
-        <div class="fhint" id="fdt-hint">
-          <div>
-            <span class="fhint-key" id="fdt-hint-key"></span>
-            <div class="fhint-label" id="fdt-hint-label"></div>
-          </div>
-        </div>
-      </div>
-      <div class="finput"><span class="fcaret">&gt;</span> <span id="fdt-input"></span><span class="fcursor"></span></div>
-      <div class="fstatus"><span id="fdt-status"><span class="c-green">●</span> mud.arctic.org:2700</span><span class="c-dim">LIVE</span></div>
-    </div>
-  </div>
+    ))
+  }
 </section>
 
 <style>
@@ -115,7 +111,7 @@
     display: grid;
     grid-template-columns: minmax(260px, 4fr) minmax(340px, 6fr);
     gap: 40px;
-    align-items: start;
+    align-items: center;
   }
   /* Flipped rows swap the columns too, so the terminal keeps the wide
      column instead of shrinking into the copy column. */
@@ -126,7 +122,6 @@
     .fd-row.flip .fd-copy { order: 0; }
   }
 
-  .fd-copy { padding-top: 6px; }
   .fd-copy h2 {
     font-family: var(--mono);
     font-size: 20px;
@@ -135,7 +130,6 @@
     letter-spacing: -0.01em;
   }
   .fd-copy p { color: var(--muted); font-size: 15.5px; line-height: 1.6; margin: 0 0 12px; max-width: 44ch; }
-  .fd-copy code { font-size: 13.5px; color: var(--cyan); background: none; }
   .fd-keys { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; }
   .fd-pair { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; color: var(--muted); font-size: 14px; }
   .key {
@@ -155,10 +149,6 @@
     border-radius: 10px;
     box-shadow: 0 18px 44px rgba(0, 0, 0, 0.4);
     overflow: hidden;
-    font-family: var(--mono);
-    font-size: 12.5px;
-    line-height: 1.5;
-    color: var(--fg);
   }
   .fterm-bar {
     display: flex; align-items: center; gap: 7px;
@@ -167,410 +157,27 @@
     border-bottom: 1px solid var(--panel-edge);
   }
   .fdot { width: 10px; height: 10px; border-radius: 50%; background: #3b3f58; }
-  .ftitle { margin-left: 8px; color: var(--muted); font-size: 11.5px; }
-
-  .fbody-wrap { position: relative; }
-  .fbody { height: 180px; padding: 12px 16px 10px; overflow: hidden; }
-  .fbody pre, .fpicker pre, .feditor pre {
-    margin: 0; white-space: pre; background: none; border: none; padding: 0; font-size: inherit;
-  }
-
-  .fpicker {
-    position: absolute;
-    left: 10px; right: 10px; bottom: 2px;
-    background: #16161e;
-    border: 1px solid var(--blue);
-    border-radius: 6px;
-    padding: 8px;
-    overflow-x: auto;
-    z-index: 2;
-    box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.45);
-  }
-  .fpicker-title { color: var(--muted); font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; margin: 0 4px 5px; }
-  .fpicker pre { line-height: 1.55; }
-  .fpicker :global(.pick-sel) { background: rgba(122, 162, 247, 0.18); display: inline-block; width: 100%; }
-
-  /* Full-body $EDITOR takeover, vim-flavored. */
-  .feditor {
-    position: absolute;
-    inset: 0;
-    z-index: 2;
-    background: #16161e;
-    padding: 12px 16px 0;
-    display: flex;
-    flex-direction: column;
-  }
-  /* A real editor wraps long lines rather than clipping them. */
-  .feditor pre { flex: 1; overflow: hidden; white-space: pre-wrap; word-break: break-word; }
-  .fed-mode {
-    display: flex; justify-content: space-between; gap: 12px;
-    font-size: 11.5px;
-    padding: 4px 2px 8px;
-    color: var(--fg);
-  }
-
-  /* Light scrim: the keycap labels the moment without blacking out the
-     content it is labeling. */
-  .fhint {
-    position: absolute;
-    inset: 0;
-    display: flex; align-items: center; justify-content: center;
-    text-align: center;
-    pointer-events: none;
-    z-index: 3;
-    opacity: 0;
-    transition: opacity 0.3s ease;
-    background: rgba(20, 21, 31, 0.55);
-  }
-  .fhint.show { opacity: 1; }
-  .fhint-key {
-    display: inline-block;
-    font-family: var(--mono);
-    font-size: 24px; font-weight: 700;
-    color: var(--fg);
-    background: var(--panel);
-    border: 1px solid var(--panel-edge);
-    border-bottom-width: 3px;
-    border-radius: 9px;
-    padding: 8px 18px;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
-  }
-  .fhint-label { margin-top: 10px; font-family: var(--mono); font-size: 12.5px; color: var(--amber); }
-
-  .finput { padding: 6px 16px; border-top: 1px solid var(--panel-edge); font-size: 12.5px; }
-  .fcaret { color: var(--amber); }
-  /* :global because the editor demo injects cursor spans at runtime;
-     scoped selectors would not match them. */
-  .fterm :global(.fcursor) {
-    display: inline-block; width: 7px; height: 14px;
-    background: var(--amber); vertical-align: text-bottom;
-    animation: fblink 1.1s steps(1) infinite;
-  }
-  /* One cursor at a time: the input line goes quiet while $EDITOR owns
-     the frame. */
-  .fterm.editor-open .finput :global(.fcursor) { visibility: hidden; }
-  @keyframes fblink { 50% { opacity: 0; } }
-  @media (prefers-reduced-motion: reduce) {
-    .fterm :global(.fcursor) { animation: none; }
-  }
-  .fstatus {
-    display: flex; justify-content: space-between; gap: 12px;
-    padding: 6px 16px;
-    background: var(--panel);
-    border-top: 1px solid var(--panel-edge);
-    color: var(--muted); font-size: 12px;
-    overflow: hidden; white-space: nowrap;
-  }
-
-  /* Runtime-injected color spans (see Landing.astro for why :global). */
-  .fterm :global(.c-cyan) { color: var(--cyan); }
-  .fterm :global(.c-green) { color: var(--green); }
-  .fterm :global(.c-red) { color: var(--red); }
-  .fterm :global(.c-amber) { color: var(--amber); }
-  .fterm :global(.c-magenta) { color: var(--magenta); }
-  .fterm :global(.c-dim) { color: var(--muted); }
-  .fterm :global(.c-bold) { font-weight: 700; color: #e6e9f5; }
-  .fterm :global(.c-blue) { color: var(--blue); }
-  .fstatus :global(.c-green) { color: var(--green); }
-  .fstatus :global(.c-dim) { color: var(--muted); }
+  .ftitle { margin-left: 8px; color: var(--muted); font-size: 11.5px; font-family: var(--mono); }
+  .fterm video { display: block; width: 100%; height: auto; }
 </style>
 
 <script>
-  // Three looping mini-demos. Each starts the first time it scrolls into
-  // view; with reduced motion it settles on a single final frame instead.
+  // Play each demo only while it is on screen; honor reduced motion by
+  // leaving the poster frame until the visitor interacts.
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const videos = document.querySelectorAll<HTMLVideoElement>('.fd video');
 
-  const dim = (s: string) => `<span class="c-dim">${s}</span>`;
-  const cyan = (s: string) => `<span class="c-cyan">${s}</span>`;
-  const green = (s: string) => `<span class="c-green">${s}</span>`;
-  const amber = (s: string) => `<span class="c-amber">${s}</span>`;
-  const blue = (s: string) => `<span class="c-blue">${s}</span>`;
-  const magenta = (s: string) => `<span class="c-magenta">${s}</span>`;
-  const bold = (s: string) => `<span class="c-bold">${s}</span>`;
-  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
-
-  type Item = { text: string; desc?: string };
-
-  function mkTerm(p: string) {
-    const el = (s: string) => document.getElementById(p + s)!;
-    const out = el('-out');
-    const scroll = el('-scroll');
-    const input = el('-input');
-    const root = out.closest('.fterm') as HTMLElement;
-
-    const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, reduced ? 0 : ms));
-    const print = (html: string) => {
-      out.insertAdjacentHTML('beforeend', html + '\n');
-      scroll.scrollTop = scroll.scrollHeight;
-    };
-    const type = async (text: string) => {
-      for (const ch of text) {
-        input.textContent += ch;
-        await sleep(36 + Math.random() * 40);
-      }
-    };
-    const submit = async () => {
-      await sleep(300);
-      const text = input.textContent ?? '';
-      input.textContent = '';
-      print(green('&gt; ' + esc(text)));
-    };
-    const showHint = async (key: string, label: string) => {
-      if (reduced) return;
-      el('-hint-key').textContent = key;
-      el('-hint-label').textContent = label;
-      el('-hint').classList.add('show');
-      await sleep(1100);
-      el('-hint').classList.remove('show');
-      await sleep(300);
-    };
-    const clear = () => {
-      out.textContent = '';
-      input.textContent = '';
-    };
-    return { el, root, out, input, sleep, print, type, submit, showHint, clear };
-  }
-
-  function renderPicker(list: HTMLElement, items: Item[], sel: number) {
-    list.innerHTML = items
-      .map((it, i) => {
-        const label = blue(esc(it.text)) + (it.desc ? ' ' + dim('- ' + esc(it.desc)) : '');
-        return i === sel ? `<span class="pick-sel">${blue('&gt; ')}${label}</span>` : '  ' + label;
-      })
-      .join('\n');
-  }
-
-  // --- Pickers: /connect worlds, Ctrl+R history, Ctrl+T aliases ---------
-  async function pickersDemo() {
-    const t = mkTerm('fdw');
-    const picker = t.el('-picker');
-    const pickerTitle = t.el('-picker-title');
-    const pickerList = t.el('-picker-list');
-    const status = t.el('-status');
-    const title = t.el('-title');
-
-    const WORLDS: Item[] = [
-      { text: 'viking', desc: 'vikingmud.org:2001' },
-      { text: 'arctic', desc: 'mud.arctic.org:2700' },
-      { text: 'discworld', desc: 'discworld.starturtle.net:4242' },
-    ];
-    const HISTORY: Item[] = [
-      { text: 'kill polar bear' },
-      { text: 'tell soblak ready when you are' },
-      { text: 'get all from corpse' },
-      { text: 'tell dios when is the restart?' },
-      { text: '/world add arctic mud.arctic.org 2700' },
-    ];
-    const ALIASES: Item[] = [
-      { text: 'ws', desc: 'wield sword;wear shield' },
-      { text: 'gac', desc: 'get all from corpse' },
-      { text: 'bs', desc: 'cast blindstrike at %1' },
-      { text: 'tt', desc: 'tell tundra %*' },
-    ];
-
-    const open = (name: string, items: Item[], sel = 0) => {
-      pickerTitle.textContent = name;
-      renderPicker(pickerList, items, sel);
-      picker.hidden = false;
-    };
-
-    for (;;) {
-      t.clear();
-      picker.hidden = true;
-      title.textContent = 'rune';
-      status.innerHTML = `${dim('●')} ${dim('Disconnected')}`;
-      await t.sleep(700);
-
-      // World picker via bare /connect.
-      await t.type('/connect');
-      await t.submit();
-      open('Worlds', WORLDS, 0);
-      await t.sleep(1000);
-      renderPicker(pickerList, WORLDS, 1);
-      await t.sleep(900);
-      picker.hidden = true;
-      t.print(`[System] Connecting to mud.arctic.org:2700...`);
-      await t.sleep(600);
-      t.print(`[System] Connected to mud.arctic.org:2700`);
-      title.textContent = 'rune — mud.arctic.org:2700';
-      status.innerHTML = `${green('●')} mud.arctic.org:2700`;
-      await t.sleep(600);
-      t.print('');
-      t.print(amber('     ~ Welcome back to Arctic ~'));
-      t.print('');
-      await t.sleep(1200);
-
-      // History picker, filtered.
-      await t.showHint('Ctrl+R', 'search command history');
-      open('History', HISTORY, 0);
-      await t.sleep(800);
-      let q = '';
-      for (const ch of 'kil') {
-        q += ch;
-        t.input.textContent = q;
-        renderPicker(pickerList, HISTORY.filter((h) => h.text.includes(q)), 0);
-        await t.sleep(170);
-      }
-      await t.sleep(900);
-      picker.hidden = true;
-      t.input.textContent = 'kill polar bear';
-      await t.sleep(700);
-      await t.submit();
-      t.print('You attack the polar bear!');
-      await t.sleep(1300);
-
-      // Alias picker. The loop parks here with the picker open, so the
-      // at-rest frame still shows the feature.
-      await t.showHint('Ctrl+T', 'browse your aliases');
-      open('Aliases', ALIASES, 0);
-      await t.sleep(1000);
-      renderPicker(pickerList, ALIASES, 1);
-
-      if (reduced) return;
-      await t.sleep(3400);
-    }
-  }
-
-  // --- Editor mode: Ctrl+E into $EDITOR ---------------------------------
-  async function editorDemo() {
-    const t = mkTerm('fde');
-    const editor = t.el('-editor');
-    const buf = t.el('-ed-buf');
-    const mode = t.el('-ed-mode');
-    const title = t.el('-title');
-
-    const START = 'tell tundra plan:';
-    const MORE = ' meet at the icefall at dusk, bring rope, torches, and the sled';
-
-    // Tildes fill the viewport the way real vim fills empty lines; extra
-    // rows are clipped by the fixed-height body.
-    const renderBuf = (text: string, cursor: boolean) => {
-      buf.innerHTML =
-        esc(text) + (cursor ? '<span class="fcursor"></span>' : '') +
-        '\n' + dim('~\n'.repeat(9).trimEnd());
-    };
-
-    for (;;) {
-      t.clear();
-      editor.hidden = true;
-      t.root.classList.remove('editor-open');
-      title.textContent = 'rune — mud.arctic.org:2700';
-      t.print(magenta('Tundra tells you: what is the plan for tonight?'));
-      await t.sleep(1300);
-
-      await t.type(START);
-      await t.sleep(500);
-      await t.showHint('Ctrl+E', 'edit the line in $EDITOR');
-
-      // Editor takes over the viewport; the input line empties and its
-      // cursor stops, so only the editor claims focus.
-      t.input.textContent = '';
-      t.root.classList.add('editor-open');
-      title.textContent = 'vim';
-      mode.textContent = '-- INSERT --';
-      renderBuf(START, true);
-      editor.hidden = false;
-      await t.sleep(800);
-
-      let text = START;
-      for (const ch of MORE) {
-        text += ch;
-        renderBuf(text, true);
-        await t.sleep(26 + Math.random() * 30);
-      }
-      await t.sleep(700);
-      mode.textContent = '';
-      for (const ch of ':wq') {
-        mode.textContent += ch;
-        await t.sleep(220);
-      }
-      await t.sleep(500);
-
-      // Back in the client with the full line ready to send.
-      editor.hidden = true;
-      t.root.classList.remove('editor-open');
-      title.textContent = 'rune — mud.arctic.org:2700';
-      t.input.textContent = text;
-      await t.sleep(1000);
-      await t.submit();
-      t.print(magenta('You tell Tundra: ' + text.slice('tell tundra '.length)));
-      await t.sleep(900);
-      t.print(magenta('Tundra tells you: see you there'));
-
-      if (reduced) return;
-      await t.sleep(3000);
-    }
-  }
-
-  // --- Tab completion: candidates rotating on the status line -----------
-  async function tabDemo() {
-    const t = mkTerm('fdt');
-    const status = t.el('-status');
-
-    const CONN = `${green('●')} mud.arctic.org:2700`;
-    const CANDS = ['kralk', 'knubo', 'knife'];
-    // Completion takes over the LEFT status slot while cycling, exactly
-    // like the real client's default status bar.
-    const renderComp = (sel: number) => {
-      status.innerHTML = CANDS
-        .map((c, i) => (i === sel ? amber(bold(c)) : dim(c)))
-        .join(dim(' · '));
-    };
-
-    for (;;) {
-      t.clear();
-      status.innerHTML = CONN;
-      t.print(bold('Kralk') + ' the smith hammers a knife blade at the forge');
-      t.print('while ' + bold('Knubo') + ' scribbles quest-engine code on a slate.');
-      t.print(dim('    There are two obvious exits: north and south'));
-      t.print('');
-      await t.sleep(1500);
-
-      await t.type('tell k');
-      await t.sleep(450);
-      await t.showHint('Tab', 'complete words the server has used');
-
-      // Each press replaces the word and rotates the highlight.
-      for (let round = 0; round < 4; round++) {
-        const sel = round % CANDS.length;
-        t.input.textContent = 'tell ' + CANDS[sel];
-        renderComp(sel);
-        await t.sleep(850);
-      }
-
-      // Settle on kralk, finish the message.
-      t.input.textContent = 'tell kralk';
-      renderComp(0);
-      await t.sleep(600);
-      status.innerHTML = CONN;
-      await t.type(' how much for the axe?');
-      await t.submit();
-      t.print(magenta('You tell Kralk: how much for the axe?'));
-
-      if (reduced) { renderComp(0); return; }
-      await t.sleep(3000);
-    }
-  }
-
-  // Start each demo the first time its terminal scrolls into view.
-  const demos: Record<string, () => Promise<void>> = {
-    fdw: pickersDemo,
-    fde: editorDemo,
-    fdt: tabDemo,
-  };
-  const seen = new Set<string>();
-  const io = new IntersectionObserver(
-    (entries) => {
-      for (const e of entries) {
-        const key = (e.target as HTMLElement).dataset.demo!;
-        if (e.isIntersecting && !seen.has(key)) {
-          seen.add(key);
-          demos[key]().catch(() => {});
-          io.unobserve(e.target);
+  if (!reduced) {
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          const v = e.target as HTMLVideoElement;
+          if (e.isIntersecting) v.play().catch(() => {});
+          else v.pause();
         }
-      }
-    },
-    { threshold: 0.35 },
-  );
-  document.querySelectorAll<HTMLElement>('.fterm[data-demo]').forEach((el) => io.observe(el));
+      },
+      { threshold: 0.3 },
+    );
+    videos.forEach((v) => io.observe(v));
+  }
 </script>

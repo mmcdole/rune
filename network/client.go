@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -109,6 +110,27 @@ func splitAddress(address string) (hostport string, useTLS, insecure bool, err e
 	}
 }
 
+// dialOverride maps a canonical host:port to an alternate dial target via
+// RUNE_DIAL_OVERRIDES, a comma-separated list of canonical=actual pairs
+// (e.g. "mud.example.com:4000=127.0.0.1:4000"). The override changes only
+// where the TCP connection goes: the canonical address remains the
+// connection's identity for display, reconnect state, and TLS SNI. It is a
+// development seam - demo recordings and tests stand up a local scripted
+// server under a real-looking address - and is unset in normal use.
+func dialOverride(hostport string) string {
+	overrides := os.Getenv("RUNE_DIAL_OVERRIDES")
+	if overrides == "" {
+		return hostport
+	}
+	for _, pair := range strings.Split(overrides, ",") {
+		canonical, actual, found := strings.Cut(strings.TrimSpace(pair), "=")
+		if found && canonical == hostport {
+			return actual
+		}
+	}
+	return hostport
+}
+
 // Connect establishes a new connection.
 // If a connection already exists, it is cleanly closed and replaced.
 func (c *TCPClient) Connect(ctx context.Context, address string) error {
@@ -127,7 +149,7 @@ func (c *TCPClient) Connect(ctx context.Context, address string) error {
 
 	// Dial with context to respect app shutdown during connection attempts
 	var d net.Dialer
-	conn, err := d.DialContext(ctx, "tcp", hostport)
+	conn, err := d.DialContext(ctx, "tcp", dialOverride(hostport))
 	if err != nil {
 		return err
 	}
