@@ -20,8 +20,8 @@ on. Special keys: `f1`-`f12`, `up/down/left/right`,
 `insert`. Modifiers: `alt+` combines with any key; `ctrl+` with letters,
 arrows, `pageup/pagedown`, and `home/end`; `shift+` with `tab`, arrows, and
 `home/end`. Enter is not bindable: it submits a normal command or, while the
-visible composer is open, sends the draft verbatim. `Ctrl+Enter` (reported by
-most terminals as `ctrl+j`) is reserved for inserting a composer newline.
+composer is open, sends the draft verbatim. `Ctrl+Enter` (which most
+terminals send as `ctrl+j`) is reserved for inserting a composer newline.
 
 ## Printable keys and typing
 
@@ -29,17 +29,17 @@ A bound printable key (like `` ` `` or `j`) fires only when the input line
 is empty, so hotkeys and typing coexist without a modal system. Type `jump`
 normally; press `j` on an empty line and it acts as a hotkey.
 
-Bracketed paste is also intercepted before binds, so pasting one bound
-character cannot trigger it. A plain one-line paste stays in normal input;
-structured text enters the [verbatim composer](/interface/input/#multiline-verbatim-composer).
+Paste is also intercepted before binds, so pasting text that contains a
+bound character can't trigger it. A one-line paste stays in normal input;
+multiline text opens the [verbatim composer](/interface/input/#multiline-verbatim-composer).
 
-## Internal input modes
+## Pickers and the composer
 
-Pickers and the composer own the keys needed to edit or cancel them. In the
-composer that includes text and cursor editing, literal `Tab`, and two-step
-`Escape` discard. Application chords the composer does not use can still run a
-Lua bind — the default `Ctrl+E` editor binding is the important example. When
-the composer or picker closes, normal binding policy resumes.
+While a picker or the composer is open, it owns the keys needed to edit or
+cancel it — in the composer that includes text and cursor editing, literal
+`Tab`, and the two-step `Escape` discard. Chords the composer doesn't use can
+still run a Lua bind; the default `Ctrl+E` editor binding is the important
+example. When the picker or composer closes, normal binding policy resumes.
 
 ## Options
 

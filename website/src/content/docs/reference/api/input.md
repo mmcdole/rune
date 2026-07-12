@@ -26,9 +26,9 @@ them with cursor moves and are what the default `ctrl+w`,
 `alt+left`/`alt+right` binds call. Setting the input fires the
 `"input_changed"` [hook event](/reference/api/hooks/), same as typing.
 
-Setting text containing a newline, tab, or terminal control byte activates the
-visible verbatim composer. Once active, replacing the draft with one non-empty
-plain line keeps it verbatim; setting it to `""` clears the composer. See
+Setting text that contains a newline, tab, or control byte opens the
+verbatim composer. Once open, replacing the draft with one plain line keeps
+it verbatim; setting it to `""` clears and closes the composer. See
 [Multiline verbatim composer](/interface/input/#multiline-verbatim-composer)
 for its submission semantics and limits.
 

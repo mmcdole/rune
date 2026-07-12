@@ -3,10 +3,12 @@ title: Input & History
 description: The normal command line, lossless multiline composer, history, completion, and editing input in $EDITOR.
 ---
 
-Ordinary commands use the single-line input at the bottom of the screen. It
-behaves like a modern shell: prefix-matching history, fuzzy search, tab
-completion, and word-level editing. A plain one-line paste stays in normal
-input and adds no mode label or other chrome.
+Everything you type goes through the input line at the bottom of the
+screen, and it behaves like a modern shell: history that matches what
+you've started typing, fuzzy search, tab completion, and word-level
+editing. When you paste or compose something with multiple lines, the input
+grows into a [multiline composer](#multiline-verbatim-composer) that sends
+your text exactly as written. None of it needs configuration.
 
 ## Normal command input
 
@@ -26,70 +28,61 @@ distinctly — use `Ctrl+W` or `Alt+Backspace` to delete words.)
 
 ## Multiline verbatim composer
 
-Pasting structured text switches the input area to a taller composer. Newlines,
-tabs, blank lines, indentation, trailing spaces, and terminal control bytes are
-kept in the draft; CRLF and bare CR line endings are normalized to LF. You can
-also press `Ctrl+Enter` to insert the first newline and enter the composer.
+Paste text that contains newlines or tabs and the input grows into a taller
+composer. Nothing is lost on the way in: blank lines, indentation, tabs, and
+trailing spaces all survive (CRLF and lone-CR line endings are normalized to
+LF). To start a multiline draft by hand, press `Ctrl+Enter`.
 
-The composer displays `VERBATIM` and its physical line count, so its submit
-behavior is explicit:
+While the composer is open, the input shows `VERBATIM` and a line count:
 
 | Key | Action |
 |---|---|
-| `Enter` | Send the draft verbatim |
+| `Enter` | Send the draft |
 | `Ctrl+Enter` | Insert a newline |
 | `Tab` | Insert a literal tab |
 | `Ctrl+E` | Edit the whole draft in `$EDITOR` |
-| `Escape` twice | Discard the draft; any other key cancels the first warning |
+| `Escape` twice | Discard the draft (any other key cancels the first press) |
 
-Verbatim submission treats only LF as a line boundary and sends every physical
-line exactly as written. Rune does not expand aliases, split semicolons, apply
-`#N` repeats, or interpret `/quit` and other slash-looking lines. Those are all
-data. The mode remains verbatim after edits even if you remove the last newline
-or tab; it ends when you send or discard the draft.
+Verbatim means exactly that: each line goes to the server as written. Aliases
+don't expand, `;` doesn't split, `#N` doesn't repeat, and a line starting with
+`/` is sent as text rather than run as a slash command. The composer stays in
+verbatim mode until you send or discard the draft, even if you edit it back
+down to a single plain line.
 
-Composer editing keys are handled locally rather than by Lua binds. For
-example, `Up`/`Down` move through the draft's visual rows and `PageUp`/`PageDown`
-move by a composer page. The ordinary one-line input and its bindings return
-after the composer closes.
+Inside the composer, `Up`/`Down` move through the draft and
+`PageUp`/`PageDown` move a page at a time. When the composer closes, the
+one-line input and all your usual key bindings return.
 
-To prevent an accidental paste from flooding the connection, a verbatim
-submission is limited to 1,000 physical lines and 256 KiB. Rune rejects the
-whole submission, leaves the draft open, and shows a warning; it never silently
-truncates the text.
+As a guard against runaway pastes, a draft larger than 1,000 lines or 256 KiB
+is rejected outright: Rune shows a warning and keeps the draft open so you can
+trim it. It never silently truncates what you wrote.
 
 ## Edit in $EDITOR
 
 `Ctrl+E` opens the current input in Vim, Emacs, or whatever `$EDITOR` points
-at. Save and exit, and the edited result replaces the input without converting
-newlines into command separators or trimming authored whitespace. Rune
-normalizes CRLF and bare CR to LF and removes exactly one final LF used as the
-text file terminator. Additional blank lines, indentation, tabs, trailing
-spaces, and an intentionally empty result are preserved.
-
-A structured editor result enters the visible verbatim composer. Editing an
-existing composer keeps it verbatim even if the result is now one non-empty
-line.
+at. Save and exit, and the result lands back in the input exactly as you
+wrote it — line breaks, indentation, and blank lines included (only the
+editor's final trailing newline is dropped). A multiline result opens in the
+[composer](#multiline-verbatim-composer), ready to send verbatim. Useful for
+mails, notes, and anything else that outgrows a one-line edit.
 
 ## History
 
-`Up`/`Down` walk submission history, and normal command drafts prefix-match:
-with `tell ` already typed, `Up` cycles only through previous entries beginning
-with `tell `. With an empty line, they walk everything.
+`Up`/`Down` walk your history, and they prefix-match: with `tell ` already
+typed, `Up` cycles only through your previous tells. With an empty line,
+they walk everything.
 
-History retains both the text and whether it was submitted as a command or
-verbatim. Recalling a verbatim entry restores the composer, even when that entry
-contains only one physical line. `Ctrl+R` opens a fuzzy history picker and
-labels verbatim entries; type a few characters, watch the list narrow, and
-press `Enter` to restore the match.
+History remembers whether each entry was a command or a verbatim draft, and
+recalling a verbatim entry reopens the composer — even a one-line entry.
+`Ctrl+R` opens a fuzzy history picker, with verbatim entries labeled: type a
+few characters, watch the list narrow, and press `Enter` to restore the match.
 
-For an unmodified verbatim entry restored by either route, `Up` on its first
-visual row and `Down` on its last visual row continue through history instead
-of trapping navigation inside the composer. Once you change its text, the
-arrows remain local to the draft.
+Recalled verbatim entries don't trap you in the composer: until you edit the
+draft, `Up` from its first line and `Down` from its last line keep walking
+history. Once you edit it, the arrows move within the draft.
 
-History is owned by the client, so it survives `/reload`. Consecutive identical
-submissions in the same mode are stored once.
+History is owned by the client, so it survives `/reload`. Consecutive
+duplicate submissions are stored once.
 
 ## Tab completion
 
@@ -105,19 +98,21 @@ inserts a tab instead.
 `PageUp`/`PageDown` scroll the output viewport; `Home`/`End` jump to the top and
 bottom. The mouse wheel scrolls too. While you're off the bottom, the status
 bar shows `SCROLL (n new)` so you know what's piling up, and it returns to
-`LIVE` when you catch up. Composer mode uses those keyboard navigation keys
-for the draft; the mouse wheel still scrolls output.
+`LIVE` when you catch up. While the composer is open, those keys move within
+the draft instead; the mouse wheel still scrolls output.
 
 The mouse is captured for scrolling, so select text with shift+drag, the
 standard convention in terminal apps like tmux.
 
 ## The default keymap
 
-Application actions such as history, completion, and `Ctrl+E` are registered
-with `rune.bind` in the core scripts and can be rebound or removed in
-`init.lua`. Input mechanics — atomic paste, composer editing, `Ctrl+Enter`, and
-`Enter` submission — are owned by the client. The full policy and default table
-are in the [rune.bind reference](/reference/api/bind/#key-policy).
+Actions like history, completion, and `Ctrl+E` are registered with
+`rune.bind` in the core scripts — rebind or remove any of them in your
+`init.lua` (see [Key Bindings](/scripting/keybindings/)). A few keys are
+fixed by the client and can't be rebound: `Enter` to submit, `Ctrl+Enter`
+for composer newlines, paste handling, and the composer's editing keys. The
+full policy and default table are in the
+[rune.bind reference](/reference/api/bind/#key-policy).
 
 **Related:** [rune.input reference](/reference/api/input/),
 [Key Bindings](/scripting/keybindings/) for binding your

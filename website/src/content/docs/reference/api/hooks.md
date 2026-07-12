@@ -59,7 +59,7 @@ call `rune.send`/`rune.send_raw` yourself and return `false`.
 | `input` | submitted text, context | Once per submission, before command or verbatim routing |
 | `output` | line object (`:raw()`, `:clean()`) | On every complete server line |
 | `prompt` | line object | On prompt fragments (no newline, or GA/EOR terminated) |
-| `echo` | typed text | On each physical line of local echo; skipped while the server has echo suppressed (passwords) |
+| `echo` | typed text | On each line of local echo; skipped while the server has echo suppressed (passwords) |
 
 Every `input` handler receives `(text, context)`. The context is read-only, and
 `context.mode` is always `"command"` or `"verbatim"`:
@@ -74,11 +74,11 @@ rune.hooks.on("input", function(text, context)
 end, { priority = 10 })
 ```
 
-Command mode applies Rune aliases, separators, repeats, and slash commands in
-the core handler. Verbatim mode still passes through custom `input` handlers
-once, but the core treats only LF as a physical-line boundary and bypasses all
-command interpretation. Existing one-argument handlers remain valid because
-Lua ignores extra arguments.
+In command mode the core handler applies aliases, `;` separators, `#N`
+repeats, and slash commands. In verbatim mode it skips all command
+interpretation and sends each line of the draft as-is (only LF is a line
+boundary). Handlers that only take `text` keep working — Lua ignores the
+extra argument.
 
 The core registers its own handlers at priority 100: command or verbatim
 routing on `input`, trigger processing on `output`/`prompt`,

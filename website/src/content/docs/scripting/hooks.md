@@ -25,15 +25,15 @@ Handlers run in priority order:
 | `input` | submitted text, context | Return `false` to consume; other returns are ignored. `context.mode` is read-only and always `"command"` or `"verbatim"`. |
 | `output` | a line object | `false` gags, a string rewrites. The core handler runs triggers at priority 100. |
 | `prompt` | a line object | Same, for prompt fragments. |
-| `echo` | one physical line of typed text | Like `output` but a plain string. The `> ` prefix is the core handler; replace it if you like. |
+| `echo` | one line of the local echo | Like `output` but a plain string. The `> ` prefix is the core handler; replace it if you like. |
 
 For `output`, `prompt`, and `echo`, rewrites chain: a handler returning a
 string replaces the text for every subsequent handler, and `false` stops the
 chain (gags the line or hides the echo). For `input`, only `false` means
-anything. The hook fires once per submission: in verbatim mode `text` is the
-whole draft and may contain LF characters. Existing handlers that accept only
-`text` continue to work because Lua ignores extra arguments. To rewrite normal
-command input, use an [alias](/scripting/aliases/).
+anything. `input` fires once per submission: in verbatim mode `text` is the
+whole draft and may contain newlines. Handlers that only take `text` keep
+working — Lua ignores the extra argument. To rewrite normal command input,
+use an [alias](/scripting/aliases/).
 
 ```lua
 -- Timestamp every line, after triggers have run
@@ -46,16 +46,14 @@ end, { priority = 150 })
 -- A panic key: swallow all input while active
 local locked = false
 rune.hooks.on("input", function(text, context)
+    -- context.mode is "command" or "verbatim"; both pass through here
     if locked and text ~= "/unlock" then return false end
-    if context.mode == "verbatim" then
-        rune.echo("Verbatim input bypasses aliases and slash commands")
-    end
 end, { priority = 1 })
 ```
 
 The core handler at priority 100 applies aliases, `;` separators, `#N`
 repeats, and slash commands when `context.mode == "command"`. For
-`"verbatim"`, it splits only on LF and sends every physical line as data.
+`"verbatim"`, it skips all of that and sends each line of the draft as-is.
 
 ## Notification events
 

@@ -34,25 +34,24 @@ rune.bind("f1", function() rune.send("north") end, {name = "go-north"})
 
 ## Key policy
 
-- In normal input, `enter` submits a Rune command. In the visible composer it
-  submits the whole draft verbatim. It is owned by the client and not
-  rebindable.
-- `ctrl+enter` inserts a newline and enters or continues the composer. Most
-  terminals encode this as `ctrl+j`; Rune reserves that key for this input
-  mechanic rather than dispatching a Lua bind.
-- Bracketed paste is handled atomically before binds. A plain one-line paste
-  stays in normal input; structured text enters the composer without firing a
-  printable hotkey.
+- `enter` is owned by the client and not rebindable. In normal input it
+  submits a Rune command; in the composer it sends the whole draft verbatim.
+- `ctrl+enter` inserts a newline, opening the composer if needed. Most
+  terminals send it as `ctrl+j`, so that key is reserved too and never
+  dispatches a Lua bind.
+- Paste is handled before binds: a one-line paste stays in normal input, and
+  text with newlines or tabs opens the composer. A pasted printable character
+  never fires a hotkey.
 - While a picker is open, `ctrl+c`/`escape` cancel it and other keys
   are captured by the picker.
 - While the composer is open, the client owns text editing, cursor movement,
-  literal `tab`, and two-step `escape` discard. Unhandled application chords,
-  including the default `ctrl+e`, can still reach Lua binds.
+  literal `tab`, and the two-step `escape` discard. Chords the composer
+  doesn't use — including the default `ctrl+e` — still reach Lua binds.
 - In normal input, bound printable keys (like `"j"`) fire only while the input
   is empty, so hotkeys don't break typing. Non-printable bound keys fire unless
   an active picker or composer owns them.
-- Outside those input mechanics, the defaults below are ordinary Lua binds and
-  can be rebound or removed.
+- Everything else — including all the defaults below — is an ordinary Lua
+  bind and can be rebound or removed.
 
 ## Default keymap
 
@@ -74,11 +73,10 @@ All defaults are registered by the Lua core and are rebindable:
 | `pageup` / `pagedown` | Scroll output viewport |
 | `home` / `end` | Jump to top/bottom of output |
 
-The table describes normal input. In the verbatim composer, `tab` inserts a
-literal tab, navigation keys edit or scroll the draft, and `ctrl+u` deletes to
-the start of the current physical line. The composer footer shows only the
-fixed submit, newline, and discard keys; rebindable actions such as the default
-`ctrl+e` editor remain documented in this table.
+The table describes normal input. In the composer, `tab` inserts a literal
+tab, navigation keys move within the draft, and `ctrl+u` deletes to the start
+of the current line. The composer's footer lists only its fixed keys (submit,
+newline, discard); rebindable actions like `ctrl+e` stay in this table.
 
 Most terminals send `ctrl+backspace` as `ctrl+h`, so it cannot be
 bound distinctly from `ctrl+h`; use `ctrl+w` or `alt+backspace` for
