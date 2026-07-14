@@ -11,6 +11,58 @@ import (
 	"github.com/mmcdole/rune/version"
 )
 
+func TestEscapeRawJSONControlsInStrings(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "valid JSON is unchanged",
+			in:   `{"msg":"hello","n":1}`,
+			want: `{"msg":"hello","n":1}`,
+		},
+		{
+			name: "ANSI escapes inside a string are encoded",
+			in:   `{"msg":"` + "\x1b" + `[1;32mhello` + "\x1b" + `[0m"}`,
+			want: `{"msg":"\u001b[1;32mhello\u001b[0m"}`,
+		},
+		{
+			name: "all raw string controls are encoded",
+			in:   "{\"msg\":\"a\x00b\nc\td\"}",
+			want: `{"msg":"a\u0000b\u000ac\u0009d"}`,
+		},
+		{
+			name: "JSON whitespace outside strings is unchanged",
+			in:   "{\n\t\"msg\": \"hello\"\r}",
+			want: "{\n\t\"msg\": \"hello\"\r}",
+		},
+		{
+			name: "escaped quotes do not end the string",
+			in:   "{\"msg\":\"quoted \\\"word\\\" \x1b[0m\"}",
+			want: `{"msg":"quoted \"word\" \u001b[0m"}`,
+		},
+		{
+			name: "existing JSON escapes are unchanged",
+			in:   `{"msg":"\u001b[0m"}`,
+			want: `{"msg":"\u001b[0m"}`,
+		},
+		{
+			name: "control outside a string remains invalid",
+			in:   "{\"msg\":\"hello\"}\x1b",
+			want: "{\"msg\":\"hello\"}\x1b",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := escapeRawJSONControlsInStrings(tt.in); got != tt.want {
+				t.Errorf("escapeRawJSONControlsInStrings(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestGMCPDispatchDecodesAndMatchesCaseInsensitively verifies GMCP
 // handlers receive the decoded JSON value and that package matching
 // is case-insensitive per the spec.

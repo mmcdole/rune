@@ -1,0 +1,27 @@
+{
+  "description": "Regression: Aardwolf includes raw ANSI escape bytes inside Comm.Channel JSON strings when server-side color is enabled. Strict JSON decoding rejected the message before GMCP handlers could receive it.",
+  "scenarios": [
+    {
+      "name": "Aardwolf colored channel messages reach GMCP handlers",
+      "issue": "https://github.com/mmcdole/rune/issues/30",
+      "init_lua": [
+        "rune.gmcp.on('Comm.Channel', function(data)",
+        "  local esc = string.char(27)",
+        "  if data.msg == esc .. '[1;32mHello' .. esc .. '[0m' then",
+        "    rune.echo('E2E-AARDWOLF-GMCP-COLOR')",
+        "  end",
+        "end)"
+      ],
+      "steps": [
+        { "connect": true },
+        { "server_bytes": [255, 251, 201], "note": "IAC WILL GMCP" },
+        { "expect_sent": "Core.Hello", "note": "sync: GMCP negotiation fully processed" },
+        {
+          "server_gmcp": "Comm.Channel {\"chan\":\"gossip\",\"msg\":\"\u001b[1;32mHello\u001b[0m\"}",
+          "note": "JSON decoding turns \\u001b into the raw ESC bytes Aardwolf sends on the wire"
+        },
+        { "expect_printed": "E2E-AARDWOLF-GMCP-COLOR" }
+      ]
+    }
+  ]
+}

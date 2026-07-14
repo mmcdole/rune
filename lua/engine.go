@@ -397,7 +397,7 @@ func (e *Engine) OnPrompt(line text.Line) string {
 
 // OnGMCP dispatches a GMCP message to Lua: the raw JSON is decoded
 // through the shared JSON bridge (api_store.go) so handlers receive a
-// real Lua value, plus the raw text for anyone who wants it.
+// real Lua value, plus the original raw text for anyone who wants it.
 // Malformed JSON is reported once and the message dropped - a broken
 // server message must not take anything else down.
 func (e *Engine) OnGMCP(pkg, raw string) {
@@ -412,7 +412,7 @@ func (e *Engine) OnGMCP(pkg, raw string) {
 	var value glua.LValue = glua.LNil
 	if raw != "" {
 		var decoded any
-		if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+		if err := json.Unmarshal([]byte(escapeRawJSONControlsInStrings(raw)), &decoded); err != nil {
 			e.reportError("gmcp "+pkg, fmt.Errorf("malformed JSON: %w", err))
 			return
 		}
@@ -428,6 +428,56 @@ func (e *Engine) OnGMCP(pkg, raw string) {
 	}); err != nil {
 		e.reportError("gmcp dispatch", err)
 	}
+}
+
+// escapeRawJSONControlsInStrings tolerates servers which put terminal control
+// bytes directly in JSON strings instead of encoding them. Aardwolf does this
+// with ANSI ESC bytes in colored Comm.Channel messages. Escaping them for the
+// decoder preserves the bytes in the decoded value; OnGMCP still passes the
+// original text to handlers as raw.
+//
+// Controls outside strings and controls following a JSON escape introducer are
+// left alone so otherwise malformed JSON remains malformed.
+func escapeRawJSONControlsInStrings(raw string) string {
+	const hex = "0123456789abcdef"
+
+	inString := false
+	escaped := false
+	last := 0
+	var repaired strings.Builder
+
+	for i := 0; i < len(raw); i++ {
+		c := raw[i]
+		if !inString {
+			if c == '"' {
+				inString = true
+			}
+			continue
+		}
+
+		if escaped {
+			escaped = false
+			continue
+		}
+		switch {
+		case c == '\\':
+			escaped = true
+		case c == '"':
+			inString = false
+		case c < 0x20:
+			repaired.WriteString(raw[last:i])
+			repaired.WriteString(`\u00`)
+			repaired.WriteByte(hex[c>>4])
+			repaired.WriteByte(hex[c&0x0f])
+			last = i + 1
+		}
+	}
+
+	if last == 0 {
+		return raw
+	}
+	repaired.WriteString(raw[last:])
+	return repaired.String()
 }
 
 // CallHook calls a hook event with string arguments.
