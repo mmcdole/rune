@@ -10,6 +10,7 @@ A modern MUD client built with Go and Lua.
 Rune combines Go's performance and concurrency with Lua's flexibility for scripting. The architecture follows a kernel philosophy: Go handles I/O, memory, and concurrency while Lua handles logic, features, and presentation.
 
 Guides, cookbook recipes, and the full API reference live at **[runemud.com](https://runemud.com)**.
+Questions, ideas, and feedback are welcome in the **[Rune Discord](https://discord.gg/gNZkrJ2jHe)**.
 
 ## Features
 
