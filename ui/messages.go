@@ -30,6 +30,12 @@ type PaneToggleMsg struct {
 	Name string
 }
 
+// PaneSetVisibleMsg shows or hides a named pane.
+type PaneSetVisibleMsg struct {
+	Name    string
+	Visible bool
+}
+
 // PaneCreateMsg creates a new named pane.
 type PaneCreateMsg struct {
 	Name string

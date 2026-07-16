@@ -212,6 +212,7 @@ func (m *mockUI) ShowPicker(opts ui.ShowPickerMsg)            {}
 func (m *mockUI) CreatePane(name string)                      {}
 func (m *mockUI) WritePane(name, text string)                 {}
 func (m *mockUI) TogglePane(name string)                      {}
+func (m *mockUI) SetPaneVisible(name string, visible bool)    {}
 func (m *mockUI) ClearPane(name string)                       {}
 func (m *mockUI) InputSetCursor(pos int)                      {}
 func (m *mockUI) OpenEditor(initial string) (string, bool)    { return "", false }

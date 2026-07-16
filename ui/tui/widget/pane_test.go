@@ -144,18 +144,66 @@ func TestPaneScrollClamps(t *testing.T) {
 	}
 }
 
-func TestPaneToggleOffResetsScroll(t *testing.T) {
+// Visibility never touches scroll state. A pane hidden while scrolled
+// reopens on the same history, even as writes land while it is hidden.
+func TestPaneHiddenWhileScrolledKeepsPosition(t *testing.T) {
 	p := newTestPane(t, 40, 2)
 	for i := 1; i <= 6; i++ {
 		p.Write(fmt.Sprintf("line %d", i))
 	}
 	p.ScrollUp(3)
-	p.Toggle() // hide
-	p.Toggle() // show again
+	p.SetVisible(false)
+	p.Write("line 7")
+	p.SetVisible(true)
 
 	rows := contentRows(t, p)
-	if rows[1] != "line 6" {
-		t.Errorf("re-shown pane should be at the live tail, got %q", rows)
+	if rows[0] != "line 2" {
+		t.Errorf("re-shown pane should keep its scroll anchor, got %q", rows)
+	}
+
+	p.Toggle() // hide
+	p.Toggle() // show again
+	rows = contentRows(t, p)
+	if rows[0] != "line 2" {
+		t.Errorf("toggle must not touch scroll state either, got %q", rows)
+	}
+}
+
+// A pane on the live tail when hidden stays in follow mode, so
+// reopening shows the newest lines.
+func TestPaneHiddenOnTailReopensLive(t *testing.T) {
+	p := newTestPane(t, 40, 2)
+	for i := 1; i <= 6; i++ {
+		p.Write(fmt.Sprintf("line %d", i))
+	}
+	p.SetVisible(false)
+	p.Write("line 7")
+	p.SetVisible(true)
+
+	rows := contentRows(t, p)
+	if rows[1] != "line 7" {
+		t.Errorf("pane hidden on the tail should reopen live, got %q", rows)
+	}
+}
+
+// If trimming removes the history a hidden pane was anchored on, the
+// anchor clamps to the oldest remaining line instead of jumping to
+// the tail.
+func TestPaneHiddenAnchorClampsWhenTrimmed(t *testing.T) {
+	p := newTestPane(t, 40, 2)
+	for i := 1; i <= 6; i++ {
+		p.Write(fmt.Sprintf("line %d", i))
+	}
+	p.ScrollUp(5)
+	p.SetVisible(false)
+	for i := 7; i <= 1001; i++ {
+		p.Write(fmt.Sprintf("line %d", i))
+	}
+	p.SetVisible(true)
+
+	rows := contentRows(t, p)
+	if rows[0] != "line 502" {
+		t.Errorf("trimmed anchor should clamp to the oldest remaining line, got %q", rows)
 	}
 }
 

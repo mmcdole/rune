@@ -12,7 +12,9 @@ introduction, see [Panes](/interface/panes/).
 ```lua
 rune.pane.create(name)                 -- create a pane (optional; writes auto-create)
 rune.pane.write(name, text)            -- append a line
-rune.pane.toggle(name)                 -- show/hide the pane
+rune.pane.show(name)                   -- make visible (no-op if already shown)
+rune.pane.hide(name)                   -- make hidden (no-op if already hidden)
+rune.pane.toggle(name)                 -- flip visibility
 rune.pane.clear(name)                  -- empty the buffer
 rune.pane.scroll_up(name, lines?)      -- scroll back (default 1 line)
 rune.pane.scroll_down(name, lines?)    -- scroll forward (default 1 line)
@@ -40,9 +42,8 @@ rune.pane.scroll_up("chat", 5)      -- a named pane's own buffer
 A scrolled pane freezes on the history you're reading: new writes keep
 landing in the buffer and the pane's header shows
 `name · scroll +N` until you return with `scroll_down` or
-`scroll_to_bottom`. Hiding a pane (`toggle`) also returns it to the
-live tail. Scrolling counts logical lines (as written), not wrapped
-rows.
+`scroll_to_bottom`. Scrolling counts logical lines (as written), not
+wrapped rows.
 
 Aim scrolling with binds:
 
@@ -53,8 +54,10 @@ rune.bind("shift+pagedown", function() rune.pane.scroll_down("chat", 5) end)
 
 :::note
 A pane displays only when the layout names it — see
-[Layout & UI](/interface/layout/). `toggle` shows and hides a pane
-that has a dock slot.
+[Layout & UI](/interface/layout/). `show`, `hide`, and `toggle` all
+operate on a pane that has a dock slot. Use `show`/`hide` when you
+need a definite end state (a trigger forcing a pane open), `toggle`
+when a key flips it.
 :::
 
 The usual shape is a trigger that writes plus a bind that toggles:

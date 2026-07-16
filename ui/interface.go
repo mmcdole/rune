@@ -27,6 +27,7 @@ type UI interface {
 	CreatePane(name string)
 	WritePane(name, text string)
 	TogglePane(name string)
+	SetPaneVisible(name string, visible bool)
 	ClearPane(name string)
 
 	// Input primitives for Lua

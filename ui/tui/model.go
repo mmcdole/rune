@@ -122,7 +122,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleServerOutput(msg)
 
 	// Pane operations
-	case ui.PaneCreateMsg, ui.PaneWriteMsg, ui.PaneToggleMsg, ui.PaneClearMsg:
+	case ui.PaneCreateMsg, ui.PaneWriteMsg, ui.PaneToggleMsg, ui.PaneSetVisibleMsg, ui.PaneClearMsg:
 		return m.handlePaneMsg(msg)
 
 	// Input control
@@ -291,6 +291,8 @@ func (m *Model) handlePaneMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.panes.Write(msg.Name, msg.Text)
 	case ui.PaneToggleMsg:
 		m.panes.Toggle(msg.Name)
+	case ui.PaneSetVisibleMsg:
+		m.panes.SetVisible(msg.Name, msg.Visible)
 	case ui.PaneClearMsg:
 		m.panes.Clear(msg.Name)
 	}

@@ -6,7 +6,9 @@ description: Named output buffers you can dock in the layout, write to from trig
 ```lua
 rune.pane.create("chat")                    -- optional; write auto-creates
 rune.pane.write("chat", styled_text)
-rune.pane.toggle("chat")                    -- show/hide (panes start hidden)
+rune.pane.toggle("chat")                    -- flip visibility (panes start hidden)
+rune.pane.show("chat")                      -- or set it outright
+rune.pane.hide("chat")
 rune.pane.clear("chat")
 ```
 
@@ -39,8 +41,7 @@ rune.bind("shift+pagedown", function() rune.pane.scroll_down("chat", 5) end)
 
 While scrolled, the pane freezes on the history you're reading and its
 header shows `chat · scroll +N` as new lines land; `scroll_down` past
-the end (or `scroll_to_bottom`, or hiding the pane) returns it to live
-tailing.
+the end (or `scroll_to_bottom`) returns it to live tailing.
 
 ## The mirror pattern
 
