@@ -42,10 +42,11 @@ rune.pane.scroll_up("chat", 5)      -- a named pane's own buffer
 A scrolled pane freezes on the history you're reading: new writes keep
 landing in the buffer and the pane's header shows
 `name · scroll +N` until you return with `scroll_down` or
-`scroll_to_bottom`. Hiding a pane (`hide` or `toggle`) also returns it
-to the live tail; `show` on an already-visible pane leaves the scroll
-position alone. Scrolling counts logical lines (as written), not
-wrapped rows.
+`scroll_to_bottom`. Visibility is independent of scrolling: a pane
+hidden on the live tail reopens live, and a pane hidden while scrolled
+reopens where you left it (clamped to the oldest remaining line if the
+buffer trimmed past that spot while hidden). Scrolling counts logical
+lines (as written), not wrapped rows.
 
 Aim scrolling with binds:
 

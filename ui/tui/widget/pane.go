@@ -190,23 +190,18 @@ func (p *Pane) ScrollToBottom() {
 	p.newLines = 0
 }
 
-// SetVisible shows or hides the pane; setting the current state is a
-// no-op, so showing an already-visible pane keeps its scroll position.
-// Hiding returns the pane to the live tail, so re-showing it never
-// opens onto stale history.
+// SetVisible shows or hides the pane. Visibility never touches scroll
+// state: a pane hidden on the live tail reopens live, a scrolled pane
+// reopens anchored where it was (Write keeps the anchor as the buffer
+// grows, and clampOffset pins it to the oldest line if trimming
+// removes the history it pointed at).
 func (p *Pane) SetVisible(visible bool) {
-	if p.Visible == visible {
-		return
-	}
 	p.Visible = visible
-	if !visible {
-		p.ScrollToBottom()
-	}
 }
 
 // Toggle toggles visibility.
 func (p *Pane) Toggle() {
-	p.SetVisible(!p.Visible)
+	p.Visible = !p.Visible
 }
 
 // Clear empties the pane.
