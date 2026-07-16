@@ -17,25 +17,23 @@ WezTerm, iTerm2, Windows Terminal, foot) handle it; some cap how much
 text one copy can carry. Inside tmux, `set-clipboard` must be `on` or
 `external` (the default) in the tmux config.
 
-A typical use is collecting something with triggers and copying it
-from an alias:
+A typical use is collecting a block with a
+[multi-line trigger](/reference/api/trigger/#multi-line-triggers) and
+copying it from an alias:
 
 ```lua
-local note = {}
-local collecting = false
+local note = ""
 
-rune.trigger.starts("-- BEGIN NOTE", function()
-    collecting, note = true, {}
-end)
-rune.trigger.starts("-- END NOTE", function()
-    collecting = false
-end)
-rune.trigger.regex(".*", function(m, ctx)
-    if collecting then note[#note + 1] = ctx.line:raw() end
-end)
+rune.trigger.starts("-- BEGIN NOTE", function(m, ctx)
+    local collected = {}
+    for _, line in ipairs(ctx.lines) do
+        collected[#collected + 1] = line:clean()
+    end
+    note = table.concat(collected, "\n")
+end, { span = { to = "^-- END NOTE", max = 40 } })
 
 rune.alias.exact("copynote", function()
-    rune.clipboard.set(table.concat(note, "\n"))
+    rune.clipboard.set(note)
 end)
 ```
 
