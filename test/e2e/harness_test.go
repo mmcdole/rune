@@ -209,6 +209,7 @@ func (m *mockUI) UpdateBars(content map[string]ui.BarContent) {}
 func (m *mockUI) UpdateBinds(keys map[string]bool)            {}
 func (m *mockUI) UpdateLayout(top, bottom []ui.LayoutEntry)   {}
 func (m *mockUI) ShowPicker(opts ui.ShowPickerMsg)            {}
+func (m *mockUI) SetClipboard(text string)                    {}
 func (m *mockUI) CreatePane(name string)                      {}
 func (m *mockUI) WritePane(name, text string)                 {}
 func (m *mockUI) TogglePane(name string)                      {}

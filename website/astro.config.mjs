@@ -94,6 +94,7 @@ export default defineConfig({
                 { label: 'rune.ui', slug: 'reference/api/ui' },
                 { label: 'rune.ui.picker', slug: 'reference/api/picker' },
                 { label: 'rune.pane', slug: 'reference/api/pane' },
+                { label: 'rune.clipboard', slug: 'reference/api/clipboard' },
               ],
             },
             { label: 'Slash Commands', slug: 'reference/slash-commands' },

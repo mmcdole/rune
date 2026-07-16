@@ -49,6 +49,18 @@ function rune.pane.scroll_to_bottom(name)
 end
 
 -- ============================================================
+-- CLIPBOARD
+-- ============================================================
+
+rune.clipboard = {}
+
+-- Copy text to the system clipboard. Uses OSC 52, so it works over
+-- SSH; the terminal emulator has to support it.
+function rune.clipboard.set(text)
+    rune._ui.set_clipboard(text)
+end
+
+-- ============================================================
 -- PANE SCROLLING BINDINGS
 -- ============================================================
 

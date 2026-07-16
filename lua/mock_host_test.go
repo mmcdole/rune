@@ -26,6 +26,7 @@ type MockHost struct {
 	LoadCalls       []string
 	PaneCalls       []struct{ Op, Name, Data string }
 	PickerCalls     []ui.ShowPickerMsg
+	ClipboardCalls  []string
 	ScheduledTimers []struct {
 		ID       int
 		Duration time.Duration
@@ -191,6 +192,12 @@ func (m *MockHost) ShowPicker(opts ui.ShowPickerMsg) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.PickerCalls = append(m.PickerCalls, opts)
+}
+
+func (m *MockHost) ClipboardSet(text string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.ClipboardCalls = append(m.ClipboardCalls, text)
 }
 
 func (m *MockHost) GetHistory() []string {

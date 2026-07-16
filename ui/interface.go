@@ -24,6 +24,7 @@ type UI interface {
 
 	// Components
 	ShowPicker(opts ShowPickerMsg)
+	SetClipboard(text string)
 	CreatePane(name string)
 	WritePane(name, text string)
 	TogglePane(name string)
