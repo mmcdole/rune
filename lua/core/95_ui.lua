@@ -20,6 +20,14 @@ function rune.pane.toggle(name)
     rune._pane.toggle(name)
 end
 
+function rune.pane.show(name)
+    rune._pane.set_visible(name, true)
+end
+
+function rune.pane.hide(name)
+    rune._pane.set_visible(name, false)
+end
+
 function rune.pane.clear(name)
     rune._pane.clear(name)
 end

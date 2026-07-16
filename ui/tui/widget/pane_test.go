@@ -159,6 +159,41 @@ func TestPaneToggleOffResetsScroll(t *testing.T) {
 	}
 }
 
+func TestPaneSetVisibleHideResetsScroll(t *testing.T) {
+	p := newTestPane(t, 40, 2)
+	for i := 1; i <= 6; i++ {
+		p.Write(fmt.Sprintf("line %d", i))
+	}
+	p.ScrollUp(3)
+	p.SetVisible(false)
+	p.SetVisible(true)
+
+	rows := contentRows(t, p)
+	if rows[1] != "line 6" {
+		t.Errorf("re-shown pane should be at the live tail, got %q", rows)
+	}
+}
+
+func TestPaneSetVisibleIsIdempotent(t *testing.T) {
+	p := newTestPane(t, 40, 2)
+	for i := 1; i <= 6; i++ {
+		p.Write(fmt.Sprintf("line %d", i))
+	}
+	p.ScrollUp(3)
+	p.SetVisible(true) // already visible: must not touch scroll
+
+	rows := contentRows(t, p)
+	if rows[0] != "line 2" {
+		t.Errorf("show on a visible pane should keep its scroll position, got %q", rows)
+	}
+
+	p.SetVisible(false)
+	p.SetVisible(false) // already hidden: still hidden, still live
+	if p.Visible {
+		t.Error("pane should remain hidden")
+	}
+}
+
 func TestPaneEmptyAndClear(t *testing.T) {
 	p := newTestPane(t, 40, 3)
 	rows := contentRows(t, p)

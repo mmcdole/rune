@@ -49,6 +49,14 @@ func (e *Engine) registerPaneFuncs() {
 		return 0
 	}))
 
+	// rune._pane.set_visible(name, visible): Show or hide a pane
+	e.L.SetField(paneTable, "set_visible", e.L.NewFunction(func(L *glua.LState) int {
+		name := L.CheckString(1)
+		visible := L.CheckBool(2)
+		e.host.PaneSetVisible(name, visible)
+		return 0
+	}))
+
 	// rune._pane.clear(name): Clear pane contents
 	e.L.SetField(paneTable, "clear", e.L.NewFunction(func(L *glua.LState) int {
 		name := L.CheckString(1)

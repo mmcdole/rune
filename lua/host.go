@@ -25,6 +25,7 @@ type Host interface {
 	PaneCreate(name string)
 	PaneWrite(name, text string)
 	PaneToggle(name string)
+	PaneSetVisible(name string, visible bool)
 	PaneClear(name string)
 	ShowPicker(opts ui.ShowPickerMsg)
 	GetInput() string

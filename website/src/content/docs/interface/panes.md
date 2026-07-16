@@ -6,7 +6,9 @@ description: Named output buffers you can dock in the layout, write to from trig
 ```lua
 rune.pane.create("chat")                    -- optional; write auto-creates
 rune.pane.write("chat", styled_text)
-rune.pane.toggle("chat")                    -- show/hide (panes start hidden)
+rune.pane.toggle("chat")                    -- flip visibility (panes start hidden)
+rune.pane.show("chat")                      -- or set it outright
+rune.pane.hide("chat")
 rune.pane.clear("chat")
 ```
 

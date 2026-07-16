@@ -190,13 +190,23 @@ func (p *Pane) ScrollToBottom() {
 	p.newLines = 0
 }
 
-// Toggle toggles visibility. Hiding a pane returns it to the live
-// tail, so re-showing it never opens onto stale history.
-func (p *Pane) Toggle() {
-	p.Visible = !p.Visible
-	if !p.Visible {
+// SetVisible shows or hides the pane; setting the current state is a
+// no-op, so showing an already-visible pane keeps its scroll position.
+// Hiding returns the pane to the live tail, so re-showing it never
+// opens onto stale history.
+func (p *Pane) SetVisible(visible bool) {
+	if p.Visible == visible {
+		return
+	}
+	p.Visible = visible
+	if !visible {
 		p.ScrollToBottom()
 	}
+}
+
+// Toggle toggles visibility.
+func (p *Pane) Toggle() {
+	p.SetVisible(!p.Visible)
 }
 
 // Clear empties the pane.
@@ -245,6 +255,13 @@ func (pm *PaneManager) Write(name, text string) {
 func (pm *PaneManager) Toggle(name string) {
 	if pane, exists := pm.panes[name]; exists {
 		pane.Toggle()
+	}
+}
+
+// SetVisible shows or hides a pane.
+func (pm *PaneManager) SetVisible(name string, visible bool) {
+	if pane, exists := pm.panes[name]; exists {
+		pane.SetVisible(visible)
 	}
 }
 
