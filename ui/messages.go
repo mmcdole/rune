@@ -122,6 +122,10 @@ type ShowPickerMsg struct {
 	DismissOnSpace bool
 }
 
+// SetClipboardMsg asks the terminal to set the system clipboard
+// (OSC 52). Sent from Session when Lua calls rune.clipboard.set().
+type SetClipboardMsg string
+
 // SetInputMsg sets the input line content.
 // Sent from Session when Lua calls rune.input.set().
 type SetInputMsg string

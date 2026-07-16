@@ -37,6 +37,11 @@ func (s *Session) PaneClear(name string) {
 	s.ui.ClearPane(name)
 }
 
+// ClipboardSet implements lua.Host.
+func (s *Session) ClipboardSet(text string) {
+	s.ui.SetClipboard(text)
+}
+
 // ShowPicker implements lua.Host.
 func (s *Session) ShowPicker(opts ui.ShowPickerMsg) {
 	s.ui.ShowPicker(opts)

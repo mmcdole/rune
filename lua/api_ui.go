@@ -20,6 +20,13 @@ func (e *Engine) registerUIInternalFuncs() {
 		e.host.OnConfigChange()
 		return 0
 	}))
+
+	// rune._ui.set_clipboard(text): ask the terminal to set the
+	// system clipboard (OSC 52).
+	e.L.SetField(internal, "set_clipboard", e.L.NewFunction(func(L *glua.LState) int {
+		e.host.ClipboardSet(L.CheckString(1))
+		return 0
+	}))
 }
 
 // registerPaneFuncs registers internal rune._pane.* primitives (wrapped by Lua)

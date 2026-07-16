@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"os"
 	"strings"
 	"time"
 
+	osc52 "github.com/aymanbagabas/go-osc52/v2"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/mmcdole/rune/input"
@@ -139,6 +141,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Input primitives (from Lua)
 	case ui.InputSetCursorMsg:
 		m.input.SetCursor(int(msg))
+		return m, nil
+
+	// Clipboard (from Lua). OSC 52 asks the terminal emulator to set
+	// the system clipboard; it renders nothing, so it bypasses the
+	// renderer and goes to the terminal on stderr.
+	case ui.SetClipboardMsg:
+		osc52.New(string(msg)).WriteTo(os.Stderr) //nolint:errcheck // best-effort: no way to report terminal-side failure
 		return m, nil
 
 	// Pane scrolling (from Lua). "main" is the output viewport; any

@@ -28,6 +28,7 @@ type Host interface {
 	PaneSetVisible(name string, visible bool)
 	PaneClear(name string)
 	ShowPicker(opts ui.ShowPickerMsg)
+	ClipboardSet(text string)
 	GetInput() string
 	SetInput(text string)
 	SetInputSubmission(submission input.Submission)
