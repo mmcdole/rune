@@ -41,10 +41,7 @@ rune.bind("shift+pagedown", function() rune.pane.scroll_down("chat", 5) end)
 
 While scrolled, the pane freezes on the history you're reading and its
 header shows `chat · scroll +N` as new lines land; `scroll_down` past
-the end (or `scroll_to_bottom`) returns it to live tailing. Hiding a
-pane doesn't touch its scroll position: hide it on the live tail and
-it reopens live, hide it while scrolled back and it reopens where you
-left it.
+the end (or `scroll_to_bottom`) returns it to live tailing.
 
 ## The mirror pattern
 
