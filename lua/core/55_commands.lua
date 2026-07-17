@@ -230,10 +230,11 @@ rune.command.add("aliases", function(args)
         local group_str = a.group and ("  " .. cyan("<" .. a.group .. ">")) or ""
         local flags = {}
         if a.once then flags[#flags + 1] = "once" end
+        local name_str = a.name and (" " .. dim("name:") .. a.name) or ""
         local flags_str = #flags > 0 and ("  " .. dim("(" .. table.concat(flags, ", ") .. ")")) or ""
         local src_str = a.source and ("  " .. dim("@" .. a.source)) or ""
-        rune.echo(string.format("  %s %-8s %s %s %s%s%s%s",
-            status, a.mode, yellow('"' .. a.match .. '"'), dim("->"), a.value, group_str, flags_str, src_str))
+        rune.echo(string.format("  %s %-8s %s %s %s %s%s%s%s",
+            status, a.mode, yellow('"' .. a.match .. '"'), dim("->"), a.value, name_str, group_str, flags_str, src_str))
     end
 end, "List all aliases")
 
@@ -253,10 +254,11 @@ rune.command.add("triggers", function(args)
         if t.once then flags[#flags + 1] = "once" end
         if t.raw then flags[#flags + 1] = "raw" end
         if t.span then flags[#flags + 1] = "span" end
+        local name_str = t.name and (" " .. dim("name:") .. t.name) or ""
         local flags_str = #flags > 0 and ("  " .. dim("(" .. table.concat(flags, ", ") .. ")")) or ""
         local src_str = t.source and ("  " .. dim("@" .. t.source)) or ""
-        rune.echo(string.format("  %s %-8s %s %s %s%s%s%s",
-            status, t.mode, yellow('"' .. t.match .. '"'), dim("->"), t.value, group_str, flags_str, src_str))
+        rune.echo(string.format("  %s %-8s %s %s %s%s%s%s%s",
+            status, t.mode, yellow('"' .. t.match .. '"'), dim("->"), t.value, name_str, group_str, flags_str, src_str))
     end
 end, "List all triggers")
 
