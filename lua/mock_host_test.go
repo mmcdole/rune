@@ -53,8 +53,9 @@ type MockHost struct {
 	StoreData map[string]string
 
 	// GMCP capture (see Host.GMCPSend)
-	GMCPSends []struct{ Package, Data string }
-	GMCPErr   error // when set, GMCPSend fails with this error
+	GMCPSends      []struct{ Package, Data string }
+	GMCPErr        error // when set, GMCPSend fails with this error
+	GMCPNegotiated bool  // what GMCPActive reports
 
 	// HTTP capture (see Host.HTTPRequest)
 	HTTPCalls []MockHTTPCall
@@ -122,6 +123,12 @@ func (m *MockHost) GMCPSend(pkg, data string) error {
 	}
 	m.GMCPSends = append(m.GMCPSends, struct{ Package, Data string }{pkg, data})
 	return nil
+}
+
+func (m *MockHost) GMCPActive() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.GMCPNegotiated
 }
 
 func (m *MockHost) Reload() {

@@ -15,6 +15,7 @@ type mockNetwork struct {
 	mu          sync.Mutex
 	sent        []string
 	gmcpSent    []struct{ Package, Data string }
+	gmcpActive  bool
 	connected   bool
 	connectedTo []string // every Connect address, in order
 	connectErr  error
@@ -77,6 +78,12 @@ func (m *mockNetwork) SendGMCP(pkg, data string) error {
 	}
 	m.gmcpSent = append(m.gmcpSent, struct{ Package, Data string }{pkg, data})
 	return nil
+}
+
+func (m *mockNetwork) GMCPActive() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.gmcpActive
 }
 
 func (m *mockNetwork) SetWindowSize(width, height int) {

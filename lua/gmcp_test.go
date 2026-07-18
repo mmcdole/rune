@@ -173,6 +173,9 @@ func TestGMCPHandshakeAndSubscriptions(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Go fires gmcp_enabled only after the option is active on the
+	// connection; mirror that ordering.
+	host.GMCPNegotiated = true
 	engine.CallHook("gmcp_enabled")
 
 	if len(host.GMCPSends) < 2 {
@@ -198,10 +201,47 @@ func TestGMCPHandshakeAndSubscriptions(t *testing.T) {
 		t.Errorf("re-sent supports = %v", host.GMCPSends)
 	}
 
-	// is_enabled resets on disconnect
-	engine.CallHook("disconnected")
+	// is_enabled mirrors the connection: false once GMCP is down
+	host.GMCPNegotiated = false
 	if err := engine.DoString("check", `assert(rune.gmcp.is_enabled() == false)`); err != nil {
 		t.Error(err)
+	}
+}
+
+// TestGMCPStateQueriedNotCached verifies negotiation state is read
+// live from the host rather than cached in the VM. A fresh Lua state
+// on a connection where GMCP is already up - exactly the situation
+// after /reload - must report enabled and send subscription changes
+// immediately, even though it never saw the gmcp_enabled edge.
+func TestGMCPStateQueriedNotCached(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	host.GMCPNegotiated = true
+
+	if err := engine.DoString("check", `assert(rune.gmcp.is_enabled() == true,
+		"is_enabled must reflect the connection, not a VM-lifetime cache")`); err != nil {
+		t.Error(err)
+	}
+
+	if err := engine.DoString("subscribe", `rune.gmcp.subscribe("Room")`); err != nil {
+		t.Fatal(err)
+	}
+	if len(host.GMCPSends) != 1 ||
+		host.GMCPSends[0].Package != "Core.Supports.Set" ||
+		host.GMCPSends[0].Data != `["Room 1"]` {
+		t.Errorf("subscribe on an active connection must send supports immediately, got %v", host.GMCPSends)
+	}
+
+	// While GMCP is down, subscriptions accumulate silently for the
+	// next handshake.
+	host.GMCPNegotiated = false
+	host.GMCPSends = nil
+	if err := engine.DoString("subscribe2", `rune.gmcp.subscribe("Char")`); err != nil {
+		t.Fatal(err)
+	}
+	if len(host.GMCPSends) != 0 {
+		t.Errorf("subscribe while inactive must not send, got %v", host.GMCPSends)
 	}
 }
 

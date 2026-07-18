@@ -20,6 +20,12 @@ type Host interface {
 	// has not negotiated GMCP.
 	GMCPSend(pkg, data string) error
 
+	// GMCPActive reports whether GMCP is negotiated on the current
+	// connection (false when disconnected). Negotiation is a
+	// connection-lifetime fact, so Lua queries it live instead of
+	// caching it in the VM, where it would go stale across /reload.
+	GMCPActive() bool
+
 	// UI
 	Print(text string)
 	PaneCreate(name string)

@@ -253,6 +253,15 @@ func (c *TCPClient) SetWindowSize(width, height int) {
 	}
 }
 
+// GMCPActive reports whether GMCP is negotiated on the current
+// connection. False when disconnected.
+func (c *TCPClient) GMCPActive() bool {
+	c.mu.Lock()
+	cx := c.current
+	c.mu.Unlock()
+	return cx != nil && cx.gmcpActive.Load()
+}
+
 // SendGMCP sends a GMCP message: "Package.SubPackage" plus optional
 // raw JSON. Returns an error when disconnected or when the server has
 // not negotiated GMCP.

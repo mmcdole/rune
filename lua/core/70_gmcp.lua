@@ -12,7 +12,6 @@ local green, red, yellow, dim =
 
 rune.gmcp = {}
 
-local enabled = false
 local subscriptions = {} -- package -> version (what Core.Supports.Set sends)
 
 -- Core.Supports.Set replaces the server-side set wholesale, so send
@@ -108,9 +107,12 @@ function rune.gmcp.send_raw(package, raw)
     return rune._gmcp.send_raw(package, raw)
 end
 
--- True once the server has negotiated GMCP on this connection.
+-- True while GMCP is negotiated on the current connection. Queried
+-- live from Go rather than cached here: negotiation is connection-
+-- lifetime state, and a VM-lifetime copy would go stale across
+-- /reload (the gmcp_enabled edge fires once per connection).
 function rune.gmcp.is_enabled()
-    return enabled
+    return rune._gmcp.is_active()
 end
 
 -- Subscribe to server packages ("Char", "Room", ...). Takes effect
@@ -118,7 +120,7 @@ end
 -- version defaults to 1.
 function rune.gmcp.subscribe(package, version)
     subscriptions[package] = version or 1
-    if enabled then
+    if rune._gmcp.is_active() then
         send_supports()
     end
 end
@@ -128,7 +130,7 @@ function rune.gmcp.unsubscribe(package)
         return
     end
     subscriptions[package] = nil
-    if enabled then
+    if rune._gmcp.is_active() then
         send_supports()
     end
 end
@@ -177,14 +179,9 @@ end
 -- ourselves and declare subscriptions. Visible and overridable - hide
 -- or replace it like any named hook.
 rune.hooks.on("gmcp_enabled", function()
-    enabled = true
     rune._gmcp.send("Core.Hello", { client = "Rune", version = rune.version })
     send_supports()
 end, { name = "gmcp-hello", priority = 100 })
-
-rune.hooks.on("disconnected", function()
-    enabled = false
-end, { name = "gmcp-reset", priority = 100 })
 
 -- /gmcp - status, or send a raw message for debugging
 rune.command.add("gmcp", function(args)
@@ -204,7 +201,7 @@ rune.command.add("gmcp", function(args)
         return
     end
 
-    local status = enabled and green("negotiated") or dim("not negotiated")
+    local status = rune._gmcp.is_active() and green("negotiated") or dim("not negotiated")
     rune.echo(green("[GMCP]") .. " " .. status)
     local subs = {}
     for package, version in pairs(subscriptions) do

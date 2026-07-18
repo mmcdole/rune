@@ -48,6 +48,14 @@ func (e *Engine) registerGMCPFuncs() {
 		return 1
 	}))
 
+	// rune._gmcp.is_active(): whether GMCP is negotiated on the
+	// current connection. Queried live so it cannot go stale across
+	// /reload (see Host.GMCPActive).
+	e.L.SetField(gmcp, "is_active", e.L.NewFunction(func(L *glua.LState) int {
+		L.Push(glua.LBool(e.host.GMCPActive()))
+		return 1
+	}))
+
 	// rune._gmcp.send_raw(package, json?): sends the JSON text
 	// verbatim (no validation) - the debugging escape hatch used by
 	// "/gmcp send". Returns true, or nil + error message.
