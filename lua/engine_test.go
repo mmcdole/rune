@@ -674,3 +674,23 @@ func TestPickerShowPassesOptions(t *testing.T) {
 		t.Errorf("expected dismiss_on_space to default to false, got %+v", host.PickerCalls[1])
 	}
 }
+
+// TestRegistryGrowsForLargeConcat verifies the VM can serialize large
+// tables. gopher-lua's table.concat pushes every element onto the data
+// stack before joining, so a fixed-size registry fails on tables past a
+// few thousand entries (e.g. CBOR-encoding a mob database) even though
+// building or decoding the same table works fine.
+func TestRegistryGrowsForLargeConcat(t *testing.T) {
+	engine, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	err := engine.DoString("bigconcat", `
+		local t = {}
+		for i = 1, 20000 do t[i] = "chunk_" .. i end
+		local blob = table.concat(t)
+		assert(#blob > 0)
+	`)
+	if err != nil {
+		t.Fatalf("large table.concat failed: %v", err)
+	}
+}
