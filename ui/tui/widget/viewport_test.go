@@ -182,6 +182,65 @@ func TestViewportEmptyBufferRendersBlankRows(t *testing.T) {
 	}
 }
 
+// A viewport left scrolled while the full ring buffer evicts its anchor
+// rows must pin to the oldest surviving window and keep its exact
+// geometry. The offset used to grow past the buffer unclamped, and View
+// then emitted more rows than its assigned height, corrupting the frame
+// (issue #60).
+func TestViewportScrolledSurvivesRingBufferEviction(t *testing.T) {
+	buf := NewScrollbackBuffer(8)
+	v := NewViewport(buf)
+	v.SetSize(40, 3)
+	for i := 1; i <= 8; i++ {
+		buf.Append(fmt.Sprintf("line %d", i))
+		v.OnNewRows(1)
+	}
+
+	v.GotoTop() // anchored on lines 1-3
+	if v.Mode() != ModeScrolled {
+		t.Fatal("expected scrolled mode after GotoTop")
+	}
+
+	// Push far past the anchor: lines 1-32 are evicted, 33-40 survive.
+	for i := 9; i <= 40; i++ {
+		buf.Append(fmt.Sprintf("line %d", i))
+		v.OnNewRows(1)
+	}
+
+	rows := viewRows(v)
+	if len(rows) != 3 {
+		t.Fatalf("View emitted %d rows, want exactly the assigned 3: %q", len(rows), rows)
+	}
+	want := []string{"line 33", "line 34", "line 35"}
+	for i, w := range want {
+		if rows[i] != w {
+			t.Errorf("row %d = %q, want %q (view should pin to the oldest surviving rows)", i, rows[i], w)
+		}
+	}
+	if v.Mode() != ModeScrolled {
+		t.Error("eviction must not silently return the viewport to live mode")
+	}
+
+	v.GotoBottom()
+	rows = viewRows(v)
+	if rows[len(rows)-1] != "line 40" {
+		t.Errorf("GotoBottom after eviction should land on the newest line, got %q", rows)
+	}
+}
+
+// View must never emit more rows than its height, whatever state the
+// offset is in - the frame-geometry backstop behind the OnNewRows clamp.
+func TestViewportViewNeverExceedsHeight(t *testing.T) {
+	v, _ := newTestViewport(40, 3, "a", "b", "c", "d", "e")
+	v.mode = ModeScrolled
+	v.offset = 999
+
+	rows := viewRows(v)
+	if len(rows) != 3 {
+		t.Fatalf("View emitted %d rows with a corrupt offset, want 3: %q", len(rows), rows)
+	}
+}
+
 func TestScrollbackBufferWrapsAtCapacity(t *testing.T) {
 	buf := NewScrollbackBuffer(3)
 	for i := 1; i <= 5; i++ {
