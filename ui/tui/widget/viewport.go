@@ -135,7 +135,14 @@ func (v *Viewport) View() string {
 		return v.cachedView
 	}
 
+	// Defensive: whatever happened to the offset, the frame must never
+	// grow taller than the assigned height. An offset beyond Count()
+	// would make endIdx negative and the padding loop below emit more
+	// than contentHeight rows.
 	totalLines := v.buffer.Count()
+	if v.offset > totalLines {
+		v.offset = totalLines
+	}
 	endIdx := totalLines - v.offset
 	if endIdx > totalLines {
 		endIdx = totalLines
@@ -195,8 +202,26 @@ func (v *Viewport) OnNewRows(count int) {
 	case ModeScrolled:
 		v.offset += count
 		v.newLines += count
+		// Once the ring buffer is full, appends evict the oldest rows
+		// and Count() stops growing - the rows this offset was anchored
+		// on may be gone. Pin to the oldest surviving window (like
+		// Pane.clampOffset) instead of letting the offset drift past
+		// the buffer and inflate the rendered frame.
+		if max := v.maxOffset(); v.offset > max {
+			v.offset = max
+		}
 		v.cacheValid = false
 	}
+}
+
+// maxOffset is the largest scroll offset that still fills the window
+// with buffered rows; 0 when the buffer fits the viewport.
+func (v *Viewport) maxOffset() int {
+	max := v.buffer.Count() - v.height
+	if max < 0 {
+		max = 0
+	}
+	return max
 }
 
 // SetPrompt sets the server prompt.
@@ -209,14 +234,9 @@ func (v *Viewport) SetPrompt(text string) {
 
 // PageUp scrolls up one page.
 func (v *Viewport) PageUp() {
-	maxOffset := v.buffer.Count() - v.height
-	if maxOffset < 0 {
-		maxOffset = 0
-	}
-
 	v.offset += v.height - 1
-	if v.offset > maxOffset {
-		v.offset = maxOffset
+	if max := v.maxOffset(); v.offset > max {
+		v.offset = max
 	}
 
 	if v.offset > 0 {
@@ -238,14 +258,9 @@ func (v *Viewport) PageDown() {
 
 // ScrollUp scrolls up by N lines (toward older content).
 func (v *Viewport) ScrollUp(lines int) {
-	maxOffset := v.buffer.Count() - v.height
-	if maxOffset < 0 {
-		maxOffset = 0
-	}
-
 	v.offset += lines
-	if v.offset > maxOffset {
-		v.offset = maxOffset
+	if max := v.maxOffset(); v.offset > max {
+		v.offset = max
 	}
 
 	if v.offset > 0 {
@@ -275,11 +290,7 @@ func (v *Viewport) GotoBottom() {
 
 // GotoTop scrolls to the oldest line.
 func (v *Viewport) GotoTop() {
-	maxOffset := v.buffer.Count() - v.height
-	if maxOffset < 0 {
-		maxOffset = 0
-	}
-	v.offset = maxOffset
+	v.offset = v.maxOffset()
 	if v.offset > 0 {
 		v.mode = ModeScrolled
 	}
