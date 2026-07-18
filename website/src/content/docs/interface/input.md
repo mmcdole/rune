@@ -19,6 +19,7 @@ separators, `#N` repeats, and `/commands` all work here.
 | `Escape` | Clear the input line |
 | `Ctrl+W`, `Alt+Backspace` | Delete the word before the cursor |
 | `Alt+Left`/`Alt+Right`, `Ctrl+Left`/`Ctrl+Right` | Move the cursor by word |
+| `Home`/`End` | Move the cursor to the start/end of the line |
 | `Ctrl+C` | Clear the input line; pressed twice on an empty line, quit |
 
 (Most terminals send `Ctrl+Backspace` as `Ctrl+H`, so it can't be bound
@@ -102,8 +103,9 @@ inserts a tab instead.
 
 ## Scrolling and the mouse
 
-`PageUp`/`PageDown` scroll the output viewport; `Home`/`End` jump to the top and
-bottom. The mouse wheel scrolls too. While you're off the bottom, the status
+`PageUp`/`PageDown` scroll the output viewport; `Ctrl+Home`/`Ctrl+End` jump to
+the top and bottom (`Home`/`End` stay on the input line — rebind them if you
+prefer they scroll). The mouse wheel scrolls too. While you're off the bottom, the status
 bar shows `SCROLL (n new)` so you know what's piling up, and it returns to
 `LIVE` when you catch up. Composer mode uses those keyboard navigation keys
 for the draft; the mouse wheel still scrolls output.

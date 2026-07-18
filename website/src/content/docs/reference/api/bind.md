@@ -72,7 +72,15 @@ All defaults are registered by the Lua core and are rebindable:
 | `tab` / `shift+tab` | Completion cycling |
 | `ctrl+e` | Edit input in `$EDITOR` |
 | `pageup` / `pagedown` | Scroll output viewport |
-| `home` / `end` | Jump to top/bottom of output |
+| `ctrl+home` / `ctrl+end` | Jump to top/bottom of output |
+
+Bare `home` / `end` are deliberately not bound: they move the input
+cursor to the start or end of the line, the same keymap the composer
+uses. Binding them replaces that cursor movement with your callback —
+`rune.bind("end", function() rune.pane.scroll_to_bottom("main") end)`
+puts the scroll jump back on `end`, useful when your terminal cannot
+send distinct `ctrl+home` / `ctrl+end` (tmux without `xterm-keys`,
+macOS Terminal.app).
 
 The table describes normal input. In the verbatim composer, `tab` inserts a
 literal tab, navigation keys edit or scroll the draft, and `ctrl+u` deletes to

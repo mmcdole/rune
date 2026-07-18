@@ -32,7 +32,7 @@ width soft-wrap at render time, so they re-fit on resize.
 
 The `scroll_*` functions work on any pane by name. The special name
 `"main"` is the output viewport — that's what the default
-PageUp/PageDown/Home/End binds target:
+PageUp/PageDown/Ctrl+Home/Ctrl+End binds target:
 
 ```lua
 rune.pane.scroll_up("main", 20)     -- the output viewport
