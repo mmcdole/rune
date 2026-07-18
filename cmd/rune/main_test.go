@@ -1,34 +1,32 @@
 package main
 
 import (
+	"strings"
 	"testing"
 )
 
-func TestClassifyArgs(t *testing.T) {
+func TestConnectTarget(t *testing.T) {
 	cases := []struct {
-		name    string
-		args    []string
-		scripts []string
-		target  string
-		wantErr bool
+		name        string
+		args        []string
+		target      string
+		errContains string
 	}{
-		{"empty", nil, nil, "", false},
-		{"host port", []string{"mud.example.com", "4000"}, nil, "mud.example.com 4000", false},
-		{"host port tls", []string{"mud.example.com", "4000", "tls"}, nil, "mud.example.com 4000 tls", false},
-		{"host:port", []string{"mud.example.com:4000"}, nil, "mud.example.com:4000", false},
-		{"scheme address", []string{"tls://mud.example.com:4000"}, nil, "tls://mud.example.com:4000", false},
-		{"world name", []string{"arctic"}, nil, "arctic", false},
-		{"script only", []string{"combat.lua"}, []string{"combat.lua"}, "", false},
-		{"script by path", []string{"scripts/combat"}, []string{"scripts/combat"}, "", false},
-		{"scripts and target", []string{"combat.lua", "arctic", "ui.lua"},
-			[]string{"combat.lua", "ui.lua"}, "arctic", false},
-		{"too many words", []string{"a", "b", "c", "d"}, nil, "", true},
+		{"empty", nil, "", ""},
+		{"host port", []string{"mud.example.com", "4000"}, "mud.example.com 4000", ""},
+		{"host port tls", []string{"mud.example.com", "4000", "tls"}, "mud.example.com 4000 tls", ""},
+		{"host:port", []string{"mud.example.com:4000"}, "mud.example.com:4000", ""},
+		{"scheme address", []string{"tls://mud.example.com:4000"}, "tls://mud.example.com:4000", ""},
+		{"world name", []string{"arctic"}, "arctic", ""},
+		{"too many words", []string{"a", "b", "c", "d"}, "", "too many arguments"},
 	}
 	for _, c := range cases {
-		scripts, target, err := classifyArgs(c.args)
-		if c.wantErr {
+		target, err := connectTarget(c.args)
+		if c.errContains != "" {
 			if err == nil {
 				t.Errorf("%s: expected error", c.name)
+			} else if !strings.Contains(err.Error(), c.errContains) {
+				t.Errorf("%s: error = %q, want it to contain %q", c.name, err, c.errContains)
 			}
 			continue
 		}
@@ -39,15 +37,21 @@ func TestClassifyArgs(t *testing.T) {
 		if target != c.target {
 			t.Errorf("%s: target = %q, want %q", c.name, target, c.target)
 		}
-		if len(scripts) != len(c.scripts) {
-			t.Errorf("%s: scripts = %v, want %v", c.name, scripts, c.scripts)
-			continue
-		}
-		for i := range scripts {
-			if scripts[i] != c.scripts[i] {
-				t.Errorf("%s: scripts = %v, want %v", c.name, scripts, c.scripts)
-				break
-			}
+	}
+}
+
+func TestUsageTextNamesWorldAndAddress(t *testing.T) {
+	usage := usageText("/tmp/rune-config")
+	if !strings.Contains(usage, "rune [--config-dir <dir>] [world | address]") {
+		t.Errorf("usage synopsis does not name world and address:\n%s", usage)
+	}
+	if !strings.Contains(usage, "--config-dir <dir>") ||
+		!strings.Contains(usage, "(default: /tmp/rune-config)") {
+		t.Errorf("usage does not show config-dir and its effective default:\n%s", usage)
+	}
+	for _, form := range []string{"host:port", "host port", "tls://host:port"} {
+		if !strings.Contains(usage, form) {
+			t.Errorf("usage does not explain address form %q:\n%s", form, usage)
 		}
 	}
 }

@@ -120,9 +120,10 @@ first load, and should return a table of exports.
 ## Data fields
 
 `rune.config_dir` and `rune.version` are plain strings set by the
-client. `rune.debug` is yours to flip — while it's `true`, `rune.dbg`
-prints its message with a `[dbg]` prefix; otherwise it's silent, so
-you can leave debug calls in place:
+client. `rune.config_dir` reflects `--config-dir`, `RUNE_CONFIG_DIR`, or
+the platform default, in that order. Set `rune.debug` to `true` to make
+`rune.dbg` print messages with a `[dbg]` prefix. When it is `false`,
+`rune.dbg` does nothing:
 
 ```lua
 rune.debug = true

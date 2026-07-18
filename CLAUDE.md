@@ -53,7 +53,9 @@ Data-flow: `"output"`, `"prompt"`, `"echo"` support returning `false` to gag or 
 
 Full reference: `website/src/content/docs/reference/api/` (one page per namespace; published at runemud.com/reference/api/). It is mechanically complete: a new public `rune.*` function must be added there or `lua/api_docs_coverage_test.go` fails. Go primitives (`rune._*`) are internal. Slash commands are registry-based; `/help` is generated from the registry.
 
-User scripts auto-load from `~/.config/rune/init.lua` at startup.
+User scripts auto-load from `<config-dir>/init.lua` at startup. The default is
+`~/.config/rune`; `--config-dir` overrides `RUNE_CONFIG_DIR`, which overrides
+the platform default.
 
 ## Testing
 

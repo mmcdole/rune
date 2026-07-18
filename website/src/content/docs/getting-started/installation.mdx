@@ -45,6 +45,24 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 Nothing is created until it's needed; a fresh install is just the binary.
 
+## Use a different config directory
+
+Pass `--config-dir` to keep everything Rune reads and writes in a
+different directory:
+
+```sh
+rune --config-dir ~/muds/tank aardwolf
+```
+
+Rune reads `init.lua`, `store.json`, world data, and logs from that directory.
+`RUNE_CONFIG_DIR` provides the same override for shell profiles and launchers:
+
+```sh
+RUNE_CONFIG_DIR=~/muds/tank rune aardwolf
+```
+
+When both are set, `--config-dir` wins.
+
 ## Next
 
 [Your First Session](/getting-started/first-session/) covers

@@ -17,52 +17,51 @@ import (
 	"github.com/mmcdole/rune/version"
 )
 
-// classifyArgs separates positional CLI args into Lua scripts and a
-// connection target. Args ending in .lua (or containing a path
-// separator) are scripts; the rest form a connect target - a saved
-// world name, "host port", "host:port", or a scheme-prefixed address,
-// resolved through the same path as /connect after boot.
-func classifyArgs(args []string) (scripts []string, target string, err error) {
-	var targetParts []string
-	for _, arg := range args {
-		switch {
-		case strings.Contains(arg, "://"):
-			// Scheme-prefixed address (tls://host:port) - the slashes
-			// are not a filesystem path.
-			targetParts = append(targetParts, arg)
-		case strings.HasSuffix(arg, ".lua") || strings.ContainsAny(arg, `/\`):
-			scripts = append(scripts, arg)
-		default:
-			targetParts = append(targetParts, arg)
-		}
-	}
+// connectTarget validates and joins the optional connection target: a
+// saved world name, "host port", "host:port", or a scheme-prefixed
+// address.
+func connectTarget(args []string) (string, error) {
 	// /connect accepts up to "host port tls" - three words. More than
 	// that is not a connection target anyone meant to type.
-	if len(targetParts) > 3 {
-		return nil, "", fmt.Errorf("too many arguments: %q", strings.Join(targetParts, " "))
+	if len(args) > 3 {
+		return "", fmt.Errorf("too many arguments: %q", strings.Join(args, " "))
 	}
-	return scripts, strings.Join(targetParts, " "), nil
+	return strings.Join(args, " "), nil
 }
 
-func main() {
-	showVersion := flag.Bool("version", false, "print version and exit")
-	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(),
-			`usage: rune [host [port] | host:port | world] [script.lua ...]
+func usageText(defaultDir string) string {
+	return fmt.Sprintf(`usage: rune [--config-dir <dir>] [world | address]
 
-A MUD client. With a connection target, rune connects on startup:
+A MUD client. A world is a saved world name (see /world). An address
+may be "host:port", "host port" (optionally followed by tls), or a
+scheme-prefixed address such as "tls://host:port" or
+"tls+insecure://host:port".
 
+Examples:
+
+  rune arctic
   rune mud.example.com 4000
   rune mud.example.com 4000 tls
   rune tls://mud.example.com:4000
-  rune arctic                        connect to a saved world (see /world)
 
-Arguments ending in .lua (or containing a path separator) are loaded
-as Lua scripts after init.lua. Config lives in %s.
+Everything Rune reads and writes - init.lua, store.json, worlds, and
+logs - lives in %s. Use --config-dir or RUNE_CONFIG_DIR to
+keep it in a different directory.
 
 Options:
-`, config.Dir())
-		flag.PrintDefaults()
+  --config-dir <dir>  Directory for all of Rune's files.
+                      (default: %s)
+  --version           Print version and exit.
+  -h, --help          Show this help.
+`, defaultDir, defaultDir)
+}
+
+func main() {
+	defaultDir := config.Dir()
+	showVersion := flag.Bool("version", false, "print version and exit")
+	configDir := flag.String("config-dir", "", "directory for all of Rune's files")
+	flag.Usage = func() {
+		fmt.Fprint(flag.CommandLine.Output(), usageText(defaultDir))
 	}
 	flag.Parse()
 
@@ -71,7 +70,7 @@ Options:
 		return
 	}
 
-	scripts, target, err := classifyArgs(flag.Args())
+	target, err := connectTarget(flag.Args())
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		flag.Usage()
@@ -85,8 +84,7 @@ Options:
 	tuiInstance := tui.NewBubbleTeaUI()
 	sess := session.New(tcpClient, tuiInstance, session.Config{
 		CoreScripts:   lua.CoreScripts,
-		ConfigDir:     config.Dir(),
-		UserScripts:   scripts,
+		ConfigDir:     config.ResolveDir(*configDir),
 		ConnectTarget: target,
 	})
 

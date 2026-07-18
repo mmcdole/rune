@@ -43,8 +43,7 @@ var _ Network = (*network.TCPClient)(nil)
 // Config holds session configuration
 type Config struct {
 	CoreScripts   embed.FS // Embedded core Lua scripts
-	ConfigDir     string   // Path to ~/.config/rune
-	UserScripts   []string // CLI script arguments
+	ConfigDir     string   // Directory for all of Rune's files (init.lua, store.json, worlds, logs)
 	ConnectTarget string   // CLI connect target (world, host port, or address)
 }
 
@@ -302,7 +301,7 @@ func (s *Session) boot() error {
 	// user's first init.lua would otherwise skip the ready hook and
 	// the binds/layout push, leaving a half-dead client. Each failure
 	// is reported individually and the rest of boot proceeds.
-	s.loadUserScripts()
+	s.loadUserScript()
 	s.engine.CallHook("ready")
 	s.pushBindsAndLayout()
 	s.pushBarUpdates()
@@ -354,21 +353,14 @@ func (s *Session) loadCoreScripts() error {
 	return nil
 }
 
-// loadUserScripts loads init.lua and CLI-specified scripts. Failures
-// are reported per script and never propagate: the client must come
+// loadUserScript loads init.lua. A failure never propagates: the client must come
 // up fully functional (binds, bars, ready hook) around a broken user
 // script, so the user can fix it and /reload.
-func (s *Session) loadUserScripts() {
+func (s *Session) loadUserScript() {
 	initPath := filepath.Join(s.config.ConfigDir, "init.lua")
 	if _, err := os.Stat(initPath); err == nil {
 		if err := s.engine.DoFile(initPath); err != nil {
 			s.reportScriptError("init.lua", err)
-		}
-	}
-
-	for _, path := range s.config.UserScripts {
-		if err := s.engine.DoFile(path); err != nil {
-			s.reportScriptError(path, err)
 		}
 	}
 }
