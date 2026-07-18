@@ -11,7 +11,7 @@ import (
 // bootSessionInDir builds and boots a session against a caller-owned
 // config dir without failing the test on boot errors - these tests
 // exist precisely to exercise boot with broken user scripts.
-func bootSessionInDir(t *testing.T, dir string, userScripts ...string) (*Session, *mockNetwork, *mockUI) {
+func bootSessionInDir(t *testing.T, dir string) (*Session, *mockNetwork, *mockUI) {
 	t.Helper()
 
 	net := newMockNetwork()
@@ -19,7 +19,6 @@ func bootSessionInDir(t *testing.T, dir string, userScripts ...string) (*Session
 	s := New(net, uiMock, Config{
 		CoreScripts: lua.CoreScripts,
 		ConfigDir:   dir,
-		UserScripts: userScripts,
 	})
 	if err := s.boot(); err != nil {
 		t.Fatalf("boot must not fail on user-script errors: %v", err)
@@ -66,31 +65,6 @@ func TestBrokenInitLuaStillBootsFully(t *testing.T) {
 
 	if printed := uiMock.drainPrinted(); !contains(printed, "[Script Error] init.lua") {
 		t.Errorf("script failure not reported, got %v", printed)
-	}
-	assertFullyBooted(t, s, net, uiMock)
-}
-
-// TestBrokenCLIScriptStillBootsFully verifies a bad CLI script arg
-// (including a nonexistent file) is reported per script while the
-// others still load.
-func TestBrokenCLIScriptStillBootsFully(t *testing.T) {
-	dir := t.TempDir()
-	good := filepath.Join(dir, "good.lua")
-	if err := os.WriteFile(good, []byte(`rune.alias.exact("k", "kill")`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	s, net, uiMock := bootSessionInDir(t, dir, filepath.Join(dir, "missing.lua"), good)
-
-	if printed := uiMock.drainPrinted(); !contains(printed, "[Script Error]") {
-		t.Errorf("missing script not reported, got %v", printed)
-	}
-
-	// The script after the broken one still loaded
-	net.connected = true
-	userInput(s, "k rat")
-	if sent := net.drainSent(); len(sent) != 1 || sent[0] != "kill rat" {
-		t.Errorf("later script did not load: sent %v", sent)
 	}
 	assertFullyBooted(t, s, net, uiMock)
 }

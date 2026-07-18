@@ -6,9 +6,23 @@ import (
 	"runtime"
 )
 
-// Dir returns the rune configuration directory.
-// Respects XDG_CONFIG_HOME on Unix, APPDATA on Windows.
+// Dir returns the rune configuration directory. RUNE_CONFIG_DIR takes
+// precedence over the platform default.
 func Dir() string {
+	return ResolveDir("")
+}
+
+// ResolveDir applies the precedence for Rune's configuration
+// directory: a non-empty CLI value wins, followed by RUNE_CONFIG_DIR,
+// then the platform default.
+func ResolveDir(cliDir string) string {
+	if cliDir != "" {
+		return cliDir
+	}
+	if envDir := os.Getenv("RUNE_CONFIG_DIR"); envDir != "" {
+		return envDir
+	}
+
 	var base string
 
 	if runtime.GOOS == "windows" {

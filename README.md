@@ -102,6 +102,10 @@ rune.gmcp.on("Char.Vitals", function(data)
 end)
 ```
 
+Everything Rune reads and writes — scripts, saved worlds, state, and
+logs — lives in `~/.config/rune`. Use `rune --config-dir <dir>` or
+`RUNE_CONFIG_DIR=<dir>` to keep it in a different directory.
+
 The [scripting basics](https://runemud.com/getting-started/scripting-basics/)
 guide picks up from here.
 
