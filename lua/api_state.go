@@ -35,12 +35,12 @@ func (e *Engine) UpdateState(state ClientState) {
 		return
 	}
 
-	stateTable := e.L.GetField(e.runeTable, "_state")
-	if stateTable == glua.LNil {
+	// A user script can clobber rune._state; skip the push rather than
+	// panic. Scripts see stale state until /reload rebuilds the table.
+	t, ok := e.L.GetField(e.runeTable, "_state").(*glua.LTable)
+	if !ok {
 		return
 	}
-
-	t := stateTable.(*glua.LTable)
 	e.L.SetField(t, "connected", glua.LBool(state.Connected))
 	e.L.SetField(t, "address", glua.LString(state.Address))
 	e.L.SetField(t, "scroll_mode", glua.LString(state.ScrollMode))

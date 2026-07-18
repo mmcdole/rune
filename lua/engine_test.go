@@ -103,6 +103,48 @@ func TestBrokenHooksDegradesGracefully(t *testing.T) {
 	}
 }
 
+// TestClobberedStateTableDoesNotPanic verifies a user script that
+// overwrites rune._state cannot crash the client: UpdateState skips the
+// push instead of panicking the process on an unchecked type assertion.
+// State pushes ride connection, resize, and scroll events, so before
+// the checked lookup this was a delayed hard crash from one bad script
+// line.
+func TestClobberedStateTableDoesNotPanic(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	for _, sabotage := range []string{
+		"rune._state = 5",
+		`rune._state = "text"`,
+		"rune._state = nil",
+	} {
+		if err := engine.DoString("sabotage", sabotage); err != nil {
+			t.Fatalf("%s: %v", sabotage, err)
+		}
+		engine.UpdateState(ClientState{Connected: true, Address: "mud.example.com:4000", Width: 80, Height: 24})
+	}
+
+	// The VM survives and everything else keeps working.
+	if err := engine.DoString("after", `rune.send_raw("still alive")`); err != nil {
+		t.Fatalf("VM unusable after clobbered-state update: %v", err)
+	}
+	if sent := host.DrainNetworkCalls(); len(sent) != 1 || sent[0] != "still alive" {
+		t.Errorf("expected send after clobbered-state update, got %v", sent)
+	}
+
+	// Re-init (what /reload does) rebuilds the mirror and pushes land again.
+	if err := engine.Init(); err != nil {
+		t.Fatal(err)
+	}
+	engine.UpdateState(ClientState{Connected: true, Address: "mud.example.com:4000"})
+	if err := engine.DoString("check", `
+		assert(rune._state.connected == true, "state push lost after reload")
+		assert(rune._state.address == "mud.example.com:4000")
+	`); err != nil {
+		t.Error(err)
+	}
+}
+
 // TestBrokenHandlerIsIsolated verifies that a throwing output handler
 // is reported and skipped, while later handlers (including core trigger
 // processing) still run.
