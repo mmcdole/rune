@@ -87,7 +87,7 @@ type Session struct {
 	config        Config
 	clientState   lua.ClientState
 	currentInput  string // Tracked so Lua can query via rune.input.get()
-	currentCursor int    // Tracked so Lua can query via rune.input.get_cursor()
+	currentCursor int    // Zero-based UTF-8 byte offset exposed to Lua
 }
 
 // New creates a new Session. It is passive - no goroutines start here.
@@ -427,10 +427,10 @@ func (s *Session) handleUIMessage(msg ui.UIEvent) {
 		s.handlePickerResult(m.CallbackID, m.Value, m.Accepted)
 	case ui.InputChangedMsg:
 		s.currentInput = m.Text
-		s.currentCursor = m.Cursor
+		s.currentCursor = input.RuneCursorToByte(m.Text, m.Cursor)
 		s.engine.CallHook("input_changed", m.Text)
 	case ui.CursorMovedMsg:
-		s.currentCursor = m.Cursor
+		s.currentCursor = input.RuneCursorToByte(s.currentInput, m.Cursor)
 		// No Lua hook - cursor-only changes don't need Lua processing
 	}
 }

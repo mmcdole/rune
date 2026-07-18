@@ -116,6 +116,7 @@ type mockUI struct {
 	prompts     []string // every SetPrompt call, including clears
 	inputSet    []string
 	inputModes  []input.Submission
+	inputCursor []int
 	bindsPushed map[string]bool // last UpdateBinds payload
 	input       chan input.Submission
 	outbound    chan ui.UIEvent
@@ -196,7 +197,11 @@ func (m *mockUI) TogglePane(name string)                   {}
 func (m *mockUI) SetPaneVisible(name string, visible bool) {}
 func (m *mockUI) ClearPane(name string)                    {}
 
-func (m *mockUI) InputSetCursor(pos int)                   {}
+func (m *mockUI) InputSetCursor(pos int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.inputCursor = append(m.inputCursor, pos)
+}
 func (m *mockUI) OpenEditor(initial string) (string, bool) { return "", false }
 
 func (m *mockUI) PaneScrollUp(name string, lines int)   {}

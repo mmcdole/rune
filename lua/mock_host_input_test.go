@@ -33,3 +33,22 @@ func TestMockSetInputUsesVerbatimAdmissionAndStickyReset(t *testing.T) {
 		t.Fatalf("cleared input mode = %s, want command", host.InputMode)
 	}
 }
+
+func TestMockHostInputCursorUsesByteBoundaries(t *testing.T) {
+	host := &MockHost{InputText: "café"}
+
+	host.InputSetCursor(4)
+	if got, want := host.InputGetCursor(), 3; got != want {
+		t.Fatalf("cursor inside UTF-8 sequence = %d, want %d", got, want)
+	}
+
+	host.InputSetCursor(6)
+	if got, want := host.InputGetCursor(), len("café"); got != want {
+		t.Fatalf("cursor beyond input = %d, want %d", got, want)
+	}
+
+	host.InputSetCursor(-1)
+	if got := host.InputGetCursor(); got != 0 {
+		t.Fatalf("negative cursor = %d, want 0", got)
+	}
+}

@@ -40,6 +40,7 @@ type Host interface {
 	SetInputSubmission(submission input.Submission)
 
 	// Input primitives
+	// Cursor positions are zero-based UTF-8 byte offsets.
 	InputGetCursor() int
 	InputSetCursor(pos int)
 	OpenEditor(initial string) (string, bool)

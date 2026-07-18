@@ -357,13 +357,7 @@ func (m *MockHost) InputGetCursor() int {
 func (m *MockHost) InputSetCursor(pos int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if pos < 0 {
-		pos = 0
-	}
-	if pos > len(m.InputText) {
-		pos = len(m.InputText)
-	}
-	m.InputCursor = pos
+	m.InputCursor = input.ClampByteCursor(m.InputText, pos)
 }
 
 func (m *MockHost) OpenEditor(initial string) (string, bool) {
