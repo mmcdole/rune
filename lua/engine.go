@@ -116,7 +116,18 @@ func (e *Engine) Init() error {
 		e.L.Close()
 	}
 
-	e.L = glua.NewState()
+	// The registry (data stack) must be able to grow: table.concat
+	// pushes every element before joining, so serializing a large
+	// table needs slots proportional to its entry count. The ceiling
+	// bounds runaway scripts (~16 MB, allocated only on demand) and
+	// exhausting it raises the same catchable "registry overflow" a
+	// fixed-size registry would. Growth is linear, so a small step
+	// would mean thousands of realloc+copy cycles on a big concat.
+	e.L = glua.NewState(glua.Options{
+		RegistrySize:     1024 * 20,
+		RegistryMaxSize:  1024 * 1024,
+		RegistryGrowStep: 4096,
+	})
 
 	e.host.TimerCancelAll()
 
