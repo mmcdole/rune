@@ -29,7 +29,8 @@ const (
 	ModeScrolled
 )
 
-// ScrollbackBuffer is a ring buffer for storing terminal output lines.
+// ScrollbackBuffer is a ring buffer of physical rows of terminal
+// output; each entry renders as exactly one row.
 type ScrollbackBuffer struct {
 	lines    []string
 	head     int
@@ -49,9 +50,9 @@ func NewScrollbackBuffer(capacity int) *ScrollbackBuffer {
 	}
 }
 
-// Append adds a line to the buffer.
-func (sb *ScrollbackBuffer) Append(line string) {
-	sb.lines[sb.tail] = line
+// Append adds a row to the buffer.
+func (sb *ScrollbackBuffer) Append(row string) {
+	sb.lines[sb.tail] = row
 	sb.tail = (sb.tail + 1) % sb.capacity
 
 	if sb.count < sb.capacity {
@@ -61,12 +62,12 @@ func (sb *ScrollbackBuffer) Append(line string) {
 	}
 }
 
-// Count returns the number of lines.
+// Count returns the number of rows.
 func (sb *ScrollbackBuffer) Count() int {
 	return sb.count
 }
 
-// At retrieves a line by logical index (0 = oldest).
+// At retrieves a row by index (0 = oldest).
 func (sb *ScrollbackBuffer) At(i int) string {
 	if i < 0 || i >= sb.count {
 		return ""
@@ -186,8 +187,8 @@ func (v *Viewport) PreferredHeight() int {
 	return v.height
 }
 
-// OnNewLines is called when lines are added.
-func (v *Viewport) OnNewLines(count int) {
+// OnNewRows is called when rows are appended to the buffer.
+func (v *Viewport) OnNewRows(count int) {
 	switch v.mode {
 	case ModeLive:
 		v.cacheValid = false

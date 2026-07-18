@@ -53,13 +53,13 @@ type Model struct {
 	}
 
 	// State
-	lastPrompt   string
-	width        int
-	height       int
-	inputChan    chan<- input.Submission
-	outbound     chan<- ui.UIEvent
-	initialized  bool
-	pendingLines []string
+	lastPrompt  string
+	width       int
+	height      int
+	inputChan   chan<- input.Submission
+	outbound    chan<- ui.UIEvent
+	initialized bool
+	pendingRows []string
 	// flushScheduled is true while a batch-window tick is outstanding.
 	// At most one tick is ever in flight: it is armed only on the
 	// idle->hot transition and re-armed only from handleTick while
@@ -195,7 +195,7 @@ func (m *Model) handleWindowSize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 // echo already flushed eagerly) ends the chain - back to zero wakeups.
 func (m *Model) handleTick() (tea.Model, tea.Cmd) {
 	m.flushScheduled = false
-	if len(m.pendingLines) == 0 {
+	if len(m.pendingRows) == 0 {
 		return m, nil
 	}
 	m.flushPending()
@@ -203,13 +203,13 @@ func (m *Model) handleTick() (tea.Model, tea.Cmd) {
 	return m, doTick()
 }
 
-// flushPending appends all batched server lines to the scrollback.
+// flushPending appends all batched server rows to the scrollback.
 func (m *Model) flushPending() {
-	if len(m.pendingLines) == 0 {
+	if len(m.pendingRows) == 0 {
 		return
 	}
-	m.appendLines(m.pendingLines)
-	m.pendingLines = nil
+	m.appendRows(m.pendingRows...)
+	m.pendingRows = nil
 }
 
 func (m *Model) handleConfigUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -257,22 +257,22 @@ func (m *Model) syncBars(content map[string]ui.BarContent) {
 func (m *Model) handleServerOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case ui.PrintLineMsg:
-		cleanLine := util.ExpandTabs(util.FilterClearSequences(string(msg)))
+		rows := splitRows(util.FilterClearSequences(string(msg)), m.width)
 		if m.flushScheduled {
 			// Inside a batch window: coalesce with the burst.
-			m.pendingLines = append(m.pendingLines, cleanLine)
+			m.pendingRows = append(m.pendingRows, rows...)
 			return m, nil
 		}
 		// Idle: render this line now and open a batch window so a
 		// following burst coalesces instead of rendering line-by-line.
-		m.appendLines([]string{cleanLine})
+		m.appendRows(rows...)
 		m.flushScheduled = true
 		return m, doTick()
 	case ui.EchoLineMsg:
 		// Flush batched server lines first so the echo cannot render
 		// ahead of output that arrived before it.
 		m.flushPending()
-		m.appendLines([]string{util.ExpandTabs(string(msg))})
+		m.appendMessage(string(msg))
 	case ui.PromptMsg:
 		text := util.ExpandTabs(string(msg))
 		if text != m.lastPrompt {
@@ -321,12 +321,32 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) appendLines(lines []string) {
-	for _, line := range lines {
-		m.scrollback.Append(line)
+// splitRows shapes a message into physical scrollback rows: one row
+// per line break, tabs expanded per row so columns restart on every
+// row, rows wider than the terminal word-wrapped. Rows are final at
+// append time; a resize does not rewrap old output.
+func splitRows(msg string, width int) []string {
+	if !strings.ContainsAny(msg, "\r\n") {
+		return util.WrapLine(util.ExpandTabs(msg), width)
 	}
-	m.viewport.OnNewLines(len(lines))
+	var rows []string
+	for _, line := range util.SplitLines(msg) {
+		rows = append(rows, util.WrapLine(util.ExpandTabs(line), width)...)
+	}
+	return rows
+}
+
+func (m *Model) appendRows(rows ...string) {
+	for _, row := range rows {
+		m.scrollback.Append(row)
+	}
+	m.viewport.OnNewRows(len(rows))
 	m.updateScrollState()
+}
+
+// appendMessage shapes text into rows and appends them.
+func (m *Model) appendMessage(text string) {
+	m.appendRows(splitRows(text, m.width)...)
 }
 
 // sendLine offers a submitted input snapshot to the session. It rejects
@@ -336,7 +356,7 @@ func (m *Model) sendLine(submission input.Submission) bool {
 	if submission.Mode == input.ModeVerbatim {
 		lineCount := 1 + strings.Count(submission.Text, "\n")
 		if len(submission.Text) > maxVerbatimBytes || lineCount > maxVerbatimLines {
-			m.appendLines([]string{text.Red("[WARNING] Verbatim input not sent - limit is 1000 lines or 256 KiB")})
+			m.appendMessage(text.Red("[WARNING] Verbatim input not sent - limit is 1000 lines or 256 KiB"))
 			return false
 		}
 	}
@@ -344,7 +364,7 @@ func (m *Model) sendLine(submission input.Submission) bool {
 	case m.inputChan <- submission:
 		return true
 	default:
-		m.appendLines([]string{text.Red("[WARNING] Input not sent - engine lagging")})
+		m.appendMessage(text.Red("[WARNING] Input not sent - engine lagging"))
 		return false
 	}
 }

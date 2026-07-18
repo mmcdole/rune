@@ -29,6 +29,48 @@ func contentRows(t *testing.T, p *Pane) []string {
 	return rows[1 : len(rows)-1]
 }
 
+// TestPaneMultilineWriteWhileScrolled verifies a multi-line write
+// counts each segment: the scrolled view stays anchored and the
+// header indicator reflects every new line.
+func TestPaneMultilineWriteWhileScrolled(t *testing.T) {
+	p := newTestPane(t, 40, 2)
+	for i := 1; i <= 6; i++ {
+		p.Write(fmt.Sprintf("line %d", i))
+	}
+	p.ScrollUp(3)
+	before := contentRows(t, p)
+
+	p.Write("line 7\nline 8")
+
+	after := contentRows(t, p)
+	if before[0] != after[0] || before[1] != after[1] {
+		t.Fatalf("scrolled view moved: before %q, after %q", before, after)
+	}
+	if p.newLines != 2 {
+		t.Fatalf("newLines = %d, want 2", p.newLines)
+	}
+}
+
+// TestPaneMultilineWriteSplitsIntoLines pins issue #49 for panes: a
+// write containing newlines stores one logical line per segment, and
+// the rendered view keeps its budgeted height.
+func TestPaneMultilineWriteSplitsIntoLines(t *testing.T) {
+	p := newTestPane(t, 40, 5)
+	p.Write("a\rb\r\nc\nd")
+
+	if len(p.Lines) != 4 {
+		t.Fatalf("expected 4 logical lines, got %d: %q", len(p.Lines), p.Lines)
+	}
+	for i, line := range p.Lines {
+		if strings.ContainsAny(line, "\r\n") {
+			t.Fatalf("stored line %d contains a line break: %q", i, line)
+		}
+	}
+	if rows := contentRows(t, p); len(rows) != 5 {
+		t.Fatalf("view content height = %d rows, want the budgeted 5", len(rows))
+	}
+}
+
 func TestPaneWrapsLongLines(t *testing.T) {
 	p := newTestPane(t, 20, 4)
 	p.Write("one two three four five six seven")

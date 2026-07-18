@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/x/ansi"
 	"github.com/mmcdole/rune/ui/tui/style"
 	"github.com/mmcdole/rune/ui/tui/util"
 )
@@ -41,18 +40,6 @@ func NewPane(name string, styles style.Styles) *Pane {
 	}
 }
 
-// wrapLine soft-wraps one logical line to the given width, returning
-// at least one row. ANSI codes and wide runes are handled.
-func wrapLine(line string, width int) []string {
-	if width < 1 {
-		width = 1
-	}
-	if util.VisibleLen(line) <= width {
-		return []string{line}
-	}
-	return strings.Split(ansi.Wrap(line, width, ""), "\n")
-}
-
 // visibleRows renders exactly p.height rows of wrapped content for the
 // current scroll position. The window is anchored at the logical line
 // end = len(Lines)-offset; when a deep scroll leaves it underfull, it
@@ -65,14 +52,14 @@ func (p *Pane) visibleRows() []string {
 
 	var rows []string
 	for i := end - 1; i >= 0 && len(rows) < p.height; i-- {
-		rows = append(wrapLine(p.Lines[i], p.width), rows...)
+		rows = append(util.WrapLine(p.Lines[i], p.width), rows...)
 	}
 
 	if len(rows) >= p.height {
 		rows = rows[len(rows)-p.height:]
 	} else {
 		for i := end; i < len(p.Lines) && len(rows) < p.height; i++ {
-			rows = append(rows, wrapLine(p.Lines[i], p.width)...)
+			rows = append(rows, util.WrapLine(p.Lines[i], p.width)...)
 		}
 		if len(rows) > p.height {
 			rows = rows[:p.height]
@@ -136,14 +123,17 @@ func (p *Pane) PreferredHeight() int {
 	return p.height + 2 // content + header + border
 }
 
-// Write appends a line to the pane. While scrolled, the view stays
-// anchored on the same history (the offset grows with the buffer) and
-// the new line is counted for the header indicator.
+// Write appends text as logical lines, one per line break. While
+// scrolled, the view stays anchored on the same history (the offset
+// grows with the buffer) and new lines are counted for the header
+// indicator.
 func (p *Pane) Write(text string) {
-	p.Lines = append(p.Lines, util.ExpandTabs(text))
-	if p.offset > 0 {
-		p.offset++
-		p.newLines++
+	for _, line := range util.SplitLines(text) {
+		p.Lines = append(p.Lines, util.ExpandTabs(line))
+		if p.offset > 0 {
+			p.offset++
+			p.newLines++
+		}
 	}
 	if len(p.Lines) > 1000 {
 		p.Lines = p.Lines[len(p.Lines)-500:]
