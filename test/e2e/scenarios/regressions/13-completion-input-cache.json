@@ -3,7 +3,7 @@
   "scenarios": [
     {
       "name": "typed words seed the tab-completion cache",
-      "issue": "found 2026-07 while building lua/input_test.go; fixed by moving _completion_input to priority 50",
+      "issue": "https://github.com/mmcdole/rune/pull/13",
       "steps": [
         { "connect": true },
         { "type": "brandish sword" },

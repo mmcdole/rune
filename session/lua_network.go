@@ -61,3 +61,8 @@ func (s *Session) Send(data string) error {
 func (s *Session) GMCPSend(pkg, data string) error {
 	return s.net.SendGMCP(pkg, data)
 }
+
+// GMCPActive implements lua.Host.
+func (s *Session) GMCPActive() bool {
+	return s.net.GMCPActive()
+}

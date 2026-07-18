@@ -32,6 +32,7 @@ type Network interface {
 	Disconnect()
 	Send(data string) error
 	SendGMCP(pkg, data string) error
+	GMCPActive() bool
 	SetWindowSize(width, height int)
 	Output() <-chan network.Output
 	LocalEchoEnabled() bool

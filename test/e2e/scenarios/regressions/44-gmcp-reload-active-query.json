@@ -1,0 +1,21 @@
+{
+  "description": "Regression: /reload rebuilt Lua while preserving the network connection, leaving GMCP disabled in the fresh VM because negotiation state was cached in Lua.",
+  "scenarios": [
+    {
+      "name": "GMCP remains active across reload",
+      "issue": "https://github.com/mmcdole/rune/pull/44",
+      "init_lua": [
+        "if rune.session.get('gmcp-loaded') then rune.gmcp.subscribe('Room') else rune.session.set('gmcp-loaded', 'yes'); rune.gmcp.subscribe('Char') end",
+        "rune.hooks.on('reloaded', function() rune.echo('E2E-GMCP-RELOAD=' .. tostring(rune.gmcp.is_enabled())) end)"
+      ],
+      "steps": [
+        { "connect": true },
+        { "server_bytes": [255, 251, 201], "note": "IAC WILL GMCP" },
+        { "expect_sent": "Char 1", "note": "sync: initial GMCP handshake completed" },
+        { "type": "/reload" },
+        { "expect_printed": "E2E-GMCP-RELOAD=true" },
+        { "expect_sent": "Room 1", "note": "the reloaded script updates the live subscription set" }
+      ]
+    }
+  ]
+}

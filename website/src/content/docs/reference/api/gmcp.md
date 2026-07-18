@@ -15,7 +15,7 @@ rune.gmcp.send(package, value?)         -- send a JSON-able value
 rune.gmcp.send_raw(package, raw_json)   -- send pre-encoded JSON (debugging)
 rune.gmcp.subscribe(package, version?)  -- declare interest (Core.Supports.Set)
 rune.gmcp.unsubscribe(package)          -- withdraw interest
-rune.gmcp.is_enabled()                  -- true once GMCP is negotiated
+rune.gmcp.is_enabled()                  -- true while GMCP is negotiated
 rune.gmcp.list()                        -- all handlers, as /gmcp shows them
 ```
 
@@ -81,7 +81,10 @@ a debugging tool (`/gmcp send` uses it).
 (`"Char"`, `"Room"`, …); `version` defaults to 1. Subscriptions
 maintain `Core.Supports.Set` — the full set is re-sent on every
 change, per the spec — taking effect immediately when GMCP is up,
-otherwise at the next handshake.
+otherwise at the next handshake. This holds across `/reload` too:
+`is_enabled()` reflects the live connection, so a subscription added
+to `init.lua` reaches the server as soon as the reloaded script
+declares it.
 
 When the server negotiates GMCP, the `"gmcp_enabled"` event fires and
 the core handler named `gmcp-hello` sends
