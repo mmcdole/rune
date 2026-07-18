@@ -31,7 +31,7 @@ soft-wrap, and re-fit when the terminal resizes.
 ## Scrolling
 
 Every pane scrolls its own buffer; the special name `"main"` is the
-output viewport (that's what the default PageUp/PageDown/Home/End
+output viewport (that's what the default PageUp/PageDown/Ctrl+Home/Ctrl+End
 binds target). Aim a pane with binds of your own:
 
 ```lua

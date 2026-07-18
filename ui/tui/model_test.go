@@ -521,3 +521,48 @@ func TestPrintedTabsAreExpanded(t *testing.T) {
 		t.Errorf("prompt = %q, want tab expanded", got)
 	}
 }
+
+// TestHomeEndEditInputWhileCtrlVariantsScroll pins the default key
+// split: with no binds registered, bare Home/End fall through to the
+// input widget as cursor movement, while Ctrl+Home/Ctrl+End hit the Go
+// scroll fallback (the path that keeps degraded mode navigable).
+func TestHomeEndEditInputWhileCtrlVariantsScroll(t *testing.T) {
+	m := newTestModel(t)
+
+	typed := "say hello"
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(typed)})
+	m = next.(*Model)
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyHome})
+	m = next.(*Model)
+	if m.viewport.Mode() != widget.ModeLive {
+		t.Fatal("Home scrolled the viewport instead of reaching the input")
+	}
+	if pos := m.inputCtl.input.Position(); pos != 0 {
+		t.Fatalf("Home left cursor at %d, want 0", pos)
+	}
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnd})
+	m = next.(*Model)
+	if m.viewport.Mode() != widget.ModeLive {
+		t.Fatal("End scrolled the viewport instead of reaching the input")
+	}
+	if pos := m.inputCtl.input.Position(); pos != len(typed) {
+		t.Fatalf("End left cursor at %d, want %d", pos, len(typed))
+	}
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlHome})
+	m = next.(*Model)
+	if m.viewport.Mode() == widget.ModeLive {
+		t.Fatal("Ctrl+Home did not scroll the viewport to the top")
+	}
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlEnd})
+	m = next.(*Model)
+	if m.viewport.Mode() != widget.ModeLive {
+		t.Fatal("Ctrl+End did not return the viewport to live")
+	}
+	if got := m.inputCtl.input.Value(); got != typed {
+		t.Fatalf("input draft = %q, want %q", got, typed)
+	}
+}

@@ -587,3 +587,22 @@ func TestInlineTabReportsCompletedInput(t *testing.T) {
 		t.Fatalf("expected input %q after completion, got %q", "/connect ", got)
 	}
 }
+
+// TestReboundHomeOverridesInputCursor pins the override path the docs
+// promise: a user bind on "home" wins over the widget's cursor
+// movement even while a draft is in progress (non-printable bound keys
+// are never gated on empty input).
+func TestReboundHomeOverridesInputCursor(t *testing.T) {
+	h := newControllerHarness()
+	h.bound["home"] = true
+
+	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("look")})
+	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyHome})
+
+	if binds := h.executeBinds(); len(binds) != 1 || binds[0] != ui.ExecuteBindMsg("home") {
+		t.Fatalf("expected one home bind dispatch, got %v", binds)
+	}
+	if pos := h.ctl.input.Position(); pos != len("look") {
+		t.Fatalf("bound home moved the cursor to %d, want untouched at %d", pos, len("look"))
+	}
+}

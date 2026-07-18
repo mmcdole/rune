@@ -422,9 +422,9 @@ func (m *Model) handleScrollKey(keyType tea.KeyType) bool {
 		m.viewport.PageUp()
 	case tea.KeyPgDown:
 		m.viewport.PageDown()
-	case tea.KeyHome:
+	case tea.KeyCtrlHome:
 		m.viewport.GotoTop()
-	case tea.KeyEnd:
+	case tea.KeyCtrlEnd:
 		m.viewport.GotoBottom()
 	default:
 		return false
