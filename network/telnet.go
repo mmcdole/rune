@@ -383,13 +383,37 @@ type parsedSlice struct {
 func (p *Parser) process() []TelnetEvent {
 	var out []TelnetEvent
 	events := p.extract()
-	for _, ev := range events {
+	for i := 0; i < len(events); {
+		ev := events[i]
+		if ev.kind == evNone {
+			end := i + 1
+			total := len(ev.buf)
+			for end < len(events) && events[end].kind == evNone {
+				total += len(events[end].buf)
+				end++
+			}
+
+			data := ev.buf
+			if end > i+1 {
+				data = make([]byte, 0, total)
+				for _, part := range events[i:end] {
+					data = append(data, part.buf...)
+				}
+			}
+			if len(data) > 0 {
+				out = append(out, TelnetEvent{Kind: TelnetEventDataReceive, Data: data})
+			}
+			i = end
+			continue
+		}
+
 		switch ev.kind {
-		case evNone, evIAC, evNeg:
+		case evIAC, evNeg:
 			out = append(out, p.processCommand(ev.buf)...)
 		case evSub:
 			out = append(out, p.processSub(ev.buf, ev.remaining)...)
 		}
+		i++
 	}
 	return out
 }
@@ -426,8 +450,10 @@ func (p *Parser) extract() []parsedSlice {
 		case stateIAC:
 			switch val {
 			case CmdIAC:
-				// Double IAC = escaped literal 255, not a command
+				// Double IAC encodes one literal 255 data byte.
+				res = append(res, parsedSlice{kind: evNone, buf: buf[cmdBegin:i]})
 				state = stateNormal
+				cmdBegin = i + 1
 			case CmdGA, CmdEOR, CmdNOP:
 				res = append(res, parsedSlice{kind: evIAC, buf: buf[cmdBegin : i+1]})
 				state = stateNormal

@@ -663,19 +663,59 @@ func TestLinemodeEnabled(t *testing.T) {
 }
 
 func TestDoubleIACInData(t *testing.T) {
+	tests := []struct {
+		name string
+		wire []byte
+		want []byte
+	}{
+		{
+			name: "middle of data",
+			wire: append(append([]byte("Hello"), CmdIAC, CmdIAC), []byte("World")...),
+			want: append(append([]byte("Hello"), CmdIAC), []byte("World")...),
+		},
+		{
+			name: "three byte input is not negotiation",
+			wire: []byte{CmdIAC, CmdIAC, OptEcho},
+			want: []byte{CmdIAC, OptEcho},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parser := NewParserDefault()
+			events := parser.Receive(tt.wire)
+			if len(events) != 1 {
+				t.Fatalf("events = %+v, want one data event", events)
+			}
+			if events[0].Kind != TelnetEventDataReceive {
+				t.Fatalf("event kind = %v, want DataReceive", events[0].Kind)
+			}
+			if !bytes.Equal(events[0].Data, tt.want) {
+				t.Errorf("data = %v, want %v", events[0].Data, tt.want)
+			}
+		})
+	}
+}
+
+func TestDoubleIACSplitAcrossReceives(t *testing.T) {
 	parser := NewParserDefault()
 
-	// Data with escaped IAC: "Hello\xff\xffWorld"
-	events := parser.Receive([]byte{72, 101, 108, 108, 111, 255, 255, 87, 111, 114, 108, 100})
+	events := parser.Receive(append([]byte("Hello"), CmdIAC))
+	if len(events) != 1 || events[0].Kind != TelnetEventDataReceive || string(events[0].Data) != "Hello" {
+		t.Fatalf("first receive events = %+v, want data Hello", events)
+	}
 
+	events = parser.Receive(append([]byte{CmdIAC}, []byte("World")...))
+	want := append([]byte{CmdIAC}, []byte("World")...)
 	if len(events) != 1 {
-		t.Fatalf("Expected 1 event, got %d: %+v", len(events), events)
+		t.Fatalf("second receive events = %+v, want one data event", events)
 	}
 	if events[0].Kind != TelnetEventDataReceive {
-		t.Errorf("Expected DataReceive, got %v", events[0].Kind)
+		t.Fatalf("event kind = %v, want DataReceive", events[0].Kind)
 	}
-	// The doubled IAC in data stream should pass through as-is in raw form
-	// (unescaping happens in subnegotiation payloads, not raw data)
+	if !bytes.Equal(events[0].Data, want) {
+		t.Errorf("data = %v, want %v", events[0].Data, want)
+	}
 }
 
 func TestIncompleteIAC(t *testing.T) {
