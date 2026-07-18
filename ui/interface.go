@@ -31,7 +31,7 @@ type UI interface {
 	SetPaneVisible(name string, visible bool)
 	ClearPane(name string)
 
-	// Input primitives for Lua
+	// Input primitives. Cursor positions are zero-based rune offsets.
 	InputSetCursor(pos int)
 	OpenEditor(initial string) (string, bool)
 

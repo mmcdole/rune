@@ -199,7 +199,7 @@ rune.history_nav = {
 
 -- ============================================================
 -- WORD NAVIGATION & EDITING
--- Logic in Lua, cursor control via Go primitives
+-- Cursor positions are UTF-8 byte offsets, matching Lua string operations.
 -- ============================================================
 
 -- Find previous word boundary

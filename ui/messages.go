@@ -90,8 +90,8 @@ type ScrollStateChangedMsg struct {
 
 func (ScrollStateChangedMsg) uiEvent() {}
 
-// InputChangedMsg notifies Session of input content changes.
-// Session tracks this so Lua can query current input via rune.input.get().
+// InputChangedMsg notifies Session of input content changes. Cursor is a
+// zero-based rune offset from the input widget.
 type InputChangedMsg struct {
 	Text   string
 	Cursor int
@@ -99,8 +99,8 @@ type InputChangedMsg struct {
 
 func (InputChangedMsg) uiEvent() {}
 
-// CursorMovedMsg notifies Session of cursor position changes (without text change).
-// This allows tracking cursor for Lua without triggering input_changed hooks.
+// CursorMovedMsg notifies Session of cursor position changes without a text
+// change. Cursor is a zero-based rune offset from the input widget.
 type CursorMovedMsg struct {
 	Cursor int
 }
@@ -150,7 +150,7 @@ func (PickerSelectMsg) uiEvent() {}
 
 // --- Input Primitive Messages (Session -> UI) ---
 
-// InputSetCursorMsg sets the cursor position.
+// InputSetCursorMsg sets the widget cursor to a zero-based rune offset.
 type InputSetCursorMsg int
 
 // --- Pane Scrolling Messages (Session -> UI) ---

@@ -237,6 +237,35 @@ func TestWordNavigationAndDelete(t *testing.T) {
 	assertCursor(t, host, 12)
 }
 
+func TestWordNavigationAndDeleteWithMultibyteInput(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	host.SetInput("café brave world")
+
+	if err := engine.DoString("test", "rune.input.word_left()"); err != nil {
+		t.Fatal(err)
+	}
+	assertCursor(t, host, 12)
+
+	if err := engine.DoString("test", "rune.input.word_left()"); err != nil {
+		t.Fatal(err)
+	}
+	assertCursor(t, host, 6)
+
+	if err := engine.DoString("test", "rune.input.word_right()"); err != nil {
+		t.Fatal(err)
+	}
+	assertCursor(t, host, 12)
+
+	host.InputSetCursor(len("café brave world"))
+	if err := engine.DoString("test", "rune.input.delete_word()"); err != nil {
+		t.Fatal(err)
+	}
+	assertInput(t, host, "café brave ")
+	assertCursor(t, host, 12)
+}
+
 func TestClearInputBinds(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
@@ -376,4 +405,19 @@ func TestCompletionMidLineInsertsWithoutTrailingSpace(t *testing.T) {
 	// Mid-line completions get no trailing space.
 	assertInput(t, host, "kill goblin now")
 	assertCursor(t, host, 11)
+}
+
+func TestCompletionMidLineWithMultibyteInput(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	engine.OnOutput(text.NewLine("goblin"))
+
+	host.SetInput("café gob now")
+	host.InputSetCursor(len("café gob"))
+	engine.CallHook("input_changed", host.GetInput())
+
+	engine.HandleKeyBind("tab")
+	assertInput(t, host, "café goblin now")
+	assertCursor(t, host, len("café goblin"))
 }

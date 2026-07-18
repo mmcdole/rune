@@ -13,8 +13,8 @@ keys, the multiline composer, history navigation, and tab completion), see
 ```lua
 rune.input.get()                  -- current input text
 rune.input.set(text)              -- replace the input text
-rune.input.get_cursor()           -- cursor position (clamped to input length)
-rune.input.set_cursor(pos)        -- move the cursor
+rune.input.get_cursor()           -- zero-based UTF-8 byte offset
+rune.input.set_cursor(pos)        -- move to a UTF-8 byte offset
 rune.input.open_editor(initial?)  -- edit in $EDITOR; returns edited_text, ok
 rune.input.word_left()            -- move cursor to the previous word boundary
 rune.input.word_right()           -- move cursor to the next word boundary
@@ -25,6 +25,11 @@ rune.input.delete_word()          -- delete the word before the cursor
 them with cursor moves and are what the default `ctrl+w`,
 `alt+left`/`alt+right` binds call. Setting the input fires the
 `"input_changed"` [hook event](/reference/api/hooks/), same as typing.
+
+Cursor positions are zero-based UTF-8 byte offsets, using the same byte units
+as Lua 5.1 string operations. `set_cursor` clamps positions to the input and
+snaps an offset inside a multibyte sequence to the preceding UTF-8 code point
+boundary.
 
 Setting text containing a newline, tab, or terminal control byte activates the
 visible verbatim composer. Once active, replacing the draft with one non-empty

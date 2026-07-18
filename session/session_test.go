@@ -8,6 +8,7 @@ import (
 	"github.com/mmcdole/rune/input"
 	"github.com/mmcdole/rune/lua"
 	runetext "github.com/mmcdole/rune/text"
+	"github.com/mmcdole/rune/ui"
 )
 
 // newTestSession boots a Session against mocks with the real embedded
@@ -225,7 +226,7 @@ func TestHistoryPreservesModeAndDedupesWholeSubmission(t *testing.T) {
 
 func TestSetInputSubmissionForwardsExplicitMode(t *testing.T) {
 	s, _, uiMock := newTestSession(t)
-	want := input.Verbatim("one line;still data")
+	want := input.Verbatim("café;still data")
 
 	s.SetInputSubmission(want)
 
@@ -235,8 +236,35 @@ func TestSetInputSubmissionForwardsExplicitMode(t *testing.T) {
 	if got := s.GetInput(); got != want.Text {
 		t.Fatalf("Session input mirror = %q, want %q", got, want.Text)
 	}
-	if got, wantCursor := s.InputGetCursor(), len([]rune(want.Text)); got != wantCursor {
+	if got, wantCursor := s.InputGetCursor(), len(want.Text); got != wantCursor {
 		t.Fatalf("Session cursor mirror = %d, want %d", got, wantCursor)
+	}
+}
+
+func TestInputCursorConvertsAtUIBoundary(t *testing.T) {
+	s, _, uiMock := newTestSession(t)
+
+	s.handleUIMessage(ui.InputChangedMsg{Text: "café gob", Cursor: 8})
+	if got, want := s.InputGetCursor(), len("café gob"); got != want {
+		t.Fatalf("cursor after input change = %d, want %d", got, want)
+	}
+
+	s.handleUIMessage(ui.CursorMovedMsg{Cursor: 4})
+	if got, want := s.InputGetCursor(), len("café"); got != want {
+		t.Fatalf("cursor after UI move = %d, want %d", got, want)
+	}
+
+	s.InputSetCursor(4)
+	if got, want := s.InputGetCursor(), 3; got != want {
+		t.Fatalf("cursor inside UTF-8 sequence = %d, want %d", got, want)
+	}
+	if got, want := uiMock.inputCursor[len(uiMock.inputCursor)-1], 3; got != want {
+		t.Fatalf("widget cursor = %d, want %d", got, want)
+	}
+
+	s.InputSetCursor(len("café"))
+	if got, want := uiMock.inputCursor[len(uiMock.inputCursor)-1], 4; got != want {
+		t.Fatalf("widget cursor after multibyte text = %d, want %d", got, want)
 	}
 }
 
