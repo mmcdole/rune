@@ -8,12 +8,14 @@ type UIEvent interface {
 	uiEvent() // unexported marker method - only this package can implement
 }
 
-// PrintLineMsg represents a line to append to scrollback.
+// PrintLineMsg carries output text to append to scrollback. The text
+// may contain newlines; the TUI splits and wraps it into rows.
 // Used for all output: server lines, Lua prints, etc.
 type PrintLineMsg string
 
-// EchoLineMsg represents a local echo (user input, already styled by
-// the Lua "echo" hook) to append to scrollback.
+// EchoLineMsg carries a local echo (user input, already styled by the
+// Lua "echo" hook) to append to scrollback. Like PrintLineMsg, the
+// text may contain newlines.
 type EchoLineMsg string
 
 // PromptMsg represents a server prompt (partial line without newline).

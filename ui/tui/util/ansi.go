@@ -3,6 +3,7 @@ package util
 import (
 	"strings"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 	"github.com/mmcdole/rune/text"
 )
@@ -10,6 +11,29 @@ import (
 // VisibleLen returns the visible display width of a string (excluding ANSI codes).
 func VisibleLen(s string) int {
 	return runewidth.StringWidth(text.StripANSI(s))
+}
+
+// SplitLines splits text into lines, treating lone CR and CRLF as
+// line breaks.
+func SplitLines(s string) []string {
+	if !strings.ContainsAny(s, "\r\n") {
+		return []string{s}
+	}
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+	return strings.Split(s, "\n")
+}
+
+// WrapLine soft-wraps one line into rows of at most width columns,
+// returning at least one row. ANSI codes and wide runes are handled. A
+// line that fits, or a width below 1, passes through unchanged. The
+// byte-length check is a fast bound: a rune's display width never
+// exceeds its byte count.
+func WrapLine(line string, width int) []string {
+	if width < 1 || len(line) <= width || VisibleLen(line) <= width {
+		return []string{line}
+	}
+	return strings.Split(ansi.Wrap(line, width, ""), "\n")
 }
 
 // FilterClearSequences removes ANSI sequences that would clear the screen.

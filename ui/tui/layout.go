@@ -83,6 +83,8 @@ func (m *Model) View() string {
 	if viewportHeight < 1 {
 		viewportHeight = 1
 	}
+	// The viewport spans the full terminal width; splitRows wraps
+	// appended rows to the same m.width.
 	m.viewport.SetSize(m.width, viewportHeight)
 
 	var parts []string

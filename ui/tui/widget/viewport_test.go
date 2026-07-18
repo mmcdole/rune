@@ -14,7 +14,7 @@ func newTestViewport(width, height int, lines ...string) (*Viewport, *Scrollback
 	v.SetSize(width, height)
 	for _, l := range lines {
 		buf.Append(l)
-		v.OnNewLines(1)
+		v.OnNewRows(1)
 	}
 	return v, buf
 }
@@ -91,9 +91,9 @@ func TestViewportScrollAnchorsWhileNewLinesArrive(t *testing.T) {
 	before := viewRows(v)
 
 	buf.Append("seven")
-	v.OnNewLines(1)
+	v.OnNewRows(1)
 	buf.Append("eight")
-	v.OnNewLines(1)
+	v.OnNewRows(1)
 
 	after := viewRows(v)
 	for i := range before {
