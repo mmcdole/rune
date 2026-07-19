@@ -63,3 +63,25 @@ func TestListingCommandsShowRegistrations(t *testing.T) {
 		t.Errorf("listing commands leaked to the network: %v", sent)
 	}
 }
+
+// TestErrorTagIsRed pins the presentation convention (05_style.lua):
+// [Error] tags are red, tag only, message plain - checked on the two
+// highest-traffic paths, the default error handler and unknown
+// commands.
+func TestErrorTagIsRed(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	engine.CallHook("error", "something broke")
+	engine.OnInput("/nosuchcommand")
+
+	printed := strings.Join(host.DrainPrintCalls(), "\n")
+	for _, want := range []string{
+		"\x1b[31m[Error]\x1b[0m something broke",
+		"\x1b[31m[Error]\x1b[0m Unknown command: /nosuchcommand",
+	} {
+		if !strings.Contains(printed, want) {
+			t.Errorf("missing red-tagged error %q in:\n%s", want, printed)
+		}
+	}
+}

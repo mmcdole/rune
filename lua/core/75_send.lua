@@ -64,7 +64,7 @@ end
 -- INTERNAL: Recursive send implementation
 local function send_impl(input, depth)
     if depth > MAX_RECURSION_DEPTH then
-        rune.echo(rune.style.red("[Error] Alias loop detected (depth limit exceeded)"))
+        rune.echo(rune.style.red("[Error]") .. " Alias loop detected (depth limit exceeded)")
         return
     end
 
@@ -130,7 +130,7 @@ rune.hooks.on("input", function(input, context)
     local cmd, args = input:match("^/(%S+)%s*(.*)")
     if cmd then
         if not rune.command.dispatch(cmd, args) then
-            rune.echo("[Error] Unknown command: /" .. cmd)
+            rune.echo(rune.style.red("[Error]") .. " Unknown command: /" .. cmd)
         end
         return false
     end
