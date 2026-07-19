@@ -60,7 +60,6 @@ type Host interface {
 	// System
 	Quit()
 	Reload()
-	Load(path string)
 	RefreshBars() // Force immediate bar refresh
 
 	// History

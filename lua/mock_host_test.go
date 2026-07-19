@@ -23,7 +23,6 @@ type MockHost struct {
 	ConnectCalls    []string
 	DisconnectCalls int
 	ReloadCalls     int
-	LoadCalls       []string
 	PaneCalls       []struct{ Op, Name, Data string }
 	PickerCalls     []ui.ShowPickerMsg
 	ClipboardCalls  []string
@@ -138,12 +137,6 @@ func (m *MockHost) Reload() {
 	m.ReloadCalls++
 }
 
-func (m *MockHost) Load(path string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.LoadCalls = append(m.LoadCalls, path)
-}
-
 func (m *MockHost) RefreshBars() {
 	// No-op for tests
 }
@@ -176,12 +169,6 @@ func (m *MockHost) PaneClear(name string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.PaneCalls = append(m.PaneCalls, struct{ Op, Name, Data string }{"clear", name, ""})
-}
-
-func (m *MockHost) GetClientState() ClientState {
-	return ClientState{
-		ScrollMode: "live",
-	}
 }
 
 func (m *MockHost) OnConfigChange() {
