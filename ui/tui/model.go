@@ -266,7 +266,7 @@ func (m *Model) syncBars(content map[string]ui.BarContent) {
 func (m *Model) handleServerOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case ui.PrintLineMsg:
-		rows := splitRows(util.FilterClearSequences(string(msg)), m.width)
+		rows := splitRows(string(msg), m.width)
 		if m.flushScheduled {
 			// Inside a batch window: coalesce with the burst.
 			m.pendingRows = append(m.pendingRows, rows...)
