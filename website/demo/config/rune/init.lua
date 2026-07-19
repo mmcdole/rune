@@ -2,9 +2,6 @@
 -- and history the landing page's simulated terminals show, so the real
 -- client demos match the site's story world.
 
--- Keep boot chatter out of the first frame.
-rune.hooks.on("loaded", function() return false end, { priority = 50 })
-
 -- Worlds (the /connect picker).
 rune.world.add("viking", "vikingmud.org:2001")
 rune.world.add("arctic", "mud.arctic.org:2700")
