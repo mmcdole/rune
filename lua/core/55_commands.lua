@@ -172,7 +172,7 @@ rune.command.add("reconnect", function(args)
     if addr then
         rune.connect(addr)
     else
-        rune.echo("[Error] No previous connection")
+        rune.echo(red("[Error]") .. " No previous connection")
     end
 end, "Reconnect to last server")
 
@@ -184,9 +184,9 @@ rune.command.add("load", function(args)
     end
     local ok, err = rune.load(args)
     if ok then
-        rune.echo("[Loaded] " .. args)
+        rune.echo(green("[Loaded]") .. " " .. args)
     else
-        rune.echo("[Error] " .. tostring(err))
+        rune.echo(red("[Error]") .. " " .. tostring(err))
     end
 end, "Load a Lua script file")
 
@@ -210,10 +210,10 @@ rune.command.add("lua", function(args)
                 rune.echo(tostring(result))
             end
         else
-            rune.echo("[Error] " .. tostring(result))
+            rune.echo(red("[Error]") .. " " .. tostring(result))
         end
     else
-        rune.echo("[Error] " .. tostring(err))
+        rune.echo(red("[Error]") .. " " .. tostring(err))
     end
 end, "Execute Lua code")
 

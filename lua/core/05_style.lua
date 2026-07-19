@@ -4,6 +4,10 @@
 -- degraded-mode messages (see text package).
 --
 -- Usage: rune.echo(rune.style.red("[Error]") .. " something broke")
+--
+-- Tag conventions for core output: [Error] tags are red (tag only,
+-- message plain), [Usage] lines are plain, success/action tags
+-- ([World], [Log], [Loaded], ...) are green.
 
 local function wrap(code)
     local prefix = "\027[" .. code .. "m"

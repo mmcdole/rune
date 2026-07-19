@@ -63,5 +63,5 @@ rune.hooks.on("loaded", function(path)
 end, { priority = 100 })
 
 rune.hooks.on("error", function(msg)
-    rune.echo("[Error] " .. msg)
+    rune.echo(rune.style.red("[Error]") .. " " .. msg)
 end, { priority = 100 })
