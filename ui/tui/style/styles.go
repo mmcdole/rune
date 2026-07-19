@@ -11,28 +11,15 @@ func RenderBorder(width int) string {
 	return "\x1b[90m" + strings.Repeat("─", width) + "\x1b[0m"
 }
 
-// Styles holds all the lipgloss styles for the TUI.
+// Styles holds the lipgloss styles the widgets render with. Server
+// output and bar/status text arrive pre-styled from Lua (rune.style);
+// only chrome the TUI draws itself is styled here.
 type Styles struct {
-	// Layout
-	App        lipgloss.Style
-	Scrollback lipgloss.Style
-	PromptArea lipgloss.Style
-	InputArea  lipgloss.Style
-	StatusBar  lipgloss.Style
-
-	// Status indicators
-	StatusConnected    lipgloss.Style
-	StatusDisconnected lipgloss.Style
-	StatusConnecting   lipgloss.Style
-	StatusLive         lipgloss.Style
-	StatusScrolled     lipgloss.Style
-
 	// Input
-	InputPrompt lipgloss.Style
 	InputText   lipgloss.Style
 	InputCursor lipgloss.Style
 
-	// Overlay
+	// Picker overlay
 	OverlayBorder        lipgloss.Style
 	OverlaySelected      lipgloss.Style
 	OverlayNormal        lipgloss.Style
@@ -45,44 +32,19 @@ type Styles struct {
 
 	// Misc
 	Muted   lipgloss.Style
-	Error   lipgloss.Style
 	Warning lipgloss.Style
 }
 
 // DefaultStyles returns the default style configuration.
 func DefaultStyles() Styles {
 	return Styles{
-		// Layout - minimal borders, let content breathe
-		App: lipgloss.NewStyle(),
-		Scrollback: lipgloss.NewStyle().
-			Padding(0),
-		PromptArea: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("250")),
-		InputArea: lipgloss.NewStyle(),
-		StatusBar: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("252")),
-
-		// Status indicators - subtle colors
-		StatusConnected: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("71")), // Muted green
-		StatusDisconnected: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("243")), // Gray (subtle)
-		StatusConnecting: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("179")), // Muted yellow
-		StatusLive: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("243")), // Gray
-		StatusScrolled: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("179")), // Muted yellow
-
 		// Input
-		InputPrompt: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("245")),
 		InputText: lipgloss.NewStyle(),
 		InputCursor: lipgloss.NewStyle().
 			Background(lipgloss.Color("255")).
 			Foreground(lipgloss.Color("0")),
 
-		// Overlay (slash picker, fuzzy search)
+		// Picker overlay (slash picker, fuzzy search)
 		OverlayBorder: lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("62")).
@@ -110,8 +72,6 @@ func DefaultStyles() Styles {
 		// Misc
 		Muted: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("240")),
-		Error: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("196")),
 		Warning: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("220")),
 	}
