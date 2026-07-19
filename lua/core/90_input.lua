@@ -302,9 +302,12 @@ local MAX_WORDS = 5000
 local MIN_WORD_LEN = 3
 
 -- Data structures for word cache
-local cache = {}        -- lower -> {word=original, order=int}
-local order_list = {}   -- array of lowercase words (insertion order for eviction)
-local prefix_idx = {}   -- 2-char -> set of lowercase words
+local cache = {}      -- lower -> {word=original, order=int}
+-- Fixed-size ring of lowercase words in insertion order: the slot a
+-- new word claims holds the eviction victim, so eviction is O(1).
+local ring = {}
+local ring_pos = 0    -- last written slot (1..MAX_WORDS)
+local prefix_idx = {} -- 2-char -> set of lowercase words
 local order_counter = 0
 
 local function cache_add(word)
@@ -318,28 +321,25 @@ local function cache_add(word)
         -- Update existing entry (bump recency)
         entry.word = word
         entry.order = order_counter
-    else
-        -- New word
-        cache[lower] = { word = word, order = order_counter }
-        order_list[#order_list + 1] = lower
+        return
+    end
 
-        -- Add to prefix index
-        if #lower >= 2 then
-            local key = lower:sub(1, 2)
-            prefix_idx[key] = prefix_idx[key] or {}
-            prefix_idx[key][lower] = true
-        end
-
-        -- Evict oldest if over capacity
-        if #order_list > MAX_WORDS then
-            local oldest = table.remove(order_list, 1)
-            local old_key = oldest:sub(1, 2)
-            if prefix_idx[old_key] then
-                prefix_idx[old_key][oldest] = nil
-            end
-            cache[oldest] = nil
+    -- New word: claim the next ring slot, evicting its occupant.
+    ring_pos = ring_pos % MAX_WORDS + 1
+    local evicted = ring[ring_pos]
+    if evicted then
+        cache[evicted] = nil
+        local bucket = prefix_idx[evicted:sub(1, 2)]
+        if bucket then
+            bucket[evicted] = nil
         end
     end
+    ring[ring_pos] = lower
+
+    cache[lower] = { word = word, order = order_counter }
+    local key = lower:sub(1, 2)
+    prefix_idx[key] = prefix_idx[key] or {}
+    prefix_idx[key][lower] = true
 end
 
 local function cache_find(prefix)
@@ -511,7 +511,8 @@ end
 
 function rune.completion.clear_cache()
     cache = {}
-    order_list = {}
+    ring = {}
+    ring_pos = 0
     prefix_idx = {}
     order_counter = 0
 end
