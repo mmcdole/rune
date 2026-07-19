@@ -611,8 +611,22 @@ func TestNegotiationDO(t *testing.T) {
 
 	// Check state
 	entry := parser.Options.Get(OptNAWS)
-	if !entry.LocalState || !entry.RemoteState {
-		t.Error("Both LocalState and RemoteState should be true after DO")
+	if !entry.LocalState {
+		t.Error("LocalState should be true after accepted DO")
+	}
+	if entry.RemoteState {
+		t.Error("RemoteState must stay false: the server never sent WILL")
+	}
+}
+
+// TestDefaultCompatibilityRefusesUnimplementedDirections verifies the
+// remote-only options: the server's WILL is accepted, but its DO is
+// refused - the client never echoes to the server or sends EOR marks.
+func TestDefaultCompatibilityRefusesUnimplementedDirections(t *testing.T) {
+	for _, opt := range []byte{OptEcho, OptEOR} {
+		parser := NewParser(DefaultCompatibility())
+		events := parser.Receive([]byte{CmdIAC, CmdDO, opt})
+		assertReply(t, events, []byte{CmdIAC, CmdWONT, opt}, "DO", opt)
 	}
 }
 
