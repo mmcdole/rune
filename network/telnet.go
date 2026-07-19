@@ -586,8 +586,9 @@ func (p *Parser) processNegotiation(command, opt byte) []TelnetEvent {
 
 	case CmdDO:
 		if entry.Local && !entry.LocalState {
+			// DO enables our side only; the remote side needs the
+			// server's own WILL.
 			entry.LocalState = true
-			entry.RemoteState = true
 			p.Options.Set(opt, entry)
 			responses = append(responses, TelnetEvent{
 				Kind: TelnetEventDataSend,
@@ -784,9 +785,9 @@ func (o *OutputBuffer) Clear() {
 // options here only together with their implementation.
 func defaultCompatibility() CompatibilityTable {
 	t := NewCompatibilityTable()
-	t.Support(OptEcho)            // WILL/WONT ECHO toggles local echo (client.go)
+	t.SupportRemote(OptEcho)      // WILL/WONT ECHO toggles local echo (client.go); we never echo to the server
 	t.Support(OptSGA)             // Suppress Go Ahead: full-duplex handshake
-	t.Support(OptEOR)             // End of Record: servers mark prompts with IAC EOR
+	t.SupportRemote(OptEOR)       // End of Record: servers mark prompts; we never send them
 	t.SupportLocal(OptTTYPE)      // Terminal type + MTTS cycle (negotiate.go)
 	t.SupportLocal(OptNAWS)       // Window size reports (negotiate.go, client.go)
 	t.Support(OptCharset)         // UTF-8 charset negotiation (negotiate.go)
