@@ -209,7 +209,10 @@ func (s *Session) handleEvent(ev event.Event) {
 		payload := string(ev.Payload.(event.Line))
 		line := text.NewLine(payload)
 		if modified, show := s.engine.OnOutput(line); show {
-			s.ui.Print(modified)
+			// Display egress owns terminal safety: strip everything but
+			// SGR so server clear/cursor sequences cannot wipe UI chrome
+			// (issue #69). Lua hooks above saw the raw line.
+			s.ui.Print(text.SanitizeDisplay(modified))
 		}
 		// Server line ends the prompt overlay
 		s.lastPrompt = ""
@@ -225,7 +228,9 @@ func (s *Session) handleEvent(ev event.Event) {
 		// (handleSubmission).
 		payload := string(ev.Payload.(event.Line))
 		line := text.NewLine(payload)
-		modified := s.engine.OnPrompt(line)
+		// Sanitized before storing so the overlay and the later
+		// scrollback commit (handleSubmission) both stay chrome-safe.
+		modified := text.SanitizeDisplay(s.engine.OnPrompt(line))
 		s.lastPrompt = modified
 		s.ui.SetPrompt(modified)
 

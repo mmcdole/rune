@@ -1,0 +1,35 @@
+{
+  "description": "Issue #69: Aardwolf's OLC editor sends terminal clear-screen and cursor-addressing sequences. Replaying those from inside a rendered scrollback row wipes UI chrome (separators, input line, bars), so Rune ignores them like CMUD/MUSHclient: no non-SGR escape sequence may reach any display surface. SGR color sequences must survive.",
+  "scenarios": [
+    {
+      "name": "clear-screen and cursor sequences are dropped from server lines, colors kept",
+      "issue": "https://github.com/mmcdole/rune/issues/69",
+      "steps": [
+        { "connect": true },
+        { "server_line": "\u001b[H\u001b[2J\u001b[3;1H\u001b[JE2E-EDITOR \u001b[31mred\u001b[0m\u001b[K kept\u001bc" },
+        { "expect_printed": "E2E-EDITOR", "note": "sync: the line reached the scrollback" },
+        { "expect_printed": "\u001b[31mred\u001b[0m", "note": "SGR color survives sanitization" },
+        { "expect_not_printed": "\u001b[2J", "note": "clear entire screen" },
+        { "expect_not_printed": "\u001b[H", "note": "cursor home" },
+        { "expect_not_printed": "\u001b[3;1H", "note": "cursor addressing" },
+        { "expect_not_printed": "\u001b[J", "note": "erase below" },
+        { "expect_not_printed": "\u001b[K", "note": "erase line" },
+        { "expect_not_printed": "\u001bc", "note": "full terminal reset" }
+      ]
+    },
+    {
+      "name": "editor clear arriving as an unterminated prompt block is ignored",
+      "issue": "https://github.com/mmcdole/rune/issues/69",
+      "steps": [
+        { "connect": true },
+        { "server_prompt": "\u001b[H\u001b[2JE2E-EDITOR-PROMPT> " },
+        { "expect_prompt": "E2E-EDITOR-PROMPT>", "note": "sync: prompt overlay updated" },
+        { "type": "look" },
+        { "expect_sent": "look", "note": "sync: submission processed, prompt committed to scrollback" },
+        { "expect_printed": "E2E-EDITOR-PROMPT>" },
+        { "expect_not_printed": "\u001b[2J", "note": "the committed prompt carries no clear sequence" },
+        { "expect_not_printed": "\u001b[H" }
+      ]
+    }
+  ]
+}

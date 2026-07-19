@@ -2,12 +2,15 @@ package session
 
 import (
 	"github.com/mmcdole/rune/input"
+	"github.com/mmcdole/rune/text"
 	"github.com/mmcdole/rune/ui"
 )
 
-// Print implements lua.Host.
-func (s *Session) Print(text string) {
-	s.ui.Print(text)
+// Print implements lua.Host. Scripts routinely re-print captured
+// server text, so display sanitization applies here too (issue #69);
+// rune.style output is SGR and passes through untouched.
+func (s *Session) Print(msg string) {
+	s.ui.Print(text.SanitizeDisplay(msg))
 }
 
 // PaneCreate implements lua.Host.
@@ -15,9 +18,10 @@ func (s *Session) PaneCreate(name string) {
 	s.ui.CreatePane(name)
 }
 
-// PaneWrite implements lua.Host.
-func (s *Session) PaneWrite(name, text string) {
-	s.ui.WritePane(name, text)
+// PaneWrite implements lua.Host. Sanitized like Print: pane content is
+// often trigger-captured server text.
+func (s *Session) PaneWrite(name, msg string) {
+	s.ui.WritePane(name, text.SanitizeDisplay(msg))
 }
 
 // PaneToggle implements lua.Host.
