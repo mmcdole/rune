@@ -402,6 +402,28 @@ func TestGMCPSendRequiresNegotiation(t *testing.T) {
 
 // --- prompt emission ---
 
+// TestSendEscapesIAC verifies outgoing line data doubles IAC bytes so
+// the server reads them as data. Protocol frames stay untouched - the
+// negotiation loopback tests pin those byte-exact.
+func TestSendEscapesIAC(t *testing.T) {
+	done := make(chan struct{})
+	addr := telnetServer(t, func(t *testing.T, conn net.Conn) {
+		defer close(done)
+		expectBytes(t, conn, []byte{'a', 0xFF, 0xFF, 'b', '\r', '\n'}, "escaped line send")
+	})
+
+	c := connectLoopback(t, addr)
+	if err := c.Send("a\xffb"); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("server never saw the escaped bytes")
+	}
+}
+
 // TestUnterminatedPromptSurvivesPromptlessNegotiation pins the
 // prompt-mode policy: negotiating SGA or EOR is not evidence of prompt
 // termination (WILL is a promise, DO concerns our output), so a server
