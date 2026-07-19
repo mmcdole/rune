@@ -35,21 +35,6 @@ func (s *Session) Reload() {
 	}
 }
 
-// Load implements lua.Host.
-func (s *Session) Load(path string) {
-	if path == "" {
-		s.ui.Print(text.Red("Load Failed: empty path"))
-		return
-	}
-
-	if err := s.engine.DoFile(path); err != nil {
-		s.ui.Print(text.Red(fmt.Sprintf("Load Failed (%s): %v", path, err)))
-		return
-	}
-
-	s.engine.CallHook("loaded", path)
-}
-
 // RefreshBars forces an immediate bar refresh.
 // Called from Lua when bar state changes and we don't want to wait for the ticker.
 func (s *Session) RefreshBars() {
