@@ -785,8 +785,8 @@ func (o *OutputBuffer) Clear() {
 func defaultCompatibility() CompatibilityTable {
 	t := NewCompatibilityTable()
 	t.Support(OptEcho)            // WILL/WONT ECHO toggles local echo (client.go)
-	t.Support(OptSGA)             // Suppress Go Ahead: prompt mode detection
-	t.Support(OptEOR)             // End of Record: prompt termination
+	t.Support(OptSGA)             // Suppress Go Ahead: full-duplex handshake
+	t.Support(OptEOR)             // End of Record: servers mark prompts with IAC EOR
 	t.SupportLocal(OptTTYPE)      // Terminal type + MTTS cycle (negotiate.go)
 	t.SupportLocal(OptNAWS)       // Window size reports (negotiate.go, client.go)
 	t.Support(OptCharset)         // UTF-8 charset negotiation (negotiate.go)

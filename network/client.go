@@ -62,9 +62,10 @@ type connection struct {
 	// Identity negotiation responder (TTYPE/MTTS, NAWS, CHARSET, MNES)
 	hs *handshake
 
-	// Telnet mode tracking - separate flags allow proper reversion
-	willEOR atomic.Bool // Server indicated WILL EOR
-	willSGA atomic.Bool // Server indicated WILL SGA (Suppress Go Ahead)
+	// Prompt-mode evidence: set once the first IAC GA or EOR arrives.
+	// Mode keys on received terminators, not negotiation state -
+	// options promise behavior, marks demonstrate it.
+	promptTerminated atomic.Bool
 
 	gmcpActive atomic.Bool // GMCP negotiated on this connection
 
@@ -188,7 +189,6 @@ func (c *TCPClient) Connect(ctx context.Context, address string) error {
 		done:      make(chan struct{}),
 	}
 	cx.localEcho.Store(true)
-	// willEOR and willSGA default to false (unterminated prompt mode)
 
 	// Set as current and start workers
 	c.current = cx
@@ -391,8 +391,9 @@ func (c *TCPClient) processIncoming(cx *connection, data []byte) bool {
 
 		case TelnetEventIAC:
 			if ev.Command == CmdGA || ev.Command == CmdEOR {
-				// GA/EOR commands indicate prompt termination for this message,
-				// but don't change the negotiated mode (that's done via WILL/WONT)
+				// A received mark is evidence the server terminates its
+				// prompts; the first one switches modes for good.
+				cx.markPromptTerminated()
 				if cx.output.HasNewData() {
 					prompt := cx.output.Prompt(true)
 					if prompt != "" {
@@ -573,7 +574,12 @@ func (cx *connection) shutdown() {
 	})
 }
 
-// applyNegotiation updates local state based on telnet negotiation events.
+// applyNegotiation updates local echo state from telnet negotiation.
+// EOR/SGA negotiation deliberately does not drive prompt mode: WILL is
+// a promise about future marks and DO concerns our own output, so a
+// server could negotiate either and still send unterminated prompts.
+// Only received GA/EOR marks switch modes (markPromptTerminated), the
+// way other MUD clients detect prompts.
 func (cx *connection) applyNegotiation(cmd, opt byte) {
 	switch opt {
 	case OptEcho:
@@ -585,36 +591,22 @@ func (cx *connection) applyNegotiation(cmd, opt byte) {
 			// Server won't echo or wants us to echo - enable local echo
 			cx.localEcho.Store(true)
 		}
-	case OptEOR:
-		switch cmd {
-		case CmdWILL, CmdDO:
-			cx.willEOR.Store(true)
-			cx.updateTelnetMode()
-		case CmdWONT, CmdDONT:
-			cx.willEOR.Store(false)
-			cx.updateTelnetMode()
-		}
-	case OptSGA:
-		switch cmd {
-		case CmdWILL, CmdDO:
-			cx.willSGA.Store(true)
-			cx.updateTelnetMode()
-		case CmdWONT, CmdDONT:
-			cx.willSGA.Store(false)
-			cx.updateTelnetMode()
-		}
 	}
 }
 
-// telnetMode returns the current telnet mode based on negotiation state.
+// markPromptTerminated records received GA/EOR evidence. From the
+// first mark on, the unterminated-prompt peek turns off and the output
+// buffer stops clearing on input; sticky for the connection.
+func (cx *connection) markPromptTerminated() {
+	if !cx.promptTerminated.Swap(true) {
+		cx.output.SetMode(TelnetModeTerminatedPrompt)
+	}
+}
+
+// telnetMode returns the current prompt-detection mode.
 func (cx *connection) telnetMode() TelnetMode {
-	if cx.willEOR.Load() || cx.willSGA.Load() {
+	if cx.promptTerminated.Load() {
 		return TelnetModeTerminatedPrompt
 	}
 	return TelnetModeUnterminated
-}
-
-// updateTelnetMode recalculates and applies the telnet mode to the output buffer.
-func (cx *connection) updateTelnetMode() {
-	cx.output.SetMode(cx.telnetMode())
 }
