@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmcdole/rune/event"
 	"github.com/mmcdole/rune/lua"
 )
 
@@ -20,8 +19,8 @@ const (
 )
 
 // HTTPRequest implements lua.Host. The request runs in its own
-// goroutine and the outcome comes back through the event loop as an
-// AsyncResult, so the Lua callback executes on the session goroutine
+// goroutine and the outcome comes back through the async-result
+// channel, so the Lua callback executes on the session goroutine
 // under the watchdog like every other callback. Like Connect's dial
 // goroutine, the channel send may block briefly; the session loop
 // keeps draining while requests are in flight.
@@ -32,11 +31,8 @@ func (s *Session) HTTPRequest(id int, req lua.HTTPRequest) {
 		if err != nil {
 			errMsg = err.Error()
 		}
-		s.events <- event.Event{
-			Type: event.AsyncResult,
-			Payload: event.Callback(func() {
-				s.engine.OnHTTPResult(id, resp, errMsg)
-			}),
+		s.asyncResults <- func() {
+			s.engine.OnHTTPResult(id, resp, errMsg)
 		}
 	}()
 }

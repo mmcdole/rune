@@ -7,13 +7,13 @@ import (
 	"time"
 )
 
-// awaitAsyncResult reads the AsyncResult the HTTP goroutine pushes and
-// runs it through handleEvent, exactly as the session loop would.
+// awaitAsyncResult reads the callback the HTTP goroutine pushes and
+// runs it, exactly as the session loop would.
 func awaitAsyncResult(t *testing.T, s *Session) {
 	t.Helper()
 	select {
-	case ev := <-s.events:
-		s.handleEvent(ev)
+	case cb := <-s.asyncResults:
+		cb()
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for HTTP result")
 	}

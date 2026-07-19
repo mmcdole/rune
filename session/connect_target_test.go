@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mmcdole/rune/event"
 	"github.com/mmcdole/rune/lua"
 )
 
@@ -35,11 +34,8 @@ func bootWithTarget(t *testing.T, dir, target string) (*Session, *mockNetwork, *
 func drainConnect(t *testing.T, s *Session) {
 	t.Helper()
 	select {
-	case ev := <-s.events:
-		if ev.Type != event.AsyncResult {
-			t.Fatalf("expected AsyncResult from connect, got %v", ev.Type)
-		}
-		s.handleEvent(ev)
+	case cb := <-s.asyncResults:
+		cb()
 	case <-time.After(5 * time.Second):
 		t.Fatal("connect never completed")
 	}
@@ -83,8 +79,8 @@ func TestCLITargetNotRepeatedOnReload(t *testing.T) {
 	drainConnect(t, s)
 
 	s.Reload()
-	ev := <-s.events
-	s.handleEvent(ev)
+	cb := <-s.asyncResults
+	cb()
 
 	if dialed := net.dialed(); len(dialed) != 1 {
 		t.Fatalf("reload redialed: %v", dialed)

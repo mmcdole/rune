@@ -83,8 +83,8 @@ func TestReloadWithBrokenScriptKeepsClientAlive(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.Reload()
-	ev := <-s.events // reload is deferred via AsyncResult
-	s.handleEvent(ev)
+	cb := <-s.asyncResults // reload is deferred
+	cb()
 
 	printed := uiMock.drainPrinted()
 	if !contains(printed, "[Script Error] init.lua") {

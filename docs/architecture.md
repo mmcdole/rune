@@ -141,12 +141,13 @@ Interaction between UI and Session is message-passing (commands), not function c
 
 - `cmd/rune/`: Entry point
 - `config/`: Config dir resolution (XDG/APPDATA)
-- `event/`: Session event types
+- `input/`: Input submission types and cursor conversions
 - `lua/`: Scripting engine, `rune._*` primitive registration, embedded Lua core (`lua/core/`)
 - `network/`: TCP and Telnet logic
 - `session/`: Main application controller (implements `lua.Host`)
 - `text/`: Line type, ANSI stripper, degraded-path colors
 - `timer/`: Timer scheduling service
+- `version/`: Version number, single-sourced for `/version` and TTYPE/MNES
 - `ui/`: UI interface and messages
   - `tui/`: Bubble Tea implementation
   - `tui/widget/`: Reusable widgets (Input, Picker, Viewport, Pane, Bar)
