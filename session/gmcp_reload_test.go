@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmcdole/rune/event"
+	"github.com/mmcdole/rune/network"
 )
 
 // TestGMCPStateSurvivesReloadMidConnection reproduces the /reload
@@ -32,7 +32,7 @@ func TestGMCPStateSurvivesReloadMidConnection(t *testing.T) {
 	// Server negotiates GMCP on the live connection.
 	net.connected = true
 	net.gmcpActive = true
-	s.handleEvent(event.Event{Type: event.SysGMCPEnabled})
+	s.handleNetworkOutput(network.Output{Kind: network.OutputGMCPEnabled})
 
 	sent := net.drainGMCPSent()
 	if len(sent) < 2 || sent[0].Package != "Core.Hello" {
@@ -49,8 +49,8 @@ func TestGMCPStateSurvivesReloadMidConnection(t *testing.T) {
 		`rune.echo("RELOAD-GMCP-UP=" .. tostring(rune.gmcp.is_enabled()))`,
 	}, "\n"))
 	s.Reload()
-	ev := <-s.events // reload is deferred via AsyncResult
-	s.handleEvent(ev)
+	cb := <-s.asyncResults // reload is deferred
+	cb()
 
 	// is_enabled() must stay truthful in the reloaded VM.
 	if printed := uiMock.drainPrinted(); !contains(printed, "RELOAD-GMCP-UP=true") {

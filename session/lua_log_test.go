@@ -86,8 +86,8 @@ func TestLogSurvivesReload(t *testing.T) {
 	userInput(s, "/log start "+path)
 
 	s.Reload()
-	ev := <-s.events // reload is deferred via AsyncResult
-	s.handleEvent(ev)
+	cb := <-s.asyncResults // reload is deferred
+	cb()
 
 	if got, active := s.LogStatus(); !active || got != path {
 		t.Fatalf("log did not survive reload: path=%q active=%v", got, active)

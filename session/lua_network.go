@@ -3,14 +3,12 @@ package session
 import (
 	"context"
 	"time"
-
-	"github.com/mmcdole/rune/event"
 )
 
 // Connect implements lua.Host.
 // The dial runs in its own goroutine; unlike Reload, that goroutine
-// may block on the events channel (lossless delivery) because the
-// session loop keeps draining while the dial is in flight.
+// may block on the async-result channel (lossless delivery) because
+// the session loop keeps draining while the dial is in flight.
 func (s *Session) Connect(addr string) {
 	s.engine.CallHook("connecting", addr)
 	go func() {
@@ -21,22 +19,19 @@ func (s *Session) Connect(addr string) {
 		defer cancel()
 
 		err := s.net.Connect(ctx, addr)
-		s.events <- event.Event{
-			Type: event.AsyncResult,
-			Payload: event.Callback(func() {
-				if err != nil {
-					s.clientState.Connected = false
-					s.clientState.Address = ""
-					s.engine.UpdateState(s.clientState)
-					s.engine.CallHook("error", err.Error())
-				} else {
-					s.clientState.Connected = true
-					s.clientState.Address = addr
-					s.engine.UpdateState(s.clientState)
-					s.engine.CallHook("connected", addr)
-				}
-				s.pushBarUpdates()
-			}),
+		s.asyncResults <- func() {
+			if err != nil {
+				s.clientState.Connected = false
+				s.clientState.Address = ""
+				s.engine.UpdateState(s.clientState)
+				s.engine.CallHook("error", err.Error())
+			} else {
+				s.clientState.Connected = true
+				s.clientState.Address = addr
+				s.engine.UpdateState(s.clientState)
+				s.engine.CallHook("connected", addr)
+			}
+			s.pushBarUpdates()
 		}
 	}()
 }

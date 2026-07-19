@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmcdole/rune/event"
 	"github.com/mmcdole/rune/input"
 	"github.com/mmcdole/rune/lua"
 	"github.com/mmcdole/rune/network"
@@ -77,9 +76,12 @@ type Session struct {
 	logPath string
 
 	// Channels
-	events      chan event.Event
-	timerEvents chan timer.Event
-	barTicker   *time.Ticker
+	// asyncResults marshals work from producer goroutines (dial, HTTP,
+	// deferred reload) back onto the session goroutine, which runs each
+	// callback with exclusive access to the Lua state.
+	asyncResults chan func()
+	timerEvents  chan timer.Event
+	barTicker    *time.Ticker
 
 	// State
 	lastPrompt    string
@@ -99,7 +101,7 @@ func New(net Network, uiInstance ui.UI, cfg Config) *Session {
 		ui:             uiInstance,
 		timer:          timer.NewService(timerEvents),
 		timerEvents:    timerEvents,
-		events:         make(chan event.Event, 256),
+		asyncResults:   make(chan func(), 256),
 		config:         cfg,
 		historyEntries: make([]input.Submission, 0, 10000),
 		historyLimit:   10000,
@@ -170,8 +172,8 @@ func (s *Session) processEvents(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case ev := <-s.events:
-			s.handleEvent(ev)
+		case cb := <-s.asyncResults:
+			cb()
 		case netOut := <-s.net.Output():
 			s.handleNetworkOutput(netOut)
 		case submission := <-s.ui.Input():
@@ -186,74 +188,50 @@ func (s *Session) processEvents(ctx context.Context) {
 	}
 }
 
-// handleNetworkOutput converts network layer output to session events.
+// handleNetworkOutput dispatches network layer output on the session loop.
 func (s *Session) handleNetworkOutput(out network.Output) {
 	switch out.Kind {
 	case network.OutputLine:
-		s.handleEvent(event.Event{Type: event.NetLine, Payload: event.Line(out.Payload)})
+		s.handleServerLine(out.Payload)
 	case network.OutputPrompt:
-		s.handleEvent(event.Event{Type: event.NetPrompt, Payload: event.Line(out.Payload)})
+		s.handleServerPrompt(out.Payload)
 	case network.OutputDisconnect:
-		s.handleEvent(event.Event{Type: event.SysDisconnect})
+		s.Disconnect()
 	case network.OutputGMCP:
-		s.handleEvent(event.Event{Type: event.NetGMCP, Payload: event.GMCP{Package: out.Package, Data: out.Payload}})
+		s.engine.OnGMCP(out.Package, out.Payload)
 	case network.OutputGMCPEnabled:
-		s.handleEvent(event.Event{Type: event.SysGMCPEnabled})
+		s.engine.CallHook("gmcp_enabled")
 	}
 }
 
-// handleEvent executes a single event on the session loop.
-func (s *Session) handleEvent(ev event.Event) {
-	switch ev.Type {
-	case event.NetLine:
-		payload := string(ev.Payload.(event.Line))
-		line := text.NewLine(payload)
-		if modified, show := s.engine.OnOutput(line); show {
-			// Display egress owns terminal safety: strip everything but
-			// SGR so server clear/cursor sequences cannot wipe UI chrome
-			// (issue #69). Lua hooks above saw the raw line.
-			s.ui.Print(text.SanitizeDisplay(modified))
-		}
-		// Server line ends the prompt overlay
-		s.lastPrompt = ""
-		s.ui.SetPrompt("")
-
-	case event.NetPrompt:
-		// A prompt snapshot replaces the overlay and is never committed to
-		// scrollback here. In unterminated mode snapshots are cumulative
-		// peeks of the growing line, so committing a superseded one would
-		// turn socket read boundaries into visible lines (issue #25); a
-		// GA/EOR prompt superseding another is a repaint and gets the same
-		// treatment. Only input submission commits the active prompt
-		// (handleSubmission).
-		payload := string(ev.Payload.(event.Line))
-		line := text.NewLine(payload)
-		// Sanitized before storing so the overlay and the later
-		// scrollback commit (handleSubmission) both stay chrome-safe.
-		modified := text.SanitizeDisplay(s.engine.OnPrompt(line))
-		s.lastPrompt = modified
-		s.ui.SetPrompt(modified)
-
-	case event.UserInput:
-		payload := string(ev.Payload.(event.Line))
-		s.handleSubmission(input.Command(payload))
-
-	case event.NetGMCP:
-		if gmcp, ok := ev.Payload.(event.GMCP); ok {
-			s.engine.OnGMCP(gmcp.Package, gmcp.Data)
-		}
-
-	case event.SysGMCPEnabled:
-		s.engine.CallHook("gmcp_enabled")
-
-	case event.AsyncResult:
-		if cb, ok := ev.Payload.(event.Callback); ok && cb != nil {
-			cb()
-		}
-
-	case event.SysDisconnect:
-		s.Disconnect()
+// handleServerLine processes a complete server line.
+func (s *Session) handleServerLine(payload string) {
+	line := text.NewLine(payload)
+	if modified, show := s.engine.OnOutput(line); show {
+		// Display egress owns terminal safety: strip everything but
+		// SGR so server clear/cursor sequences cannot wipe UI chrome
+		// (issue #69). Lua hooks above saw the raw line.
+		s.ui.Print(text.SanitizeDisplay(modified))
 	}
+	// Server line ends the prompt overlay
+	s.lastPrompt = ""
+	s.ui.SetPrompt("")
+}
+
+// handleServerPrompt processes a prompt snapshot. It replaces the overlay
+// and is never committed to scrollback here. In unterminated mode snapshots
+// are cumulative peeks of the growing line, so committing a superseded one
+// would turn socket read boundaries into visible lines (issue #25); a
+// GA/EOR prompt superseding another is a repaint and gets the same
+// treatment. Only input submission commits the active prompt
+// (handleSubmission).
+func (s *Session) handleServerPrompt(payload string) {
+	line := text.NewLine(payload)
+	// Sanitized before storing so the overlay and the later
+	// scrollback commit (handleSubmission) both stay chrome-safe.
+	modified := text.SanitizeDisplay(s.engine.OnPrompt(line))
+	s.lastPrompt = modified
+	s.ui.SetPrompt(modified)
 }
 
 // handleSubmission processes an immutable input snapshot. Command submissions
