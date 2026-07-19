@@ -545,6 +545,12 @@ func (c *TCPClient) writeLoop(cx *connection) {
 				// Clear prompt buffer before sending - in unterminated mode,
 				// the server will reprint the prompt after echoing our input
 				cx.output.InputSent()
+				// Line data is text: double IAC bytes so the server
+				// reads them as data, not commands. Raw messages are
+				// protocol frames and pass through untouched.
+				if bytes.IndexByte(data, CmdIAC) >= 0 {
+					data = EscapeIAC(data)
+				}
 				data = append(data, '\r', '\n')
 			}
 
