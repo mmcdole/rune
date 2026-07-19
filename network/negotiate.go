@@ -235,10 +235,10 @@ func (h *handshake) environReplyLocked(data []byte) [][]byte {
 
 	appendVar := func(kind byte, name string) {
 		payload = append(payload, kind)
-		payload = append(payload, []byte(name)...)
+		payload = append(payload, environEscape(name)...)
 		if value, ok := h.environValueLocked(name); ok {
 			payload = append(payload, environVALUE)
-			payload = append(payload, []byte(value)...)
+			payload = append(payload, environEscape(value)...)
 		}
 	}
 
@@ -261,6 +261,21 @@ type environName struct {
 	name string
 }
 
+// environEscape ESC-quotes the VAR/VALUE/ESC/USERVAR bytes so they
+// ride as data (RFC 1572). Our own names and values are ASCII; only
+// echoed request names can carry quoted markers.
+func environEscape(s string) []byte {
+	out := make([]byte, 0, len(s))
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case environVAR, environVALUE, environESC, environUSERVAR:
+			out = append(out, environESC)
+		}
+		out = append(out, s[i])
+	}
+	return out
+}
+
 // parseEnvironNames decodes the VAR/USERVAR name list of a SEND
 // request, honoring ESC-quoted bytes.
 func parseEnvironNames(data []byte) []environName {
@@ -280,9 +295,15 @@ func parseEnvironNames(data []byte) []environName {
 			flush()
 			current = &environName{kind: data[i]}
 		case environESC:
-			if current != nil && i+1 < len(data) {
+			// ESC quotes the next byte unconditionally - a lexical
+			// rule, like telnet's IAC IAC. A quoted byte outside any
+			// name has nowhere to attach and is discarded (RFC 1572
+			// leaves that case undefined).
+			if i+1 < len(data) {
 				i++
-				current.name += string(data[i])
+				if current != nil {
+					current.name += string(data[i])
+				}
 			}
 		default:
 			if current != nil {
