@@ -54,6 +54,21 @@ The `Session` struct is the heart of the application. It owns the main event loo
 - **Thread Safety:** Because all logic (including Lua execution) happens sequentially in this loop, Lua scripts do not need locks.
 - **State:** Owns the Lua Engine, Network Client, and Timer Service.
 
+### The Inner Loop
+
+`Session.processEvents` (`session/session.go`) is the single dispatch point. Its `select` is the complete inventory of what can happen in the client - each channel is a typed lane with one handler:
+
+| Lane | Carries | Handler |
+|---|---|---|
+| `ui.Outbound()` | UI intents (keys, resize, picker, input edits) | `handleUIMessage` |
+| `ui.Input()` | Submitted input (`input.Submission`, command or verbatim) | `handleSubmission` |
+| `net.Output()` | Server lines, prompts, GMCP, disconnect (`network.Output`) | `handleNetworkOutput` |
+| `timerEvents` | Due Lua timers | `engine.OnTimer` |
+| `barTicker` | 250ms bar repaint tick | `pushBarUpdates` |
+| `asyncResults` | Continuations of Session's own async work (dial, HTTP, deferred reload), as `func()` | run the closure |
+
+Lanes carrying cross-domain data are typed; `asyncResults` is deliberately not - it carries the second half of Session methods that had to leave the goroutine for a blocking step, and only the `session` package may send on it. Each lane is FIFO; ordering across lanes is undefined. To answer "what can this client react to?", read the `select`.
+
 ## 2.2 The UI (The Dumb Terminal)
 
 The UI layer (built with Bubble Tea) is deliberately "dumb."

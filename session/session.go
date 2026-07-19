@@ -78,7 +78,10 @@ type Session struct {
 	// Channels
 	// asyncResults marshals work from producer goroutines (dial, HTTP,
 	// deferred reload) back onto the session goroutine, which runs each
-	// callback with exclusive access to the Lua state.
+	// callback with exclusive access to the Lua state. Senders are
+	// Session's own methods only: this lane carries continuations, not
+	// messages. Data crossing a domain boundary (network, UI, timers)
+	// gets a typed channel instead, never a closure.
 	asyncResults chan func()
 	timerEvents  chan timer.Event
 	barTicker    *time.Ticker
@@ -158,7 +161,22 @@ func (s *Session) Run(ctx context.Context) error {
 	return err
 }
 
-// processEvents is the main event loop.
+// processEvents is the session's inner loop. The select below is the
+// complete inventory of everything that can happen in the client - a
+// new capability means a new lane here, not a new entry in a hidden
+// dispatch table:
+//
+//	ui.Outbound()  UI intents (keys, resize, picker, edits) -> handleUIMessage
+//	ui.Input()     submitted input, command or verbatim     -> handleSubmission
+//	net.Output()   server lines/prompts/GMCP/disconnect     -> handleNetworkOutput
+//	timerEvents    due Lua timers                           -> engine.OnTimer
+//	barTicker      250ms bar repaint tick                   -> pushBarUpdates
+//	asyncResults   continuations of Session's own async work -> run the closure
+//
+// Every lane is drained on this one goroutine, so handlers - and the
+// Lua they call - touch session state without locks. Each lane is
+// FIFO; ordering ACROSS lanes is undefined (select picks among ready
+// cases at random).
 func (s *Session) processEvents(ctx context.Context) {
 	for {
 		// Priority: drain UI input messages first (for responsive completion)
