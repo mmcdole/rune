@@ -208,6 +208,74 @@ func TestEnvironSendSpecificVariables(t *testing.T) {
 	}
 }
 
+// TestEnvironEscapeQuoting pins the ESC policy: ESC quotes the next
+// byte unconditionally, as a lexical rule. Inside a name the quoted
+// marker byte becomes data; before any VAR/USERVAR the quoted byte has
+// no name to attach to and is discarded; a trailing ESC quotes nothing.
+func TestEnvironEscapeQuoting(t *testing.T) {
+	cases := []struct {
+		name string
+		data []byte
+		want []environName
+	}{
+		{
+			"quoted marker inside a name",
+			[]byte{environVAR, 'A', environESC, environUSERVAR, 'B'},
+			[]environName{{kind: environVAR, name: "A\x03B"}},
+		},
+		{
+			"leading ESC discards its quoted marker",
+			[]byte{environESC, environVAR, 'X'},
+			nil, // quoted VAR is data with no name to join; bare X is ignored
+		},
+		{
+			"trailing ESC quotes nothing",
+			[]byte{environVAR, 'A', environESC},
+			[]environName{{kind: environVAR, name: "A"}},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := parseEnvironNames(c.data)
+			if len(got) != len(c.want) {
+				t.Fatalf("parsed %+v, want %+v", got, c.want)
+			}
+			for i := range c.want {
+				if got[i] != c.want[i] {
+					t.Errorf("name %d = %+v, want %+v", i, got[i], c.want[i])
+				}
+			}
+		})
+	}
+}
+
+// TestEnvironGarbageRequestGetsSendAll verifies a SEND whose name list
+// dissolves entirely into quoted garbage is treated as an empty SEND:
+// the reply is the full identity set, which is public by design.
+func TestEnvironGarbageRequestGetsSendAll(t *testing.T) {
+	all := newHandshake(false, 80, 24).onSubnegotiation(OptNewEnviron, []byte{environSEND})
+	got := newHandshake(false, 80, 24).onSubnegotiation(OptNewEnviron,
+		[]byte{environSEND, environESC, environVAR, 'X'})
+	if len(all) != 1 || len(got) != 1 || !bytes.Equal(got[0], all[0]) {
+		t.Fatalf("garbage SEND reply:\n got %v\nwant the send-all reply %v", got, all)
+	}
+}
+
+// TestEnvironReplyRequotesEchoedNames verifies an unknown requested
+// name carrying a quoted marker byte is echoed with the byte re-quoted,
+// so the reply stays inside the RFC 1572 grammar.
+func TestEnvironReplyRequotesEchoedNames(t *testing.T) {
+	h := newHandshake(false, 80, 24)
+	request := []byte{environSEND, environVAR, 'B', environESC, environVAR, 'G'}
+
+	frames := h.onSubnegotiation(OptNewEnviron, request)
+	want := subnegFrame(OptNewEnviron,
+		[]byte{environIS, environVAR, 'B', environESC, environVAR, 'G'})
+	if len(frames) != 1 || !bytes.Equal(frames[0], want) {
+		t.Fatalf("requoted echo:\n got %v\nwant %v", frames, want)
+	}
+}
+
 // TestGMCPSplit verifies package/payload separation.
 func TestGMCPSplit(t *testing.T) {
 	cases := []struct {
