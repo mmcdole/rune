@@ -6,6 +6,8 @@ package lua
 // UI would emit them.
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/mmcdole/rune/input"
@@ -388,6 +390,46 @@ func TestTabCompletionIgnoresShortPrefixAndInput(t *testing.T) {
 	typeInput(engine, host, "bra")
 	engine.HandleKeyBind("tab")
 	assertInput(t, host, "brandish ")
+}
+
+// The word cache caps at 5,000 entries (MAX_WORDS in 90_input.lua) and
+// evicts in insertion order: past the cap the oldest words stop
+// completing while newer ones still do. Pins the contract, not the
+// data structure.
+func TestTabCompletionCacheEvictsOldestBeyondCap(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	// Ten distinct "old" words, then verify they complete.
+	var old strings.Builder
+	for i := 1; i <= 10; i++ {
+		fmt.Fprintf(&old, "oldword%02d ", i)
+	}
+	engine.OnOutput(text.NewLine(old.String()))
+
+	typeInput(engine, host, "oldwor")
+	engine.HandleKeyBind("tab")
+	assertInput(t, host, "oldword10 ") // most recent match first
+
+	// 5,000 distinct filler words: exactly enough to evict the ten
+	// oldest entries and nothing else.
+	for line := 0; line < 50; line++ {
+		var b strings.Builder
+		for j := 1; j <= 100; j++ {
+			fmt.Fprintf(&b, "fill%04d ", line*100+j)
+		}
+		engine.OnOutput(text.NewLine(b.String()))
+	}
+
+	// The old words are gone: Tab is a no-op.
+	typeInput(engine, host, "oldwor")
+	engine.HandleKeyBind("tab")
+	assertInput(t, host, "oldwor")
+
+	// Surviving filler words still complete, newest match first.
+	typeInput(engine, host, "fill49")
+	engine.HandleKeyBind("tab")
+	assertInput(t, host, "fill4999 ")
 }
 
 func TestCompletionMidLineInsertsWithoutTrailingSpace(t *testing.T) {
