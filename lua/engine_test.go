@@ -2,6 +2,8 @@ package lua
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -100,6 +102,42 @@ func TestBrokenHooksDegradesGracefully(t *testing.T) {
 	}
 	if warnings != 1 {
 		t.Errorf("expected exactly one degraded-mode warning, got %d", warnings)
+	}
+}
+
+// TestDoFileSurvivesClobberedPackageAndRestoresPath verifies DoFile's
+// two package.path invariants: a script that clobbers the package
+// global cannot panic the process on the next file load, and a
+// successful load leaves package.path exactly as it found it.
+func TestDoFileSurvivesClobberedPackageAndRestoresPath(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	script := filepath.Join(t.TempDir(), "loaded.lua")
+	if err := os.WriteFile(script, []byte(`rune.send_raw("file ran")`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Normal path: package.path is restored byte-identically.
+	if err := engine.DoString("snap", `path_before = package.path`); err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.DoFile(script); err != nil {
+		t.Fatalf("DoFile: %v", err)
+	}
+	if err := engine.DoString("check", `assert(package.path == path_before, "package.path not restored")`); err != nil {
+		t.Error(err)
+	}
+
+	// Clobbered package global: the load still runs instead of panicking.
+	if err := engine.DoString("sabotage", `package = 5`); err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.DoFile(script); err != nil {
+		t.Fatalf("DoFile with clobbered package: %v", err)
+	}
+	if sent := host.DrainNetworkCalls(); len(sent) != 2 {
+		t.Errorf("expected the file to run both times, sent %v", sent)
 	}
 }
 

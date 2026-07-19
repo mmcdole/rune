@@ -232,18 +232,17 @@ func (e *Engine) DoFile(path string) error {
 	if err != nil {
 		return err
 	}
-	dir := filepath.Dir(absPath)
+	// A user script can clobber the package global; skip the path
+	// prefix rather than panic (require is already broken then). The
+	// deferred restore keeps the prefix scoped to this load even if a
+	// panic escapes the guarded call.
+	if pkg, ok := e.L.GetGlobal("package").(*glua.LTable); ok {
+		oldPath := e.L.GetField(pkg, "path").String()
+		e.L.SetField(pkg, "path", glua.LString(filepath.Dir(absPath)+"/?.lua;"+oldPath))
+		defer e.L.SetField(pkg, "path", glua.LString(oldPath))
+	}
 
-	pkg := e.L.GetGlobal("package").(*glua.LTable)
-	oldPath := e.L.GetField(pkg, "path").String()
-	newPath := dir + "/?.lua;" + oldPath
-	e.L.SetField(pkg, "path", glua.LString(newPath))
-
-	err = e.guard(func() error { return e.L.DoFile(absPath) })
-
-	e.L.SetField(pkg, "path", glua.LString(oldPath))
-
-	return err
+	return e.guard(func() error { return e.L.DoFile(absPath) })
 }
 
 // OnInput handles traditional command input. It remains as a convenience for
