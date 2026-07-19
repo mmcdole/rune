@@ -120,7 +120,7 @@ func TestParser(t *testing.T) {
 	}
 
 	// Test receiving data with IAC GA
-	events := parser.Receive(append([]byte("Hello, rust!"), CmdIAC, CmdGA))
+	events := parser.Receive(append([]byte("Hello, world!"), CmdIAC, CmdGA))
 	kinds := eventKinds(events)
 	expected := []TelnetEventKind{TelnetEventDataReceive, TelnetEventIAC}
 	if len(kinds) != len(expected) {
@@ -195,7 +195,7 @@ func TestParser(t *testing.T) {
 }
 
 func TestSubnegSeparateReceives(t *testing.T) {
-	parser := NewParserWithCapacity(10)
+	parser := NewParser(NewCompatibilityTable())
 	parser.Options.SupportLocal(OptGMCP)
 	parser.Will(OptGMCP)
 
@@ -296,8 +296,9 @@ func TestUnescape(t *testing.T) {
 	}
 }
 
+// A doubled IAC followed by a data byte must round-trip through
+// escape/unescape unchanged.
 func TestEscapeRoundtripBugOne(t *testing.T) {
-	// The original libtelnet-rs mishandles this input
 	data := []byte{CmdIAC, CmdIAC, 228}
 	escaped := EscapeIAC(data)
 	unescaped := UnescapeIAC(escaped)
@@ -306,8 +307,9 @@ func TestEscapeRoundtripBugOne(t *testing.T) {
 	}
 }
 
+// A data byte followed by a doubled IAC must round-trip through
+// escape/unescape unchanged.
 func TestEscapeRoundtripBugTwo(t *testing.T) {
-	// The original libtelnet-rs mishandles this input
 	data := []byte{228, CmdIAC, CmdIAC}
 	escaped := EscapeIAC(data)
 	unescaped := UnescapeIAC(escaped)
@@ -319,7 +321,7 @@ func TestEscapeRoundtripBugTwo(t *testing.T) {
 func TestBadSubnegBuffer(t *testing.T) {
 	// Configure opt 0xFF (IAC) as local supported, and local state enabled.
 	entry := CompatibilityEntry{Local: true, Remote: false, LocalState: true, RemoteState: false}
-	table := FromOptions([][2]byte{{CmdIAC, entry.toU8()}})
+	table := fromOptions([][2]byte{{CmdIAC, entry.toU8()}})
 	parser := NewParser(table)
 
 	// Receive a malformed subnegotiation - this should not panic
@@ -367,12 +369,13 @@ func TestCompatibilityEntryBitmask(t *testing.T) {
 	}
 }
 
-// Tests ported from libmudtelnet compat_tests
+// Malformed-stream regression inputs: each must parse without
+// panicking, whatever it decodes to.
 
 func TestParserDiff1(t *testing.T) {
 	// options: [(255, 254)]
 	// received_data: [[255, 255, 255, 255, 255, 254, 255, 0]]
-	table := FromOptions([][2]byte{{255, 254}})
+	table := fromOptions([][2]byte{{255, 254}})
 	parser := NewParser(table)
 	parser.Receive([]byte{255, 255, 255, 255, 255, 254, 255, 0})
 	// Should not panic
@@ -384,7 +387,7 @@ func TestParserDiff2(t *testing.T) {
 }
 
 func TestParserDiff3(t *testing.T) {
-	table := FromOptions([][2]byte{{0, 1}})
+	table := fromOptions([][2]byte{{0, 1}})
 	parser := NewParser(table)
 	parser.Receive([]byte{255, 253, 0})
 }
@@ -420,7 +423,7 @@ func TestParserDiff9(t *testing.T) {
 }
 
 func TestParserDiff10(t *testing.T) {
-	table := FromOptions([][2]byte{{255, 254}, {1, 0}})
+	table := fromOptions([][2]byte{{255, 254}, {1, 0}})
 	parser := NewParser(table)
 	parser.Receive([]byte{255, 253, 255})
 }
@@ -546,24 +549,6 @@ func TestOutputBufferPromptConsumeHeldCR(t *testing.T) {
 	}
 }
 
-func TestSendText(t *testing.T) {
-	ev := SendText("hello")
-	if ev.Kind != TelnetEventDataSend {
-		t.Errorf("Expected DataSend, got %v", ev.Kind)
-	}
-	expected := []byte("hello\r\n")
-	if !bytes.Equal(ev.Data, expected) {
-		t.Errorf("Expected %v, got %v", expected, ev.Data)
-	}
-
-	// Test with IAC in text
-	ev = SendText(string([]byte{0xFF, 0x41}))
-	expected = []byte{0xFF, 0xFF, 0x41, '\r', '\n'}
-	if !bytes.Equal(ev.Data, expected) {
-		t.Errorf("Expected %v, got %v", expected, ev.Data)
-	}
-}
-
 func TestNegotiationWILL(t *testing.T) {
 	parser := NewParserDefault()
 	parser.Options.SupportRemote(OptEcho)
@@ -643,22 +628,6 @@ func TestNegotiationDOUnsupported(t *testing.T) {
 	}
 	if !bytes.Equal(events[0].Data, []byte{CmdIAC, CmdWONT, OptNAWS}) {
 		t.Errorf("Expected IAC WONT NAWS, got %v", events[0].Data)
-	}
-}
-
-func TestLinemodeEnabled(t *testing.T) {
-	parser := NewParserDefault()
-	parser.Options.SupportRemote(OptLinemode)
-
-	if parser.LinemodeEnabled() {
-		t.Error("LinemodeEnabled should be false initially")
-	}
-
-	// Enable via WILL
-	parser.Receive([]byte{CmdIAC, CmdWILL, OptLinemode})
-
-	if !parser.LinemodeEnabled() {
-		t.Error("LinemodeEnabled should be true after WILL")
 	}
 }
 

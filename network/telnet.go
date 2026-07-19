@@ -1,5 +1,5 @@
-// Package network provides telnet protocol parsing for MUD clients.
-// This is a faithful Go port of libmudtelnet (Rust).
+// Package network provides the telnet protocol layer for the client:
+// stream parsing, option negotiation, and connection management.
 package network
 
 import (
@@ -8,7 +8,7 @@ import (
 	"sync"
 )
 
-// Telnet command codes (op_command in libmudtelnet).
+// Telnet command codes.
 const (
 	CmdIAC  byte = 255 // Interpret As Command
 	CmdWILL byte = 251 // Will use option
@@ -24,7 +24,7 @@ const (
 	CmdEOR  byte = 239 // End of record
 )
 
-// Telnet option codes (op_option in libmudtelnet).
+// Telnet option codes.
 const (
 	OptBinary         byte = 0
 	OptEcho           byte = 1
@@ -73,12 +73,6 @@ const (
 	OptZMP            byte = 93
 	OptEXOPL          byte = 255
 	OptGMCP           byte = 201
-)
-
-// Aliases for backwards compatibility
-const (
-	OptSuppressGA = OptSGA
-	OptLINEMODE   = OptLinemode
 )
 
 // TelnetEventKind represents the type of telnet event.
@@ -160,8 +154,9 @@ func DefaultCompatibility() CompatibilityTable {
 	return defaultCompatibility()
 }
 
-// FromOptions creates a table from (option, bitmask) tuples.
-func FromOptions(values [][2]byte) CompatibilityTable {
+// fromOptions creates a table from (option, bitmask) tuples.
+// Test scaffolding for constructing arbitrary negotiation states.
+func fromOptions(values [][2]byte) CompatibilityTable {
 	table := CompatibilityTable{}
 	for _, v := range values {
 		table.options[v[0]] = v[1]
@@ -223,20 +218,9 @@ func NewParserDefault() *Parser {
 	return NewParser(NewCompatibilityTable())
 }
 
-func NewParserWithCapacity(size int) *Parser {
-	return &Parser{
-		buffer: make([]byte, 0, size),
-	}
-}
-
 func (p *Parser) Receive(data []byte) []TelnetEvent {
 	p.buffer = append(p.buffer, data...)
 	return p.process()
-}
-
-func (p *Parser) LinemodeEnabled() bool {
-	entry := p.Options.Get(OptLinemode)
-	return entry.Remote && entry.RemoteState
 }
 
 // EscapeIAC doubles IAC bytes for outbound data.
@@ -353,16 +337,6 @@ func (p *Parser) Subnegotiation(option byte, data []byte) *TelnetEvent {
 		}
 	}
 	return nil
-}
-
-func (p *Parser) SubnegotiationText(option byte, text string) *TelnetEvent {
-	return p.Subnegotiation(option, []byte(text))
-}
-
-// SendText prepares text for transmission with CRLF and IAC escaping.
-func SendText(text string) TelnetEvent {
-	escaped := EscapeIAC([]byte(text + "\r\n"))
-	return TelnetEvent{Kind: TelnetEventDataSend, Data: escaped}
 }
 
 type eventType int
