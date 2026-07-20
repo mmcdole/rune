@@ -55,6 +55,26 @@ The scripting language is the same; the API names differ:
 | `tempRegexTrigger(pattern, code)` | `rune.trigger.regex(pattern, action)` |
 | script editor window | your `$EDITOR`; `Ctrl+E` edits the input line in it too |
 
+## From MUSHclient
+
+The scripting language is the same; the API names differ. If you're using
+MUSHclient's XML syntax for creating triggers, aliases, and timers, you'll
+need to covert those to Lua first.
+
+| MUSHclient                        | Rune equivalent                       |
+|-----------------------------------|---------------------------------------|
+| `Send("kill rat")`                | `rune.send_raw("kill rat")`           |
+| `Execute("kill rat")`             | `rune.send("kill rat")`               |
+| `Note("text")`                    | `rune.echo(text)`                     |
+| `wildcards[1]`                    | `matches[1]`                          |
+| `DoAfter(5, "drink")`             | `rune.timer.after(5, "drink")`        |
+| `tempRegexTrigger(pattern, code)` | `rune.trigger.regex(pattern, action)` |
+| `EnableTrigger("tname",false)`    | `rune.trigger.disable("tname")`       |
+| `SetVariable("varname","value")`  | `rune.store.set("varname","value")`   |
+
+Some functions such as ColourNote have no direct equivalent, but a simple
+wrapper function could replace it with Lua. (using `rune.style.*`)
+
 ## Capture references
 
 Regex aliases and triggers substitute `%1`, `%2`, and so on from captures
