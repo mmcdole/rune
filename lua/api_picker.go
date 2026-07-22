@@ -2,7 +2,7 @@ package lua
 
 import (
 	"github.com/mmcdole/rune/ui"
-	glua "github.com/yuin/gopher-lua"
+	glua "github.com/mmcdole/rune/lua/luavm"
 )
 
 // registerPickerFuncs registers the rune._ui.picker_show primitive.

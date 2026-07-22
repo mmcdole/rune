@@ -1,7 +1,7 @@
 package lua
 
 import "github.com/mmcdole/rune/input"
-import glua "github.com/yuin/gopher-lua"
+import glua "github.com/mmcdole/rune/lua/luavm"
 
 // registerInputFuncs registers rune._input.* primitives.
 // The public rune.input API is defined in Lua (90_input.lua).

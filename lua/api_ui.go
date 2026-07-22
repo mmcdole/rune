@@ -1,6 +1,6 @@
 package lua
 
-import glua "github.com/yuin/gopher-lua"
+import glua "github.com/mmcdole/rune/lua/luavm"
 
 // registerUIFuncs registers all UI-related API functions
 func (e *Engine) registerUIFuncs() {

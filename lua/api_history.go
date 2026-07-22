@@ -1,6 +1,6 @@
 package lua
 
-import glua "github.com/yuin/gopher-lua"
+import glua "github.com/mmcdole/rune/lua/luavm"
 
 // registerHistoryFuncs registers rune._history.* primitives.
 // The public rune.history API is defined in Lua (00_init.lua).

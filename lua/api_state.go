@@ -1,6 +1,6 @@
 package lua
 
-import glua "github.com/yuin/gopher-lua"
+import glua "github.com/mmcdole/rune/lua/luavm"
 
 // ClientState holds the current client state for Lua access.
 type ClientState struct {

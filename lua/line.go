@@ -2,7 +2,7 @@ package lua
 
 import (
 	"github.com/mmcdole/rune/text"
-	glua "github.com/yuin/gopher-lua"
+	glua "github.com/mmcdole/rune/lua/luavm"
 )
 
 const luaLineTypeName = "line"

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"math"
 
-	glua "github.com/yuin/gopher-lua"
+	glua "github.com/mmcdole/rune/lua/luavm"
 )
 
 // maxStoreDepth bounds nesting during Lua→JSON conversion; combined

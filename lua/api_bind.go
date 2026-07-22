@@ -1,6 +1,6 @@
 package lua
 
-import glua "github.com/yuin/gopher-lua"
+import glua "github.com/mmcdole/rune/lua/luavm"
 
 // Key bindings are owned by the Lua bind module (30_binds.lua); Go is
 // transport only. The Engine methods here bridge Session to the two

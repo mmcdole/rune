@@ -1,7 +1,7 @@
 package lua
 
 import (
-	glua "github.com/yuin/gopher-lua"
+	glua "github.com/mmcdole/rune/lua/luavm"
 )
 
 // registerHTTPFuncs registers rune._http.* primitives.

@@ -1,6 +1,6 @@
 package lua
 
-import glua "github.com/yuin/gopher-lua"
+import glua "github.com/mmcdole/rune/lua/luavm"
 
 // registerLogFuncs registers rune._log.* primitives.
 // The public rune.log API and the hooks that decide what gets written

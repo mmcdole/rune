@@ -3,7 +3,7 @@ package lua
 import (
 	"regexp"
 
-	glua "github.com/yuin/gopher-lua"
+	glua "github.com/mmcdole/rune/lua/luavm"
 )
 
 const luaRegexTypeName = "Regex"

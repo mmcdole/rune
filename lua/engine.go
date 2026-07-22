@@ -13,7 +13,7 @@ import (
 	"github.com/mmcdole/rune/text"
 	"github.com/mmcdole/rune/ui"
 	"github.com/mmcdole/rune/version"
-	glua "github.com/yuin/gopher-lua"
+	glua "github.com/mmcdole/rune/lua/luavm"
 )
 
 // DefaultCallTimeout bounds each entry into the Lua VM. A script that

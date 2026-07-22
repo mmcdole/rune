@@ -3,7 +3,7 @@ package lua
 import (
 	"encoding/json"
 
-	glua "github.com/yuin/gopher-lua"
+	glua "github.com/mmcdole/rune/lua/luavm"
 )
 
 // registerGMCPFuncs registers rune._gmcp.* primitives.

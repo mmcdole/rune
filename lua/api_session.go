@@ -1,6 +1,6 @@
 package lua
 
-import glua "github.com/yuin/gopher-lua"
+import glua "github.com/mmcdole/rune/lua/luavm"
 
 // registerSessionFuncs registers rune._session.* primitives.
 // The public rune.session API is defined in Lua (00_init.lua).

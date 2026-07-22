@@ -3,7 +3,7 @@ package lua
 import (
 	"time"
 
-	glua "github.com/yuin/gopher-lua"
+	glua "github.com/mmcdole/rune/lua/luavm"
 )
 
 // registerTimerFuncs registers rune._timer.* primitives.
