@@ -1,27 +1,18 @@
 package lua
 
-import glua "github.com/mmcdole/rune/lua/luavm"
+import "github.com/mmcdole/rune/script"
 
 // Key bindings are owned by the Lua bind module (30_binds.lua); Go is
 // transport only. The Engine methods here bridge Session to the two
 // internal Lua entry points.
 
 // HandleKeyBind dispatches a pressed key to the Lua bind module.
+// found=false (bind module unavailable, e.g. core failed to load) is
+// ignored silently.
 func (e *Engine) HandleKeyBind(key string) {
-	if e.L == nil {
-		return
-	}
-	dispatch, ok := e.getRuneFunc("binds", "_dispatch")
-	if !ok {
-		return // Bind module unavailable (core failed to load)
-	}
-
 	if err := e.guard(func() error {
-		return e.L.CallByParam(glua.P{
-			Fn:      dispatch,
-			NRet:    0,
-			Protect: true,
-		}, glua.LString(key))
+		_, _, callErr := e.vm.CallModule("rune.binds", "_dispatch", 0, key)
+		return callErr
 	}); err != nil {
 		e.reportError("keybind '"+key+"'", err)
 	}
@@ -31,35 +22,25 @@ func (e *Engine) HandleKeyBind(key string) {
 // module. Session pushes these to the UI so it knows which keys to
 // forward instead of feeding them to the input widget.
 func (e *Engine) GetBoundKeys() []string {
-	if e.L == nil {
-		return nil
-	}
-	keysFn, ok := e.getRuneFunc("binds", "_keys")
-	if !ok {
-		return nil
-	}
-
-	if err := e.guard(func() error {
-		return e.L.CallByParam(glua.P{
-			Fn:      keysFn,
-			NRet:    1,
-			Protect: true,
-		})
-	}); err != nil {
+	var keys []string
+	err := e.guard(func() error {
+		_, callErr := e.vm.CallModuleScoped("rune.binds", "_keys", 1,
+			nil, func(vals []script.Value) error {
+				tbl := vals[0].Table()
+				if tbl == nil {
+					return nil
+				}
+				tbl.Each(func(_, v script.Value) bool {
+					keys = append(keys, v.String())
+					return true
+				})
+				return nil
+			})
+		return callErr
+	})
+	if err != nil {
 		e.reportError("bind key listing", err)
 		return nil
 	}
-
-	ret := e.L.Get(-1)
-	e.L.Pop(1)
-
-	tbl, ok := ret.(*glua.LTable)
-	if !ok {
-		return nil
-	}
-	var keys []string
-	tbl.ForEach(func(_, v glua.LValue) {
-		keys = append(keys, v.String())
-	})
 	return keys
 }

@@ -1,5 +1,5 @@
-#ifndef RUNE_LUAJIT_SHIM_H
-#define RUNE_LUAJIT_SHIM_H
+#ifndef RUNE_SEAM_LUAJIT_SHIM_H
+#define RUNE_SEAM_LUAJIT_SHIM_H
 
 #include <lua.h>
 #include <lauxlib.h>
@@ -21,5 +21,9 @@ void rune_install_gc(lua_State *L);
  * during normal execution. */
 void rune_sethook_interrupt(lua_State *L);
 void rune_clearhook(lua_State *L);
+
+/* Release the mcode address-space reservation made at process load
+ * (see shim.c). Called once, before the first state is created. */
+void rune_release_mcode_reserve(void);
 
 #endif
