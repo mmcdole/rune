@@ -2,10 +2,9 @@
 
 #include "shim.h"
 #include <stdint.h>
-#include <sys/mman.h>
 
 /* LuaJIT compiles traces into mcode areas that must sit within the
- * arm64 branch range (+-128MB) of its VM code, and its hardened
+ * branch range of its VM code (+-128MB on arm64), and its hardened
  * allocator probes random addresses in that window. In a Go process
  * the window can be crowded by the time the JIT needs it, and every
  * probe misses: the JIT then thrashes compile -> fail -> flush and
@@ -14,7 +13,19 @@
  * image load -- before the Go runtime allocates anything -- and
  * reserves a large block near our text for LuaJIT to find later.
  * rune_release_mcode_reserve() returns it right before the first
- * state is created. */
+ * state is created.
+ *
+ * Windows builds stub this out: x64's +-2GB branch range makes the
+ * probe window vast, and the failure mode has not been observed
+ * there. Revisit if windows/arm64 ever becomes a target. */
+
+#ifdef _WIN32
+
+void rune_release_mcode_reserve(void) {}
+
+#else
+
+#include <sys/mman.h>
 
 static void *rune_mcode_reserve = NULL;
 static size_t rune_mcode_reserve_size = 0;
@@ -50,6 +61,8 @@ void rune_release_mcode_reserve(void) {
         rune_mcode_reserve_size = 0;
     }
 }
+
+#endif /* _WIN32 */
 
 /* Implemented in Go (engine.go). */
 extern int runeSeamDispatch(lua_State *L);

@@ -27,8 +27,6 @@ jobs:
   # rune-jit is cgo + statically linked LuaJIT, so it cannot be
   # cross-compiled from one runner; each target builds natively and
   # attaches its archive to the release goreleaser created above.
-  # Windows is deliberately absent until a mingw + static-LuaJIT lane
-  # is qualified.
   rune-jit:
     needs: goreleaser
     runs-on: ${{ matrix.os }}
@@ -45,6 +43,8 @@ jobs:
             target: linux_amd64
           - os: ubuntu-24.04-arm
             target: linux_arm64
+          - os: windows-2025
+            target: windows_amd64
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -56,35 +56,50 @@ jobs:
       - name: Install LuaJIT (macOS)
         if: runner.os == 'macOS'
         run: brew install luajit
+      - name: Build static LuaJIT (Windows)
+        if: runner.os == 'Windows'
+        uses: ./.github/actions/setup-luajit-windows
       - name: Test this platform's JIT build
+        shell: bash
         run: go test -tags luajit ./lua/ ./script/...
       - name: Build rune-jit
+        shell: bash
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
+          BIN="rune-jit"
+          [ "$RUNNER_OS" = "Windows" ] && BIN="rune-jit.exe"
           go build -tags luajit -trimpath \
             -ldflags "-s -w -X github.com/mmcdole/rune/version.Number=${VERSION}" \
-            -o rune-jit ./cmd/rune
+            -o "$BIN" ./cmd/rune
       - name: Verify binary is self-contained
+        shell: bash
         run: |
-          if [ "$RUNNER_OS" = "macOS" ]; then
-            if otool -L rune-jit | grep -qi luajit; then
-              echo "rune-jit dynamically links LuaJIT; release binaries must be static" >&2
-              exit 1
-            fi
-          else
-            if ldd rune-jit | grep -qi luajit; then
-              echo "rune-jit dynamically links LuaJIT; release binaries must be static" >&2
-              exit 1
-            fi
+          case "$RUNNER_OS" in
+            macOS)   check() { otool -L rune-jit; } ;;
+            Linux)   check() { ldd rune-jit; } ;;
+            Windows) check() { objdump -p rune-jit.exe | grep -i 'DLL Name' || true; } ;;
+          esac
+          if check | grep -qi luajit; then
+            echo "rune-jit dynamically links LuaJIT; release binaries must be static" >&2
+            exit 1
           fi
       - name: Package and attach to release
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           NAME="rune-jit_${VERSION}_${{ matrix.target }}"
           mkdir "$NAME"
-          cp rune-jit LICENSE README.md "$NAME/"
-          tar -czf "$NAME.tar.gz" "$NAME"
-          shasum -a 256 "$NAME.tar.gz" > "$NAME.tar.gz.sha256"
-          gh release upload "$GITHUB_REF_NAME" "$NAME.tar.gz" "$NAME.tar.gz.sha256"
+          cp LICENSE README.md "$NAME/"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cp rune-jit.exe "$NAME/"
+            7z a "$NAME.zip" "$NAME" > /dev/null
+            sha256sum "$NAME.zip" > "$NAME.zip.sha256"
+            gh release upload "$GITHUB_REF_NAME" "$NAME.zip" "$NAME.zip.sha256"
+          else
+            cp rune-jit "$NAME/"
+            tar -czf "$NAME.tar.gz" "$NAME"
+            shasum -a 256 "$NAME.tar.gz" > "$NAME.tar.gz.sha256"
+            gh release upload "$GITHUB_REF_NAME" "$NAME.tar.gz" "$NAME.tar.gz.sha256"
+          fi

@@ -17,9 +17,15 @@ requires the LuaJIT library and headers:
 go build -tags luajit ./cmd/...
 ```
 
-On macOS arm64 (`brew install luajit`) LuaJIT is linked statically —
-see "Machine-code placement" below for why. Elsewhere `pkg-config
-luajit` must resolve.
+LuaJIT is linked statically on release platforms so shipped binaries
+are self-contained: macOS arm64 uses the homebrew archive
+(`brew install luajit`; see "Machine-code placement" below), Linux uses
+the libluajit-5.1-dev static archive, and Windows builds a static
+libluajit.a from source with mingw-w64
+(`.github/actions/setup-luajit-windows` stages it under
+`script/luajit/vendor_luajit/`). Other platforms fall back to
+`pkg-config luajit`. On Windows the mcode reservation is stubbed out:
+x64's +-2GB branch range makes allocation failure unlikely there.
 
 ## The seam
 

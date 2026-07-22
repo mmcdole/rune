@@ -106,11 +106,11 @@ jobs:
   luajit:
     name: luajit (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15]
+        os: [ubuntu-24.04, macos-15, windows-2025]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -122,6 +122,9 @@ jobs:
       - name: Install LuaJIT (macOS)
         if: runner.os == 'macOS'
         run: brew install luajit
+      - name: Build static LuaJIT (Windows)
+        if: runner.os == 'Windows'
+        uses: ./.github/actions/setup-luajit-windows
       - name: vet
         run: go vet -tags luajit ./...
       - name: test

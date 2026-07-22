@@ -1,0 +1,41 @@
+name: Setup static LuaJIT (Windows)
+description: >
+  Builds a static libluajit.a from source with mingw-w64 and stages it
+  where script/luajit/link_windows.go expects it
+  (script/luajit/vendor_luajit/). Also leaves the mingw toolchain on
+  PATH for cgo.
+
+inputs:
+  luajit-ref:
+    description: LuaJIT git ref to build (branch, tag, or commit)
+    required: false
+    default: v2.1
+
+runs:
+  using: composite
+  steps:
+    - uses: msys2/setup-msys2@v2
+      with:
+        msystem: MINGW64
+        path-type: inherit
+        install: >-
+          mingw-w64-x86_64-gcc
+          make
+          git
+    - name: Expose mingw toolchain to later non-msys2 steps
+      shell: msys2 {0}
+      run: cygpath -w /mingw64/bin >> "$GITHUB_PATH"
+    - name: Build LuaJIT static library
+      shell: msys2 {0}
+      run: |
+        set -euo pipefail
+        git clone --depth 1 --branch "${{ inputs.luajit-ref }}" \
+          https://github.com/LuaJIT/LuaJIT.git /tmp/luajit-src
+        echo "LuaJIT commit: $(git -C /tmp/luajit-src rev-parse HEAD)"
+        make -C /tmp/luajit-src/src -j"$(nproc)" BUILDMODE=static
+        DEST="$GITHUB_WORKSPACE/script/luajit/vendor_luajit"
+        mkdir -p "$DEST/include" "$DEST/lib"
+        cp /tmp/luajit-src/src/libluajit.a "$DEST/lib/"
+        cp /tmp/luajit-src/src/lua.h /tmp/luajit-src/src/lauxlib.h \
+           /tmp/luajit-src/src/lualib.h /tmp/luajit-src/src/luaconf.h \
+           /tmp/luajit-src/src/luajit.h "$DEST/include/"
