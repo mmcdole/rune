@@ -45,9 +45,9 @@ type Engine struct {
 	modules []moduleDecl
 	types   []typeDecl
 
-	funcs   []script.GoFunc      // trampoline targets, addressed by upvalue
-	ownMeta map[uintptr]string   // lua_topointer of our type metatables -> type name
-	pins    map[int64]C.int      // pinned functions -> registry ref
+	funcs   []script.GoFunc    // trampoline targets, addressed by upvalue
+	ownMeta map[uintptr]string // lua_topointer of our type metatables -> type name
+	pins    map[int64]C.int    // pinned functions -> registry ref
 	pinNext int64
 
 	ctx       context.Context

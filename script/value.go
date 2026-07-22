@@ -18,21 +18,21 @@ type Value struct {
 }
 
 // Constructors for backend implementations.
-func NilValue() Value              { return Value{k: KindNil} }
-func BoolValue(b bool) Value       { return Value{k: KindBool, b: b} }
-func NumberValue(n float64) Value  { return Value{k: KindNumber, n: n} }
-func StringValue(s string) Value   { return Value{k: KindString, s: s} }
-func TableValue(t TableView) Value { return Value{k: KindTable, t: t} }
+func NilValue() Value               { return Value{k: KindNil} }
+func BoolValue(b bool) Value        { return Value{k: KindBool, b: b} }
+func NumberValue(n float64) Value   { return Value{k: KindNumber, n: n} }
+func StringValue(s string) Value    { return Value{k: KindString, s: s} }
+func TableValue(t TableView) Value  { return Value{k: KindTable, t: t} }
 func FunctionValue(token any) Value { return Value{k: KindFunction, fn: token} }
-func OpaqueValue(k Kind) Value     { return Value{k: k} }
+func OpaqueValue(k Kind) Value      { return Value{k: k} }
 
-func (v Value) Kind() Kind   { return v.k }
+func (v Value) Kind() Kind { return v.k }
 
 // FuncToken exposes the backend function token; backend use only.
 func (v Value) FuncToken() any { return v.fn }
-func (v Value) IsNil() bool  { return v.k == KindNil }
-func (v Value) Bool() bool   { return v.k == KindBool && v.b }
-func (v Value) Num() float64 { return v.n }
+func (v Value) IsNil() bool    { return v.k == KindNil }
+func (v Value) Bool() bool     { return v.k == KindBool && v.b }
+func (v Value) Num() float64   { return v.n }
 
 // Str returns the string form of a string or number, else "".
 // (Mirrors LVAsString: no raising, for optional-field reads.)

@@ -1,4 +1,4 @@
-//go:build luajit && !(darwin && arm64)
+//go:build luajit && !linux && !(darwin && arm64)
 
 package luajit
 

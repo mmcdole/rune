@@ -23,3 +23,68 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # rune-jit is cgo + statically linked LuaJIT, so it cannot be
+  # cross-compiled from one runner; each target builds natively and
+  # attaches its archive to the release goreleaser created above.
+  # Windows is deliberately absent until a mingw + static-LuaJIT lane
+  # is qualified.
+  rune-jit:
+    needs: goreleaser
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            target: darwin_arm64
+          - os: ubuntu-24.04
+            target: linux_amd64
+          - os: ubuntu-24.04-arm
+            target: linux_arm64
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Install LuaJIT (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y luajit libluajit-5.1-dev
+      - name: Install LuaJIT (macOS)
+        if: runner.os == 'macOS'
+        run: brew install luajit
+      - name: Test this platform's JIT build
+        run: go test -tags luajit ./lua/ ./script/...
+      - name: Build rune-jit
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          go build -tags luajit -trimpath \
+            -ldflags "-s -w -X github.com/mmcdole/rune/version.Number=${VERSION}" \
+            -o rune-jit ./cmd/rune
+      - name: Verify binary is self-contained
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            if otool -L rune-jit | grep -qi luajit; then
+              echo "rune-jit dynamically links LuaJIT; release binaries must be static" >&2
+              exit 1
+            fi
+          else
+            if ldd rune-jit | grep -qi luajit; then
+              echo "rune-jit dynamically links LuaJIT; release binaries must be static" >&2
+              exit 1
+            fi
+          fi
+      - name: Package and attach to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          NAME="rune-jit_${VERSION}_${{ matrix.target }}"
+          mkdir "$NAME"
+          cp rune-jit LICENSE README.md "$NAME/"
+          tar -czf "$NAME.tar.gz" "$NAME"
+          shasum -a 256 "$NAME.tar.gz" > "$NAME.tar.gz.sha256"
+          gh release upload "$GITHUB_REF_NAME" "$NAME.tar.gz" "$NAME.tar.gz.sha256"
