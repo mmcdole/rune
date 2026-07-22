@@ -300,7 +300,7 @@ func (e *Engine) Call(fn script.FuncRef, nret int, args ...any) ([]script.Result
 	return results, nil
 }
 
-func (e *Engine) releasePin(id int64) {
+func (e *Engine) ReleasePin(id int64) {
 	if ref, ok := e.pins[id]; ok {
 		delete(e.pins, id)
 		if e.l != nil {

@@ -234,7 +234,7 @@ func (e *Engine) call(fn glua.LValue, nret int, args []any) ([]script.Result, er
 	return results, nil
 }
 
-func (e *Engine) releasePin(id int64) { delete(e.pins, id) }
+func (e *Engine) ReleasePin(id int64) { delete(e.pins, id) }
 
 func (e *Engine) SetContext(ctx context.Context) { e.L.SetContext(ctx) }
 func (e *Engine) RemoveContext()                 { e.L.RemoveContext() }

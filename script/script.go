@@ -111,9 +111,14 @@ func (f FuncRef) Valid() bool { return f.e != nil }
 // Release frees the pin. Safe to call more than once; safe (no-op)
 // after Init/Close invalidated the generation.
 func (f FuncRef) Release() {
-	if r, ok := f.e.(interface{ releasePin(int64) }); ok {
-		r.releasePin(f.id)
+	if r, ok := f.e.(PinReleaser); ok {
+		r.ReleasePin(f.id)
 	}
+}
+
+// PinReleaser is implemented by backends that hold pinned functions.
+type PinReleaser interface {
+	ReleasePin(id int64)
 }
 
 // NewFuncRef is used by backend implementations only.

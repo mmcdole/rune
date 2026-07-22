@@ -43,10 +43,12 @@ func TestJITMcodeAllocation(t *testing.T) {
 			e.Close()
 			t.Fatal(err)
 		}
+		// The log path is spliced as a Lua long-bracket string so
+		// Windows path backslashes are not parsed as escapes.
 		err := e.DoString("trace", `
 			local ok, v = pcall(require, "jit.v")
 			if not ok then error("SKIP: jit.v unavailable") end
-			v.on("`+log+`")
+			v.on([[`+log+`]])
 			for i = 1, 50 do bench_step() end
 			v.off()
 		`)
