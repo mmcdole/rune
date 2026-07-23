@@ -1,7 +1,9 @@
 package lua
 
 import (
-	glua "github.com/yuin/gopher-lua"
+	"time"
+
+	"github.com/mmcdole/rune/script"
 )
 
 // registerHTTPFuncs registers rune._http.* primitives.
@@ -12,73 +14,64 @@ import (
 // argument policy, so callback state lives in exactly one place and
 // dies with the VM on reload.
 func (e *Engine) registerHTTPFuncs() {
-	httpTable := e.L.NewTable()
-	e.L.SetField(e.runeTable, "_http", httpTable)
+	e.vm.RegisterModule("rune._http", map[string]script.GoFunc{
+		// rune._http.request(id, {method, url, body?, headers?, timeout?})
+		"request": func(c *script.Call) error {
+			id := c.Int(1)
+			opts := c.Table(2)
 
-	// rune._http.request(id, {method, url, body?, headers?, timeout?})
-	e.L.SetField(httpTable, "request", e.L.NewFunction(func(L *glua.LState) int {
-		id := int(L.CheckNumber(1))
-		opts := L.CheckTable(2)
+			req := HTTPRequest{
+				Method: opts.Field("method").Str(),
+				URL:    opts.Field("url").Str(),
+				Body:   opts.Field("body").Str(),
+			}
+			if req.Method == "" || req.URL == "" {
+				return c.Errorf("rune._http.request: method and url are required")
+			}
+			if timeout := opts.Field("timeout"); timeout.Kind() == script.KindNumber {
+				req.Timeout = time.Duration(timeout.Num() * float64(time.Second))
+			}
+			if headers := opts.Field("headers").Table(); headers != nil {
+				req.Headers = make(map[string]string)
+				headers.Each(func(k, v script.Value) bool {
+					if k.Kind() == script.KindString {
+						req.Headers[k.Str()] = v.Str()
+					}
+					return true
+				})
+			}
 
-		req := HTTPRequest{
-			Method: glua.LVAsString(opts.RawGetString("method")),
-			URL:    glua.LVAsString(opts.RawGetString("url")),
-			Body:   glua.LVAsString(opts.RawGetString("body")),
-		}
-		if req.Method == "" || req.URL == "" {
-			L.RaiseError("rune._http.request: method and url are required")
-		}
-		if timeout, ok := opts.RawGetString("timeout").(glua.LNumber); ok {
-			req.Timeout = toDuration(timeout)
-		}
-		if headers, ok := opts.RawGetString("headers").(*glua.LTable); ok {
-			req.Headers = make(map[string]string)
-			headers.ForEach(func(k, v glua.LValue) {
-				if ks, ok := k.(glua.LString); ok {
-					req.Headers[string(ks)] = glua.LVAsString(v)
-				}
-			})
-		}
-
-		e.host.HTTPRequest(id, req)
-		return 0
-	}))
+			e.host.HTTPRequest(id, req)
+			return nil
+		},
+	}, nil)
 }
 
 // OnHTTPResult delivers a completed HTTP request into Lua
 // (rune.http._deliver). Exactly one of resp/errMsg is set. Called on
 // the session goroutine, like every other Go -> Lua entry.
 func (e *Engine) OnHTTPResult(id int, resp *HTTPResponse, errMsg string) {
-	if e.L == nil {
-		return
-	}
-	deliver, ok := e.getRuneFunc("http", "_deliver")
-	if !ok {
-		return // http module unavailable (core failed to load)
-	}
-
-	respVal := glua.LValue(glua.LNil)
-	errVal := glua.LValue(glua.LNil)
+	var respArg any
+	var errArg any
 	if errMsg != "" {
-		errVal = glua.LString(errMsg)
+		errArg = errMsg
 	} else if resp != nil {
-		t := e.L.NewTable()
-		t.RawSetString("status", glua.LNumber(resp.Status))
-		t.RawSetString("body", glua.LString(resp.Body))
-		headers := e.L.NewTable()
+		headers := make(map[string]any, len(resp.Headers))
 		for k, v := range resp.Headers {
-			headers.RawSetString(k, glua.LString(v))
+			headers[k] = v
 		}
-		t.RawSetString("headers", headers)
-		respVal = t
+		respArg = script.Tree{V: map[string]any{
+			"status":  float64(resp.Status),
+			"body":    resp.Body,
+			"headers": headers,
+		}}
 	}
 
 	if err := e.guard(func() error {
-		return e.L.CallByParam(glua.P{
-			Fn:      deliver,
-			NRet:    0,
-			Protect: true,
-		}, glua.LNumber(id), respVal, errVal)
+		// found=false means the http module is unavailable (core failed
+		// to load); deliver silently becomes a no-op.
+		_, _, err := e.vm.CallModule("rune.http", "_deliver", 0, id, respArg, errArg)
+		return err
 	}); err != nil {
 		e.reportError("http callback", err)
 	}

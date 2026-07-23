@@ -1,8 +1,8 @@
 package lua
 
 import (
+	"github.com/mmcdole/rune/script"
 	"github.com/mmcdole/rune/ui"
-	glua "github.com/yuin/gopher-lua"
 )
 
 // registerPickerFuncs registers the rune._ui.picker_show primitive.
@@ -10,96 +10,74 @@ import (
 // opts parsing stays here because it marshals Lua tables into Go
 // types for the UI.
 func (e *Engine) registerPickerFuncs() {
-	internal := e.L.GetField(e.runeTable, "_ui").(*glua.LTable)
+	e.vm.RegisterModule("rune._ui", map[string]script.GoFunc{
+		// rune._ui.picker_show(opts) - Show a picker overlay
+		// opts = {
+		//   title = "History",                  -- optional title (modal mode only)
+		//   items = {"item1", "item2"} or {{text="...", value="...", desc="..."}},
+		//   on_select = function(value) end     -- called with selected value
+		//   mode = "inline"                     -- optional: "inline" or "modal" (default)
+		//   match_description = true            -- optional: include description in fuzzy matching
+		//   dismiss_on_space = true             -- optional (inline): close once input contains a space
+		// }
+		// Modal mode: picker captures keyboard and has its own search field.
+		// Inline mode: user types in main input, picker filters based on input content.
+		"picker_show": func(c *script.Call) error {
+			opts := c.Table(1)
 
-	// rune._ui.picker_show(opts) - Show a picker overlay
-	// opts = {
-	//   title = "History",                  -- optional title (modal mode only)
-	//   items = {"item1", "item2"} or {{text="...", value="...", desc="..."}},
-	//   on_select = function(value) end     -- called with selected value
-	//   mode = "inline"                     -- optional: "inline" or "modal" (default)
-	//   match_description = true            -- optional: include description in fuzzy matching
-	//   dismiss_on_space = true             -- optional (inline): close once input contains a space
-	// }
-	// Modal mode: picker captures keyboard and has its own search field.
-	// Inline mode: user types in main input, picker filters based on input content.
-	e.L.SetField(internal, "picker_show", e.L.NewFunction(func(L *glua.LState) int {
-		opts := L.CheckTable(1)
+			title := ""
+			if v := opts.Field("title"); !v.IsNil() {
+				title = v.String()
+			}
+			inline := false
+			if v := opts.Field("mode"); !v.IsNil() {
+				inline = v.String() == "inline"
+			}
+			matchDesc := opts.Field("match_description").Truthy()
+			dismissOnSpace := opts.Field("dismiss_on_space").Truthy()
 
-		// Parse title (optional - used in modal mode header)
-		title := ""
-		if titleVal := L.GetField(opts, "title"); titleVal != glua.LNil {
-			title = titleVal.String()
-		}
+			items := opts.Field("items").Table()
+			if items == nil {
+				return c.Errorf("picker: items must be a table")
+			}
 
-		// Parse mode (optional - "inline" or "modal", default "modal")
-		inline := false
-		if modeVal := L.GetField(opts, "mode"); modeVal != glua.LNil {
-			inline = modeVal.String() == "inline"
-		}
+			// Pin on_select for execution when the selection lands.
+			// Cleared on reload to prevent stale references.
+			onSelect, ok := c.PinValue(opts.Field("on_select"))
+			if !ok {
+				return c.Errorf("picker: on_select must be a function")
+			}
+			callbackID := e.RegisterPickerCallback(onSelect)
 
-		// Parse match_description (optional - include description in fuzzy matching)
-		matchDesc := false
-		if mdVal := L.GetField(opts, "match_description"); mdVal != glua.LNil {
-			matchDesc = glua.LVAsBool(mdVal)
-		}
-
-		// Parse dismiss_on_space (optional - close an inline picker once the
-		// input contains a space; for pickers over single-token items)
-		dismissOnSpace := false
-		if dsVal := L.GetField(opts, "dismiss_on_space"); dsVal != glua.LNil {
-			dismissOnSpace = glua.LVAsBool(dsVal)
-		}
-
-		// Parse items
-		itemsVal := L.GetField(opts, "items")
-		itemsTbl, ok := itemsVal.(*glua.LTable)
-		if !ok {
-			L.RaiseError("picker: items must be a table")
-			return 0
-		}
-		items := parsePickerItems(L, itemsTbl, matchDesc)
-
-		// Parse on_select callback
-		onSelectVal := L.GetField(opts, "on_select")
-		onSelectFn, ok := onSelectVal.(*glua.LFunction)
-		if !ok {
-			L.RaiseError("picker: on_select must be a function")
-			return 0
-		}
-
-		// Register callback in Engine (cleared on reload to prevent stale references)
-		callbackID := e.RegisterPickerCallback(onSelectFn)
-
-		// Call host to show the picker
-		e.host.ShowPicker(ui.ShowPickerMsg{
-			Title:          title,
-			Items:          items,
-			CallbackID:     callbackID,
-			Inline:         inline,
-			DismissOnSpace: dismissOnSpace,
-		})
-		return 0
-	}))
+			e.host.ShowPicker(ui.ShowPickerMsg{
+				Title:          title,
+				Items:          parsePickerItems(items, matchDesc),
+				CallbackID:     callbackID,
+				Inline:         inline,
+				DismissOnSpace: dismissOnSpace,
+			})
+			return nil
+		},
+	}, nil)
 }
 
-// parsePickerItems parses a Lua table into []ui.PickerItem.
+// parsePickerItems parses a script table into []ui.PickerItem.
 // Supports both simple strings and tables with text/value/desc fields.
-func parsePickerItems(L *glua.LState, tbl *glua.LTable, matchDesc bool) []ui.PickerItem {
+func parsePickerItems(tbl script.TableView, matchDesc bool) []ui.PickerItem {
 	var items []ui.PickerItem
-	tbl.ForEach(func(k, v glua.LValue) {
-		switch item := v.(type) {
-		case glua.LString:
+	tbl.Each(func(k, v script.Value) bool {
+		switch v.Kind() {
+		case script.KindString:
 			// Simple string: text and value are the same
-			s := string(item)
+			s := v.Str()
 			items = append(items, ui.PickerItem{Text: s, Value: s, MatchDesc: matchDesc})
-		case *glua.LTable:
-			// Table with text, value, desc fields
-			text := L.GetField(item, "text").String()
-			value := L.GetField(item, "value").String()
+		case script.KindTable:
+			t := v.Table()
+			text := t.Field("text").String()
+			value := t.Field("value").String()
 			desc := ""
-			if descVal := L.GetField(item, "desc"); descVal != glua.LNil {
-				desc = descVal.String()
+			if d := t.Field("desc"); !d.IsNil() {
+				desc = d.String()
 			}
 			// Default value to text if not specified
 			if value == "" {
@@ -107,6 +85,7 @@ func parsePickerItems(L *glua.LState, tbl *glua.LTable, matchDesc bool) []ui.Pic
 			}
 			items = append(items, ui.PickerItem{Text: text, Description: desc, Value: value, MatchDesc: matchDesc})
 		}
+		return true
 	})
 	return items
 }

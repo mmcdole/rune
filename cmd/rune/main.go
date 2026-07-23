@@ -66,7 +66,7 @@ func main() {
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Println("rune " + version.Number)
+		fmt.Println("rune " + version.Number + " (lua: " + lua.Backend() + ")")
 		return
 	}
 

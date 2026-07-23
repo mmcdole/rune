@@ -3,71 +3,66 @@ package lua
 import (
 	"encoding/json"
 
-	glua "github.com/yuin/gopher-lua"
+	"github.com/mmcdole/rune/script"
 )
 
 // registerGMCPFuncs registers rune._gmcp.* primitives.
 // The public rune.gmcp API (handlers, subscriptions, the Core.Hello
 // handshake) is defined in Lua (70_gmcp.lua). Encoding goes through
-// the shared JSON bridge (api_store.go).
+// the shared script-tree/JSON bridge (see api_store.go).
 func (e *Engine) registerGMCPFuncs() {
-	gmcp := e.L.NewTable()
-	e.L.SetField(e.runeTable, "_gmcp", gmcp)
+	e.vm.RegisterModule("rune._gmcp", map[string]script.GoFunc{
+		// rune._gmcp.send(package, value?): value may be a string, number,
+		// boolean, or JSON-able table; nil sends the bare package name.
+		// Returns true, or nil + error message (not connected, GMCP not
+		// negotiated, unencodable value).
+		"send": func(c *script.Call) error {
+			pkg := c.Str(1)
+			value := c.Arg(2)
 
-	// rune._gmcp.send(package, value?): value may be a string, number,
-	// boolean, or JSON-able table; nil sends the bare package name.
-	// Returns true, or nil + error message (not connected, GMCP not
-	// negotiated, unencodable value).
-	e.L.SetField(gmcp, "send", e.L.NewFunction(func(L *glua.LState) int {
-		pkg := L.CheckString(1)
-		value := L.Get(2)
-
-		data := ""
-		if value != glua.LNil {
-			gv, err := luaToGo(value, make(map[*glua.LTable]bool), 0)
-			if err != nil {
-				L.Push(glua.LNil)
-				L.Push(glua.LString(err.Error()))
-				return 2
+			data := ""
+			if !value.IsNil() {
+				gv, err := script.DecodeTree(value, maxStoreDepth)
+				if err != nil {
+					c.Return(nil, err.Error())
+					return nil
+				}
+				raw, err := json.Marshal(gv)
+				if err != nil {
+					c.Return(nil, err.Error())
+					return nil
+				}
+				data = string(raw)
 			}
-			raw, err := json.Marshal(gv)
-			if err != nil {
-				L.Push(glua.LNil)
-				L.Push(glua.LString(err.Error()))
-				return 2
+
+			if err := e.host.GMCPSend(pkg, data); err != nil {
+				c.Return(nil, err.Error())
+				return nil
 			}
-			data = string(raw)
-		}
+			c.Return(true)
+			return nil
+		},
 
-		if err := e.host.GMCPSend(pkg, data); err != nil {
-			L.Push(glua.LNil)
-			L.Push(glua.LString(err.Error()))
-			return 2
-		}
-		L.Push(glua.LTrue)
-		return 1
-	}))
+		// rune._gmcp.is_active(): whether GMCP is negotiated on the
+		// current connection. Queried live so it cannot go stale across
+		// /reload (see Host.GMCPActive).
+		"is_active": func(c *script.Call) error {
+			c.Return(e.host.GMCPActive())
+			return nil
+		},
 
-	// rune._gmcp.is_active(): whether GMCP is negotiated on the
-	// current connection. Queried live so it cannot go stale across
-	// /reload (see Host.GMCPActive).
-	e.L.SetField(gmcp, "is_active", e.L.NewFunction(func(L *glua.LState) int {
-		L.Push(glua.LBool(e.host.GMCPActive()))
-		return 1
-	}))
-
-	// rune._gmcp.send_raw(package, json?): sends the JSON text
-	// verbatim (no validation) - the debugging escape hatch used by
-	// "/gmcp send". Returns true, or nil + error message.
-	e.L.SetField(gmcp, "send_raw", e.L.NewFunction(func(L *glua.LState) int {
-		pkg := L.CheckString(1)
-		data := L.OptString(2, "")
-		if err := e.host.GMCPSend(pkg, data); err != nil {
-			L.Push(glua.LNil)
-			L.Push(glua.LString(err.Error()))
-			return 2
-		}
-		L.Push(glua.LTrue)
-		return 1
-	}))
+		// rune._gmcp.send_raw(package, json?): sends the JSON text
+		// verbatim (no validation) - the debugging escape hatch used by
+		// "/gmcp send". Returns true, or nil + error message.
+		"send_raw": func(c *script.Call) error {
+			pkg := c.Str(1)
+			data := c.OptStr(2, "")
+			if err := e.host.GMCPSend(pkg, data); err != nil {
+				c.Return(nil, err.Error())
+				return nil
+			}
+			c.Return(true)
+			return nil
+		},
+	}, nil)
 }

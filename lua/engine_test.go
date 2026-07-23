@@ -14,6 +14,21 @@ import (
 
 var errNotConnected = errors.New("not connected")
 
+// runawayLoop returns an infinite loop the active backend's watchdog
+// can actually interrupt. gopher-lua polls its context on every
+// instruction, so a bare loop works. LuaJIT compiles a bare loop into
+// a trace that never polls debug hooks — that escape is a documented
+// backend caveat (docs/luajit.md) — but any loop touching a host
+// function stays interpreter-bound (traces abort on C calls), which is
+// the realistic runaway class in a scripted client, and is what the
+// LuaJIT watchdog is tested against.
+func runawayLoop(engine *Engine) string {
+	if engine.EngineBackend() == "luajit" {
+		return `while true do rune._strip_ansi("x") end`
+	}
+	return "while true do end"
+}
+
 // TestWatchdogInterruptsRunawayScript verifies that a script stuck in an
 // infinite loop is interrupted after CallTimeout instead of hanging the
 // calling goroutine forever.
@@ -24,7 +39,7 @@ func TestWatchdogInterruptsRunawayScript(t *testing.T) {
 	engine.CallTimeout = 100 * time.Millisecond
 
 	start := time.Now()
-	err := engine.DoString("runaway", "while true do end")
+	err := engine.DoString("runaway", runawayLoop(engine))
 	elapsed := time.Since(start)
 
 	if err == nil {
@@ -46,7 +61,7 @@ func TestWatchdogStateUsableAfterInterrupt(t *testing.T) {
 
 	engine.CallTimeout = 100 * time.Millisecond
 
-	if err := engine.DoString("runaway", "while true do end"); err == nil {
+	if err := engine.DoString("runaway", runawayLoop(engine)); err == nil {
 		t.Fatal("expected runaway script to be interrupted")
 	}
 
@@ -688,7 +703,7 @@ func TestWatchdogPausedDuringBlockingHostCall(t *testing.T) {
 	}
 
 	// The re-armed deadline must still catch a runaway loop afterwards.
-	err := engine.DoString("runaway", "rune.input.open_editor(''); while true do end")
+	err := engine.DoString("runaway", "rune.input.open_editor(''); "+runawayLoop(engine))
 	if err == nil || !strings.Contains(err.Error(), "interrupted") {
 		t.Errorf("watchdog not re-armed after pause: %v", err)
 	}
@@ -702,7 +717,7 @@ func TestWatchdogRunawayHookDoesNotHang(t *testing.T) {
 
 	engine.CallTimeout = 100 * time.Millisecond
 
-	setup := `rune.hooks.on("input", function() while true do end end, {priority = 1})`
+	setup := "rune.hooks.on('input', function() " + runawayLoop(engine) + " end, {priority = 1})"
 	if err := engine.DoString("setup", setup); err != nil {
 		t.Fatalf("setup failed: %v", err)
 	}

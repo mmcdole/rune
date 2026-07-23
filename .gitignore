@@ -10,3 +10,5 @@ allcode.txt
 # Local files
 website-mockups/
 init.lua.old
+script/luajit/vendor_luajit/
+bin/
