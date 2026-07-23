@@ -354,6 +354,12 @@ func (e *Engine) OnGMCP(pkg, raw string) {
 			e.reportError("gmcp "+pkg, fmt.Errorf("malformed JSON: %w", err))
 			return
 		}
+		// Server-controlled nesting is bounded before it is pushed into
+		// the VM, mirroring maxStoreDepth on the script->Go direction.
+		if treeTooDeep(decoded, maxStoreDepth) {
+			e.reportError("gmcp "+pkg, fmt.Errorf("message nested deeper than %d levels", maxStoreDepth))
+			return
+		}
 		value = decoded
 	}
 
@@ -363,6 +369,29 @@ func (e *Engine) OnGMCP(pkg, raw string) {
 	}); err != nil {
 		e.reportError("gmcp dispatch", err)
 	}
+}
+
+// treeTooDeep reports whether a decoded JSON tree nests beyond limit
+// levels of containers.
+func treeTooDeep(v any, limit int) bool {
+	if limit < 0 {
+		return true
+	}
+	switch val := v.(type) {
+	case []any:
+		for _, item := range val {
+			if treeTooDeep(item, limit-1) {
+				return true
+			}
+		}
+	case map[string]any:
+		for _, item := range val {
+			if treeTooDeep(item, limit-1) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // escapeRawJSONControlsInStrings tolerates servers which put terminal control

@@ -31,7 +31,7 @@ func (e *Engine) GetBoundKeys() []string {
 					return nil
 				}
 				tbl.Each(func(_, v script.Value) bool {
-					keys = append(keys, v.String())
+					keys = append(keys, v.Str())
 					return true
 				})
 				return nil

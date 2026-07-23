@@ -55,6 +55,10 @@ type Engine struct {
 	watchDone chan struct{}
 }
 
+// engines resolves callbacks back to their Engine. Unsynchronized:
+// everything runs on the session goroutine per the seam contract. If
+// sessions ever get their own goroutines, this needs a lock (or a
+// per-state registry entry).
 var engines = map[*C.lua_State]*Engine{}
 
 // New creates an uninitialized engine; call Init before use.
@@ -331,6 +335,13 @@ func (e *Engine) pcall(nargs, nret int) error {
 	rc := C.lua_pcall(e.l, C.int(nargs), C.int(nret), C.int(msgh))
 	if rc != 0 {
 		msg := e.toGoString(-1)
+		if msg == "" {
+			// error() with a non-string value (debug.traceback passes
+			// such values through untouched); name its type rather than
+			// losing the error entirely.
+			msg = "(error object is a " +
+				C.GoString(C.lua_typename(e.l, C.lua_type(e.l, -1))) + " value)"
+		}
 		if msgh != 0 {
 			C.lua_settop(e.l, C.int(msgh-1))
 		} else {
@@ -513,8 +524,20 @@ func (e *Engine) pushValue(v script.Value) {
 	}
 }
 
+// checkStack reserves stack slots ahead of a nested push. LuaJIT
+// happens to grow its stack on push, but that is beyond the C API
+// contract; reserving through lua_checkstack stays inside it and turns
+// exhaustion into a Go panic instead of an unprotected Lua error.
+func (e *Engine) checkStack(n int) {
+	if C.lua_checkstack(e.l, C.int(n)) == 0 {
+		panic("script: Lua stack exhausted during tree push")
+	}
+}
+
 // pushTree converts a Go tree in one pass without creating Go-side
-// views or refs — the point of the Tree contract.
+// views or refs — the point of the Tree contract. Each nesting level
+// holds its table (plus a pending key) on the stack, so recursion
+// reserves slots per level.
 func (e *Engine) pushTree(v any) {
 	switch val := v.(type) {
 	case nil:
@@ -528,12 +551,14 @@ func (e *Engine) pushTree(v any) {
 	case string:
 		e.pushString(val)
 	case []any:
+		e.checkStack(4)
 		C.lua_createtable(e.l, C.int(len(val)), 0)
 		for i, item := range val {
 			e.pushTree(item)
 			C.lua_rawseti(e.l, -2, C.int(i+1))
 		}
 	case map[string]any:
+		e.checkStack(4)
 		C.lua_createtable(e.l, 0, C.int(len(val)))
 		for k, item := range val {
 			e.pushString(k)

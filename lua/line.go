@@ -11,21 +11,20 @@ import (
 func registerLineType(vm script.Engine) {
 	vm.RegisterType("line", map[string]script.GoFunc{
 		"raw": func(c *script.Call) error {
-			c.Return(checkLine(c).Raw)
+			line, ok := c.Payload(1).(*text.Line)
+			if !ok {
+				return c.Errorf("line expected")
+			}
+			c.Return(line.Raw)
 			return nil
 		},
 		"clean": func(c *script.Call) error {
-			c.Return(checkLine(c).Clean)
+			line, ok := c.Payload(1).(*text.Line)
+			if !ok {
+				return c.Errorf("line expected")
+			}
+			c.Return(line.Clean)
 			return nil
 		},
 	})
-}
-
-// checkLine retrieves the receiver's text.Line payload.
-func checkLine(c *script.Call) *text.Line {
-	line, ok := c.Payload(1).(*text.Line)
-	if !ok {
-		c.B.Raise("line expected")
-	}
-	return line
 }

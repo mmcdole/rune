@@ -268,7 +268,7 @@ func runeSeamDispatch(l *C.lua_State) C.int {
 	if e == nil {
 		return pushDispatchError(l, "script: callback on unknown state")
 	}
-	idx := int(C.lua_tonumber(l, C.LUA_GLOBALSINDEX-1)) // upvalue 1
+	idx := int(C.lua_tonumber(l, C.RUNE_UPVALUE1))
 	if idx < 0 || idx >= len(e.funcs) {
 		return pushDispatchError(l, "script: callback index out of range")
 	}

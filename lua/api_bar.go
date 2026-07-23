@@ -44,9 +44,12 @@ func (e *Engine) registerBarFuncs() {
 
 // parseLayoutArray converts a script array table to LayoutEntry slice.
 // Supports both strings ("name") and tables ({name="name", height=10}).
+// Layout order is semantic, so read the array part by index (Each
+// visits in engine-defined order).
 func parseLayoutArray(tbl script.TableView) []ui.LayoutEntry {
 	var result []ui.LayoutEntry
-	tbl.Each(func(k, v script.Value) bool {
+	for i := 1; i <= tbl.Len(); i++ {
+		v := tbl.Index(i)
 		switch v.Kind() {
 		case script.KindString:
 			// Simple string: "component_name"
@@ -54,10 +57,7 @@ func parseLayoutArray(tbl script.TableView) []ui.LayoutEntry {
 		case script.KindTable:
 			// Table: {name="component_name", height=10}
 			t := v.Table()
-			entry := ui.LayoutEntry{Name: t.Field("name").String()}
-			if entry.Name == "nil" {
-				entry.Name = ""
-			}
+			entry := ui.LayoutEntry{Name: t.Field("name").Str()}
 			if height := t.Field("height"); height.Kind() == script.KindNumber {
 				entry.Height = int(height.Num())
 			}
@@ -65,8 +65,7 @@ func parseLayoutArray(tbl script.TableView) []ui.LayoutEntry {
 				result = append(result, entry)
 			}
 		}
-		return true
-	})
+	}
 	return result
 }
 
@@ -84,7 +83,7 @@ func (e *Engine) RenderBars(width int) map[string]ui.BarContent {
 					return nil
 				}
 				tbl.Each(func(k, v script.Value) bool {
-					name := k.String()
+					name := k.Str()
 					switch v.Kind() {
 					case script.KindString:
 						result[name] = ui.BarContent{Left: v.Str()}

@@ -25,14 +25,8 @@ func (e *Engine) registerPickerFuncs() {
 		"picker_show": func(c *script.Call) error {
 			opts := c.Table(1)
 
-			title := ""
-			if v := opts.Field("title"); !v.IsNil() {
-				title = v.String()
-			}
-			inline := false
-			if v := opts.Field("mode"); !v.IsNil() {
-				inline = v.String() == "inline"
-			}
+			title := opts.Field("title").Str()
+			inline := opts.Field("mode").Str() == "inline"
 			matchDesc := opts.Field("match_description").Truthy()
 			dismissOnSpace := opts.Field("dismiss_on_space").Truthy()
 
@@ -63,9 +57,12 @@ func (e *Engine) registerPickerFuncs() {
 
 // parsePickerItems parses a script table into []ui.PickerItem.
 // Supports both simple strings and tables with text/value/desc fields.
+// Item order is semantic, so read the array part by index (Each
+// visits in engine-defined order).
 func parsePickerItems(tbl script.TableView, matchDesc bool) []ui.PickerItem {
 	var items []ui.PickerItem
-	tbl.Each(func(k, v script.Value) bool {
+	for i := 1; i <= tbl.Len(); i++ {
+		v := tbl.Index(i)
 		switch v.Kind() {
 		case script.KindString:
 			// Simple string: text and value are the same
@@ -73,19 +70,15 @@ func parsePickerItems(tbl script.TableView, matchDesc bool) []ui.PickerItem {
 			items = append(items, ui.PickerItem{Text: s, Value: s, MatchDesc: matchDesc})
 		case script.KindTable:
 			t := v.Table()
-			text := t.Field("text").String()
-			value := t.Field("value").String()
-			desc := ""
-			if d := t.Field("desc"); !d.IsNil() {
-				desc = d.String()
-			}
+			text := t.Field("text").Str()
+			value := t.Field("value").Str()
+			desc := t.Field("desc").Str()
 			// Default value to text if not specified
 			if value == "" {
 				value = text
 			}
 			items = append(items, ui.PickerItem{Text: text, Description: desc, Value: value, MatchDesc: matchDesc})
 		}
-		return true
-	})
+	}
 	return items
 }

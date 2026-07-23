@@ -360,7 +360,10 @@ func (e *Engine) newGoFunction(fn script.GoFunc) *glua.LFunction {
 		scope := &callScope{e: e, L: L, n: L.GetTop()}
 		c := &script.Call{B: scope}
 		if err := fn(c); err != nil {
-			L.RaiseError("%s", err.Error())
+			// Raise without gopher-lua's own position decoration: seam
+			// errors (Errorf, typeError) already embed Where(), and the
+			// luajit backend adds nothing either.
+			L.Error(glua.LString(err.Error()), 0)
 			return 0
 		}
 		for _, r := range scope.rets {
@@ -438,11 +441,17 @@ func (s *callScope) PinValue(v script.Value) (script.FuncRef, bool) {
 }
 
 func (s *callScope) Raise(msg string) {
-	s.L.RaiseError("%s", msg)
+	// Level 0: no position decoration; seam messages carry their own.
+	s.L.Error(glua.LString(msg), 0)
 }
 
 func (s *callScope) Where() string {
-	return s.L.Where(1)
+	// L.Where yields "file:line:"; the seam contract includes a
+	// trailing space (see script.CallBackend), as the luajit backend emits.
+	if w := s.L.Where(1); w != "" {
+		return w + " "
+	}
+	return ""
 }
 
 // ---------------------------------------------------------------------------

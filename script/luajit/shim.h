@@ -11,6 +11,10 @@
  * C, so no longjmp ever crosses a Go frame. */
 void rune_push_trampoline(lua_State *L);
 
+/* Pseudo-index of the trampoline's first upvalue (the Go function
+ * index): lua_upvalueindex(1) as a cgo-visible constant. */
+#define RUNE_UPVALUE1 (LUA_GLOBALSINDEX - 1)
+
 /* Sets __gc on the table at the top of the stack to the Go-backed
  * userdata release hook. */
 void rune_install_gc(lua_State *L);

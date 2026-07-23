@@ -789,3 +789,24 @@ func TestRegistryGrowsForLargeConcat(t *testing.T) {
 		t.Fatalf("large table.concat failed: %v", err)
 	}
 }
+
+// TestRaisedErrorsCarrySinglePosition verifies host-raised errors
+// (argument type errors, c.Errorf) carry exactly one script position
+// prefix on the active backend — a doubled prefix means the backend
+// stacked its own decoration on top of the seam's Where().
+func TestRaisedErrorsCarrySinglePosition(t *testing.T) {
+	engine, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	err := engine.DoString("prefix.lua", "rune._send_raw({})")
+	if err == nil {
+		t.Fatal("expected an argument type error")
+	}
+	first := strings.SplitN(err.Error(), "\n", 2)[0]
+	if !strings.Contains(first, "string expected, got table") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := strings.Count(first, ":1: "); got != 1 {
+		t.Errorf("want exactly one position prefix, got %d in %q", got, first)
+	}
+}
