@@ -439,9 +439,11 @@ func (e *Engine) CallHook(event string, args ...string) {
 
 func (e *Engine) registerAPIs() {
 	// Data fields (not API): the client version, single-sourced from
-	// the version package so TTYPE/MNES and /version cannot drift.
+	// the version package so TTYPE/MNES and /version cannot drift, and
+	// the scripting engine this binary was built with.
 	e.vm.RegisterModule("rune", nil, map[string]any{
 		"version": version.Number,
+		"engine":  e.vm.Backend(),
 	})
 
 	registerLineType(e.vm)

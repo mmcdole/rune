@@ -8,3 +8,6 @@ import (
 )
 
 func newScriptEngine() script.Engine { return gopherlua.New() }
+
+// Backend names the scripting engine compiled into this binary.
+func Backend() string { return "gopher-lua" }

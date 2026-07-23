@@ -263,5 +263,5 @@ end
 
 -- Startup
 
-rune.echo("Rune MUD Client " .. rune.version)
+rune.echo("Rune MUD Client " .. rune.version .. " (lua: " .. rune.engine .. ")")
 rune.echo("Type /help for commands")
