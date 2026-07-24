@@ -80,10 +80,13 @@ this in one short script.
 
 ## Reactive state
 
-Bars usually render from `rune.state`, a read-only table the client keeps
-current: `connected`, `address`, `scroll_mode`, `scroll_lines`, `width`,
-`height`. When your own state changes and a bar should reflect it now, call
-`rune.ui.refresh_bars()`.
+A bar renders from whatever state your script keeps — GMCP vitals, group
+flags, anything. Precompute in the event that changes the data, and call
+`rune.ui.refresh_bars()` when a bar should reflect it now rather than on
+the next tick. For client-side facts there is also
+[`rune.state`](/reference/api/state-lines/), a read-only table the client
+keeps current (`connected`, `address`, `scroll_mode`, `scroll_lines`,
+`width`, `height`) — it's what the built-in status bar renders from.
 
 **Related:** [rune.ui reference](/reference/api/ui/),
 [Bars](/interface/bars/),
