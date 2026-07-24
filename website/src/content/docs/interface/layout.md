@@ -78,15 +78,20 @@ a separator rule, and the status bar below it.
 The [quake console recipe](/cookbook/quake-console/) combines all of
 this in one short script.
 
-## Reactive state
+## Pull and push
 
-A bar renders from whatever state your script keeps — GMCP vitals, group
-flags, anything. Precompute in the event that changes the data, and call
-`rune.ui.refresh_bars()` when a bar should reflect it now rather than on
-the next tick. For client-side facts there is also
-[`rune.state`](/reference/api/state-lines/), a read-only table the client
-keeps current (`connected`, `address`, `scroll_mode`, `scroll_lines`,
-`width`, `height`) — it's what the built-in status bar renders from.
+Bars are pulled. Four times a second, rune calls each bar's render
+function and displays whatever it returns. The function reads state
+your script keeps, such as vitals stored by a GMCP handler. When that
+state changes and the bar should update before the next tick, call
+`rune.ui.refresh_bars()`.
+
+Panes are pushed. Nothing polls a pane; it shows the lines you append
+with `rune.pane.write()` as they arrive.
+
+Bars can also read [`rune.state`](/reference/api/state-lines/), a
+read-only table of client facts like the connection status and terminal
+size. The built-in status bar renders from it.
 
 **Related:** [rune.ui reference](/reference/api/ui/),
 [Bars](/interface/bars/),
