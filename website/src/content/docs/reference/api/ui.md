@@ -26,9 +26,10 @@ rune.ui.layout(config)
 
 - `config` (table) — `top` and/or `bottom` arrays of dock entries.
   Each entry is a string (the component name) or a table with options:
-  `{name = "tells", height = 8}`. Built-in components: `"input"` (the
-  command line), `"status"` (the default status bar), and
-  `"separator"` (a horizontal rule); anything else names a bar or pane.
+  `{name = "tells", height = 8}`. The name is a built-in component
+  (below), a bar, or a pane. Beyond `name` and `height`, string-valued
+  keys are passed to the named component as component options; a
+  component ignores keys it doesn't understand.
 
 ```lua
 -- The default layout
@@ -47,6 +48,17 @@ rune.ui.layout({
 A bar or pane renders only if a layout dock names it — see
 [Layout & UI](/interface/layout/).
 :::
+
+#### Built-in components
+
+- `"input"` — the command line or multiline composer. Height is
+  intrinsic; no options.
+- `"status"` — the default status bar, shown until a bar named
+  `"status"` replaces it. No options.
+- `"separator"` — a one-line horizontal rule. Options:
+  - `char` (string) — the character the rule repeats:
+    `{name = "separator", char = "═"}`. Must occupy a single terminal
+    cell; anything else falls back to the default `─`.
 
 ### rune.ui.bar
 

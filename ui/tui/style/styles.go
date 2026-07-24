@@ -7,8 +7,12 @@ import (
 )
 
 // RenderBorder returns a horizontal border line with dim styling.
-func RenderBorder(width int) string {
-	return "\x1b[90m" + strings.Repeat("─", width) + "\x1b[0m"
+// An empty char draws the default rule.
+func RenderBorder(width int, char string) string {
+	if char == "" {
+		char = "─"
+	}
+	return "\x1b[90m" + strings.Repeat(char, width) + "\x1b[0m"
 }
 
 // Styles holds the lipgloss styles the widgets render with. Server

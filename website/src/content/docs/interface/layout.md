@@ -38,6 +38,10 @@ a separator rule, and the status bar below it.
   `"input"`, `"status"`, `"separator"`. A table entry
   (`{ name = ..., height = n }`) sets an explicit height in lines (a pane
   spends two of those on its header and bottom border).
+- A table entry can also carry component options — extra string-valued
+  keys handed to the component it names (see
+  [Built-in components](#built-in-components)). Unknown keys are
+  ignored.
 - `rune.ui.layout` replaces the whole layout. Always include the bottom
   dock with `"input"`, because nothing re-adds the input line if you leave
   it out.
@@ -46,6 +50,20 @@ a separator rule, and the status bar below it.
   or writing to a pane is not enough — the layout decides what appears.
 - The default layout is `bottom = { "input", "status" }`. You only need
   `rune.ui.layout` to change it.
+
+## Built-in components
+
+- **`input`** — the [command line](/interface/input/) or multiline
+  composer. Its height is intrinsic; the layout only decides where it
+  sits. Always include it in the bottom dock.
+- **`status`** — the default status bar. Registering a bar named
+  `"status"` replaces it with your own renderer.
+- **`separator`** — a one-line horizontal rule. Its `char` option sets
+  the character the rule repeats: `{ name = "separator", char = "═" }`
+  draws a double rule. The character must occupy a single terminal
+  cell; anything else falls back to the default `─`. For anything
+  fancier than a repeated character — color, patterns, text — write a
+  [bar](/interface/bars/) instead.
 
 ## The pieces
 
@@ -60,12 +78,20 @@ a separator rule, and the status bar below it.
 The [quake console recipe](/cookbook/quake-console/) combines all of
 this in one short script.
 
-## Reactive state
+## Pull and push
 
-Bars usually render from `rune.state`, a read-only table the client keeps
-current: `connected`, `address`, `scroll_mode`, `scroll_lines`, `width`,
-`height`. When your own state changes and a bar should reflect it now, call
+Bars are pulled. Four times a second, rune calls each bar's render
+function and displays whatever it returns. The function reads state
+your script keeps, such as vitals stored by a GMCP handler. When that
+state changes and the bar should update before the next tick, call
 `rune.ui.refresh_bars()`.
+
+Panes are pushed. Nothing polls a pane; it shows the lines you append
+with `rune.pane.write()` as they arrive.
+
+Bars can also read [`rune.state`](/reference/api/state-lines/), a
+read-only table of client facts like the connection status and terminal
+size. The built-in status bar renders from it.
 
 **Related:** [rune.ui reference](/reference/api/ui/),
 [Bars](/interface/bars/),
