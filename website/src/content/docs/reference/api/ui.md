@@ -29,6 +29,11 @@ rune.ui.layout(config)
   `{name = "tells", height = 8}`. Built-in components: `"input"` (the
   command line), `"status"` (the default status bar), and
   `"separator"` (a horizontal rule); anything else names a bar or pane.
+  Beyond `name` and `height`, string-valued keys are passed to the
+  named component, which ignores any it doesn't understand. The
+  separator accepts `char` — the character the rule repeats
+  (`{name = "separator", char = "═"}`); it must occupy a single
+  terminal cell, otherwise the default `─` is used.
 
 ```lua
 -- The default layout

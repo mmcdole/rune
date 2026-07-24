@@ -38,6 +38,10 @@ a separator rule, and the status bar below it.
   `"input"`, `"status"`, `"separator"`. A table entry
   (`{ name = ..., height = n }`) sets an explicit height in lines (a pane
   spends two of those on its header and bottom border).
+- A table entry can also carry component options: the separator takes
+  `char`, so `{ name = "separator", char = "═" }` draws a double rule.
+  Anything fancier than a repeated character is a one-line
+  [bar](/interface/bars/) away.
 - `rune.ui.layout` replaces the whole layout. Always include the bottom
   dock with `"input"`, because nothing re-adds the input line if you leave
   it out.

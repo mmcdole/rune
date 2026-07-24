@@ -50,6 +50,8 @@ func (e *Engine) registerBarFuncs() {
 
 // parseLayoutArray converts a Lua array table to LayoutEntry slice.
 // Supports both strings ("name") and tables ({name="name", height=10}).
+// Any other string-valued key on a table entry is carried in Opts
+// without interpretation; the named widget owns its keys' meaning.
 func parseLayoutArray(L *glua.LState, tbl *glua.LTable) []ui.LayoutEntry {
 	var result []ui.LayoutEntry
 	tbl.ForEach(func(k, v glua.LValue) {
@@ -58,7 +60,7 @@ func parseLayoutArray(L *glua.LState, tbl *glua.LTable) []ui.LayoutEntry {
 			// Simple string: "component_name"
 			result = append(result, ui.LayoutEntry{Name: string(val)})
 		case *glua.LTable:
-			// Table: {name="component_name", height=10}
+			// Table: {name="component_name", height=10, ...opts}
 			entry := ui.LayoutEntry{}
 			if name := L.GetField(val, "name"); name != glua.LNil {
 				entry.Name = name.String()
@@ -68,6 +70,18 @@ func parseLayoutArray(L *glua.LState, tbl *glua.LTable) []ui.LayoutEntry {
 					entry.Height = int(h)
 				}
 			}
+			val.ForEach(func(ok, ov glua.LValue) {
+				key, isStr := ok.(glua.LString)
+				if !isStr || key == "name" || key == "height" {
+					return
+				}
+				if s, isStr := ov.(glua.LString); isStr {
+					if entry.Opts == nil {
+						entry.Opts = make(map[string]string)
+					}
+					entry.Opts[string(key)] = string(s)
+				}
+			})
 			if entry.Name != "" {
 				result = append(result, entry)
 			}

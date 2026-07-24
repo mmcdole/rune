@@ -338,6 +338,30 @@ func TestBarCannotClobberBuiltinWidget(t *testing.T) {
 	}
 }
 
+// TestLayoutEntryOptsReachWidget verifies layoutDock hands each
+// entry's option bag to Configurable widgets — and that a second
+// separator entry without options resets the shared instance instead
+// of inheriting the first entry's char.
+func TestLayoutEntryOptsReachWidget(t *testing.T) {
+	m := newTestModel(t)
+
+	// No "input" entry: the input widget draws its own default rule,
+	// which would mask a separator that failed to reset.
+	next, _ := m.Update(ui.UpdateLayoutMsg{
+		Top:    []ui.LayoutEntry{{Name: "separator", Opts: map[string]string{"char": "═"}}},
+		Bottom: []ui.LayoutEntry{{Name: "separator"}},
+	})
+	m = next.(*Model)
+
+	view := m.View()
+	if !strings.Contains(view, strings.Repeat("═", m.width)) {
+		t.Error("configured separator rule missing from view")
+	}
+	if !strings.Contains(view, strings.Repeat("─", m.width)) {
+		t.Error("option-less separator entry did not reset to the default rule")
+	}
+}
+
 // newInlinePickerModel builds a model with an inline picker open over a
 // command-style item list and the input seeded with text, returning the
 // outbound channel so tests can observe picker cancel messages.

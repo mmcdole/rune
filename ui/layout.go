@@ -2,8 +2,9 @@ package ui
 
 // LayoutEntry represents a single component in a layout dock.
 type LayoutEntry struct {
-	Name   string // Component name (e.g., "input", "status", pane name)
-	Height int    // Explicit height in lines (0 = intrinsic/auto)
+	Name   string            // Component name (e.g., "input", "status", pane name)
+	Height int               // Explicit height in lines (0 = intrinsic/auto)
+	Opts   map[string]string // Component-specific options, passed through opaquely; only the named widget interprets its keys
 }
 
 // LayoutConfig declares which components go in each dock.

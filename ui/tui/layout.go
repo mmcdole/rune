@@ -45,6 +45,13 @@ func (m *Model) layoutDock(entries []ui.LayoutEntry) (string, int) {
 			continue
 		}
 
+		// Options are per-entry but the widget instance is shared, so
+		// pass the bag unconditionally: an entry without options must
+		// reset whatever a previous entry configured this render pass.
+		if c, ok := w.(widget.Configurable); ok {
+			c.SetOptions(entry.Opts)
+		}
+
 		// Width can affect intrinsic height (notably soft-wrapped composer
 		// text), so make the current width available before asking for it.
 		// Existing fixed-height widgets ignore the zero height.
