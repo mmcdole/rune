@@ -8,7 +8,7 @@ require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/x/ansi v0.11.7
-	github.com/mattn/go-runewidth v0.0.23
+	github.com/mattn/go-runewidth v0.0.27
 	github.com/yuin/gopher-lua v1.1.2
 )
 
