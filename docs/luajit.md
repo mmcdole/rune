@@ -11,11 +11,27 @@ The active engine is reported by `Engine.EngineBackend()`.
 ## Building
 
 The default build has no cgo and no new dependencies. The LuaJIT build
-requires the LuaJIT library and headers:
+requires the LuaJIT library and headers, so install those first:
 
 ```sh
-go build -tags luajit ./cmd/...
+sudo apt-get install libluajit-5.1-dev   # Debian/Ubuntu
+sudo dnf install luajit-devel            # Fedora
+sudo pacman -S luajit                    # Arch
+brew install luajit                      # macOS
 ```
+
+Any distro's LuaJIT development package works; the headers land in
+`/usr/include/luajit-2.1`, which is where `script/luajit/link_linux.go`
+looks. Windows has no packaged static archive;
+`.github/actions/setup-luajit-windows` builds one from source. Then:
+
+```sh
+go build -tags luajit ./cmd/...   # or: make build-jit
+```
+
+`make build-jit`, `test-jit`, `bench`, and `check` probe for the headers
+up front and print the install command rather than letting cgo fail with
+a bare "lua.h: No such file or directory".
 
 LuaJIT is linked statically on release platforms so shipped binaries
 are self-contained: macOS arm64 uses the homebrew archive
