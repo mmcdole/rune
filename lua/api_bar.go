@@ -45,7 +45,9 @@ func (e *Engine) registerBarFuncs() {
 // parseLayoutArray converts a script array table to LayoutEntry slice.
 // Supports both strings ("name") and tables ({name="name", height=10}).
 // Layout order is semantic, so read the array part by index (Each
-// visits in engine-defined order).
+// visits in engine-defined order). Any other string-valued key on a
+// table entry is carried in Opts without interpretation; the named
+// widget owns its keys' meaning.
 func parseLayoutArray(tbl script.TableView) []ui.LayoutEntry {
 	var result []ui.LayoutEntry
 	for i := 1; i <= tbl.Len(); i++ {
@@ -55,12 +57,28 @@ func parseLayoutArray(tbl script.TableView) []ui.LayoutEntry {
 			// Simple string: "component_name"
 			result = append(result, ui.LayoutEntry{Name: v.Str()})
 		case script.KindTable:
-			// Table: {name="component_name", height=10}
+			// Table: {name="component_name", height=10, ...opts}
 			t := v.Table()
 			entry := ui.LayoutEntry{Name: t.Field("name").Str()}
 			if height := t.Field("height"); height.Kind() == script.KindNumber {
 				entry.Height = int(height.Num())
 			}
+			// Opts are a set, so order does not matter here.
+			t.Each(func(key, option script.Value) bool {
+				if key.Kind() != script.KindString ||
+					option.Kind() != script.KindString {
+					return true
+				}
+				switch name := key.Str(); name {
+				case "name", "height":
+				default:
+					if entry.Opts == nil {
+						entry.Opts = make(map[string]string)
+					}
+					entry.Opts[name] = option.Str()
+				}
+				return true
+			})
 			if entry.Name != "" {
 				result = append(result, entry)
 			}
