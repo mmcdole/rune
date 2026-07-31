@@ -1,6 +1,8 @@
 # Replacing gopher-lua with a compact Lua 5.1 runtime
 
-Status: proposal
+Status: implemented. The seam landed as the `script` package, and Lunar is the
+default backend as of the switch from gopher-lua. This document is kept as the
+record of why, and of the measurements that justified it.
 
 ## Decision summary
 

@@ -2,8 +2,8 @@
 
 Rune's scripting layer talks to its Lua engine through the
 engine-neutral `script` package rather than a Lua implementation
-directly. The default backend is gopher-lua (pure Go, no cgo); building
-with `-tags luajit` selects a cgo backend over LuaJIT 2.1. A
+directly. The default backend is Lunar (pure Go, no cgo); building with
+`-tags luajit` selects a cgo backend over LuaJIT 2.1. A
 pathfinding-shaped benchmark runs ~39x faster on the LuaJIT build
 (`go test ./lua/ -run '^$' -bench EngineScriptWork` on both builds).
 The active engine is reported by `Engine.EngineBackend()`.
@@ -92,7 +92,8 @@ LuaJIT compiles traces into mcode areas that must sit within the arm64
 +-128MB branch range of its VM code, probed at randomized addresses by
 its hardened allocator. In a Go process that window can be crowded, and
 a losing process does not merely fall back to the interpreter — it
-thrashes compile -> fail -> flush and runs slower than gopher-lua.
+thrashes compile -> fail -> flush and runs slower than the pure-Go
+backend.
 Whether a given process won was an address-space-layout lottery.
 
 The backend removes the luck: LuaJIT is linked statically so its VM

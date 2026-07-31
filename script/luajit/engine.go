@@ -314,7 +314,7 @@ func (e *Engine) ReleasePin(id int64) {
 }
 
 // pcall runs fn+args at the top of the stack with debug.traceback as
-// the message handler, matching gopher-lua's traceback-bearing errors.
+// the message handler, matching Lunar's traceback-bearing errors.
 func (e *Engine) pcall(nargs, nret int) error {
 	fnPos := int(C.lua_gettop(e.l)) - nargs
 	msgh := 0

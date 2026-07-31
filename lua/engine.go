@@ -67,7 +67,7 @@ func NewEngine(host Host) *Engine {
 }
 
 // EngineBackend reports which scripting engine this binary was built
-// with: "gopher-lua" (default) or "luajit" (-tags luajit).
+// with: "lunar" (default) or "luajit" (-tags luajit).
 func (e *Engine) EngineBackend() string { return e.vm.Backend() }
 
 // guard runs fn under the watchdog: a deadline context is attached to

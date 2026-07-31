@@ -37,7 +37,7 @@ type Engine interface {
 	Init() error
 	Close()
 
-	// Backend names the underlying engine ("gopher-lua", "luajit").
+	// Backend names the underlying engine ("lunar", "luajit").
 	Backend() string
 
 	// RegisterModule declares functions and constant data fields on a

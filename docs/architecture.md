@@ -79,7 +79,8 @@ The UI layer (built with Bubble Tea) is deliberately "dumb."
 
 ## 2.3 The Lua Engine
 
-A wrapper around gopher-lua.
+A wrapper around the scripting seam in `script/`, which the Lunar backend
+implements by default and the LuaJIT backend implements under `-tags luajit`.
 
 - **Single Host interface:** The Engine depends on one `lua.Host` interface (`lua/host.go`). Session implements it, with the methods grouped by service area across `session/lua_*.go` (network, ui, timers, system, history, session, store, log, state). Tests substitute a mock Host.
 - **Reactivity:** The Engine updates a global `rune.state` table whenever system state changes (connection, scroll position), allowing scripts to reactively render UI elements.

@@ -15,8 +15,8 @@ import (
 var errNotConnected = errors.New("not connected")
 
 // runawayLoop returns an infinite loop the active backend's watchdog
-// can actually interrupt. gopher-lua polls its context on every
-// instruction, so a bare loop works. LuaJIT compiles a bare loop into
+// can actually interrupt. Lunar polls its installed context at bounded
+// safe points, including loop back edges, so a bare loop works. LuaJIT compiles a bare loop into
 // a trace that never polls debug hooks — that escape is a documented
 // backend caveat (docs/luajit.md) — but any loop touching a host
 // function stays interpreter-bound (traces abort on C calls), which is
@@ -771,10 +771,11 @@ func TestPickerShowPassesOptions(t *testing.T) {
 }
 
 // TestRegistryGrowsForLargeConcat verifies the VM can serialize large
-// tables. gopher-lua's table.concat pushes every element onto the data
-// stack before joining, so a fixed-size registry fails on tables past a
-// few thousand entries (e.g. CBOR-encoding a mob database) even though
-// building or decoding the same table works fine.
+// tables. This was a gopher-lua failure mode: table.concat pushed every
+// element onto a fixed-size data stack, so tables past a few thousand
+// entries (e.g. CBOR-encoding a mob database) failed even though
+// building or decoding the same table worked. The test stays as a
+// regression guard on the backend seam.
 func TestRegistryGrowsForLargeConcat(t *testing.T) {
 	engine, _, cleanup := setupTest(t)
 	defer cleanup()

@@ -1,6 +1,7 @@
 # A deeper gopher-lua memory fork
 
-Status: proposal
+Status: superseded. Rune replaced gopher-lua with Lunar rather than forking it;
+see lua-runtime-replacement.md.
 
 ## Decision summary
 
