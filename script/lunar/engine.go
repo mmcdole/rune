@@ -61,9 +61,10 @@ func (e *Engine) Init() error {
 		_ = e.state.Close()
 	}
 	state, err := lua.New(lua.Options{
-		// Rune loads user scripts from disk, so the State is granted
-		// operating-system source access.
-		Source: lua.OSSource(),
+		// Rune's core and user scripts use the complete Lua 5.1 library set,
+		// and load init files plus user-selected scripts from the host.
+		Libraries:    lua.FullLibraries(),
+		ScriptLoader: lua.HostLoader(),
 	})
 	if err != nil {
 		return err
@@ -72,24 +73,6 @@ func (e *Engine) Init() error {
 	e.classes = map[string]*lua.UserDataType[any]{}
 	e.pins = map[int64]*lua.Function{}
 	e.ctx = nil
-
-	// A new Lunar State has no libraries. Rune's core uses string, table,
-	// math, io.open, os.date, and debug.getinfo, and user scripts may use
-	// anything a 5.1 runtime offers.
-	for _, open := range []func() error{
-		state.OpenBase,
-		state.OpenString,
-		state.OpenTable,
-		state.OpenMath,
-		state.OpenIO,
-		state.OpenOS,
-		state.OpenPackage,
-		state.OpenDebug,
-	} {
-		if err := open(); err != nil {
-			return err
-		}
-	}
 
 	for _, t := range e.types {
 		if err := e.installType(t); err != nil {

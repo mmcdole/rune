@@ -120,16 +120,21 @@ func TestBrokenHooksDegradesGracefully(t *testing.T) {
 	}
 }
 
-// TestDoFileSurvivesClobberedPackageAndRestoresPath verifies DoFile's
-// two package.path invariants: a script that clobbers the package
-// global cannot panic the process on the next file load, and a
-// successful load leaves package.path exactly as it found it.
-func TestDoFileSurvivesClobberedPackageAndRestoresPath(t *testing.T) {
+// TestDoFileLoadsSiblingModuleSurvivesClobberedPackageAndRestoresPath verifies
+// DoFile's script-loading invariants: a file can require a module beside it, a
+// script that clobbers the package global cannot panic the process on the next
+// file load, and a successful load leaves package.path exactly as it found it.
+func TestDoFileLoadsSiblingModuleSurvivesClobberedPackageAndRestoresPath(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 
-	script := filepath.Join(t.TempDir(), "loaded.lua")
-	if err := os.WriteFile(script, []byte(`rune.send_raw("file ran")`), 0o644); err != nil {
+	dir := t.TempDir()
+	module := filepath.Join(dir, "sibling.lua")
+	if err := os.WriteFile(module, []byte(`return "file ran"`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(dir, "loaded.lua")
+	if err := os.WriteFile(script, []byte(`rune.send_raw(require("sibling"))`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
