@@ -61,7 +61,7 @@ jobs:
         uses: ./.github/actions/setup-luajit-windows
       - name: Test this platform's JIT build
         shell: bash
-        run: go test -tags luajit ./lua/ ./script/...
+        run: go test -tags luajit ./...
       - name: Build rune-jit
         shell: bash
         run: |

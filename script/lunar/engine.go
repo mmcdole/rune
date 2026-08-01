@@ -3,6 +3,7 @@ package lunar
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -37,6 +38,16 @@ type luaCaller interface {
 type Engine struct {
 	state *lua.State
 
+	// activeFrame is the innermost native callback frame while Lua is executing Go.
+	// Ordinary Engine calls made synchronously by host code continue on it
+	// instead of trying to start a second State execution. nativeFunc restores
+	// the previous frame on return, so nested callbacks form a dynamic stack on
+	// the Go call stack rather than in this Engine.
+	activeFrame *lua.Frame
+	// borrowDepth covers every Go callback or scoped consumer that still owns
+	// VM-backed call state. Lifecycle operations must wait for all of them.
+	borrowDepth int
+
 	modules []moduleDecl
 	types   []typeDecl
 
@@ -66,8 +77,13 @@ func New() *Engine {
 func (e *Engine) Backend() string { return "lunar" }
 
 func (e *Engine) Init() error {
+	if e.borrowDepth != 0 {
+		return errors.New("script: Init called before the active script call returned")
+	}
 	if e.state != nil {
-		_ = e.state.Close()
+		if err := e.state.Close(); errors.Is(err, lua.ErrRunning) {
+			return err
+		}
 	}
 	state, err := lua.New(lua.Options{
 		// Rune's core and user scripts use the complete Lua 5.1 library set,
@@ -97,8 +113,13 @@ func (e *Engine) Init() error {
 }
 
 func (e *Engine) Close() {
+	if e.borrowDepth != 0 {
+		panic("script: Close called before the active script call returned")
+	}
 	if e.state != nil {
-		_ = e.state.Close()
+		if err := e.state.Close(); errors.Is(err, lua.ErrRunning) {
+			panic(err)
+		}
 		e.state = nil
 	}
 	e.classes = map[string]*lua.UserDataType[any]{}
@@ -230,22 +251,14 @@ func (e *Engine) SetModuleField(path, key string, value any) {
 }
 
 func (e *Engine) DoString(name, code string) error {
-	return e.doString(e.state, name, code)
-}
-
-func (e *Engine) doString(caller luaCaller, name, code string) error {
 	chunk, err := e.state.LoadString(name, code)
 	if err != nil {
 		return err
 	}
-	return caller.CallDiscard(chunk.Value())
+	return e.executionCaller().CallDiscard(chunk.Value())
 }
 
 func (e *Engine) DoFile(path string) error {
-	return e.doFile(e.state, path)
-}
-
-func (e *Engine) doFile(caller luaCaller, path string) error {
 	path = expandTilde(path)
 	absolute, err := filepath.Abs(path)
 	if err != nil {
@@ -271,19 +284,10 @@ func (e *Engine) doFile(caller luaCaller, path string) error {
 	if err != nil {
 		return err
 	}
-	return caller.CallDiscard(chunk.Value())
+	return e.executionCaller().CallDiscard(chunk.Value())
 }
 
 func (e *Engine) CallModule(
-	module, fn string,
-	nret int,
-	args ...any,
-) ([]script.Result, bool, error) {
-	return e.callModule(e.state, module, fn, nret, args...)
-}
-
-func (e *Engine) callModule(
-	caller luaCaller,
 	module, fn string,
 	nret int,
 	args ...any,
@@ -292,7 +296,7 @@ func (e *Engine) callModule(
 	if err != nil || !found {
 		return nil, false, err
 	}
-	results, err := e.call(caller, target, nret, args)
+	results, err := e.call(e.executionCaller(), target, nret, args)
 	return results, true, err
 }
 
@@ -302,21 +306,11 @@ func (e *Engine) CallModuleScoped(
 	args []any,
 	consume func([]script.Value) error,
 ) (bool, error) {
-	return e.callModuleScoped(e.state, module, fn, nret, args, consume)
-}
-
-func (e *Engine) callModuleScoped(
-	caller luaCaller,
-	module, fn string,
-	nret int,
-	args []any,
-	consume func([]script.Value) error,
-) (bool, error) {
 	target, found, err := e.moduleFunction(module, fn)
 	if err != nil || !found {
 		return false, err
 	}
-	values, err := e.callValues(caller, target, nret, args)
+	values, err := e.callValues(e.executionCaller(), target, nret, args)
 	if err != nil {
 		return true, err
 	}
@@ -324,6 +318,8 @@ func (e *Engine) callModuleScoped(
 	for index, value := range values {
 		scoped[index] = e.wrap(value)
 	}
+	e.borrowDepth++
+	defer func() { e.borrowDepth-- }()
 	return true, consume(scoped)
 }
 
@@ -332,20 +328,18 @@ func (e *Engine) Call(
 	nret int,
 	args ...any,
 ) ([]script.Result, error) {
-	return e.callPinned(e.state, fn, nret, args...)
-}
-
-func (e *Engine) callPinned(
-	caller luaCaller,
-	fn script.FuncRef,
-	nret int,
-	args ...any,
-) ([]script.Result, error) {
 	target, ok := e.pins[fn.PinID()]
 	if !ok {
 		return nil, fmt.Errorf("script function is no longer available")
 	}
-	return e.call(caller, target.Value(), nret, args)
+	return e.call(e.executionCaller(), target.Value(), nret, args)
+}
+
+func (e *Engine) executionCaller() luaCaller {
+	if e.activeFrame != nil {
+		return e.activeFrame
+	}
+	return e.state
 }
 
 func (e *Engine) moduleFunction(module, fn string) (lua.Value, bool, error) {
@@ -613,49 +607,16 @@ type callScope struct {
 	rets []any
 }
 
-func (s *callScope) DoString(name, code string) error {
-	return s.engine.doString(&s.frame, name, code)
-}
-
-func (s *callScope) DoFile(path string) error {
-	return s.engine.doFile(&s.frame, path)
-}
-
-func (s *callScope) CallModule(
-	module, fn string,
-	nret int,
-	args ...any,
-) ([]script.Result, bool, error) {
-	return s.engine.callModule(&s.frame, module, fn, nret, args...)
-}
-
-func (s *callScope) Call(
-	fn script.FuncRef,
-	nret int,
-	args ...any,
-) ([]script.Result, error) {
-	return s.engine.callPinned(&s.frame, fn, nret, args...)
-}
-
-func (s *callScope) CallModuleScoped(
-	module, fn string,
-	nret int,
-	args []any,
-	consume func([]script.Value) error,
-) (bool, error) {
-	return s.engine.callModuleScoped(
-		&s.frame,
-		module,
-		fn,
-		nret,
-		args,
-		consume,
-	)
-}
-
 func (e *Engine) nativeFunc(fn script.GoFunc) lua.NativeFunc {
 	return func(frame lua.Frame) lua.Outcome {
 		scope := &callScope{engine: e, frame: frame}
+		previous := e.activeFrame
+		e.activeFrame = &scope.frame
+		e.borrowDepth++
+		defer func() {
+			e.borrowDepth--
+			e.activeFrame = previous
+		}()
 		if err := fn(&script.Call{B: scope}); err != nil {
 			// Seam errors already embed Where(), so the message is raised
 			// undecorated. ThrowError keeps the Go error as the cause.

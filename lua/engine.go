@@ -221,21 +221,12 @@ func (e *Engine) OnInput(text string) {
 
 // callHooks dispatches through rune.hooks.call; found=false means the
 // hook system is unavailable (core failed to load or was clobbered).
-func (e *Engine) callHooks(
-	executor script.Executor,
-	nret int,
-	args ...any,
-) ([]script.Result, bool, error) {
+func (e *Engine) callHooks(nret int, args ...any) ([]script.Result, bool, error) {
 	var results []script.Result
 	var found bool
 	err := e.guard(func() error {
 		var callErr error
-		results, found, callErr = executor.CallModule(
-			"rune.hooks",
-			"call",
-			nret,
-			args...,
-		)
+		results, found, callErr = e.vm.CallModule("rune.hooks", "call", nret, args...)
 		return callErr
 	})
 	return results, found, err
@@ -250,7 +241,7 @@ func (e *Engine) OnSubmission(submission input.Submission) {
 
 	// The consumed/pass-through result is dispatch routing state that
 	// lives in Lua; nothing on the Go side acts on it.
-	_, found, err := e.callHooks(e.vm, 1, "input", submission.Text, ctx)
+	_, found, err := e.callHooks(1, "input", submission.Text, ctx)
 	if !found {
 		e.reportHooksBroken()
 		if submission.Mode == input.ModeVerbatim {
@@ -264,7 +255,7 @@ func (e *Engine) OnSubmission(submission input.Submission) {
 		case "/quit":
 			e.host.Quit()
 		case "/reload":
-			e.host.Reload(e.vm)
+			e.host.Reload()
 		default:
 			_ = e.host.Send(submission.Text)
 		}
@@ -295,7 +286,7 @@ func (e *Engine) OnEcho(in string) (string, bool) {
 	in = text.VisualizeTerminalControls(in, true)
 	fallback := text.Green("> " + in)
 
-	results, found, err := e.callHooks(e.vm, 2, "echo", in)
+	results, found, err := e.callHooks(2, "echo", in)
 	if !found {
 		e.reportHooksBroken()
 		return fallback, true
@@ -314,12 +305,7 @@ func (e *Engine) OnEcho(in string) (string, bool) {
 
 // OnOutput handles server text.
 func (e *Engine) OnOutput(line text.Line) (string, bool) {
-	results, found, err := e.callHooks(
-		e.vm,
-		2,
-		"output",
-		script.Obj{Type: "line", Payload: &line},
-	)
+	results, found, err := e.callHooks(2, "output", script.Obj{Type: "line", Payload: &line})
 	if !found {
 		e.reportHooksBroken()
 		return line.Raw, true
@@ -338,12 +324,7 @@ func (e *Engine) OnOutput(line text.Line) (string, bool) {
 
 // OnPrompt handles server prompts.
 func (e *Engine) OnPrompt(line text.Line) string {
-	results, found, err := e.callHooks(
-		e.vm,
-		2,
-		"prompt",
-		script.Obj{Type: "line", Payload: &line},
-	)
+	results, found, err := e.callHooks(2, "prompt", script.Obj{Type: "line", Payload: &line})
 	if !found {
 		e.reportHooksBroken()
 		return line.Raw
@@ -465,31 +446,13 @@ func escapeRawJSONControlsInStrings(raw string) string {
 
 // CallHook calls a hook event with string arguments.
 func (e *Engine) CallHook(event string, args ...string) {
-	e.callHook(e.vm, event, args...)
-}
-
-// CallHookIn calls a hook from an active script execution. The executor must
-// be the one supplied to the host callback that is reentering Lua.
-func (e *Engine) CallHookIn(
-	executor script.Executor,
-	event string,
-	args ...string,
-) {
-	e.callHook(executor, event, args...)
-}
-
-func (e *Engine) callHook(
-	executor script.Executor,
-	event string,
-	args ...string,
-) {
 	callArgs := make([]any, len(args)+1)
 	callArgs[0] = event
 	for i, arg := range args {
 		callArgs[i+1] = arg
 	}
 
-	_, found, err := e.callHooks(executor, 0, callArgs...)
+	_, found, err := e.callHooks(0, callArgs...)
 	if !found {
 		e.reportHooksBroken()
 		// Errors must never disappear, even with hooks broken.
@@ -499,7 +462,7 @@ func (e *Engine) callHook(
 		return
 	}
 	if err != nil {
-		e.reportErrorIn(executor, "'"+event+"' hook", err)
+		e.reportError("'"+event+"' hook", err)
 	}
 }
 
@@ -533,14 +496,6 @@ func (e *Engine) registerAPIs() {
 // Lua "error" hook. Failures inside the error hook itself fall back to
 // direct printing rather than recursing.
 func (e *Engine) reportError(source string, err error) {
-	e.reportErrorIn(e.vm, source, err)
-}
-
-func (e *Engine) reportErrorIn(
-	executor script.Executor,
-	source string,
-	err error,
-) {
 	msg := source + ": " + err.Error()
 	if e.reportingError {
 		e.host.Print(text.Red("[Error] " + msg))
@@ -548,7 +503,7 @@ func (e *Engine) reportErrorIn(
 	}
 	e.reportingError = true
 	defer func() { e.reportingError = false }()
-	e.callHook(executor, "error", msg)
+	e.CallHook("error", msg)
 }
 
 // reportHooksBroken warns the user, once per VM generation, that the

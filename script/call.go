@@ -2,10 +2,9 @@ package script
 
 import "fmt"
 
-// Call is the scope of one host-function invocation. It is also the borrowed
-// Executor for code that must reenter Lua before the host function returns.
-// Every Value or TableView obtained from it is valid only until then. Argument
-// positions are 1-based, like Lua.
+// Call is the scope of one host-function invocation. Every Value or
+// TableView obtained from it is valid only until the host function
+// returns. Argument positions are 1-based, like Lua.
 type Call struct {
 	B CallBackend // backend hook; treat as private
 }
@@ -13,8 +12,6 @@ type Call struct {
 // CallBackend is implemented by each engine; host code never uses it
 // directly.
 type CallBackend interface {
-	Executor
-
 	NArgs() int
 	Arg(i int) Value
 	ArgKind(i int) Kind
@@ -24,43 +21,6 @@ type CallBackend interface {
 	PinValue(v Value) (FuncRef, bool)
 	Raise(msg string) // unwinds the call; never returns
 	Where() string    // "file:line: " of the script caller, or ""
-}
-
-// DoString compiles and runs code in the execution that entered c.
-func (c *Call) DoString(name, code string) error {
-	return c.B.DoString(name, code)
-}
-
-// DoFile runs a file in the execution that entered c.
-func (c *Call) DoFile(path string) error { return c.B.DoFile(path) }
-
-// CallModule invokes a module function in the execution that entered c.
-func (c *Call) CallModule(
-	module, fn string,
-	nret int,
-	args ...any,
-) ([]Result, bool, error) {
-	return c.B.CallModule(module, fn, nret, args...)
-}
-
-// Call invokes a pinned function in the execution that entered c.
-func (c *Call) Call(
-	fn FuncRef,
-	nret int,
-	args ...any,
-) ([]Result, error) {
-	return c.B.Call(fn, nret, args...)
-}
-
-// CallModuleScoped invokes a module function and consumes its scoped results
-// in the execution that entered c.
-func (c *Call) CallModuleScoped(
-	module, fn string,
-	nret int,
-	args []any,
-	consume func([]Value) error,
-) (bool, error) {
-	return c.B.CallModuleScoped(module, fn, nret, args, consume)
 }
 
 // NArgs is the number of arguments the script passed.

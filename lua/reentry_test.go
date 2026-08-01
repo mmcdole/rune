@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmcdole/rune/script"
 	"github.com/mmcdole/rune/ui"
 )
 
@@ -68,12 +67,12 @@ type configChangeReentryHost struct {
 	bars      map[string]ui.BarContent
 }
 
-func (h *configChangeReentryHost) OnConfigChange(executor script.Executor) {
+func (h *configChangeReentryHost) OnConfigChange() {
 	if !h.active {
 		return
 	}
-	h.boundKeys = h.engine.GetBoundKeysIn(executor)
-	h.bars = h.engine.RenderBarsIn(executor, 80)
+	h.boundKeys = h.engine.GetBoundKeys()
+	h.bars = h.engine.RenderBars(80)
 }
 
 // TestConfigChangeCanReenterLuaAndResume verifies the real Session call path:
@@ -114,16 +113,27 @@ func TestConfigChangeCanReenterLuaAndResume(t *testing.T) {
 	}
 }
 
-// TestConfigChangeCanReenterFromCoroutine verifies that the callback executor
-// remains bound to the Lua thread that entered Go rather than silently using
-// the VM's main thread.
+// TestConfigChangeCanReenterFromCoroutine verifies that ordinary Engine calls
+// made by the host remain bound to the Lua thread that entered Go rather than
+// silently using the VM's main thread.
 func TestConfigChangeCanReenterFromCoroutine(t *testing.T) {
 	engine, host := newConfigChangeReentryEngine(t)
+	if err := engine.DoString("coroutine setup", `
+		worker = false
+		rune.ui.bar("thread", function()
+			if coroutine.running() == worker then
+				return "worker"
+			end
+			return "wrong thread"
+		end)
+	`); err != nil {
+		t.Fatalf("register coroutine-aware bar: %v", err)
+	}
 	host.active = true
 
 	if err := engine.DoString("coroutine reentry", `
-		local worker = coroutine.create(function()
-			rune.bind("ctrl+shift+c", function() end)
+			worker = coroutine.create(function()
+				rune.bind("ctrl+shift+c", function() end)
 			rune.send_raw("coroutine resumed")
 		end)
 		local ok, err = coroutine.resume(worker)
@@ -136,6 +146,9 @@ func TestConfigChangeCanReenterFromCoroutine(t *testing.T) {
 	if !containsString(host.boundKeys, "ctrl+shift+c") {
 		t.Errorf("nested bind query used the wrong thread: %q", host.boundKeys)
 	}
+	if got := host.bars["thread"].Left; got != "worker" {
+		t.Errorf("nested bar render ran on %q, want worker coroutine", got)
+	}
 	if got := host.DrainNetworkCalls(); !reflect.DeepEqual(
 		got,
 		[]string{"coroutine resumed"},
@@ -147,10 +160,10 @@ func TestConfigChangeCanReenterFromCoroutine(t *testing.T) {
 	}
 }
 
-// TestReentryFailureUsesSameExecutor verifies that an error produced by a
-// nested call reaches the error hook through the callback executor instead of
-// retrying through the already-running Engine.
-func TestReentryFailureUsesSameExecutor(t *testing.T) {
+// TestReentryFailureUsesActiveFrame verifies that an error produced by a
+// nested call reaches the error hook through the active callback frame instead
+// of trying to start a second outer execution.
+func TestReentryFailureUsesActiveFrame(t *testing.T) {
 	engine, host := newConfigChangeReentryEngine(t)
 	if err := engine.DoString("failure setup", `
 		rune.hooks.on("error", function(message)
@@ -181,8 +194,19 @@ func TestReentryFailureUsesSameExecutor(t *testing.T) {
 	}
 	for _, printed := range host.DrainPrintCalls() {
 		if strings.Contains(printed, "state is executing") {
-			t.Fatalf("error reporting left callback executor: %q", printed)
+			t.Fatalf("error reporting left active callback frame: %q", printed)
 		}
+	}
+	if err := engine.DoString("after failed reentry", `
+		rune.send_raw("idle state restored")
+	`); err != nil {
+		t.Fatalf("VM unusable after outer callback returned: %v", err)
+	}
+	if got := host.DrainNetworkCalls(); !reflect.DeepEqual(
+		got,
+		[]string{"idle state restored"},
+	) {
+		t.Fatalf("post-reentry execution = %q", got)
 	}
 }
 
