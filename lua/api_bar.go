@@ -16,7 +16,7 @@ func (e *Engine) registerBarFuncs() {
 		// rune._ui.refresh_bars() - Force immediate bar refresh
 		// Use when bar state changes and you don't want to wait for the 250ms ticker
 		"refresh_bars": func(c *script.Call) error {
-			e.host.RefreshBars()
+			e.host.RefreshBars(c)
 			return nil
 		},
 
@@ -36,7 +36,7 @@ func (e *Engine) registerBarFuncs() {
 				e.barLayout.Bottom = nil
 			}
 
-			e.host.OnConfigChange() // Notify Session to push layout update to UI
+			e.host.OnConfigChange(c) // Notify Session to push layout update to UI
 			return nil
 		},
 	}, nil)
@@ -92,9 +92,24 @@ func parseLayoutArray(tbl script.TableView) []ui.LayoutEntry {
 // module is unavailable (degraded mode).
 // Must be called from the Session goroutine (single Lua owner).
 func (e *Engine) RenderBars(width int) map[string]ui.BarContent {
+	return e.renderBars(e.vm, width)
+}
+
+// RenderBarsIn renders bars from an active script execution.
+func (e *Engine) RenderBarsIn(
+	executor script.Executor,
+	width int,
+) map[string]ui.BarContent {
+	return e.renderBars(executor, width)
+}
+
+func (e *Engine) renderBars(
+	executor script.Executor,
+	width int,
+) map[string]ui.BarContent {
 	result := make(map[string]ui.BarContent)
 	err := e.guard(func() error {
-		_, callErr := e.vm.CallModuleScoped("rune.bars", "_render_all", 1,
+		_, callErr := executor.CallModuleScoped("rune.bars", "_render_all", 1,
 			[]any{width}, func(vals []script.Value) error {
 				tbl := vals[0].Table()
 				if tbl == nil {
@@ -120,7 +135,7 @@ func (e *Engine) RenderBars(width int) map[string]ui.BarContent {
 		return callErr
 	})
 	if err != nil {
-		e.reportError("bar render", err)
+		e.reportErrorIn(executor, "bar render", err)
 		return nil
 	}
 	if len(result) == 0 {

@@ -48,7 +48,7 @@ func TestGMCPStateSurvivesReloadMidConnection(t *testing.T) {
 		`rune.gmcp.subscribe("Room")`,
 		`rune.echo("RELOAD-GMCP-UP=" .. tostring(rune.gmcp.is_enabled()))`,
 	}, "\n"))
-	s.Reload()
+	s.reload()
 	cb := <-s.asyncResults // reload is deferred
 	cb()
 

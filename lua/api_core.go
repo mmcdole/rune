@@ -41,19 +41,19 @@ func (e *Engine) registerCoreFuncs() {
 		// rune._connect(address): Connect to server
 		"_connect": func(c *script.Call) error {
 			addr := c.Str(1)
-			e.host.Connect(addr)
+			e.host.Connect(c, addr)
 			return nil
 		},
 
 		// rune._disconnect(): Disconnect from server
 		"_disconnect": func(c *script.Call) error {
-			e.host.Disconnect()
+			e.host.Disconnect(c)
 			return nil
 		},
 
 		// rune._reload(): Reload all scripts
 		"_reload": func(c *script.Call) error {
-			e.host.Reload()
+			e.host.Reload(c)
 			return nil
 		},
 
@@ -70,11 +70,11 @@ func (e *Engine) registerCoreFuncs() {
 		// Returns true, or nil + error message.
 		"_load": func(c *script.Call) error {
 			path := c.Str(1)
-			if err := e.DoFile(path); err != nil {
+			if err := c.DoFile(path); err != nil {
 				c.Return(nil, err.Error())
 				return nil
 			}
-			e.CallHook("loaded", path)
+			e.callHook(c, "loaded", path)
 			c.Return(true)
 			return nil
 		},

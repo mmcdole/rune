@@ -78,7 +78,7 @@ func TestCLITargetNotRepeatedOnReload(t *testing.T) {
 	s, net, _ := bootWithTarget(t, t.TempDir(), "mud.example.com:4000")
 	drainConnect(t, s)
 
-	s.Reload()
+	s.reload()
 	cb := <-s.asyncResults
 	cb()
 

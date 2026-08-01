@@ -106,6 +106,37 @@ func (s *callScope) payloadAt(idx int) any {
 
 type raiseSentinel struct{ msg string }
 
+func (s *callScope) DoString(name, code string) error {
+	return s.e.DoString(name, code)
+}
+
+func (s *callScope) DoFile(path string) error { return s.e.DoFile(path) }
+
+func (s *callScope) CallModule(
+	module, fn string,
+	nret int,
+	args ...any,
+) ([]script.Result, bool, error) {
+	return s.e.CallModule(module, fn, nret, args...)
+}
+
+func (s *callScope) Call(
+	fn script.FuncRef,
+	nret int,
+	args ...any,
+) ([]script.Result, error) {
+	return s.e.Call(fn, nret, args...)
+}
+
+func (s *callScope) CallModuleScoped(
+	module, fn string,
+	nret int,
+	args []any,
+	consume func([]script.Value) error,
+) (bool, error) {
+	return s.e.CallModuleScoped(module, fn, nret, args, consume)
+}
+
 func (s *callScope) NArgs() int { return s.n }
 
 func (s *callScope) Arg(i int) script.Value {

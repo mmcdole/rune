@@ -15,7 +15,7 @@ func (e *Engine) registerUIInternalFuncs() {
 		// rune._ui.config_changed(): notify the host that binds/layout
 		// changed so it can push fresh state to the UI.
 		"config_changed": func(c *script.Call) error {
-			e.host.OnConfigChange()
+			e.host.OnConfigChange(c)
 			return nil
 		},
 

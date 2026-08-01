@@ -22,9 +22,18 @@ func (e *Engine) HandleKeyBind(key string) {
 // module. Session pushes these to the UI so it knows which keys to
 // forward instead of feeding them to the input widget.
 func (e *Engine) GetBoundKeys() []string {
+	return e.getBoundKeys(e.vm)
+}
+
+// GetBoundKeysIn reads bindings from an active script execution.
+func (e *Engine) GetBoundKeysIn(executor script.Executor) []string {
+	return e.getBoundKeys(executor)
+}
+
+func (e *Engine) getBoundKeys(executor script.Executor) []string {
 	var keys []string
 	err := e.guard(func() error {
-		_, callErr := e.vm.CallModuleScoped("rune.binds", "_keys", 1,
+		_, callErr := executor.CallModuleScoped("rune.binds", "_keys", 1,
 			nil, func(vals []script.Value) error {
 				tbl := vals[0].Table()
 				if tbl == nil {
@@ -39,7 +48,7 @@ func (e *Engine) GetBoundKeys() []string {
 		return callErr
 	})
 	if err != nil {
-		e.reportError("bind key listing", err)
+		e.reportErrorIn(executor, "bind key listing", err)
 		return nil
 	}
 	return keys

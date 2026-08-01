@@ -24,6 +24,15 @@ type typeDecl struct {
 	methods map[string]script.GoFunc
 }
 
+// luaCaller is the common execution surface of an idle State and the Frame
+// supplied to an active native callback. State starts an outer execution;
+// Frame continues the execution that entered Go.
+type luaCaller interface {
+	CallDiscard(lua.Value, ...lua.Value) error
+	CallOne(lua.Value, ...lua.Value) (lua.Value, error)
+	CallInto(lua.Value, []lua.Value, []lua.Value) (int, error)
+}
+
 // Engine implements script.Engine over Lunar.
 type Engine struct {
 	state *lua.State
@@ -221,14 +230,22 @@ func (e *Engine) SetModuleField(path, key string, value any) {
 }
 
 func (e *Engine) DoString(name, code string) error {
+	return e.doString(e.state, name, code)
+}
+
+func (e *Engine) doString(caller luaCaller, name, code string) error {
 	chunk, err := e.state.LoadString(name, code)
 	if err != nil {
 		return err
 	}
-	return e.state.CallDiscard(chunk.Value())
+	return caller.CallDiscard(chunk.Value())
 }
 
 func (e *Engine) DoFile(path string) error {
+	return e.doFile(e.state, path)
+}
+
+func (e *Engine) doFile(caller luaCaller, path string) error {
 	path = expandTilde(path)
 	absolute, err := filepath.Abs(path)
 	if err != nil {
@@ -254,10 +271,19 @@ func (e *Engine) DoFile(path string) error {
 	if err != nil {
 		return err
 	}
-	return e.state.CallDiscard(chunk.Value())
+	return caller.CallDiscard(chunk.Value())
 }
 
 func (e *Engine) CallModule(
+	module, fn string,
+	nret int,
+	args ...any,
+) ([]script.Result, bool, error) {
+	return e.callModule(e.state, module, fn, nret, args...)
+}
+
+func (e *Engine) callModule(
+	caller luaCaller,
 	module, fn string,
 	nret int,
 	args ...any,
@@ -266,7 +292,7 @@ func (e *Engine) CallModule(
 	if err != nil || !found {
 		return nil, false, err
 	}
-	results, err := e.call(target, nret, args)
+	results, err := e.call(caller, target, nret, args)
 	return results, true, err
 }
 
@@ -276,11 +302,21 @@ func (e *Engine) CallModuleScoped(
 	args []any,
 	consume func([]script.Value) error,
 ) (bool, error) {
+	return e.callModuleScoped(e.state, module, fn, nret, args, consume)
+}
+
+func (e *Engine) callModuleScoped(
+	caller luaCaller,
+	module, fn string,
+	nret int,
+	args []any,
+	consume func([]script.Value) error,
+) (bool, error) {
 	target, found, err := e.moduleFunction(module, fn)
 	if err != nil || !found {
 		return false, err
 	}
-	values, err := e.callValues(target, nret, args)
+	values, err := e.callValues(caller, target, nret, args)
 	if err != nil {
 		return true, err
 	}
@@ -296,11 +332,20 @@ func (e *Engine) Call(
 	nret int,
 	args ...any,
 ) ([]script.Result, error) {
+	return e.callPinned(e.state, fn, nret, args...)
+}
+
+func (e *Engine) callPinned(
+	caller luaCaller,
+	fn script.FuncRef,
+	nret int,
+	args ...any,
+) ([]script.Result, error) {
 	target, ok := e.pins[fn.PinID()]
 	if !ok {
 		return nil, fmt.Errorf("script function is no longer available")
 	}
-	return e.call(target.Value(), nret, args)
+	return e.call(caller, target.Value(), nret, args)
 }
 
 func (e *Engine) moduleFunction(module, fn string) (lua.Value, bool, error) {
@@ -324,6 +369,7 @@ func (e *Engine) moduleFunction(module, fn string) (lua.Value, bool, error) {
 // buffer, and ResultCapacityError carries the completed results, so the extras
 // are discarded rather than lost.
 func (e *Engine) callValues(
+	caller luaCaller,
 	target lua.Value,
 	nret int,
 	args []any,
@@ -334,9 +380,9 @@ func (e *Engine) callValues(
 	}
 	switch {
 	case nret <= 0:
-		return nil, e.state.CallDiscard(target, arguments...)
+		return nil, caller.CallDiscard(target, arguments...)
 	case nret == 1:
-		result, callErr := e.state.CallOne(target, arguments...)
+		result, callErr := caller.CallOne(target, arguments...)
 		if callErr != nil {
 			return nil, callErr
 		}
@@ -344,7 +390,7 @@ func (e *Engine) callValues(
 	}
 
 	results := make([]lua.Value, nret)
-	count, callErr := e.state.CallInto(target, arguments, results)
+	count, callErr := caller.CallInto(target, arguments, results)
 	if callErr != nil {
 		var overflow *lua.ResultCapacityError
 		if !asResultCapacityError(callErr, &overflow) {
@@ -360,11 +406,12 @@ func (e *Engine) callValues(
 }
 
 func (e *Engine) call(
+	caller luaCaller,
 	target lua.Value,
 	nret int,
 	args []any,
 ) ([]script.Result, error) {
-	values, err := e.callValues(target, nret, args)
+	values, err := e.callValues(caller, target, nret, args)
 	if err != nil {
 		return nil, err
 	}
@@ -564,6 +611,46 @@ type callScope struct {
 	frame  lua.Frame
 	// rets holds values staged by Return until the callback completes.
 	rets []any
+}
+
+func (s *callScope) DoString(name, code string) error {
+	return s.engine.doString(&s.frame, name, code)
+}
+
+func (s *callScope) DoFile(path string) error {
+	return s.engine.doFile(&s.frame, path)
+}
+
+func (s *callScope) CallModule(
+	module, fn string,
+	nret int,
+	args ...any,
+) ([]script.Result, bool, error) {
+	return s.engine.callModule(&s.frame, module, fn, nret, args...)
+}
+
+func (s *callScope) Call(
+	fn script.FuncRef,
+	nret int,
+	args ...any,
+) ([]script.Result, error) {
+	return s.engine.callPinned(&s.frame, fn, nret, args...)
+}
+
+func (s *callScope) CallModuleScoped(
+	module, fn string,
+	nret int,
+	args []any,
+	consume func([]script.Value) error,
+) (bool, error) {
+	return s.engine.callModuleScoped(
+		&s.frame,
+		module,
+		fn,
+		nret,
+		args,
+		consume,
+	)
 }
 
 func (e *Engine) nativeFunc(fn script.GoFunc) lua.NativeFunc {
