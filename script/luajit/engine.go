@@ -42,6 +42,11 @@ type typeDecl struct {
 type Engine struct {
 	l *C.lua_State
 
+	// borrowDepth covers every Go callback or scoped consumer that still owns
+	// VM-backed stack slots or registry references. Lifecycle operations must
+	// wait for all of them.
+	borrowDepth int
+
 	modules []moduleDecl
 	types   []typeDecl
 
@@ -69,6 +74,9 @@ func New() *Engine {
 func (e *Engine) Backend() string { return "luajit" }
 
 func (e *Engine) Init() error {
+	if e.borrowDepth != 0 {
+		return errors.New("script: Init called before the active script call returned")
+	}
 	e.closeState()
 	C.rune_release_mcode_reserve()
 	l := C.luaL_newstate()
@@ -90,7 +98,12 @@ func (e *Engine) Init() error {
 	return nil
 }
 
-func (e *Engine) Close() { e.closeState() }
+func (e *Engine) Close() {
+	if e.borrowDepth != 0 {
+		panic("script: Close called before the active script call returned")
+	}
+	e.closeState()
+}
 
 func (e *Engine) closeState() {
 	if e.l == nil {
@@ -270,15 +283,19 @@ func (e *Engine) CallModuleScoped(module, fn string, nret int, args []any, consu
 		return true, err
 	}
 	scope := &callScope{e: e}
-	vals := make([]script.Value, nret)
 	base := int(C.lua_gettop(e.l)) - nret
+	e.borrowDepth++
+	defer func() { e.borrowDepth-- }()
+	defer func() {
+		scope.release()
+		C.lua_settop(e.l, C.int(base))
+	}()
+
+	vals := make([]script.Value, nret)
 	for i := 0; i < nret; i++ {
 		vals[i] = scope.wrap(base + 1 + i)
 	}
-	err := consume(vals)
-	scope.release()
-	C.lua_settop(e.l, C.int(base))
-	return true, err
+	return true, consume(vals)
 }
 
 func (e *Engine) Call(fn script.FuncRef, nret int, args ...any) ([]script.Result, error) {

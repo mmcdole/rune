@@ -14,8 +14,12 @@
 //     the caller's job. Refs die silently with Engine.Close or Init.
 //   - All Engine and ref methods must be called from the session
 //     goroutine. Host functions run on it too.
-//   - A host function that synchronously executes Lua must use or pass its
-//     Call as the Executor; Engine starts an outer execution.
+//   - Engine execution methods called synchronously by a host function
+//     continue the innermost script callback. Once that callback returns,
+//     they start a new outer execution as usual.
+//   - Init and Close cannot run before an enclosing Engine execution call has
+//     returned. This includes host functions and CallModuleScoped consumers;
+//     host-triggered lifecycle work must therefore be deferred.
 //   - Accessor methods (Str, Num, Table, ...) raise a script-level
 //     type error by unwinding the call; host code must not recover it.
 //   - Two Values are never comparable; identity is not part of the
@@ -31,38 +35,8 @@ import (
 // error raises it as a script error in the calling script.
 type GoFunc func(c *Call) error
 
-// Executor is the authority to execute Lua either from an idle Engine or from
-// one active host Call. A callback passes its *Call through helper layers that
-// may reenter Lua; using the Engine there would start a second outer execution.
-//
-// An Executor obtained from a Call is borrowed for that callback. It must not
-// be retained or used concurrently.
-type Executor interface {
-	// DoString compiles and runs code; name appears in stack traces.
-	DoString(name, code string) error
-	// DoFile runs a file, temporarily extending the script search path
-	// with the file's directory so local require works.
-	DoFile(path string) error
-
-	// CallModule invokes <module>.<fn> if it exists and is a function;
-	// found=false otherwise. nret fixes the result count; results are
-	// materialized (scalars only — composite results become Foreign).
-	CallModule(module, fn string, nret int, args ...any) (results []Result, found bool, err error)
-
-	// Call invokes a pinned function.
-	Call(fn FuncRef, nret int, args ...any) ([]Result, error)
-
-	// CallModuleScoped invokes <module>.<fn> and passes the raw results
-	// to consume within a live call scope, so composite results (tables)
-	// can be read through Values/TableViews. The values die when consume
-	// returns.
-	CallModuleScoped(module, fn string, nret int, args []any, consume func([]Value) error) (found bool, err error)
-}
-
 // Engine is a scripting runtime hosting Rune's Lua environment.
 type Engine interface {
-	Executor
-
 	// Init creates (or recreates) the VM and re-registers everything
 	// previously registered via RegisterModule/RegisterType. Pins from
 	// an earlier generation are dead after Init.
@@ -83,6 +57,26 @@ type Engine interface {
 
 	// SetModuleField sets one data field on a module table at runtime.
 	SetModuleField(path, key string, value any)
+
+	// DoString compiles and runs code; name appears in stack traces.
+	DoString(name, code string) error
+	// DoFile runs a file, temporarily extending the script search path
+	// with the file's directory so local require works.
+	DoFile(path string) error
+
+	// CallModule invokes <module>.<fn> if it exists and is a function;
+	// found=false otherwise. nret fixes the result count; results are
+	// materialized (scalars only — composite results become Foreign).
+	CallModule(module, fn string, nret int, args ...any) (results []Result, found bool, err error)
+
+	// Call invokes a pinned function.
+	Call(fn FuncRef, nret int, args ...any) ([]Result, error)
+
+	// CallModuleScoped invokes <module>.<fn> and passes the raw results
+	// to consume within a live call scope, so composite results (tables)
+	// can be read through Values/TableViews. The values die when consume
+	// returns.
+	CallModuleScoped(module, fn string, nret int, args []any, consume func([]Value) error) (found bool, err error)
 
 	// Watchdog: while a context is set, script execution should be
 	// interrupted (best-effort, engine-appropriate) once it expires.

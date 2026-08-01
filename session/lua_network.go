@@ -3,16 +3,14 @@ package session
 import (
 	"context"
 	"time"
-
-	"github.com/mmcdole/rune/script"
 )
 
 // Connect implements lua.Host.
 // The dial runs in its own goroutine; unlike Reload, that goroutine
 // may block on the async-result channel (lossless delivery) because
 // the session loop keeps draining while the dial is in flight.
-func (s *Session) Connect(executor script.Executor, addr string) {
-	s.engine.CallHookIn(executor, "connecting", addr)
+func (s *Session) Connect(addr string) {
+	s.engine.CallHook("connecting", addr)
 	go func() {
 		// Create a timeout context for the dial attempt.
 		// We use a separate context because if the Session cancels,
@@ -39,17 +37,7 @@ func (s *Session) Connect(executor script.Executor, addr string) {
 }
 
 // Disconnect implements lua.Host.
-func (s *Session) Disconnect(executor script.Executor) {
-	s.engine.CallHookIn(executor, "disconnecting")
-	s.net.Disconnect()
-	s.clientState.Connected = false
-	s.clientState.Address = ""
-	s.engine.UpdateState(s.clientState)
-	s.engine.CallHookIn(executor, "disconnected")
-	s.pushBarUpdatesIn(executor)
-}
-
-func (s *Session) disconnect() {
+func (s *Session) Disconnect() {
 	s.engine.CallHook("disconnecting")
 	s.net.Disconnect()
 	s.clientState.Connected = false

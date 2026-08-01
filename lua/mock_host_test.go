@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/mmcdole/rune/input"
-	"github.com/mmcdole/rune/script"
 	"github.com/mmcdole/rune/ui"
 )
 
@@ -104,13 +103,13 @@ func (m *MockHost) Quit() {
 	m.QuitCalled = true
 }
 
-func (m *MockHost) Connect(_ script.Executor, addr string) {
+func (m *MockHost) Connect(addr string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.ConnectCalls = append(m.ConnectCalls, addr)
 }
 
-func (m *MockHost) Disconnect(script.Executor) {
+func (m *MockHost) Disconnect() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.DisconnectCalls++
@@ -132,13 +131,13 @@ func (m *MockHost) GMCPActive() bool {
 	return m.GMCPNegotiated
 }
 
-func (m *MockHost) Reload(script.Executor) {
+func (m *MockHost) Reload() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.ReloadCalls++
 }
 
-func (m *MockHost) RefreshBars(script.Executor) {
+func (m *MockHost) RefreshBars() {
 	// No-op for tests
 }
 
@@ -172,7 +171,7 @@ func (m *MockHost) PaneClear(name string) {
 	m.PaneCalls = append(m.PaneCalls, struct{ Op, Name, Data string }{"clear", name, ""})
 }
 
-func (m *MockHost) OnConfigChange(script.Executor) {
+func (m *MockHost) OnConfigChange() {
 	// No-op for tests - config change notifications not tracked
 }
 

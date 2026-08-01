@@ -97,7 +97,7 @@ func TestReloadWithBrokenScriptKeepsClientAlive(t *testing.T) {
 		[]byte("syntax error here ((("), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	s.reload()
+	s.Reload()
 	cb := <-s.asyncResults // reload is deferred
 	cb()
 

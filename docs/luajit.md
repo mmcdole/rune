@@ -64,9 +64,13 @@ what keep both backends simple and honest:
 - Values are never comparable; table identity is exposed only as
   `TableView.Id` for cycle detection.
 - Everything runs on the session goroutine.
+- Ordinary engine calls made synchronously from a host callback continue on
+  that callback's active Lua frame/thread. Backends keep this execution detail
+  internal; callers use the same `script.Engine` methods whether the VM is idle
+  or executing a callback.
 
-The engine test suite is the backend conformance contract:
-`go test ./lua/` and `go test -tags luajit ./lua/` must both pass.
+The full test suite is the backend conformance contract:
+`go test ./...` and `go test -tags luajit ./...` must both pass.
 
 ## LuaJIT backend notes
 
