@@ -13,6 +13,26 @@ import (
 	"github.com/mmcdole/rune/ui/tui/widget"
 )
 
+// recordingSearchEffects records searchEffects calls so tests can
+// assert the settle-exactly-once invariant.
+type recordingSearchEffects struct {
+	opens    int
+	scope    widget.SearchScope
+	previews []bool // ok flag of each PreviewSearch call
+	commits  int
+	cancels  int
+}
+
+func (r *recordingSearchEffects) OpenSearch() widget.SearchScope {
+	r.opens++
+	return r.scope
+}
+func (r *recordingSearchEffects) PreviewSearch(_ widget.SearchMatch, ok bool) {
+	r.previews = append(r.previews, ok)
+}
+func (r *recordingSearchEffects) CommitSearch() { r.commits++ }
+func (r *recordingSearchEffects) CancelSearch() { r.cancels++ }
+
 // controllerHarness drives an inputController directly, recording
 // outbound events and submitted lines.
 type controllerHarness struct {
@@ -21,14 +41,19 @@ type controllerHarness struct {
 	submitted []input.Submission
 	bound     map[string]bool
 	accept    bool
+	fx        *recordingSearchEffects
+	buf       *widget.ScrollbackBuffer
 }
 
 func newControllerHarness() *controllerHarness {
 	h := &controllerHarness{
 		bound:  make(map[string]bool),
 		accept: true,
+		fx:     &recordingSearchEffects{},
+		buf:    widget.NewScrollbackBuffer(100),
 	}
-	draftInput := widget.NewInput(style.DefaultStyles())
+	styles := style.DefaultStyles()
+	draftInput := widget.NewInput(styles, widget.NewSearch(h.buf, styles))
 	h.ctl = newInputController(
 		draftInput,
 		func(ev ui.UIEvent) { h.events = append(h.events, ev) },
@@ -38,6 +63,7 @@ func newControllerHarness() *controllerHarness {
 		},
 		func(key string) bool { return h.bound[key] },
 		func(tea.KeyType) bool { return false },
+		h.fx,
 	)
 	return h
 }
@@ -604,5 +630,158 @@ func TestReboundHomeOverridesInputCursor(t *testing.T) {
 	}
 	if pos := h.ctl.input.Position(); pos != len("look") {
 		t.Fatalf("bound home moved the cursor to %d, want untouched at %d", pos, len("look"))
+	}
+}
+
+// TestSearchSettledOnEveryExit mirrors the picker invariant for search:
+// every path out of ModeSearch resets the mode and settles the
+// viewport exactly once - one CommitSearch or one CancelSearch.
+func TestSearchSettledOnEveryExit(t *testing.T) {
+	cases := []struct {
+		name    string
+		exit    func(h *controllerHarness)
+		commits int
+		cancels int
+	}{
+		{
+			name:    "escape cancels",
+			exit:    func(h *controllerHarness) { h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyEsc}) },
+			cancels: 1,
+		},
+		{
+			name:    "ctrl+c cancels",
+			exit:    func(h *controllerHarness) { h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyCtrlC}) },
+			cancels: 1,
+		},
+		{
+			name:    "enter commits",
+			exit:    func(h *controllerHarness) { h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyEnter}) },
+			commits: 1,
+		},
+		{
+			name:    "SetText cancels once",
+			exit:    func(h *controllerHarness) { h.ctl.SetText("go north") },
+			cancels: 1,
+		},
+		{
+			name: "opening a picker cancels the search",
+			exit: func(h *controllerHarness) {
+				h.ctl.ShowPicker(ui.ShowPickerMsg{Items: pickerTestItems, CallbackID: "cb"})
+			},
+			cancels: 1,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newControllerHarness()
+			h.buf.Append("a thief passes")
+			h.ctl.ShowSearch(ui.ShowSearchMsg{Query: "thief"})
+			if h.ctl.mode != ModeSearch {
+				t.Fatalf("expected ModeSearch after ShowSearch, got %v", h.ctl.mode)
+			}
+			if h.fx.opens != 1 {
+				t.Fatalf("expected one OpenSearch, got %d", h.fx.opens)
+			}
+
+			tc.exit(h)
+
+			if h.fx.commits != tc.commits || h.fx.cancels != tc.cancels {
+				t.Fatalf("commits/cancels = %d/%d, want %d/%d",
+					h.fx.commits, h.fx.cancels, tc.commits, tc.cancels)
+			}
+			if tc.name == "opening a picker cancels the search" {
+				if h.ctl.mode != ModePickerModal {
+					t.Fatalf("expected ModePickerModal after picker-over-search, got %v", h.ctl.mode)
+				}
+			} else if h.ctl.mode != ModeNormal {
+				t.Fatalf("expected ModeNormal after exit, got %v", h.ctl.mode)
+			}
+		})
+	}
+}
+
+// TestSearchOpensWithPreviewAndSteps verifies opening previews the
+// newest match and Up/Down re-preview as the selection steps.
+func TestSearchOpensWithPreviewAndSteps(t *testing.T) {
+	h := newControllerHarness()
+	h.buf.Append("thief one")
+	h.buf.Append("quiet row")
+	h.buf.Append("thief two")
+
+	h.ctl.ShowSearch(ui.ShowSearchMsg{Query: "thief"})
+	if len(h.fx.previews) != 1 || !h.fx.previews[0] {
+		t.Fatalf("open should preview the newest match, previews = %v", h.fx.previews)
+	}
+
+	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyDown})
+	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyUp})
+	if len(h.fx.previews) != 3 {
+		t.Fatalf("selection moves should re-preview, previews = %v", h.fx.previews)
+	}
+
+	// Editing the query re-previews; a query with no matches previews
+	// ok=false (restores the snapshot).
+	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("zzz")})
+	last := h.fx.previews[len(h.fx.previews)-1]
+	if last {
+		t.Fatal("no-match query must preview ok=false")
+	}
+}
+
+// TestSearchTrapsBoundKeys verifies ModeSearch behaves like the modal
+// picker: bound keys edit the query instead of dispatching to Lua.
+func TestSearchTrapsBoundKeys(t *testing.T) {
+	h := newControllerHarness()
+	h.buf.Append("j marks the spot")
+	h.bound["j"] = true
+	h.bound["ctrl+t"] = true
+
+	h.ctl.ShowSearch(ui.ShowSearchMsg{})
+	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyCtrlT})
+
+	if binds := h.executeBinds(); len(binds) != 0 {
+		t.Fatalf("search mode must not dispatch binds, got %v", binds)
+	}
+	if h.ctl.mode != ModeSearch {
+		t.Fatalf("unhandled chords must not exit search mode, got %v", h.ctl.mode)
+	}
+}
+
+// TestSearchIgnoredWhileComposing verifies ShowSearch over a structured
+// draft is a no-op: no mode change, no effects.
+func TestSearchIgnoredWhileComposing(t *testing.T) {
+	h := newControllerHarness()
+	h.ctl.SetText("line one\nline two")
+	if h.ctl.mode != ModeCompose {
+		t.Fatalf("expected ModeCompose, got %v", h.ctl.mode)
+	}
+
+	h.ctl.ShowSearch(ui.ShowSearchMsg{Query: "thief"})
+
+	if h.ctl.mode != ModeCompose {
+		t.Fatalf("search must not open over a composer, got %v", h.ctl.mode)
+	}
+	if h.fx.opens != 0 || len(h.fx.previews) != 0 {
+		t.Fatal("refused ShowSearch must produce zero effects")
+	}
+}
+
+// TestSearchOverPickerSettlesPickerFirst verifies the picker's callback
+// settles exactly once (cancelled) when search opens over it.
+func TestSearchOverPickerSettlesPickerFirst(t *testing.T) {
+	h := newControllerHarness()
+	h.buf.Append("a thief passes")
+	h.ctl.ShowPicker(ui.ShowPickerMsg{Items: pickerTestItems, CallbackID: "cb"})
+
+	h.ctl.ShowSearch(ui.ShowSearchMsg{Query: "thief"})
+
+	selects := h.pickerSelects()
+	if len(selects) != 1 || selects[0].Accepted {
+		t.Fatalf("picker must settle cancelled exactly once, got %v", selects)
+	}
+	if h.ctl.mode != ModeSearch {
+		t.Fatalf("expected ModeSearch, got %v", h.ctl.mode)
 	}
 }

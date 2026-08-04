@@ -164,7 +164,7 @@ end
 -- Client state (read-only view)
 -- Go pushes updates into rune._state; rune.state is a read-only proxy
 -- so scripts cannot corrupt Go-owned state. Fields: connected,
--- address, scroll_mode, scroll_lines, width, height.
+-- address, scroll_mode, scroll_lines, search_active, width, height.
 rune.state = setmetatable({}, {
     __index = function(_, key)
         return rune._state[key]
@@ -259,6 +259,13 @@ rune.ui.picker = {}
 -- }
 function rune.ui.picker.show(opts)
     rune._ui.picker_show(opts)
+end
+
+-- Open the scrollback-search overlay (also bound to Ctrl+F and /find).
+-- opts = { query = "thief" }  -- optional; omitted or empty reopens
+--                             -- with the previous search's query
+function rune.ui.search(opts)
+    rune._ui.search_show(opts or {})
 end
 
 -- Startup

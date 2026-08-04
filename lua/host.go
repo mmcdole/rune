@@ -34,6 +34,7 @@ type Host interface {
 	PaneSetVisible(name string, visible bool)
 	PaneClear(name string)
 	ShowPicker(opts ui.ShowPickerMsg)
+	ShowSearch(opts ui.ShowSearchMsg)
 	ClipboardSet(text string)
 	GetInput() string
 	SetInput(text string)

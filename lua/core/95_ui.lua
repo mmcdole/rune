@@ -147,7 +147,9 @@ rune.ui.bar("status", function(width)
 
     -- Right side: scroll mode indicator
     local right
-    if state.scroll_mode == "scrolled" then
+    if state.search_active then
+        right = yellow("SEARCH")
+    elseif state.scroll_mode == "scrolled" then
         right = yellow("SCROLL") .. " " .. dim("(" .. state.scroll_lines .. " new)")
     else
         right = dim("LIVE")
@@ -187,6 +189,13 @@ rune.bind("ctrl+t", function()
             rune.input.set(val)
         end
     })
+end)
+
+-- Scrollback Search (Ctrl+F)
+-- Reopening preserves the last query; typing replaces it. The overlay
+-- itself owns stepping (Up/Down), commit (Enter), and cancel (Esc).
+rune.bind("ctrl+f", function()
+    rune.ui.search()
 end)
 
 -- Slash Command Picker (Inline Mode)

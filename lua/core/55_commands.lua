@@ -404,6 +404,12 @@ rune.command.add("echo", function(args)
     rune.echo(args)
 end, "Print text locally")
 
+-- /find [pattern] - Search the scrollback. With no pattern the overlay
+-- reopens with the previous query (find-next lives in the overlay).
+rune.command.add("find", function(args)
+    rune.ui.search({ query = args })
+end, "Search scrollback")
+
 -- /version - Client version
 rune.command.add("version", function(args)
     rune.echo("Rune " .. rune.version .. " (lua: " .. rune.engine .. ")")

@@ -49,6 +49,11 @@ func (s *Session) ShowPicker(opts ui.ShowPickerMsg) {
 	s.ui.ShowPicker(opts)
 }
 
+// ShowSearch implements lua.Host.
+func (s *Session) ShowSearch(opts ui.ShowSearchMsg) {
+	s.ui.ShowSearch(opts)
+}
+
 // GetInput implements lua.Host.
 func (s *Session) GetInput() string {
 	return s.currentInput

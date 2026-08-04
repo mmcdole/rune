@@ -43,8 +43,11 @@ type Model struct {
 	input      *widget.Input
 	panes      *widget.PaneManager
 
-	// Input-mode state machine (normal / modal picker / inline picker)
+	// Input-mode state machine (normal / modal picker / inline picker / search)
 	inputCtl *inputController
+
+	// Viewport geometry and focus for the active/committed search result.
+	searchView searchViewState
 
 	// Push-based state from Session
 	boundKeys  map[string]bool
@@ -73,8 +76,9 @@ type Model struct {
 func NewModel(inputChan chan<- input.Submission, outbound chan<- ui.UIEvent) *Model {
 	styles := style.DefaultStyles()
 	scrollback := widget.NewScrollbackBuffer(100000)
-	viewport := widget.NewViewport(scrollback)
-	input := widget.NewInput(styles)
+	viewport := widget.NewViewport(scrollback, styles)
+	search := widget.NewSearch(scrollback, styles)
+	input := widget.NewInput(styles, search)
 	panes := widget.NewPaneManager(styles)
 
 	m := &Model{
@@ -86,7 +90,7 @@ func NewModel(inputChan chan<- input.Submission, outbound chan<- ui.UIEvent) *Mo
 		outbound:   outbound,
 		widgets:    make(map[string]widget.Widget),
 	}
-	m.inputCtl = newInputController(input, m.sendOutbound, m.sendLine, m.isBound, m.handleScrollKey)
+	m.inputCtl = newInputController(input, m.sendOutbound, m.sendLine, m.isBound, m.handleScrollKey, m)
 
 	// Register static widgets
 	m.widgets["input"] = input
@@ -131,6 +135,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ui.ShowPickerMsg:
 		m.inputCtl.ShowPicker(msg)
 		return m, nil
+	case ui.ShowSearchMsg:
+		m.inputCtl.ShowSearch(msg)
+		return m, nil
 	case ui.SetInputMsg:
 		m.inputCtl.SetText(string(msg))
 		return m, nil
@@ -155,32 +162,32 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ignored rather than auto-created.
 	case ui.PaneScrollUpMsg:
 		if msg.Name == "main" {
-			m.viewport.ScrollUp(msg.Lines)
-			m.updateScrollState()
+			m.navigateMainViewport(func() {
+				m.viewport.ScrollUp(msg.Lines)
+			})
 		} else if m.panes.Exists(msg.Name) {
 			m.panes.Get(msg.Name).ScrollUp(msg.Lines)
 		}
 		return m, nil
 	case ui.PaneScrollDownMsg:
 		if msg.Name == "main" {
-			m.viewport.ScrollDown(msg.Lines)
-			m.updateScrollState()
+			m.navigateMainViewport(func() {
+				m.viewport.ScrollDown(msg.Lines)
+			})
 		} else if m.panes.Exists(msg.Name) {
 			m.panes.Get(msg.Name).ScrollDown(msg.Lines)
 		}
 		return m, nil
 	case ui.PaneScrollToTopMsg:
 		if msg.Name == "main" {
-			m.viewport.GotoTop()
-			m.updateScrollState()
+			m.navigateMainViewport(m.viewport.GotoTop)
 		} else if m.panes.Exists(msg.Name) {
 			m.panes.Get(msg.Name).ScrollToTop()
 		}
 		return m, nil
 	case ui.PaneScrollToBottomMsg:
 		if msg.Name == "main" {
-			m.viewport.GotoBottom()
-			m.updateScrollState()
+			m.navigateMainViewport(m.viewport.GotoBottom)
 		} else if m.panes.Exists(msg.Name) {
 			m.panes.Get(msg.Name).ScrollToBottom()
 		}
@@ -194,7 +201,12 @@ func (m *Model) handleWindowSize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	m.width = msg.Width
 	m.height = msg.Height
 	m.initialized = true
+	m.syncViewportSize()
+	scrollStateChanged := m.recenterSearchFocus()
 	m.sendOutbound(ui.WindowSizeChangedMsg{Width: msg.Width, Height: msg.Height})
+	if scrollStateChanged {
+		m.updateScrollState()
+	}
 	return m, nil
 }
 
@@ -222,14 +234,23 @@ func (m *Model) flushPending() {
 }
 
 func (m *Model) handleConfigUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
+	layoutChanged := false
 	switch msg := msg.(type) {
 	case ui.UpdateBindsMsg:
 		m.boundKeys = msg
 	case ui.UpdateBarsMsg:
 		m.syncBars(msg)
+		layoutChanged = true
 	case ui.UpdateLayoutMsg:
 		m.luaLayout.Top = msg.Top
 		m.luaLayout.Bottom = msg.Bottom
+		layoutChanged = true
+	}
+	if layoutChanged {
+		m.syncViewportSize()
+		if m.recenterSearchFocus() {
+			m.updateScrollState()
+		}
 	}
 	return m, nil
 }
@@ -321,11 +342,19 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	switch msg.Button {
 	case tea.MouseButtonWheelUp:
-		m.viewport.ScrollUp(wheelScrollLines)
-		m.updateScrollState()
+		if m.inputCtl.selectOlderSearch() {
+			return m, nil
+		}
+		m.navigateMainViewport(func() {
+			m.viewport.ScrollUp(wheelScrollLines)
+		})
 	case tea.MouseButtonWheelDown:
-		m.viewport.ScrollDown(wheelScrollLines)
-		m.updateScrollState()
+		if m.inputCtl.selectNewerSearch() {
+			return m, nil
+		}
+		m.navigateMainViewport(func() {
+			m.viewport.ScrollDown(wheelScrollLines)
+		})
 	}
 	return m, nil
 }
@@ -414,21 +443,29 @@ func (m *Model) updateScrollState() {
 	m.sendOutbound(ui.ScrollStateChangedMsg{Mode: modeStr, NewLines: newLines})
 }
 
+// navigateMainViewport is the single path for deliberate user/script
+// navigation of the main output surface. Search previews position the
+// viewport directly so their committed marker remains intact.
+func (m *Model) navigateMainViewport(move func()) {
+	m.clearCommittedSearchFocus()
+	move()
+	m.updateScrollState()
+}
+
 // handleScrollKey handles viewport scrolling keys.
 // Returns true if the key was handled.
 func (m *Model) handleScrollKey(keyType tea.KeyType) bool {
 	switch keyType {
 	case tea.KeyPgUp:
-		m.viewport.PageUp()
+		m.navigateMainViewport(m.viewport.PageUp)
 	case tea.KeyPgDown:
-		m.viewport.PageDown()
+		m.navigateMainViewport(m.viewport.PageDown)
 	case tea.KeyCtrlHome:
-		m.viewport.GotoTop()
+		m.navigateMainViewport(m.viewport.GotoTop)
 	case tea.KeyCtrlEnd:
-		m.viewport.GotoBottom()
+		m.navigateMainViewport(m.viewport.GotoBottom)
 	default:
 		return false
 	}
-	m.updateScrollState()
 	return true
 }

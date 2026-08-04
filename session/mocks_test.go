@@ -190,6 +190,7 @@ func (m *mockUI) pushedBinds() map[string]bool {
 }
 
 func (m *mockUI) ShowPicker(opts ui.ShowPickerMsg)         {}
+func (m *mockUI) ShowSearch(opts ui.ShowSearchMsg)         {}
 func (m *mockUI) SetClipboard(text string)                 {}
 func (m *mockUI) CreatePane(name string)                   {}
 func (m *mockUI) WritePane(name, text string)              {}

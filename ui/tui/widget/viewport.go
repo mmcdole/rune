@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/mmcdole/rune/ui/tui/style"
 	"github.com/mmcdole/rune/ui/tui/util"
 )
 
@@ -37,6 +38,7 @@ type ScrollbackBuffer struct {
 	tail     int
 	count    int
 	capacity int
+	appended uint64 // rows ever appended; assigns eviction-stable sequence numbers
 }
 
 // NewScrollbackBuffer creates a new ring buffer.
@@ -54,6 +56,7 @@ func NewScrollbackBuffer(capacity int) *ScrollbackBuffer {
 func (sb *ScrollbackBuffer) Append(row string) {
 	sb.lines[sb.tail] = row
 	sb.tail = (sb.tail + 1) % sb.capacity
+	sb.appended++
 
 	if sb.count < sb.capacity {
 		sb.count++
@@ -76,6 +79,23 @@ func (sb *ScrollbackBuffer) At(i int) string {
 	return sb.lines[actualIndex]
 }
 
+// Seq returns the absolute sequence number of the row at index i.
+// Indices shift as the full ring evicts old rows; sequence numbers
+// never do, so they can anchor positions across appends.
+func (sb *ScrollbackBuffer) Seq(i int) uint64 {
+	return sb.appended - uint64(sb.count) + uint64(i)
+}
+
+// IndexOf maps an absolute sequence number back to a current index;
+// ok is false when that row has been evicted (or never existed).
+func (sb *ScrollbackBuffer) IndexOf(seq uint64) (int, bool) {
+	oldest := sb.appended - uint64(sb.count)
+	if seq < oldest || seq >= sb.appended {
+		return 0, false
+	}
+	return int(seq - oldest), true
+}
+
 // Viewport renders a window into the scrollback buffer.
 type Viewport struct {
 	buffer     *ScrollbackBuffer
@@ -87,13 +107,21 @@ type Viewport struct {
 	cacheValid bool
 	cachedView string
 	prompt     string
+	styles     style.Styles
+
+	// Search-match highlight, anchored by sequence number so appends
+	// and ring eviction cannot smear it onto a different row.
+	hlSet    bool
+	hlSeq    uint64
+	hlRanges []util.ColRange
 }
 
 // NewViewport creates a viewport for the given buffer.
-func NewViewport(buffer *ScrollbackBuffer) *Viewport {
+func NewViewport(buffer *ScrollbackBuffer, styles style.Styles) *Viewport {
 	return &Viewport{
 		buffer: buffer,
 		mode:   ModeLive,
+		styles: styles,
 	}
 }
 
@@ -162,11 +190,26 @@ func (v *Viewport) View() string {
 		}
 	}
 
+	hlIdx := -1
+	if v.hlSet {
+		if idx, ok := v.buffer.IndexOf(v.hlSeq); ok {
+			hlIdx = idx
+		}
+	}
+
 	for i := startIdx; i < endIdx; i++ {
 		if emptyLines > 0 || i > startIdx {
 			b.WriteByte('\n')
 		}
-		b.WriteString(clipRow(v.buffer.At(i), v.width))
+		row := v.buffer.At(i)
+		if i == hlIdx {
+			// Splice first, clip second: highlighting must not let a
+			// row exceed the terminal width.
+			row = util.HighlightRanges(row, v.hlRanges, func(s string) string {
+				return v.styles.OverlayMatch.Render(s)
+			})
+		}
+		b.WriteString(clipRow(row, v.width))
 	}
 
 	if hasPrompt {
@@ -293,6 +336,102 @@ func (v *Viewport) GotoTop() {
 	v.offset = v.maxOffset()
 	if v.offset > 0 {
 		v.mode = ModeScrolled
+	}
+	v.cacheValid = false
+}
+
+// CenterOn scrolls so the row with the given sequence number sits
+// vertically centered (as close as clamping allows). An evicted row
+// pins to the oldest surviving window, like OnNewRows.
+func (v *Viewport) CenterOn(seq uint64) {
+	idx, ok := v.buffer.IndexOf(seq)
+	if !ok {
+		v.offset = v.maxOffset()
+	} else {
+		v.offset = v.buffer.Count() - idx - (v.height+1)/2
+		if max := v.maxOffset(); v.offset > max {
+			v.offset = max
+		}
+		if v.offset < 0 {
+			v.offset = 0
+		}
+	}
+	if v.offset > 0 {
+		v.mode = ModeScrolled
+	} else {
+		v.mode = ModeLive
+		v.newLines = 0
+	}
+	v.cacheValid = false
+}
+
+// SetHighlight marks visible column ranges of the row with the given
+// sequence number to render restyled (search-match highlighting).
+func (v *Viewport) SetHighlight(seq uint64, ranges []util.ColRange) {
+	v.hlSet = true
+	v.hlSeq = seq
+	v.hlRanges = ranges
+	v.cacheValid = false
+}
+
+// ClearHighlight removes the search-match highlight.
+func (v *Viewport) ClearHighlight() {
+	if v.hlSet {
+		v.hlSet = false
+		v.hlRanges = nil
+		v.cacheValid = false
+	}
+}
+
+// ScrollPos is a sequence-anchored snapshot of the viewport position.
+// A raw offset would not survive appends: OnNewRows re-anchors a
+// scrolled viewport's offset on every append, and a snapshot taken
+// earlier would land newer by exactly the rows that arrived since.
+type ScrollPos struct {
+	BottomSeq uint64 // sequence of the bottom visible row at save time
+	Mode      ScrollMode
+	NewLines  int
+	Appended  uint64 // buffer append counter at save time
+}
+
+// SaveScroll captures the current position for a later RestoreScroll.
+func (v *Viewport) SaveScroll() ScrollPos {
+	p := ScrollPos{Mode: v.mode, NewLines: v.newLines, Appended: v.buffer.appended}
+	if c := v.buffer.Count(); c > 0 {
+		bottom := c - 1 - v.offset
+		if bottom < 0 {
+			bottom = 0
+		}
+		p.BottomSeq = v.buffer.Seq(bottom)
+	}
+	return p
+}
+
+// RestoreScroll returns to a saved position: the same text, not the
+// same distance from live. A live snapshot returns to live (tailing is
+// itself a position); a scrolled snapshot re-anchors on the saved
+// bottom row, counting rows that arrived meanwhile into NewLineCount,
+// and pins to the oldest surviving window if the row was evicted.
+func (v *Viewport) RestoreScroll(p ScrollPos) {
+	if p.Mode == ModeLive {
+		v.GotoBottom()
+		return
+	}
+	if idx, ok := v.buffer.IndexOf(p.BottomSeq); ok {
+		v.offset = v.buffer.Count() - 1 - idx
+	} else {
+		v.offset = v.maxOffset()
+	}
+	if max := v.maxOffset(); v.offset > max {
+		v.offset = max
+	}
+	if v.offset <= 0 {
+		v.offset = 0
+		v.mode = ModeLive
+		v.newLines = 0
+	} else {
+		v.mode = ModeScrolled
+		v.newLines = p.NewLines + int(v.buffer.appended-p.Appended)
 	}
 	v.cacheValid = false
 }

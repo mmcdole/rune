@@ -25,6 +25,7 @@ type MockHost struct {
 	ReloadCalls     int
 	PaneCalls       []struct{ Op, Name, Data string }
 	PickerCalls     []ui.ShowPickerMsg
+	SearchCalls     []ui.ShowSearchMsg
 	ClipboardCalls  []string
 	ScheduledTimers []struct {
 		ID       int
@@ -179,6 +180,12 @@ func (m *MockHost) ShowPicker(opts ui.ShowPickerMsg) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.PickerCalls = append(m.PickerCalls, opts)
+}
+
+func (m *MockHost) ShowSearch(opts ui.ShowSearchMsg) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.SearchCalls = append(m.SearchCalls, opts)
 }
 
 func (m *MockHost) ClipboardSet(text string) {

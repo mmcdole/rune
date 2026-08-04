@@ -16,6 +16,7 @@ rune.state.connected     -- bool, connection status
 rune.state.address       -- server address, scheme included
 rune.state.scroll_mode   -- "live" or "scrolled"
 rune.state.scroll_lines  -- new lines arrived while scrolled
+rune.state.search_active -- true while scrollback search captures input
 rune.state.width         -- terminal width
 rune.state.height        -- terminal height
 
@@ -35,6 +36,7 @@ the current values, and writing any field raises an error.
 | `address` | string | The connected address, scheme included (e.g. `tls://mud.example.com:4000`) |
 | `scroll_mode` | string | `"live"`, or `"scrolled"` while scrolled back |
 | `scroll_lines` | number | New lines received while scrolled |
+| `search_active` | boolean | Whether the scrollback-search navigator is active |
 | `width` | number | Terminal width in columns |
 | `height` | number | Terminal height in rows |
 

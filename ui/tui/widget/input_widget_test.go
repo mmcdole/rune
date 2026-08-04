@@ -9,7 +9,8 @@ import (
 )
 
 func newTestInput(width int) *Input {
-	in := NewInput(style.DefaultStyles())
+	styles := style.DefaultStyles()
+	in := NewInput(styles, NewSearch(NewScrollbackBuffer(100), styles))
 	in.SetSize(width, 0)
 	return in
 }
@@ -107,5 +108,31 @@ func TestInputInlinePickerSeedsFilterFromInput(t *testing.T) {
 	view := in.View()
 	if !strings.Contains(view, "reload") {
 		t.Errorf("re-filtered view should keep matches, got %q", view)
+	}
+}
+
+func TestInputSearchReplacesInactiveCommandField(t *testing.T) {
+	buf := newTestBuffer("a thief passes")
+	styles := style.DefaultStyles()
+	search := NewSearch(buf, styles)
+	in := NewInput(styles, search)
+	in.SetSize(60, 0)
+	in.SetValue("COMMAND-DRAFT")
+	in.ShowSearch("thief", SearchScope{})
+
+	view := in.View()
+	if !strings.Contains(view, "Search:") || !strings.Contains(view, "a thief passes") {
+		t.Fatalf("search navigator missing from input view:\n%s", view)
+	}
+	if strings.Contains(view, "COMMAND-DRAFT") {
+		t.Fatalf("inactive command field remained visible during search:\n%s", view)
+	}
+	if got, want := in.PreferredHeight(), search.PreferredHeight(); got != want {
+		t.Fatalf("PreferredHeight = %d, want search-only height %d", got, want)
+	}
+
+	in.HideSearch()
+	if view := in.View(); !strings.Contains(view, "COMMAND-DRAFT") {
+		t.Fatalf("command draft did not return after search closed:\n%s", view)
 	}
 }

@@ -6,9 +6,12 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/mmcdole/rune/input"
+	runetext "github.com/mmcdole/rune/text"
 	"github.com/mmcdole/rune/ui"
 	"github.com/mmcdole/rune/ui/tui/widget"
+	"github.com/muesli/termenv"
 )
 
 // newTestModel builds a model with a sized window and enough
@@ -589,4 +592,201 @@ func TestHomeEndEditInputWhileCtrlVariantsScroll(t *testing.T) {
 	if got := m.inputCtl.input.Value(); got != typed {
 		t.Fatalf("input draft = %q, want %q", got, typed)
 	}
+}
+
+// Search changes the input widget's intrinsic height as its result list
+// grows and collapses. The viewport must be sized for that final geometry
+// before centering, or the selected source row can land just outside the
+// visible window even though it is selected in the overlay.
+func TestSearchFocusUsesFinalLayoutGeometry(t *testing.T) {
+	profile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	t.Cleanup(func() { lipgloss.SetColorProfile(profile) })
+
+	inputChan := make(chan input.Submission, 16)
+	outbound := make(chan ui.UIEvent, 64)
+	m := NewModel(inputChan, outbound)
+
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	m = next.(*Model)
+	next, _ = m.Update(ui.UpdateBarsMsg{"status": {Left: "status"}})
+	m = next.(*Model)
+
+	for i := 0; i < 9; i++ {
+		next, _ = m.Update(ui.EchoLineMsg(fmt.Sprintf("match %d thief", i)))
+		m = next.(*Model)
+	}
+	next, _ = m.Update(ui.EchoLineMsg("SELECTED thief"))
+	m = next.(*Model)
+	for i := 0; i < 20; i++ {
+		next, _ = m.Update(ui.EchoLineMsg(fmt.Sprintf("quiet %d", i)))
+		m = next.(*Model)
+	}
+
+	// Establish the normal layout, then the shorter no-match navigator. Typing
+	// the query expands it to its five-result maximum in one update.
+	m.View()
+	next, _ = m.Update(ui.ShowSearchMsg{})
+	m = next.(*Model)
+	m.View()
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("thief")})
+	m = next.(*Model)
+	m.View()
+
+	assertViewportRowCentered(t, m.viewport.View(), "SELECTED thief")
+
+	// Enter removes the overlay and expands the viewport. The accepted row
+	// must be centered again using that post-close height.
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(*Model)
+	m.View()
+	assertViewportRowCentered(t, m.viewport.View(), "SELECTED thief")
+	if m.searchView.focus == nil {
+		t.Fatal("accepted search should retain its active-result marker")
+	}
+	committedSeq := m.searchView.focus.Seq
+	assertViewportRowHighlighted(t, m.viewport.View(), "SELECTED thief")
+
+	// A replacement search may preview another row, but cancelling it restores
+	// the previously committed focus from the grouped search lifecycle state.
+	next, _ = m.Update(ui.ShowSearchMsg{})
+	m = next.(*Model)
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m = next.(*Model)
+	if m.searchView.focus == nil || m.searchView.focus.Seq == committedSeq {
+		t.Fatal("replacement search did not preview an older result")
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(*Model)
+	if m.searchView.focus == nil || m.searchView.focus.Seq != committedSeq {
+		t.Fatal("cancelled replacement search did not restore committed focus")
+	}
+	assertViewportRowHighlighted(t, m.viewport.View(), "SELECTED thief")
+
+	// Deliberate viewport navigation retires the accepted marker.
+	next, _ = m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp})
+	m = next.(*Model)
+	if m.searchView.focus != nil {
+		t.Fatal("manual scrolling should clear the accepted search marker")
+	}
+}
+
+func TestSearchReportsInteractionStateSeparatelyFromScrollState(t *testing.T) {
+	inputChan := make(chan input.Submission, 4)
+	outbound := make(chan ui.UIEvent, 32)
+	m := NewModel(inputChan, outbound)
+	m.initialized = true
+	m.width = 80
+	m.height = 24
+
+	next, _ := m.Update(ui.ShowSearchMsg{})
+	m = next.(*Model)
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	_ = next.(*Model)
+
+	var states []bool
+	for len(outbound) > 0 {
+		if state, ok := (<-outbound).(ui.SearchStateChangedMsg); ok {
+			states = append(states, bool(state))
+		}
+	}
+	if len(states) != 2 || !states[0] || states[1] {
+		t.Fatalf("search active states = %v, want [true false]", states)
+	}
+}
+
+func TestManualViewportEntryPointsClearCommittedSearchFocus(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  tea.Msg
+	}{
+		{
+			name: "fallback scroll key",
+			msg:  tea.KeyMsg{Type: tea.KeyPgUp},
+		},
+		{
+			name: "mouse wheel",
+			msg:  tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp},
+		},
+		{
+			name: "Lua main-pane navigation",
+			msg:  ui.PaneScrollUpMsg{Name: "main", Lines: 1},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newTestModel(t)
+			focus := widget.SearchMatch{Seq: m.scrollback.Seq(50)}
+			m.searchView.focus = &focus
+			m.viewport.SetHighlight(focus.Seq, focus.Ranges)
+
+			next, _ := m.Update(tt.msg)
+			m = next.(*Model)
+			if m.searchView.focus != nil {
+				t.Fatal("manual viewport navigation retained committed search focus")
+			}
+		})
+	}
+}
+
+func TestMouseWheelNavigatesActiveSearchMatches(t *testing.T) {
+	m := newBareModel(t)
+	for _, line := range []string{"thief oldest", "quiet", "thief middle", "quiet", "thief newest"} {
+		m.appendMessage(line)
+	}
+
+	m.inputCtl.ShowSearch(ui.ShowSearchMsg{Query: "thief"})
+	newest, ok := m.input.SearchSelected()
+	if !ok || newest.Stripped != "thief newest" {
+		t.Fatalf("initial selection = (%q, %v), want newest match", newest.Stripped, ok)
+	}
+
+	next, _ := m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp})
+	m = next.(*Model)
+	middle, ok := m.input.SearchSelected()
+	if !ok || middle.Stripped != "thief middle" {
+		t.Fatalf("wheel up selection = (%q, %v), want older middle match", middle.Stripped, ok)
+	}
+	if !m.input.SearchActive() || m.searchView.focus == nil || m.searchView.focus.Seq != middle.Seq {
+		t.Fatal("wheel navigation must keep search active and preview the selected match")
+	}
+
+	next, _ = m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown})
+	m = next.(*Model)
+	selected, ok := m.input.SearchSelected()
+	if !ok || selected.Seq != newest.Seq {
+		t.Fatalf("wheel down selection = (%q, %v), want newer match", selected.Stripped, ok)
+	}
+}
+
+func assertViewportRowCentered(t *testing.T, view, want string) {
+	t.Helper()
+	rows := strings.Split(view, "\n")
+	for i, row := range rows {
+		if runetext.StripANSI(row) != want {
+			continue
+		}
+		center := (len(rows) - 1) / 2
+		if i < center-1 || i > center+1 {
+			t.Fatalf("row %q rendered at viewport row %d of %d, want it centered near %d\n%s",
+				want, i, len(rows), center, runetext.StripANSI(view))
+		}
+		return
+	}
+	t.Fatalf("row %q is outside the viewport:\n%s", want, runetext.StripANSI(view))
+}
+
+func assertViewportRowHighlighted(t *testing.T, view, want string) {
+	t.Helper()
+	for _, row := range strings.Split(view, "\n") {
+		if runetext.StripANSI(row) != want {
+			continue
+		}
+		if !strings.Contains(row, "\x1b[") {
+			t.Fatalf("row %q is visible but not highlighted:\n%s", want, runetext.StripANSI(view))
+		}
+		return
+	}
+	t.Fatalf("row %q is outside the viewport:\n%s", want, runetext.StripANSI(view))
 }

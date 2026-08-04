@@ -1,6 +1,9 @@
 package lua
 
-import "github.com/mmcdole/rune/script"
+import (
+	"github.com/mmcdole/rune/script"
+	"github.com/mmcdole/rune/ui"
+)
 
 // registerUIFuncs registers all UI-related API functions
 func (e *Engine) registerUIFuncs() {
@@ -23,6 +26,19 @@ func (e *Engine) registerUIInternalFuncs() {
 		// system clipboard (OSC 52).
 		"set_clipboard": func(c *script.Call) error {
 			e.host.ClipboardSet(c.Str(1))
+			return nil
+		},
+
+		// rune._ui.search_show(opts): open the scrollback-search
+		// overlay. opts = { query = "..." } (optional; empty keeps the
+		// previous search's query). Fire-and-forget - unlike the picker
+		// there is no callback: the search is self-contained in the UI.
+		"search_show": func(c *script.Call) error {
+			query := ""
+			if c.NArgs() >= 1 && c.Arg(1).Kind() == script.KindTable {
+				query = c.Arg(1).Table().Field("query").Str()
+			}
+			e.host.ShowSearch(ui.ShowSearchMsg{Query: query})
 			return nil
 		},
 	}, nil)
