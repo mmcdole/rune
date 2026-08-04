@@ -89,7 +89,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          NAME="rune-jit_${VERSION}_${{ matrix.target }}"
+          NAME="rune_jit_${VERSION}_${{ matrix.target }}"
           mkdir "$NAME"
           cp LICENSE README.md "$NAME/"
           if [ "$RUNNER_OS" = "Windows" ]; then
