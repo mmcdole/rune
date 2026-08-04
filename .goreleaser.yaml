@@ -29,6 +29,10 @@ archives:
 checksum:
   name_template: checksums.txt
 
+release:
+  # v1.2.3-beta.1 style tags publish as prereleases automatically.
+  prerelease: auto
+
 changelog:
   use: git
   sort: asc

@@ -406,7 +406,7 @@ end, "Print text locally")
 
 -- /version - Client version
 rune.command.add("version", function(args)
-    rune.echo("Rune " .. rune.version)
+    rune.echo("Rune " .. rune.version .. " (lua: " .. rune.engine .. ")")
 end, "Show client version")
 
 -- /quit - Exit the client

@@ -9,7 +9,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/mattn/go-runewidth v0.0.27
-	github.com/yuin/gopher-lua v1.1.2
+	github.com/mmcdole/lunar v0.1.0
 )
 
 require (

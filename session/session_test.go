@@ -135,7 +135,7 @@ func TestReloadIsDeferredAndRebuildsVM(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s.Reload()
+	s.reload()
 
 	// The reload callback is queued, not executed inline
 	select {

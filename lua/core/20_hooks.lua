@@ -229,11 +229,15 @@ function rune.hooks.call(event, ...)
         return true
 
     else
-        -- System events (notifications) - all handlers run
+        -- System events (notifications) - all handlers run.
+        -- Keep the true argument count: an embedded nil (e.g. a GMCP
+        -- message with no body) makes #args implementation-defined,
+        -- and a bare unpack(args) would truncate at the hole.
+        local nargs = select("#", ...)
         local args = {...}
         for _, entry in ipairs(handlers) do
             if registry:active(entry) then
-                run_handler(entry, unpack(args))
+                run_handler(entry, unpack(args, 1, nargs))
             end
         end
     end

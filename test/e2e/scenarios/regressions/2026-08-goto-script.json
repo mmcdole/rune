@@ -1,0 +1,20 @@
+{
+  "description": "Regression: user init scripts that use Lua 5.2-style goto syntax must compile and must not close captured locals when a jump stays in the same scope.",
+  "scenarios": [
+    {
+      "name": "same-scope goto keeps captured local open",
+      "init_lua": [
+        "local x = 1",
+        "local f = function() return x end",
+        "::again::",
+        "x = x + 1",
+        "if x < 3 then goto again end",
+        "assert(f() == 3)",
+        "rune.echo('E2E-GOTO-UPVALUE=3')"
+      ],
+      "steps": [
+        { "expect_printed": "E2E-GOTO-UPVALUE=3" }
+      ]
+    }
+  ]
+}

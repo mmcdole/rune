@@ -15,6 +15,7 @@ import (
 	"github.com/mmcdole/rune/input"
 	"github.com/mmcdole/rune/lua"
 	"github.com/mmcdole/rune/network"
+	"github.com/mmcdole/rune/script"
 	"github.com/mmcdole/rune/text"
 	"github.com/mmcdole/rune/timer"
 	"github.com/mmcdole/rune/ui"
@@ -214,7 +215,7 @@ func (s *Session) handleNetworkOutput(out network.Output) {
 	case network.OutputPrompt:
 		s.handleServerPrompt(out.Payload)
 	case network.OutputDisconnect:
-		s.Disconnect()
+		s.disconnect()
 	case network.OutputGMCP:
 		s.engine.OnGMCP(out.Package, out.Payload)
 	case network.OutputGMCPEnabled:
@@ -382,12 +383,22 @@ func (s *Session) handleKeyBind(key string) {
 
 // pushBarUpdates renders all Lua bars and pushes to UI.
 func (s *Session) pushBarUpdates() {
+	s.updateBars(s.engine.RenderBars(s.barWidth()))
+}
+
+func (s *Session) pushBarUpdatesIn(executor script.Executor) {
+	s.updateBars(s.engine.RenderBarsIn(executor, s.barWidth()))
+}
+
+func (s *Session) barWidth() int {
 	width := s.clientState.Width
 	if width <= 0 {
 		width = 80
 	}
+	return width
+}
 
-	content := s.engine.RenderBars(width)
+func (s *Session) updateBars(content map[string]ui.BarContent) {
 	if content != nil {
 		s.ui.UpdateBars(content)
 	}
@@ -395,7 +406,14 @@ func (s *Session) pushBarUpdates() {
 
 // pushBindsAndLayout pushes current bindings and layout config to UI.
 func (s *Session) pushBindsAndLayout() {
-	keys := s.engine.GetBoundKeys()
+	s.updateBindsAndLayout(s.engine.GetBoundKeys())
+}
+
+func (s *Session) pushBindsAndLayoutIn(executor script.Executor) {
+	s.updateBindsAndLayout(s.engine.GetBoundKeysIn(executor))
+}
+
+func (s *Session) updateBindsAndLayout(keys []string) {
 	bindsMap := make(map[string]bool, len(keys))
 	for _, key := range keys {
 		bindsMap[key] = true

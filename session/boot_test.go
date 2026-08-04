@@ -3,6 +3,7 @@ package session
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/mmcdole/rune/lua"
@@ -27,6 +28,20 @@ func bootSessionInDir(t *testing.T, dir string) (*Session, *mockNetwork, *mockUI
 		s.timer.Stop()
 	})
 	return s, net, uiMock
+}
+
+// TestBootDoesNotReportLuaReentryErrors exercises the complete startup path.
+// Core script configuration callbacks synchronously query binds and bars, so
+// boot must reuse the callback's active Lua execution rather than reentering
+// the already-running State.
+func TestBootDoesNotReportLuaReentryErrors(t *testing.T) {
+	_, _, uiMock := bootSessionInDir(t, t.TempDir())
+
+	for _, printed := range uiMock.drainPrinted() {
+		if strings.Contains(printed, "state is executing") {
+			t.Fatalf("boot reported Lua reentry error: %q", printed)
+		}
+	}
 }
 
 // assertFullyBooted verifies the parts of boot that used to be
@@ -82,7 +97,7 @@ func TestReloadWithBrokenScriptKeepsClientAlive(t *testing.T) {
 		[]byte("syntax error here ((("), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	s.Reload()
+	s.reload()
 	cb := <-s.asyncResults // reload is deferred
 	cb()
 

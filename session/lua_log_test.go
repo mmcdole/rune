@@ -85,7 +85,7 @@ func TestLogSurvivesReload(t *testing.T) {
 	path := filepath.Join(s.config.ConfigDir, "reload.log")
 	userInput(s, "/log start "+path)
 
-	s.Reload()
+	s.reload()
 	cb := <-s.asyncResults // reload is deferred
 	cb()
 

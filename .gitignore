@@ -8,5 +8,8 @@ layout-test
 allcode.txt
 
 # Local files
+.DS_Store
 website-mockups/
 init.lua.old
+script/luajit/vendor_luajit/
+bin/

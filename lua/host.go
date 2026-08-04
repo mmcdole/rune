@@ -4,16 +4,19 @@ import (
 	"time"
 
 	"github.com/mmcdole/rune/input"
+	"github.com/mmcdole/rune/script"
 	"github.com/mmcdole/rune/ui"
 )
 
 // Host provides all services the Lua engine needs from the host application.
-// In production, Session implements this interface.
+// In production, Session implements this interface. Methods receiving an
+// Executor may synchronously reenter Lua only through that borrowed executor;
+// they must not retain it after the host method returns.
 type Host interface {
 	// Network
 	Send(data string) error
-	Connect(addr string)
-	Disconnect()
+	Connect(executor script.Executor, addr string)
+	Disconnect(executor script.Executor)
 
 	// GMCP: send an out-of-band message ("Package.SubPackage" plus
 	// optional raw JSON). Fails when disconnected or when the server
@@ -59,8 +62,8 @@ type Host interface {
 
 	// System
 	Quit()
-	Reload()
-	RefreshBars() // Force immediate bar refresh
+	Reload(executor script.Executor)
+	RefreshBars(executor script.Executor) // Force immediate bar refresh
 
 	// History
 	GetHistory() []string
@@ -99,7 +102,7 @@ type Host interface {
 	HTTPRequest(id int, req HTTPRequest)
 
 	// State
-	OnConfigChange()
+	OnConfigChange(executor script.Executor)
 }
 
 // HTTPRequest describes one request handed to Host.HTTPRequest.

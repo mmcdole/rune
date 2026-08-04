@@ -3,6 +3,7 @@ package session
 import (
 	"fmt"
 
+	"github.com/mmcdole/rune/script"
 	"github.com/mmcdole/rune/text"
 )
 
@@ -16,8 +17,17 @@ func (s *Session) Quit() {
 // The send is non-blocking by necessity: Reload runs ON the session
 // goroutine (called from inside a Lua dispatch), so blocking on the
 // async-result channel here would deadlock the loop that drains it.
-func (s *Session) Reload() {
+func (s *Session) Reload(executor script.Executor) {
+	s.engine.CallHookIn(executor, "reloading")
+	s.queueReload()
+}
+
+func (s *Session) reload() {
 	s.engine.CallHook("reloading")
+	s.queueReload()
+}
+
+func (s *Session) queueReload() {
 	select {
 	case s.asyncResults <- func() {
 		if err := s.boot(); err != nil {
@@ -33,6 +43,6 @@ func (s *Session) Reload() {
 
 // RefreshBars forces an immediate bar refresh.
 // Called from Lua when bar state changes and we don't want to wait for the ticker.
-func (s *Session) RefreshBars() {
-	s.pushBarUpdates()
+func (s *Session) RefreshBars(executor script.Executor) {
+	s.pushBarUpdatesIn(executor)
 }
