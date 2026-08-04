@@ -28,6 +28,7 @@ func newTestSession(t *testing.T) (*Session, *mockNetwork, *mockUI) {
 	}
 	uiMock.drainPrinted() // discard startup banner
 	t.Cleanup(func() {
+		s.LogStop()
 		s.timer.Stop()
 	})
 	return s, net, uiMock
