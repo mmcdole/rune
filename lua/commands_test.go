@@ -64,6 +64,38 @@ func TestListingCommandsShowRegistrations(t *testing.T) {
 	}
 }
 
+// Invalid user metadata must fail at registration, before it can poison
+// the command registry consumed by /help and the inline command picker.
+func TestCommandRegistrationRejectsTableDescriptionWithoutBreakingHelp(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	err := engine.DoString("user.lua", `
+		rune.command.add("autoreconnect", function() end, {
+			name = "automatic-reconnect-command",
+			group = "connection",
+		})
+	`)
+	if err == nil {
+		t.Error("registration with a table description succeeded")
+	} else if !strings.Contains(err.Error(), "description must be a string") {
+		t.Errorf("registration error = %q, want description type error", err)
+	}
+
+	host.DrainPrintCalls()
+	engine.OnInput("/help")
+	printed := strings.Join(host.DrainPrintCalls(), "\n")
+	if strings.Contains(printed, "error:") {
+		t.Errorf("/help was broken by the rejected command:\n%s", printed)
+	}
+	if !strings.Contains(printed, "/connect") {
+		t.Errorf("/help did not list built-in commands:\n%s", printed)
+	}
+	if strings.Contains(printed, "/autoreconnect") {
+		t.Errorf("rejected command remained registered:\n%s", printed)
+	}
+}
+
 // TestErrorTagIsRed pins the presentation convention (05_style.lua):
 // [Error] tags are red, tag only, message plain - checked on the two
 // highest-traffic paths, the default error handler and unknown

@@ -33,6 +33,19 @@ rune.command = {}
 -- Add a slash command. opts: group (see 15_registry.lua).
 -- Returns a handle with :enable/:disable/:remove.
 function rune.command.add(name, handler, description, opts)
+    if type(name) ~= "string" then
+        error("rune.command.add: name must be a string", 2)
+    end
+    if type(handler) ~= "function" then
+        error("rune.command.add: handler must be a function", 2)
+    end
+    if description ~= nil and type(description) ~= "string" then
+        error("rune.command.add: description must be a string", 2)
+    end
+    if opts ~= nil and type(opts) ~= "table" then
+        error("rune.command.add: opts must be a table", 2)
+    end
+
     return registry:add({
         command = name,
         handler = handler,
