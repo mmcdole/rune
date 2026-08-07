@@ -19,7 +19,18 @@ const (
 	ModeCompose                       // Lossless structured-text input
 	ModePickerModal                   // Modal picker traps all keys
 	ModePickerInline                  // Inline picker filters based on input
+	ModeSearch                        // Scrollback-search overlay traps all keys
 )
+
+// searchEffects is the viewport half of scrollback search, implemented
+// by Model. The controller owns the mode state machine; the viewport
+// snapshot, centering, and highlight stay with the widget owner.
+type searchEffects interface {
+	OpenSearch() widget.SearchScope              // snapshot viewport and choose the search origin
+	PreviewSearch(m widget.SearchMatch, ok bool) // center+highlight the match, or restore when none
+	CommitSearch()                               // keep the accepted match and its highlight
+	CancelSearch()                               // restore the viewport and prior highlight
+}
 
 // inputController owns the input-mode state machine: the current mode,
 // the active picker's Lua callback, and the invariant that every path
@@ -42,6 +53,7 @@ type inputController struct {
 	submit  func(input.Submission) bool // transfer an immutable draft to the session
 	isBound func(key string) bool       // key has a Lua bind
 	scroll  func(tea.KeyType) bool      // Go scroll-key fallback; true if handled
+	search  searchEffects               // viewport side of scrollback search
 }
 
 func newInputController(
@@ -50,6 +62,7 @@ func newInputController(
 	submit func(input.Submission) bool,
 	isBound func(string) bool,
 	scroll func(tea.KeyType) bool,
+	search searchEffects,
 ) *inputController {
 	return &inputController{
 		input:   input,
@@ -57,6 +70,7 @@ func newInputController(
 		submit:  submit,
 		isBound: isBound,
 		scroll:  scroll,
+		search:  search,
 	}
 }
 
@@ -74,7 +88,7 @@ func (c *inputController) HandleKey(msg tea.KeyMsg) {
 	// dispatch so even a one-character paste can never fire a printable
 	// hotkey, and so structured text never passes through textinput's
 	// newline/tab sanitizer.
-	if msg.Paste && c.mode != ModePickerModal {
+	if msg.Paste && c.mode != ModePickerModal && c.mode != ModeSearch {
 		c.handlePaste(msg)
 		return
 	}
@@ -89,6 +103,10 @@ func (c *inputController) HandleKey(msg tea.KeyMsg) {
 	case tea.KeyCtrlC, tea.KeyEsc:
 		if c.mode == ModePickerModal || c.mode == ModePickerInline {
 			c.closePicker(false, "")
+			return
+		}
+		if c.mode == ModeSearch {
+			c.closeSearch(false)
 			return
 		}
 		if c.mode == ModeCompose && msg.Type == tea.KeyEsc {
@@ -106,6 +124,8 @@ func (c *inputController) HandleKey(msg tea.KeyMsg) {
 		c.handleModalKey(msg)
 	case ModePickerInline:
 		c.handleInlineKey(msg)
+	case ModeSearch:
+		c.handleSearchKey(msg)
 	default:
 		c.handleNormalKey(msg)
 	}
@@ -120,6 +140,11 @@ func (c *inputController) ShowPicker(opts ui.ShowPickerMsg) {
 	if c.input.IsComposing() {
 		c.notify(ui.PickerSelectMsg{CallbackID: opts.CallbackID, Accepted: false})
 		return
+	}
+	// Picker and search overlays are mutually exclusive; the newcomer
+	// wins, the open search settles as cancelled.
+	if c.mode == ModeSearch {
+		c.closeSearch(false)
 	}
 	if opts.Inline {
 		c.mode = ModePickerInline
@@ -136,6 +161,9 @@ func (c *inputController) ShowPicker(opts ui.ShowPickerMsg) {
 // keep its filter in sync, and close the picker (cancelling its
 // callback) when the input is cleared.
 func (c *inputController) SetText(text string) {
+	if c.mode == ModeSearch {
+		c.closeSearch(false)
+	}
 	c.historyRecall = false
 	wasPicker := c.mode == ModePickerInline || c.mode == ModePickerModal
 	wasInline := c.mode == ModePickerInline
@@ -163,6 +191,9 @@ func (c *inputController) SetText(text string) {
 // Unlike SetText, an explicit command entry exits sticky compose mode, while
 // verbatim is forced even for one safe, non-empty physical line.
 func (c *inputController) SetSubmission(submission input.Submission) {
+	if c.mode == ModeSearch {
+		c.closeSearch(false)
+	}
 	wasPicker := c.mode == ModePickerInline || c.mode == ModePickerModal
 	c.historyRecall = submission.Mode == input.ModeVerbatim
 
@@ -427,6 +458,102 @@ func (c *inputController) syncInlineFilter() {
 		return
 	}
 	c.input.UpdatePickerFilter()
+}
+
+// ShowSearch opens the scrollback-search overlay. Unlike the picker
+// there is no callback to settle, so refusing while a structured draft
+// is active is a plain no-op. An open picker settles first: overlays
+// are mutually exclusive and the newcomer wins.
+func (c *inputController) ShowSearch(opts ui.ShowSearchMsg) {
+	if c.input.IsComposing() {
+		return
+	}
+	if c.mode == ModePickerModal || c.mode == ModePickerInline {
+		c.closePicker(false, "")
+	}
+	if c.mode != ModeSearch {
+		c.mode = ModeSearch
+		scope := c.search.OpenSearch()
+		c.input.ShowSearch(opts.Query, scope)
+	} else {
+		c.input.ReopenSearch(opts.Query)
+	}
+	c.previewSearch()
+}
+
+// handleSearchKey traps all keys while the search overlay is open,
+// like the modal picker: bound keys do not dispatch to Lua.
+func (c *inputController) handleSearchKey(msg tea.KeyMsg) {
+	switch msg.Type {
+	case tea.KeyUp:
+		c.selectOlderSearch()
+
+	case tea.KeyDown:
+		c.selectNewerSearch()
+
+	case tea.KeyEnter:
+		c.closeSearch(true)
+
+	case tea.KeyRunes:
+		if msg.Alt {
+			return
+		}
+		c.input.SearchTypeRunes(msg.Runes)
+		c.previewSearch()
+
+	case tea.KeySpace:
+		c.input.SearchTypeRunes([]rune{' '})
+		c.previewSearch()
+
+	case tea.KeyBackspace:
+		c.input.SearchBackspace()
+		c.previewSearch()
+	}
+}
+
+// selectOlderSearch and selectNewerSearch are the semantic navigation seam
+// shared by keyboard and mouse input. Device handlers do not need to forge a
+// different device's event or re-enter the full key dispatcher.
+func (c *inputController) selectOlderSearch() bool {
+	if c.mode != ModeSearch {
+		return false
+	}
+	c.input.SearchSelectOlder()
+	c.previewSearch()
+	return true
+}
+
+func (c *inputController) selectNewerSearch() bool {
+	if c.mode != ModeSearch {
+		return false
+	}
+	c.input.SearchSelectNewer()
+	c.previewSearch()
+	return true
+}
+
+// previewSearch centers the viewport on the current selection (live
+// preview); with no match it restores the pre-search position so a
+// query edit that empties the result set snaps back.
+func (c *inputController) previewSearch() {
+	m, ok := c.input.SearchSelected()
+	c.search.PreviewSearch(m, ok)
+}
+
+// closeSearch is the single exit path from search mode: resets the
+// mode, hides the overlay, and settles the viewport exactly once -
+// committed (stay at the match) or cancelled (restore the snapshot).
+// The final ScrollStateChangedMsg emitted by the effects is search's
+// analog of the picker's settle message: it keeps the session's
+// rune.state scroll view fresh.
+func (c *inputController) closeSearch(accepted bool) {
+	c.mode = ModeNormal
+	c.input.HideSearch()
+	if accepted {
+		c.search.CommitSearch()
+	} else {
+		c.search.CancelSearch()
+	}
 }
 
 // closePicker is the single exit path from either picker mode: resets

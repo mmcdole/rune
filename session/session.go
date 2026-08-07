@@ -424,6 +424,10 @@ func (s *Session) handleUIMessage(msg ui.UIEvent) {
 		s.clientState.ScrollLines = m.NewLines
 		s.engine.UpdateState(s.clientState)
 		s.pushBarUpdates()
+	case ui.SearchStateChangedMsg:
+		s.clientState.SearchActive = bool(m)
+		s.engine.UpdateState(s.clientState)
+		s.pushBarUpdates()
 	case ui.PickerSelectMsg:
 		s.handlePickerResult(m.CallbackID, m.Value, m.Accepted)
 	case ui.InputChangedMsg:

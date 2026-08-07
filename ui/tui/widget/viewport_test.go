@@ -5,12 +5,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mmcdole/rune/ui/tui/style"
 	"github.com/mmcdole/rune/ui/tui/util"
 )
 
 func newTestViewport(width, height int, lines ...string) (*Viewport, *ScrollbackBuffer) {
 	buf := NewScrollbackBuffer(1000)
-	v := NewViewport(buf)
+	v := NewViewport(buf, style.DefaultStyles())
 	v.SetSize(width, height)
 	for _, l := range lines {
 		buf.Append(l)
@@ -189,7 +190,7 @@ func TestViewportEmptyBufferRendersBlankRows(t *testing.T) {
 // (issue #60).
 func TestViewportScrolledSurvivesRingBufferEviction(t *testing.T) {
 	buf := NewScrollbackBuffer(8)
-	v := NewViewport(buf)
+	v := NewViewport(buf, style.DefaultStyles())
 	v.SetSize(40, 3)
 	for i := 1; i <= 8; i++ {
 		buf.Append(fmt.Sprintf("line %d", i))
@@ -257,5 +258,191 @@ func TestScrollbackBufferWrapsAtCapacity(t *testing.T) {
 	}
 	if buf.At(-1) != "" || buf.At(3) != "" {
 		t.Error("out-of-range At should return empty string")
+	}
+}
+
+func TestScrollbackBufferSeqSurvivesEviction(t *testing.T) {
+	buf := NewScrollbackBuffer(5)
+	for i := 1; i <= 8; i++ {
+		buf.Append(fmt.Sprintf("line %d", i))
+	}
+	// Lines 4-8 survive; seq numbers are 3-7 (0-based from first append).
+	if got := buf.Seq(0); got != 3 {
+		t.Errorf("Seq(0) = %d, want 3", got)
+	}
+	for i := 0; i < buf.Count(); i++ {
+		idx, ok := buf.IndexOf(buf.Seq(i))
+		if !ok || idx != i {
+			t.Errorf("IndexOf(Seq(%d)) = %d,%v, want %d,true", i, idx, ok, i)
+		}
+	}
+	if _, ok := buf.IndexOf(2); ok {
+		t.Error("IndexOf of an evicted seq must report ok=false")
+	}
+	if _, ok := buf.IndexOf(8); ok {
+		t.Error("IndexOf of a not-yet-appended seq must report ok=false")
+	}
+}
+
+func TestViewportCenterOn(t *testing.T) {
+	var lines []string
+	for i := 1; i <= 20; i++ {
+		lines = append(lines, fmt.Sprintf("line %d", i))
+	}
+	v, buf := newTestViewport(40, 5, lines...)
+
+	// Center on line 10 (seq 9): it should sit on the middle row.
+	v.CenterOn(buf.Seq(9))
+	rows := viewRows(v)
+	if rows[2] != "line 10" {
+		t.Errorf("center row = %q, want %q (rows %q)", rows[2], "line 10", rows)
+	}
+	if v.Mode() != ModeScrolled {
+		t.Error("centering into history should enter scrolled mode")
+	}
+
+	// Near the top: clamps so the frame stays full.
+	v.CenterOn(buf.Seq(0))
+	rows = viewRows(v)
+	if rows[0] != "line 1" {
+		t.Errorf("top clamp: rows = %q, want line 1 first", rows)
+	}
+
+	// Near the live edge: clamps to offset 0 and returns to live.
+	v.CenterOn(buf.Seq(19))
+	if v.Mode() != ModeLive {
+		t.Error("centering on the newest row should land live")
+	}
+
+	// Buffer smaller than the viewport: always live, never negative.
+	small, sbuf := newTestViewport(40, 10, "a", "b")
+	small.CenterOn(sbuf.Seq(0))
+	if small.Mode() != ModeLive {
+		t.Error("centering within a short buffer should stay live")
+	}
+}
+
+func TestViewportHighlightRendersOnRightRowOnly(t *testing.T) {
+	v, buf := newTestViewport(40, 3, "one thief", "two", "three", "four")
+	v.ScrollUp(1) // showing "one thief", "two", "three"
+	v.SetHighlight(buf.Seq(0), []util.ColRange{{Start: 4, End: 9}})
+
+	rows := viewRows(v)
+	if !strings.Contains(rows[0], "\x1b[") || !strings.Contains(rows[0], "thief") {
+		t.Errorf("highlighted row should carry escape codes: %q", rows[0])
+	}
+	for i := 1; i < len(rows); i++ {
+		if strings.Contains(rows[i], "\x1b[") {
+			t.Errorf("row %d should be unstyled, got %q", i, rows[i])
+		}
+	}
+
+	// The highlight follows its row: while scrolled, appends re-anchor
+	// the view and the highlight must stay on the same text.
+	buf.Append("five")
+	v.OnNewRows(1)
+	rows = viewRows(v)
+	if !strings.Contains(rows[0], "\x1b[") || !strings.Contains(rows[0], "thief") {
+		t.Errorf("after append the highlight must stay on its row; rows = %q", rows)
+	}
+
+	v.ClearHighlight()
+	for i, row := range viewRows(v) {
+		if strings.Contains(row, "\x1b[") {
+			t.Errorf("row %d still styled after ClearHighlight: %q", i, row)
+		}
+	}
+}
+
+func TestViewportSetHighlightInvalidatesCache(t *testing.T) {
+	v, buf := newTestViewport(40, 2, "alpha", "beta")
+	before := v.View()
+	v.SetHighlight(buf.Seq(1), []util.ColRange{{Start: 0, End: 4}})
+	if v.View() == before {
+		t.Error("SetHighlight must invalidate the cached view")
+	}
+}
+
+// Esc-restore must return to the same text, not the same distance from
+// live: appends during search re-anchor a scrolled viewport (OnNewRows),
+// and a raw saved offset would land newer by the rows that arrived.
+func TestViewportRestoreScrollSameTextAfterAppends(t *testing.T) {
+	var lines []string
+	for i := 1; i <= 10; i++ {
+		lines = append(lines, fmt.Sprintf("line %d", i))
+	}
+	v, buf := newTestViewport(40, 2, lines...)
+
+	v.ScrollUp(5) // showing lines 4,5
+	before := viewRows(v)
+	saved := v.SaveScroll()
+
+	v.CenterOn(buf.Seq(0)) // search preview moves the viewport
+	for i := 11; i <= 15; i++ {
+		buf.Append(fmt.Sprintf("line %d", i))
+		v.OnNewRows(1)
+	}
+
+	v.RestoreScroll(saved)
+	after := viewRows(v)
+	for i := range before {
+		if before[i] != after[i] {
+			t.Errorf("restore changed the visible text: %q -> %q", before, after)
+		}
+	}
+	if v.Mode() != ModeScrolled {
+		t.Error("restore of a scrolled snapshot should stay scrolled")
+	}
+	if v.NewLineCount() != 5 {
+		t.Errorf("NewLineCount = %d, want 5 (rows appended during search)", v.NewLineCount())
+	}
+}
+
+func TestViewportRestoreScrollFromLiveReturnsToLive(t *testing.T) {
+	v, buf := newTestViewport(40, 2, "one", "two", "three")
+	saved := v.SaveScroll()
+
+	v.CenterOn(buf.Seq(0))
+	buf.Append("four")
+	v.OnNewRows(1)
+
+	v.RestoreScroll(saved)
+	if v.Mode() != ModeLive || v.NewLineCount() != 0 {
+		t.Error("live snapshot must restore to live/tailing")
+	}
+	rows := viewRows(v)
+	if rows[len(rows)-1] != "four" {
+		t.Errorf("restored live view should show the newest line, got %q", rows)
+	}
+}
+
+func TestViewportRestoreScrollClampsAfterEviction(t *testing.T) {
+	buf := NewScrollbackBuffer(6)
+	v := NewViewport(buf, style.DefaultStyles())
+	v.SetSize(40, 2)
+	for i := 1; i <= 6; i++ {
+		buf.Append(fmt.Sprintf("line %d", i))
+		v.OnNewRows(1)
+	}
+
+	v.GotoTop() // anchored on lines 1,2
+	saved := v.SaveScroll()
+
+	// Evict the anchor entirely.
+	for i := 7; i <= 20; i++ {
+		buf.Append(fmt.Sprintf("line %d", i))
+		v.OnNewRows(1)
+	}
+
+	v.RestoreScroll(saved)
+	rows := viewRows(v)
+	if len(rows) != 2 {
+		t.Fatalf("View emitted %d rows, want 2: %q", len(rows), rows)
+	}
+	if rows[0] != "line 15" {
+		t.Errorf("evicted anchor should pin to the oldest surviving view, got %q", rows)
+	}
+	if v.Mode() != ModeScrolled {
+		t.Error("clamped restore should remain scrolled")
 	}
 }

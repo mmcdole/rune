@@ -12,7 +12,8 @@ import (
 )
 
 func newComposerInput(width int) *Input {
-	in := NewInput(style.DefaultStyles())
+	styles := style.DefaultStyles()
+	in := NewInput(styles, NewSearch(NewScrollbackBuffer(100), styles))
 	in.SetSize(width, 0)
 	return in
 }

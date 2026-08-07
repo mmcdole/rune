@@ -13,6 +13,7 @@ introductions, see [Layout & UI](/interface/layout/) and
 rune.ui.layout(config)               -- set the dock layout
 rune.ui.bar(name, render_fn, opts?)  -- register a bar renderer
 rune.ui.refresh_bars()               -- request an immediate re-render
+rune.ui.search(opts?)                -- open the scrollback-search overlay
 ```
 
 `rune.ui.bar` returns a [handle](/reference/api/#handles) and accepts
@@ -88,6 +89,38 @@ end)
 `rune.ui.refresh_bars()` requests an immediate re-render instead of
 waiting for the tick — call it after changing the state a renderer
 reads, e.g. in a GMCP vitals handler.
+
+### rune.ui.search
+
+```lua
+rune.ui.search(opts?)
+```
+
+- `opts` (table, optional) — `query` (string): the initial search
+  text. Omitted or empty reopens the overlay with the previous
+  search's query.
+
+Opens the scrollback-search overlay above the input line. It scans the
+main window's history (newest first, case-insensitive substring) and
+lists matching lines; the viewport follows the selection, centering
+each match with the matched text highlighted.
+
+Bound to `Ctrl+F` by default, and available as `/find [pattern]`.
+A bare `/find` (or `Ctrl+F`) reopens with the last query preserved;
+typing replaces it.
+
+Keys inside the overlay:
+
+| Key | Action |
+|-----|--------|
+| type / backspace | edit the query (rescans as you type) |
+| `Up` / `Down` | step to a newer / older match (the viewport follows) |
+| `Enter` | close, leaving the viewport at the match |
+| `Esc` / `Ctrl+C` | close and restore the scroll position from before the search |
+
+The match counter shows `current/total`; a total like `250+` means the
+scan stopped at its cap and older matches exist beyond it. After
+`Enter`, the usual scroll keys apply — `Ctrl+End` returns to live.
 
 ## Managing
 

@@ -177,6 +177,11 @@ func (b *BubbleTeaUI) ShowPicker(opts ui.ShowPickerMsg) {
 	b.send(opts)
 }
 
+// ShowSearch opens the scrollback-search overlay.
+func (b *BubbleTeaUI) ShowSearch(opts ui.ShowSearchMsg) {
+	b.send(opts)
+}
+
 // SetClipboard asks the terminal to set the system clipboard.
 func (b *BubbleTeaUI) SetClipboard(text string) {
 	b.send(ui.SetClipboardMsg(text))

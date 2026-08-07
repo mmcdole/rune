@@ -20,17 +20,24 @@ type Input struct {
 	textinput textinput.Model
 	composer  *Composer
 	picker    *Picker
+	search    *Search
 	styles    style.Styles
 
 	// State
 	pickerActive   bool
+	searchActive   bool
 	discardPending bool
 	width          int
 	height         int
 }
 
-// NewInput creates a new input widget.
-func NewInput(styles style.Styles) *Input {
+// NewInput creates the input dock with its scrollback-search child. Search is
+// required because the dock delegates its entire surface to that child while
+// search mode is active.
+func NewInput(styles style.Styles, search *Search) *Input {
+	if search == nil {
+		panic("widget.NewInput requires a search widget")
+	}
 	ti := textinput.New()
 	ti.Placeholder = ""
 	ti.Prompt = "> "
@@ -44,6 +51,7 @@ func NewInput(styles style.Styles) *Input {
 			MaxVisible: 10,
 			EmptyText:  "No matches",
 		}, styles),
+		search: search,
 		styles: styles,
 	}
 }
@@ -67,9 +75,16 @@ func (i *Input) UpdateTextInput(msg tea.Msg) tea.Cmd {
 
 // View implements Widget.
 func (i *Input) View() string {
+	// Search is a modal navigator, not an inline completion surface. It
+	// replaces the command field while active so the terminal never shows
+	// two apparent cursors competing for keyboard focus.
+	if i.searchActive {
+		return i.search.View()
+	}
+
 	var parts []string
 
-	// Picker overlay (if active)
+	// Picker overlay (picker and search modes are mutually exclusive).
 	if i.pickerActive {
 		parts = append(parts, i.picker.View())
 	}
@@ -93,10 +108,15 @@ func (i *Input) SetSize(width, height int) {
 	i.height = height
 	i.textinput.Width = width - 2 // Account for prompt
 	i.picker.SetWidth(width)
+	i.search.SetWidth(width)
 }
 
 // PreferredHeight implements Widget.
 func (i *Input) PreferredHeight() int {
+	if i.searchActive {
+		return i.search.PreferredHeight()
+	}
+
 	h := 3 // normal: top border + input + bottom border
 	if i.composer != nil {
 		layout := buildComposerLayout(i.composer.text, i.composer.cursor, i.width)
@@ -446,4 +466,55 @@ func (i *Input) PickerQuery() string {
 // input mode and cancel the Lua callback.
 func (i *Input) UpdatePickerFilter() {
 	i.picker.Filter(i.textinput.Value())
+}
+
+// Search access
+
+// ShowSearch opens the search overlay. An empty query keeps the
+// previous search's query (the widget persists across open/close).
+func (i *Input) ShowSearch(query string, scope SearchScope) {
+	i.search.Open(query, scope)
+	i.searchActive = true
+}
+
+// ReopenSearch updates an already-active navigator without changing its
+// frozen scrollback scope.
+func (i *Input) ReopenSearch(query string) {
+	i.search.Reopen(query)
+}
+
+// HideSearch closes the search overlay. Query and match state persist
+// in the widget for the next ShowSearch.
+func (i *Input) HideSearch() {
+	i.searchActive = false
+}
+
+// SearchActive reports whether the search overlay is showing.
+func (i *Input) SearchActive() bool {
+	return i.searchActive
+}
+
+// SearchTypeRunes appends typed runes to the search query.
+func (i *Input) SearchTypeRunes(rs []rune) {
+	i.search.TypeRunes(rs)
+}
+
+// SearchBackspace deletes the last rune of the search query.
+func (i *Input) SearchBackspace() {
+	i.search.Backspace()
+}
+
+// SearchSelectOlder moves the search selection toward earlier output.
+func (i *Input) SearchSelectOlder() {
+	i.search.SelectOlder()
+}
+
+// SearchSelectNewer moves the search selection toward the live tail.
+func (i *Input) SearchSelectNewer() {
+	i.search.SelectNewer()
+}
+
+// SearchSelected returns the currently selected search match.
+func (i *Input) SearchSelected() (SearchMatch, bool) {
+	return i.search.Selected()
 }

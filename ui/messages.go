@@ -90,6 +90,14 @@ type ScrollStateChangedMsg struct {
 
 func (ScrollStateChangedMsg) uiEvent() {}
 
+// SearchStateChangedMsg reports whether the modal scrollback-search
+// navigator is active. Search interaction and viewport scroll position are
+// independent state dimensions, so this is deliberately not another
+// ScrollStateChangedMsg.Mode value.
+type SearchStateChangedMsg bool
+
+func (SearchStateChangedMsg) uiEvent() {}
+
 // InputChangedMsg notifies Session of input content changes. Cursor is a
 // zero-based rune offset from the input widget.
 type InputChangedMsg struct {
@@ -122,6 +130,17 @@ type ShowPickerMsg struct {
 	// a space - for pickers over single-token items (slash commands) where
 	// a space means the user has committed and is typing arguments.
 	DismissOnSpace bool
+}
+
+// --- Search Messages (Session -> UI) ---
+
+// ShowSearchMsg requests the UI to open the scrollback-search overlay.
+// Sent from Session when Lua calls rune.ui.search(). Fire-and-forget:
+// unlike the picker there is no callback to settle - the search is
+// self-contained in the UI, and its only session-visible outcome is
+// the viewport position, reported through ScrollStateChangedMsg.
+type ShowSearchMsg struct {
+	Query string // initial query; empty keeps the previous search's query
 }
 
 // SetClipboardMsg asks the terminal to set the system clipboard
