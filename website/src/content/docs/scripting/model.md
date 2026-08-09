@@ -40,7 +40,7 @@ core fields:
 |---|---|---|---|
 | `name` | string | none | Unique ID for management. Registering the same name again **replaces** the old entry (upsert) — reloading a script never stacks duplicates. |
 | `group` | string | none | Group membership for batch enable/disable/remove. |
-| `priority` | number | 50 | Execution order where multiple items can match (aliases, triggers, hooks). Lower runs first. |
+| `priority` | number | 50 | Execution order where multiple items can match (regex aliases, triggers, hooks). Lower runs first. |
 | `once` | bool | false | Auto-remove after the first match (aliases, triggers). |
 
 Individual registries add their own options — triggers take `gag` and
@@ -85,7 +85,7 @@ Function actions receive a context table as their last argument:
 | `ctx.group` | The item's group, if set |
 | `ctx.type` | `"alias"`, `"trigger"`, `"timer"`, or `"hook"` |
 | `ctx.line` | The original line (a [line object](/reference/api/state-lines/) for triggers) |
-| `ctx.args` | Argument string (exact aliases) |
+| `ctx.args` | Text after the matched phrase (exact aliases) |
 | `ctx.matches` | Capture array (regex matches) |
 | `ctx:remove()` | Remove this item from inside its own callback |
 

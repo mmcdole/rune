@@ -61,7 +61,7 @@ Common `opts` fields accepted by every creation function:
 |---|---|---|---|
 | `name` | string | none | All — unique ID; same name replaces (upsert) |
 | `group` | string | none | All — membership for batch operations |
-| `priority` | number | 50 | Aliases, triggers, hooks — lower runs first |
+| `priority` | number | 50 | Regex aliases, triggers, hooks — lower runs first |
 | `once` | bool | false | Aliases, triggers — remove after first match |
 
 Page-specific extras (e.g. trigger `gag`/`raw`) are listed on each page.

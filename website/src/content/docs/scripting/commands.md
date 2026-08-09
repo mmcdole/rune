@@ -19,9 +19,11 @@ listings never drift from what is actually registered.
 rune.command.add(name, handler, description?, opts?)
 ```
 
-The handler is a function; it receives everything after `/name ` as a
-single string (`""` when there are no arguments). The command name doubles
-as its registry name.
+The command name is one non-empty word without the slash. The handler
+receives everything after `/name ` as a single string (`""` when there
+are no arguments), so multi-word forms such as `/pather go town` are
+expressed as a command plus arguments. The command name doubles as its
+registry name.
 
 ## Options
 
