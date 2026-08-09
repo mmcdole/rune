@@ -1,6 +1,6 @@
 ---
 title: rune.alias
-description: Full signatures for expanding and transforming your input — exact word and regex matching.
+description: Full signatures for expanding and transforming your input — literal phrase and regex matching.
 ---
 
 Aliases match your input and transform or expand it before it reaches
@@ -10,7 +10,7 @@ the server. For a task-oriented introduction, see
 ## Quick reference
 
 ```lua
-rune.alias.exact(command, action, opts?)  -- first word matches literally
+rune.alias.exact(phrase, action, opts?)   -- leading command phrase matches literally
 rune.alias.regex(pattern, action, opts?)  -- Go regexp on the full input line
 ```
 
@@ -19,31 +19,34 @@ the [common options](/reference/api/#options).
 
 ## Matching
 
-Regex aliases are checked first, in `priority` order; if none match,
-the first word of the input is looked up among exact aliases. Only one
-alias fires per command. A string result — whether from a string action
-or returned by a function — is fed back through
+Regex aliases are checked first, in `priority` order. If none match, an
+exact alias can match one or more complete words at the beginning of what
+you type. When more than one matches, the longest active phrase wins, so
+`"chat off"` takes precedence over `"chat"`. Only one alias fires per
+command. A string result — whether from a string action or returned by a
+function — is fed back through
 [`rune.send`](/reference/api/core/), so aliases can expand to other
 aliases; a depth limit catches loops.
 
 ### rune.alias.exact
 
 ```lua
-rune.alias.exact(command, action, opts?) -> handle
+rune.alias.exact(phrase, action, opts?) -> handle
 ```
 
-- `command` (string) — matched literally against the first word of the
-  input. Registering the same word again replaces the previous exact
-  alias.
+- `phrase` (string) — one or more words matched literally at the start of
+  the input. Whitespace separates words and is normalized, so `chat off`
+  also matches `chat   off`. Registering the same normalized phrase again
+  replaces the previous exact alias.
 - `action` (string | function) — an expansion string (trailing
   arguments are appended: with `rune.alias.exact("g", "get")`, typing
   `g sword` sends `get sword`), or `function(args, ctx)` where `args`
-  is everything after the command word.
+  is everything after the matched phrase.
 - `opts` (table, optional) — [common options](/reference/api/#options).
 
 ```lua
-rune.alias.exact("heal", function(args, ctx)
-    rune.send("cast heal " .. (args ~= "" and args or "self"))
+rune.alias.exact("chat off", function(args, ctx)
+    rune.echo("chatlog: off" .. (args ~= "" and " (" .. args .. ")" or ""))
 end)
 ```
 

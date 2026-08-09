@@ -36,6 +36,9 @@ function rune.command.add(name, handler, description, opts)
     if type(name) ~= "string" then
         error("rune.command.add: name must be a string", 2)
     end
+    if name == "" or name:find("%s") then
+        error("rune.command.add: name must be a non-empty single word", 2)
+    end
     if type(handler) ~= "function" then
         error("rune.command.add: handler must be a function", 2)
     end

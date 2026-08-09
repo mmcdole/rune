@@ -3,7 +3,7 @@
 -- Built on rune.registry (15_registry.lua).
 --
 -- API (literal matching):
---   rune.alias.exact(key, action, opts?)      -- Match command word exactly (literal)
+--   rune.alias.exact(phrase, action, opts?)   -- Match a literal command phrase
 --
 -- API (regex matching):
 --   rune.alias.regex(pattern, action, opts?)  -- Go regexp on full input line
@@ -18,7 +18,7 @@
 --
 -- Action can be:
 --   - String: expansion text, %1 %2 etc substituted from captures (regex only)
---   - Function (exact):  function(args, ctx)  -- args = string after command word
+--   - Function (exact):  function(args, ctx)  -- args = text after matched phrase
 --   - Function (regex):  function(matches, ctx) -- matches = array of captures
 --
 -- Context object:
@@ -26,28 +26,81 @@
 --   ctx.name  = alias name (if set)
 --   ctx.group = alias group (if set)
 --   ctx.type  = "alias"
---   ctx.args  = args string (exact only)
+--   ctx.args  = text after matched phrase (exact only)
 --   ctx.matches = captures array (regex only)
 
--- Exact-command index: command word -> data, kept in sync with the
--- registry so exact lookup stays O(1).
+-- Exact-command indexes. The phrase map supports upsert/listing; the word
+-- trie lets dispatch follow only registered prefixes and stop at the first
+-- impossible continuation.
 local exact = {}
+local exact_root = { children = {} }
+
+local function index_exact(data)
+    local node = exact_root
+    local words = {}
+    for word in data.pattern:gmatch("%S+") do
+        words[#words + 1] = word
+        local child = node.children[word]
+        if not child then
+            child = { children = {} }
+            node.children[word] = child
+        end
+        node = child
+    end
+    node.data = data
+    data._exact_words = words
+end
+
+local function unindex_exact(data)
+    local words = data._exact_words
+    if not words then
+        return
+    end
+
+    local node = exact_root
+    local path = { node }
+    for _, word in ipairs(words) do
+        node = node.children[word]
+        if not node then
+            data._exact_words = nil
+            return
+        end
+        path[#path + 1] = node
+    end
+
+    if node.data == data then
+        node.data = nil
+    end
+    for i = #words, 1, -1 do
+        local child = path[i + 1]
+        if child.data == nil and next(child.children) == nil then
+            path[i].children[words[i]] = nil
+        else
+            break
+        end
+    end
+    data._exact_words = nil
+end
 
 local registry = rune.registry.new{
     kind = "alias",
     on_add = function(data)
         if data.is_exact then
-            -- Upsert by command word: replace any previous exact alias
+            -- Upsert by normalized phrase: replace any previous exact alias
             local old = exact[data.pattern]
             if old and old ~= data then
                 old._handle:remove()
             end
             exact[data.pattern] = data
+            index_exact(data)
         end
     end,
     on_remove = function(data)
-        if data.is_exact and exact[data.pattern] == data then
-            exact[data.pattern] = nil
+        if data.is_exact then
+            if exact[data.pattern] == data then
+                exact[data.pattern] = nil
+            end
+            unindex_exact(data)
         end
     end,
 }
@@ -65,9 +118,18 @@ end
 -- Public API
 rune.alias = {}
 
--- Match command word exactly (first word of input, literal)
-function rune.alias.exact(command, action, opts)
-    return create_alias(command, action, opts, true)
+-- Match a literal command phrase. Whitespace separates words rather
+-- than being part of the phrase, matching the input parser's behavior.
+function rune.alias.exact(phrase, action, opts)
+    if type(phrase) ~= "string" then
+        error("rune.alias.exact: phrase must be a string", 2)
+    end
+    local normalized = phrase:gsub("%s+", " ")
+    normalized = normalized:gsub("^ ", ""):gsub(" $", "")
+    if normalized == "" then
+        error("rune.alias.exact: phrase must contain at least one word", 2)
+    end
+    return create_alias(normalized, action, opts, true)
 end
 
 -- Go regexp match on full input line
@@ -188,38 +250,55 @@ function rune.alias.process(input)
         end
     end
 
-    -- Then try exact aliases (command word match)
-    local cmd, args = input:match("^(%S+)%s*(.*)")
-    if cmd then
-        local data = exact[cmd]
-        if data and registry:active(data) then
-            local result = nil
-
-            if type(data.action) == "function" then
-                -- For exact aliases, pass args string (not matches array)
-                local ctx = {
-                    line = input,
-                    name = data.name,
-                    group = data.group,
-                    type = "alias",
-                    args = args,
-                }
-                result = run_action(data, args, ctx)
-            elseif type(data.action) == "string" then
-                -- Exact alias expansion: append args
-                if args and args ~= "" then
-                    result = data.action .. " " .. args
-                else
-                    result = data.action
-                end
+    -- Then walk the exact-alias trie. Retaining the last active candidate
+    -- makes the most specific (longest) phrase win.
+    local data, matched_end = nil, nil
+    local node = exact_root
+    local token_start, token_end = input:find("%S+")
+    if token_start == 1 then
+        while token_start do
+            local token = input:sub(token_start, token_end)
+            node = node.children[token]
+            if not node then
+                break
             end
-
-            if data.once then
-                data._handle:remove()
+            local candidate = node.data
+            if candidate and registry:active(candidate) then
+                data = candidate
+                matched_end = token_end
             end
-
-            return true, result
+            token_start, token_end = input:find("%S+", token_end + 1)
         end
+    end
+    if data then
+        local args_start = input:find("%S", matched_end + 1)
+        local args = args_start and input:sub(args_start) or ""
+        local result = nil
+
+        if type(data.action) == "function" then
+            -- For exact aliases, pass args string (not matches array)
+            local ctx = {
+                line = input,
+                name = data.name,
+                group = data.group,
+                type = "alias",
+                args = args,
+            }
+            result = run_action(data, args, ctx)
+        elseif type(data.action) == "string" then
+            -- Exact alias expansion: append args
+            if args and args ~= "" then
+                result = data.action .. " " .. args
+            else
+                result = data.action
+            end
+        end
+
+        if data.once then
+            data._handle:remove()
+        end
+
+        return true, result
     end
 
     return false, nil

@@ -27,8 +27,8 @@ name is the command name itself).
 rune.command.add(name, handler, description?, opts?) -> handle
 ```
 
-- `name` (string) — the command name, without the slash. Re-adding the
-  same name replaces the old handler (upsert).
+- `name` (string) — a non-empty, single-word command name without the
+  slash. Re-adding the same name replaces the old handler (upsert).
 - `handler` (function) — `function(args)`; `args` is everything after
   `/name ` as a single string (`""` when there are no arguments).
 - `description` (string, optional) — shown in `/help` and the `/`

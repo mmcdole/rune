@@ -5,7 +5,10 @@ package lua
 // semantics (upsert, once) live in registry_test.go; the e2e wiring
 // proof in test/e2e/scenarios/aliases.json.
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestAliasMatching(t *testing.T) {
 	runFeatureCases(t, []featureCase{
@@ -20,6 +23,83 @@ func TestAliasMatching(t *testing.T) {
 			setup: `rune.alias.exact('k', 'kill')`,
 			input: "k orc",
 			want:  []string{"kill orc"},
+		},
+		{
+			name:  "multi-word exact with arguments",
+			setup: `rune.alias.exact('chat off', 'chatlog off')`,
+			input: "chat off temporarily",
+			want:  []string{"chatlog off temporarily"},
+		},
+		{
+			name:  "multi-word exact function receives arguments",
+			setup: `rune.alias.exact('chat off', function(args, ctx) rune.send_raw(args .. '|' .. ctx.args) end)`,
+			input: "chat off temporarily",
+			want:  []string{"temporarily|temporarily"},
+		},
+		{
+			name:  "multi-word exact preserves internal argument whitespace",
+			setup: `rune.alias.exact('chat off', function(args) rune.send_raw('[' .. args .. ']') end)`,
+			input: "chat off   temporarily  later",
+			want:  []string{"[temporarily  later]"},
+		},
+		{
+			name: "longest exact phrase wins",
+			setup: `
+				rune.alias.exact('chat off', 'specific', {priority = 100})
+				rune.alias.exact('chat', 'general', {priority = 1})
+			`,
+			input: "chat off temporarily",
+			want:  []string{"specific temporarily"},
+		},
+		{
+			name:  "multi-word exact requires a word boundary",
+			setup: `rune.alias.exact('chat off', 'matched')`,
+			input: "chat offline",
+			want:  []string{"chat offline"},
+		},
+		{
+			name: "disabled longer phrase falls back to shorter exact alias",
+			setup: `
+				rune.alias.exact('chat', 'general')
+				local specific = rune.alias.exact('chat off', 'specific')
+				specific:disable()
+			`,
+			input: "chat off temporarily",
+			want:  []string{"general off temporarily"},
+		},
+		{
+			name: "removed longer phrase falls back to shorter exact alias",
+			setup: `
+				rune.alias.exact('chat', 'general')
+				local specific = rune.alias.exact('chat off', 'specific')
+				specific:remove()
+			`,
+			input: "chat off temporarily",
+			want:  []string{"general off temporarily"},
+		},
+		{
+			name:  "multi-word exact treats whitespace as a token separator",
+			setup: `rune.alias.exact('chat off', 'matched')`,
+			input: "chat\t  off   temporarily",
+			want:  []string{"matched temporarily"},
+		},
+		{
+			name:  "multi-word exact normalizes registration whitespace",
+			setup: "rune.alias.exact('  chat\\t off  ', 'matched')",
+			input: "chat off",
+			want:  []string{"matched"},
+		},
+		{
+			name: "equivalent exact phrase replaces previous alias",
+			setup: `
+				rune.alias.exact('chat off', 'old')
+				rune.alias.exact('chat  off', 'new')
+				local aliases = rune.alias.list()
+				assert(rune.alias.count() == 1)
+				assert(#aliases == 1 and aliases[1].match == 'chat off')
+			`,
+			input: "chat off",
+			want:  []string{"new"},
 		},
 		{
 			name:  "exact no match - different command",
@@ -88,6 +168,38 @@ func TestAliasMatching(t *testing.T) {
 			want:  []string{"regex-matched"},
 		},
 	})
+}
+
+func TestExactAliasRejectsEmptyPhrase(t *testing.T) {
+	engine, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	err := engine.DoString("user.lua", `rune.alias.exact(" \t ", "look")`)
+	if err == nil {
+		t.Fatal("empty exact alias phrase was accepted")
+	}
+	if !strings.Contains(err.Error(), "must contain at least one word") {
+		t.Fatalf("registration error = %q, want empty phrase error", err)
+	}
+	if err := engine.DoString("assert.lua", `assert(rune.alias.count() == 0)`); err != nil {
+		t.Fatalf("rejected alias remained registered: %v", err)
+	}
+}
+
+func TestExactAliasRejectsNonStringPhrase(t *testing.T) {
+	engine, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	err := engine.DoString("user.lua", `rune.alias.exact({}, "look")`)
+	if err == nil {
+		t.Fatal("non-string exact alias phrase was accepted")
+	}
+	if !strings.Contains(err.Error(), "phrase must be a string") {
+		t.Fatalf("registration error = %q, want phrase type error", err)
+	}
+	if err := engine.DoString("assert.lua", `assert(rune.alias.count() == 0)`); err != nil {
+		t.Fatalf("rejected alias remained registered: %v", err)
+	}
 }
 
 func TestAliasHandles(t *testing.T) {

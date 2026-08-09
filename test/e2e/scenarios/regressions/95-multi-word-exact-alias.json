@@ -1,0 +1,18 @@
+{
+  "description": "Regression: multi-word exact aliases were registered and listed but could never match because exact dispatch only looked up the first input word.",
+  "scenarios": [
+    {
+      "name": "multi-word exact alias executes",
+      "issue": "https://github.com/mmcdole/rune/issues/95",
+      "init_lua": [
+        "rune.alias.exact('chat off', function(args)",
+        "  rune.echo('E2E-CHAT-OFF=' .. args)",
+        "end)"
+      ],
+      "steps": [
+        { "type": "chat off" },
+        { "expect_printed": "E2E-CHAT-OFF=" }
+      ]
+    }
+  ]
+}

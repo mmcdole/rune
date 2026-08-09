@@ -1,10 +1,10 @@
 ---
 title: Aliases
-description: Expand what you type before it reaches the server, with exact words or regex patterns and string or function actions.
+description: Expand what you type before it reaches the server, with literal phrases or regex patterns and string or function actions.
 ---
 
 An alias rewrites what you type before it goes to the server. Two decisions
-define one: how it matches (an exact command word, or a regex over the
+define one: how it matches (a literal command phrase, or a regex over the
 whole line) and what it does (a string to send, or a Lua function to run).
 
 The simplest form is a word that expands, with anything you typed after it
@@ -28,16 +28,26 @@ end)
 
 Both forms register the same way and are managed the same way.
 
+Literal aliases can contain more than one word. The matched phrase is the
+command head and anything after it remains available as arguments:
+
+```lua
+rune.alias.exact("chat off", "chatlog off")
+-- "chat off now" -> chatlog off now
+```
+
 ## Creating
 
 ```lua
-rune.alias.exact(word, action, opts?)     -- matches the first word you type
+rune.alias.exact(phrase, action, opts?)   -- matches leading words literally
 rune.alias.regex(pattern, action, opts?)  -- Go regexp against the whole line
 ```
 
-Exact aliases are an O(1) lookup on the command word; use them for most
-cases. Regex aliases see the entire input line and can capture pieces of
-it. They run in `priority` order before exact aliases are tried.
+Exact aliases match literal words at the start of what you type. If phrases
+overlap, the longest active phrase wins. Whitespace separates phrase words,
+so `chat off` also matches `chat   off`. Regex aliases see the entire input
+line and can capture pieces of it. They run in `priority` order before exact
+aliases are tried.
 
 Regex patterns are validated at registration: a bad pattern raises
 immediately instead of failing silently at match time.
@@ -46,7 +56,7 @@ immediately instead of failing silently at match time.
 
 **A string** is a plain expansion.
 
-- For `exact` aliases, whatever you typed after the word is appended:
+- For `exact` aliases, whatever you typed after the matched phrase is appended:
   `rune.alias.exact("k", "kill")` turns `k rat` into `kill rat`.
 - For `regex` aliases, `%1`, `%2`, and so on are substituted from the
   pattern's captures. This is how you reorder or reuse arguments:
@@ -64,7 +74,7 @@ entirely.
 The function's first argument depends on the match type:
 
 ```lua
--- exact: (args, ctx). args is the text after the command word.
+-- exact: (args, ctx). args is the text after the matched phrase.
 rune.alias.exact("heal", function(args, ctx)
     if args == "" then
         rune.echo(rune.style.yellow("heal who?"))
