@@ -322,9 +322,21 @@ func (e *Engine) OnOutput(line text.Line) (string, bool) {
 	return modified.String(), true
 }
 
-// OnPrompt handles server prompts.
+// OnPrompt handles a server prompt confirmed by Telnet GA/EOR.
 func (e *Engine) OnPrompt(line text.Line) string {
-	results, found, err := e.callHooks(2, "prompt", script.Obj{Type: "line", Payload: &line})
+	return e.onPrompt(line, true)
+}
+
+// OnPromptPreview handles an unterminated partial-line snapshot. It follows
+// the same hook and display path as a confirmed prompt, but tells core trigger
+// processing not to finalize spans at an arbitrary socket-read boundary.
+func (e *Engine) OnPromptPreview(line text.Line) string {
+	return e.onPrompt(line, false)
+}
+
+func (e *Engine) onPrompt(line text.Line, confirmed bool) string {
+	results, found, err := e.callHooks(2, "prompt",
+		script.Obj{Type: "line", Payload: &line}, confirmed)
 	if !found {
 		e.reportHooksBroken()
 		return line.Raw

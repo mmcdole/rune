@@ -110,6 +110,26 @@ func TestPromptCommitOrdering(t *testing.T) {
 	}
 }
 
+// Unterminated prompt snapshots still take the normal presentation path:
+// prompt-matching rewrites apply immediately even though span finalization is
+// withheld until a real GA/EOR boundary.
+func TestPromptPreviewKeepsVisualTransformations(t *testing.T) {
+	s, _, uiMock := newTestSession(t)
+
+	if err := s.engine.DoString("prompt rewrite", `
+		rune.trigger.exact("HP:100>", function()
+			return "[healthy] HP:100>"
+		end)
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	serverPrompt(s, "HP:100>")
+	if prompts := uiMock.drainPrompts(); len(prompts) != 1 || prompts[0] != "[healthy] HP:100>" {
+		t.Fatalf("preview did not follow prompt visual pipeline: %v", prompts)
+	}
+}
+
 func TestDisconnectEventUpdatesStateAndNotifiesLua(t *testing.T) {
 	s, net, uiMock := newTestSession(t)
 	net.connected = true

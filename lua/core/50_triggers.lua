@@ -197,13 +197,16 @@ end
 -- triggers match against (and receive) the rewritten text. Span
 -- triggers collect lines instead of firing per line: the header match
 -- opens a span, following lines are appended, and the action fires
--- once when span.to matches, span.max lines arrive, a prompt flushes
--- (is_prompt = true), or a new header restarts the span. A span
+-- once when span.to matches, span.max lines arrive, a confirmed prompt
+-- flushes (prompt_confirmed = true), or a new header restarts the span. A span
 -- captures each line as this trigger would have seen it, so rewrites
 -- from higher-priority triggers are included.
-function rune.trigger.process(line, is_prompt)
+-- prompt_confirmed is nil for complete output, false for an unterminated
+-- preview, and true for a GA/EOR-confirmed prompt.
+function rune.trigger.process(line, prompt_confirmed)
     local gagged = false
     local modified_text = nil
+    local prompt_preview = prompt_confirmed == false
 
     local raw_line = line:raw()
     local clean_line = line:clean()
@@ -268,10 +271,11 @@ function rune.trigger.process(line, is_prompt)
         return #st.lines >= sp.max
     end
 
-    -- A prompt is never a continuation: flush every open span first,
-    -- in priority order. The prompt line itself still runs normal
-    -- matching below.
-    if is_prompt then
+    -- A confirmed prompt is never a continuation: flush every open span
+    -- first, in priority order. Speculative unterminated-line previews still
+    -- run normal prompt matching below, but cannot finalize spans merely
+    -- because a socket read happened to end there.
+    if prompt_confirmed == true then
         for _, data in ipairs(registry:snapshot()) do
             if open[data] then
                 fire_span(data, open[data])
@@ -283,7 +287,12 @@ function rune.trigger.process(line, is_prompt)
     -- Snapshot: a trigger action that adds/removes triggers must not
     -- perturb this dispatch pass (removals still honored via active()).
     for _, data in ipairs(registry:snapshot()) do
-        if registry:active(data) then
+        -- Span triggers only consume complete lines or confirmed prompt
+        -- boundaries. A preview may contain the beginning of a continuation
+        -- that will arrive again as a complete line; touching span state here
+        -- would either truncate or duplicate it. Non-span prompt triggers keep
+        -- their historical behavior (prompt rewriting and status-bar updates).
+        if registry:active(data) and not (prompt_preview and data.span) then
             local match_line = data.raw and raw_line or clean_line
 
             if open[data] then

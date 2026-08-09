@@ -212,7 +212,7 @@ func (s *Session) handleNetworkOutput(out network.Output) {
 	case network.OutputLine:
 		s.handleServerLine(out.Payload)
 	case network.OutputPrompt:
-		s.handleServerPrompt(out.Payload)
+		s.handleServerPrompt(out.Payload, out.PromptConfirmed)
 	case network.OutputDisconnect:
 		s.Disconnect()
 	case network.OutputGMCP:
@@ -242,12 +242,19 @@ func (s *Session) handleServerLine(payload string) {
 // would turn socket read boundaries into visible lines (issue #25); a
 // GA/EOR prompt superseding another is a repaint and gets the same
 // treatment. Only input submission commits the active prompt
-// (handleSubmission).
-func (s *Session) handleServerPrompt(payload string) {
+// (handleSubmission). Preview and confirmed prompts share the exact same
+// display path; confirmation only controls irreversible trigger state.
+func (s *Session) handleServerPrompt(payload string, confirmed bool) {
 	line := text.NewLine(payload)
 	// Sanitized before storing so the overlay and the later
 	// scrollback commit (handleSubmission) both stay chrome-safe.
-	modified := text.SanitizeDisplay(s.engine.OnPrompt(line))
+	var modified string
+	if confirmed {
+		modified = s.engine.OnPrompt(line)
+	} else {
+		modified = s.engine.OnPromptPreview(line)
+	}
+	modified = text.SanitizeDisplay(modified)
 	s.lastPrompt = modified
 	s.ui.SetPrompt(modified)
 }

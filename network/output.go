@@ -13,7 +13,8 @@ const (
 
 // Output represents data emitted by the network layer.
 type Output struct {
-	Kind    OutputKind
-	Payload string // Line content, or raw JSON for GMCP (may be empty)
-	Package string // GMCP package name (e.g. "Char.Vitals"); GMCP only
+	Kind            OutputKind
+	Payload         string // Line content, or raw JSON for GMCP (may be empty)
+	Package         string // GMCP package name (e.g. "Char.Vitals"); GMCP only
+	PromptConfirmed bool   // OutputPrompt only: true when terminated by GA/EOR
 }

@@ -453,6 +453,9 @@ func TestUnterminatedPromptSurvivesPromptlessNegotiation(t *testing.T) {
 			if out.Payload != "Enter your name: " {
 				t.Fatalf("prompt = %q, want %q", out.Payload, "Enter your name: ")
 			}
+			if out.PromptConfirmed {
+				t.Fatal("unterminated prompt peek marked confirmed")
+			}
 		})
 	}
 }
@@ -483,6 +486,9 @@ func TestFirstGASwitchesOffUnterminatedPeek(t *testing.T) {
 		case out := <-c.Output():
 			switch out.Kind {
 			case OutputPrompt:
+				if !out.PromptConfirmed {
+					t.Fatalf("GA-terminated prompt %q marked as preview", out.Payload)
+				}
 				prompts = append(prompts, out.Payload)
 			case OutputLine:
 				if out.Payload == "marker" {
@@ -533,6 +539,9 @@ func TestPromptEmittedOncePerGABatch(t *testing.T) {
 		case out := <-c.Output():
 			switch out.Kind {
 			case OutputPrompt:
+				if !out.PromptConfirmed {
+					t.Fatalf("GA-terminated prompt %q marked as preview", out.Payload)
+				}
 				prompts = append(prompts, out.Payload)
 			case OutputLine:
 				if out.Payload == "marker" {

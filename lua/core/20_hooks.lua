@@ -16,7 +16,8 @@
 -- Events (data-flow):
 --   "input"        -- User input: (text, context); return false to consume
 --   "output"       -- Server output line object (false gags, string rewrites)
---   "prompt"       -- Server prompt line object (false gags, string rewrites)
+--   "prompt"       -- Server prompt line object and confirmed boolean
+--                     (false gags, string rewrites)
 --   "echo"         -- Local echo of typed input, plain string (false hides,
 --                     string rewrites; core handler adds the "> " styling)
 -- Events (notifications):
@@ -180,10 +181,20 @@ function rune.hooks.call(event, ...)
         -- for every subsequent handler, so rewrites compose in priority
         -- order instead of last-writer-wins on the original text.
         local line = select(1, ...)
+        local prompt_confirmed = select(2, ...)
 
         for _, entry in ipairs(handlers) do
             if registry:active(entry) then
-                local result = run_handler(entry, line)
+                -- Existing one-argument prompt handlers remain valid. The
+                -- second argument is false only for speculative snapshots of
+                -- an unterminated line; nil retains the historical confirmed
+                -- behavior for direct rune.hooks.call users.
+                local result
+                if event == "prompt" then
+                    result = run_handler(entry, line, prompt_confirmed ~= false)
+                else
+                    result = run_handler(entry, line)
+                end
                 if result == false then
                     return "", false  -- gagged
                 elseif type(result) == "string" then

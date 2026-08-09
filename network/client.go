@@ -398,7 +398,7 @@ func (c *TCPClient) processIncoming(cx *connection, data []byte) bool {
 					prompt := cx.output.Prompt(true)
 					if prompt != "" {
 						select {
-						case c.outputChan <- Output{Kind: OutputPrompt, Payload: prompt}:
+						case c.outputChan <- Output{Kind: OutputPrompt, Payload: prompt, PromptConfirmed: true}:
 						case <-cx.done:
 							return false
 						}

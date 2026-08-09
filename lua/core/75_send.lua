@@ -149,10 +149,11 @@ rune.hooks.on("output", function(line)
     return modified
 end, { priority = 100 })
 
--- Register prompt handler. is_prompt = true: a prompt is never part
--- of a multi-line span, so any open span flushes first.
-rune.hooks.on("prompt", function(line)
-    local modified, show = rune.trigger.process(line, true)
+-- Register prompt handler. Only GA/EOR-confirmed prompts are semantic
+-- boundaries that flush open spans. Unterminated snapshots still take this
+-- same trigger/style/display path, but remain speculative.
+rune.hooks.on("prompt", function(line, confirmed)
+    local modified, show = rune.trigger.process(line, confirmed)
     if not show then
         return false
     end
