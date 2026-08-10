@@ -625,14 +625,6 @@ func (p *Parser) processNegotiation(command, opt byte) []TelnetEvent {
 	return responses
 }
 
-// TelnetMode represents how prompt/line boundaries are detected.
-type TelnetMode int
-
-const (
-	TelnetModeUnterminated     TelnetMode = iota // Split on \n, prompts are unterminated
-	TelnetModeTerminatedPrompt                   // Prompts terminated by GA/EOR
-)
-
 // OutputBuffer buffers incoming data and splits it into lines.
 // Lines are delimited by \r\n, \n\r, \n, or a bare \r — the contract of the
 // original ExtractLines. Bare \r matters: muds return the carriage to
@@ -643,27 +635,19 @@ const (
 // pair split across reads is completed via pendingPartner instead of
 // emitting a spurious empty line.
 // The mutex is required: the read loop parses into the buffer while
-// the write loop calls InputSent to drop a pending prompt.
+// the write loop calls DiscardPartial before sending a line.
 type OutputBuffer struct {
-	mu      sync.Mutex
-	buffer  bytes.Buffer
-	mode    TelnetMode
-	newData bool
+	mu     sync.Mutex
+	buffer bytes.Buffer
 	// pendingPartner is the second byte of a delimiter pair whose first
 	// byte was already consumed at the end of a previous read ('\r' after
-	// an emitted \n, or '\n' after a held \r dropped by Prompt/InputSent).
+	// an emitted \n, or '\n' after a held \r that was consumed/discarded).
 	// If the next read starts with it, it is swallowed.
 	pendingPartner byte
 }
 
-func NewOutputBuffer(mode TelnetMode) *OutputBuffer {
-	return &OutputBuffer{mode: mode}
-}
-
-func (o *OutputBuffer) SetMode(mode TelnetMode) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	o.mode = mode
+func NewOutputBuffer() *OutputBuffer {
+	return &OutputBuffer{}
 }
 
 func (o *OutputBuffer) Receive(data []byte) []string {
@@ -679,7 +663,6 @@ func (o *OutputBuffer) Receive(data []byte) []string {
 		return nil
 	}
 	o.buffer.Write(data)
-	o.newData = true
 	buf := o.buffer.Bytes()
 	var lines []string
 	last := 0
@@ -718,10 +701,9 @@ func (o *OutputBuffer) Receive(data []byte) []string {
 	return lines
 }
 
-// Prompt returns any pending (unterminated) text. Clears buffer if consume is true.
-// A held trailing \r (a possible half of \r\n) is never part of the prompt
-// text; on consume its \n partner, if it arrives next, is still swallowed.
-func (o *OutputBuffer) Prompt(consume bool) string {
+// PeekPartial returns the current unfinished tail without consuming it. A
+// held trailing \r (a possible half of \r\n) is not part of the snapshot.
+func (o *OutputBuffer) PeekPartial() string {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if o.buffer.Len() == 0 {
@@ -732,34 +714,43 @@ func (o *OutputBuffer) Prompt(consume bool) string {
 	if heldCR {
 		text = text[:len(text)-1]
 	}
-	if consume {
-		o.buffer.Reset()
-		o.newData = false
-		if heldCR {
-			o.pendingPartner = '\n'
-		}
-	}
 	return text
 }
 
-func (o *OutputBuffer) HasNewData() bool {
+// ConsumePrompt returns and clears the text preceding a Telnet GA/EOR marker.
+// completedLine is true when that text ended in a held bare CR: the marker
+// proves no LF followed it in the data stream, so the text is a completed line
+// rather than a prompt. An empty buffer returns ("", false); empty markers do
+// not create text events.
+func (o *OutputBuffer) ConsumePrompt() (text string, completedLine bool) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	return o.newData
+	if o.buffer.Len() == 0 {
+		return "", false
+	}
+	text = o.buffer.String()
+	if strings.HasSuffix(text, "\r") {
+		text = text[:len(text)-1]
+		completedLine = true
+		// Telnet commands are not data octets, so a later LF can still be
+		// the partner of this CR even though GA/EOR appeared between them.
+		o.pendingPartner = '\n'
+	}
+	o.buffer.Reset()
+	return text, completedLine
 }
 
-// InputSent clears the buffer in unterminated mode since the server
-// will reprint the prompt after echoing the input.
-func (o *OutputBuffer) InputSent() {
+// DiscardPartial discards the unfinished tail. A server cannot respond to the
+// submitted line until after the caller writes it, so later response text
+// cannot be part of this tail. Without a wire terminator there is no way to
+// distinguish a real prompt from an ordinary line split at this boundary.
+func (o *OutputBuffer) DiscardPartial() {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	if o.mode == TelnetModeUnterminated {
-		if bytes.HasSuffix(o.buffer.Bytes(), []byte{'\r'}) {
-			o.pendingPartner = '\n' // dropped a held \r; swallow its pair
-		}
-		o.buffer.Reset()
-		o.newData = false
+	if bytes.HasSuffix(o.buffer.Bytes(), []byte{'\r'}) {
+		o.pendingPartner = '\n' // dropped a held \r; swallow its pair
 	}
+	o.buffer.Reset()
 }
 
 func (o *OutputBuffer) Len() int {
@@ -772,8 +763,6 @@ func (o *OutputBuffer) Clear() {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.buffer.Reset()
-	o.mode = TelnetModeUnterminated
-	o.newData = false
 	o.pendingPartner = 0
 }
 

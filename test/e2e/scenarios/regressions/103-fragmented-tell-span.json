@@ -1,0 +1,27 @@
+{
+  "description": "Regression: an unfinished socket tail between wrapped tell lines is only a display preview. It must not end the multiline trigger before the rest of the tell arrives.",
+  "scenarios": [
+    {
+      "name": "a fragmented wrapped tell reaches its multiline trigger in full",
+      "issue": "https://github.com/mmcdole/rune/issues/103",
+      "init_lua": [
+        "rune.trigger.regex('^You tell ([A-Za-z]+): (.+)$', function(matches, ctx)",
+        "  rune.echo('E2E-TELL=[' .. ctx.text .. ']')",
+        "end, { span = { to = 'FINAL', max = 8 } })"
+      ],
+      "steps": [
+        { "connect": true },
+        { "server_line": "You tell Player: A long example starts" },
+        {
+          "server_bytes": [97, 110, 100, 32, 99, 111, 110, 116, 105, 110, 117, 101, 115],
+          "note": "the next physical line is split across socket reads"
+        },
+        { "expect_prompt": "and continues", "note": "sync: the unfinished tail was previewed" },
+        { "server_line": " onto the final physical line FINAL" },
+        {
+          "expect_printed": "E2E-TELL=[A long example starts and continues onto the final physical line FINAL]"
+        }
+      ]
+    }
+  ]
+}

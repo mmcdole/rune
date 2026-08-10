@@ -10,6 +10,12 @@ import (
 // may block on the async-result channel (lossless delivery) because
 // the session loop keeps draining while the dial is in flight.
 func (s *Session) Connect(addr string) {
+	s.engine.DiscardSpans()
+	s.lastPrompt = ""
+	s.promptActive = false
+	s.promptConfirmed = false
+	s.promptEpoch = 0
+	s.ui.SetPrompt("")
 	s.engine.CallHook("connecting", addr)
 	go func() {
 		// Create a timeout context for the dial attempt.
@@ -40,8 +46,14 @@ func (s *Session) Connect(addr string) {
 func (s *Session) Disconnect() {
 	s.engine.CallHook("disconnecting")
 	s.net.Disconnect()
+	s.engine.DiscardSpans()
 	s.clientState.Connected = false
 	s.clientState.Address = ""
+	s.lastPrompt = ""
+	s.promptActive = false
+	s.promptConfirmed = false
+	s.promptEpoch = 0
+	s.ui.SetPrompt("")
 	s.engine.UpdateState(s.clientState)
 	s.engine.CallHook("disconnected")
 	s.pushBarUpdates()

@@ -191,7 +191,7 @@ func expectBytes(t *testing.T, conn net.Conn, want []byte, what string) []byte {
 }
 
 // nextOutput waits for the next Output of the given kind, skipping
-// prompts (the output buffer emits prompt fragments freely).
+// unrelated events (the output buffer emits partial snapshots freely).
 func nextOutput(t *testing.T, c *TCPClient, kind OutputKind, what string) Output {
 	t.Helper()
 	deadline := time.After(5 * time.Second)
@@ -449,27 +449,23 @@ func TestUnterminatedPromptSurvivesPromptlessNegotiation(t *testing.T) {
 			})
 
 			c := connectLoopback(t, addr)
-			out := nextOutput(t, c, OutputPrompt, "unterminated prompt after "+neg.name)
+			out := nextOutput(t, c, OutputPartial, "unterminated prompt after "+neg.name)
 			if out.Payload != "Enter your name: " {
 				t.Fatalf("prompt = %q, want %q", out.Payload, "Enter your name: ")
-			}
-			if out.PromptConfirmed {
-				t.Fatal("unterminated prompt peek marked confirmed")
 			}
 		})
 	}
 }
 
-// TestFirstGASwitchesOffUnterminatedPeek verifies the received-mark
-// switch: after the first GA-terminated prompt, a later partial line
-// is no longer peeked at read boundaries - it renders exactly once,
-// when its own GA arrives.
-func TestFirstGASwitchesOffUnterminatedPeek(t *testing.T) {
+// A server may use GA/EOR for some prompts and omit it for others. A received
+// marker must not permanently hide later unfinished text.
+func TestPartialSnapshotsContinueAfterGA(t *testing.T) {
+	advance := make(chan struct{})
 	addr := telnetServer(t, func(t *testing.T, conn net.Conn) {
 		conn.Write(append([]byte("HP:100> "), CmdIAC, CmdGA))
-		time.Sleep(50 * time.Millisecond)
+		<-advance
 		conn.Write([]byte("HP:90> ")) // partial, terminator still in flight
-		time.Sleep(50 * time.Millisecond)
+		<-advance
 		conn.Write([]byte{CmdIAC, CmdGA})
 		conn.Write([]byte("marker\r\n"))
 
@@ -479,27 +475,32 @@ func TestFirstGASwitchesOffUnterminatedPeek(t *testing.T) {
 	})
 
 	c := connectLoopback(t, addr)
-	var prompts []string
+	var partials, prompts []string
 	deadline := time.After(5 * time.Second)
 	for {
 		select {
 		case out := <-c.Output():
 			switch out.Kind {
+			case OutputPartial:
+				partials = append(partials, out.Payload)
+				if out.Payload == "HP:90> " {
+					advance <- struct{}{}
+				}
 			case OutputPrompt:
-				if !out.PromptConfirmed {
-					t.Fatalf("GA-terminated prompt %q marked as preview", out.Payload)
+				if out.PromptTerminator != PromptTerminatorGA {
+					t.Fatalf("prompt %q terminator = %v, want GA", out.Payload, out.PromptTerminator)
 				}
 				prompts = append(prompts, out.Payload)
+				if out.Payload == "HP:100> " {
+					advance <- struct{}{}
+				}
 			case OutputLine:
 				if out.Payload == "marker" {
-					count := 0
-					for _, p := range prompts {
-						if p == "HP:90> " {
-							count++
-						}
+					if len(partials) != 1 || partials[0] != "HP:90> " {
+						t.Fatalf("partial snapshots = %q, want [\"HP:90> \"]", partials)
 					}
-					if count != 1 {
-						t.Fatalf("second prompt emitted %d times, want exactly 1 (via GA); prompts=%q", count, prompts)
+					if len(prompts) != 2 || prompts[0] != "HP:100> " || prompts[1] != "HP:90> " {
+						t.Fatalf("confirmed prompts = %q", prompts)
 					}
 					return
 				}
@@ -538,9 +539,11 @@ func TestPromptEmittedOncePerGABatch(t *testing.T) {
 		select {
 		case out := <-c.Output():
 			switch out.Kind {
+			case OutputPartial:
+				t.Fatalf("same-batch GA prompt emitted a preliminary partial: %q", out.Payload)
 			case OutputPrompt:
-				if !out.PromptConfirmed {
-					t.Fatalf("GA-terminated prompt %q marked as preview", out.Payload)
+				if out.PromptTerminator != PromptTerminatorGA {
+					t.Fatalf("prompt %q terminator = %v, want GA", out.Payload, out.PromptTerminator)
 				}
 				prompts = append(prompts, out.Payload)
 			case OutputLine:
@@ -552,6 +555,237 @@ func TestPromptEmittedOncePerGABatch(t *testing.T) {
 				}
 			case OutputDisconnect:
 				t.Fatal("connection dropped while waiting for marker")
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for marker line")
+		}
+	}
+}
+
+func TestPartialGrowsThenCompletesAsOneLine(t *testing.T) {
+	advance := make(chan struct{})
+	addr := telnetServer(t, func(t *testing.T, conn net.Conn) {
+		conn.Write([]byte("User"))
+		<-advance
+		conn.Write([]byte("name:"))
+		<-advance
+		conn.Write([]byte(" accepted\r\n"))
+
+		buf := make([]byte, 1)
+		conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+		conn.Read(buf)
+	})
+
+	c := connectLoopback(t, addr)
+	if got := nextOutput(t, c, OutputPartial, "first partial").Payload; got != "User" {
+		t.Fatalf("first partial = %q, want User", got)
+	}
+	advance <- struct{}{}
+	if got := nextOutput(t, c, OutputPartial, "grown partial").Payload; got != "Username:" {
+		t.Fatalf("grown partial = %q, want Username:", got)
+	}
+	advance <- struct{}{}
+	if got := nextOutput(t, c, OutputLine, "completed line").Payload; got != "Username: accepted" {
+		t.Fatalf("completed line = %q, want %q", got, "Username: accepted")
+	}
+}
+
+func TestPromptPreservesGAVersusEOR(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cmd  byte
+		want PromptTerminator
+	}{
+		{name: "GA", cmd: CmdGA, want: PromptTerminatorGA},
+		{name: "EOR", cmd: CmdEOR, want: PromptTerminatorEOR},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			addr := telnetServer(t, func(t *testing.T, conn net.Conn) {
+				conn.Write(append([]byte("HP:100> "), CmdIAC, tc.cmd))
+				buf := make([]byte, 1)
+				conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+				conn.Read(buf)
+			})
+
+			c := connectLoopback(t, addr)
+			out := nextOutput(t, c, OutputPrompt, tc.name+" prompt")
+			if out.Payload != "HP:100> " || out.PromptTerminator != tc.want {
+				t.Fatalf("prompt = (%q, %v), want (%q, %v)",
+					out.Payload, out.PromptTerminator, "HP:100> ", tc.want)
+			}
+		})
+	}
+}
+
+func TestSentLineSeparatesUnterminatedPrompts(t *testing.T) {
+	addr := telnetServer(t, func(t *testing.T, conn net.Conn) {
+		conn.Write([]byte("Username: "))
+		expectBytes(t, conn, []byte("player\r\n"), "login name")
+		conn.Write([]byte("Password: "))
+
+		buf := make([]byte, 1)
+		conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+		conn.Read(buf)
+	})
+
+	c := connectLoopback(t, addr)
+	if got := nextOutput(t, c, OutputPartial, "username prompt").Payload; got != "Username: " {
+		t.Fatalf("first partial = %q", got)
+	}
+	if err := c.Send("player"); err != nil {
+		t.Fatal(err)
+	}
+	if got := nextOutput(t, c, OutputPartial, "password prompt").Payload; got != "Password: " {
+		t.Fatalf("second partial = %q, want Password without the old tail", got)
+	}
+}
+
+func TestSentLineEndsPartialEpochBeforeResponse(t *testing.T) {
+	addr := telnetServer(t, func(t *testing.T, conn net.Conn) {
+		conn.Write([]byte("first half"))
+		expectBytes(t, conn, []byte("look\r\n"), "command after partial")
+		conn.Write([]byte(" second half\r\nnext tail"))
+
+		buf := make([]byte, 1)
+		conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+		conn.Read(buf)
+	})
+
+	c := connectLoopback(t, addr)
+	first := nextOutput(t, c, OutputPartial, "first partial")
+	if first.Payload != "first half" || first.PartialEpoch == 0 {
+		t.Fatalf("first partial = (%q, epoch %d)", first.Payload, first.PartialEpoch)
+	}
+	if err := c.Send("look"); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.After(5 * time.Second)
+	sawBoundary := false
+	sawTruncatedLine := false
+	for {
+		select {
+		case out := <-c.Output():
+			switch out.Kind {
+			case OutputSendBoundary:
+				if sawBoundary {
+					t.Fatal("duplicate send boundary")
+				}
+				if out.PartialEpoch != first.PartialEpoch {
+					t.Fatalf("boundary epoch = %d, want %d", out.PartialEpoch, first.PartialEpoch)
+				}
+				sawBoundary = true
+			case OutputLine:
+				if !sawBoundary {
+					t.Fatalf("response line overtook send boundary: %q", out.Payload)
+				}
+				if out.Payload != " second half" {
+					t.Fatalf("line after mid-fragment send = %q", out.Payload)
+				}
+				sawTruncatedLine = true
+			case OutputPartial:
+				if !sawTruncatedLine {
+					t.Fatalf("new partial arrived before response line: %q", out.Payload)
+				}
+				if out.Payload != "next tail" {
+					t.Fatalf("new partial = %q", out.Payload)
+				}
+				if out.PartialEpoch != first.PartialEpoch+1 {
+					t.Fatalf("new partial epoch = %d, want %d", out.PartialEpoch, first.PartialEpoch+1)
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for boundary and post-command output")
+		}
+	}
+}
+
+func TestSentLineEmitsBoundaryAfterConsumedPrompt(t *testing.T) {
+	addr := telnetServer(t, func(t *testing.T, conn net.Conn) {
+		conn.Write(append([]byte("HP:100> "), CmdIAC, CmdGA))
+		expectBytes(t, conn, []byte("look\r\n"), "command after confirmed prompt")
+		conn.Write([]byte("marker\r\n"))
+
+		buf := make([]byte, 1)
+		conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+		conn.Read(buf)
+	})
+
+	c := connectLoopback(t, addr)
+	prompt := nextOutput(t, c, OutputPrompt, "confirmed prompt")
+	if prompt.PartialEpoch == 0 {
+		t.Fatal("confirmed prompt did not carry its partial epoch")
+	}
+	if err := c.Send("look"); err != nil {
+		t.Fatal(err)
+	}
+	boundary := nextOutput(t, c, OutputSendBoundary, "send boundary")
+	if boundary.PartialEpoch != prompt.PartialEpoch {
+		t.Fatalf("boundary epoch = %d, want prompt epoch %d", boundary.PartialEpoch, prompt.PartialEpoch)
+	}
+	if got := nextOutput(t, c, OutputLine, "response line").Payload; got != "marker" {
+		t.Fatalf("response line = %q", got)
+	}
+}
+
+func TestBareCRBeforeGABecomesLine(t *testing.T) {
+	addr := telnetServer(t, func(t *testing.T, conn net.Conn) {
+		wire := append([]byte("complete line\r"), CmdIAC, CmdGA)
+		wire = append(wire, []byte("\nmarker\r\n")...)
+		conn.Write(wire)
+
+		buf := make([]byte, 1)
+		conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+		conn.Read(buf)
+	})
+
+	c := connectLoopback(t, addr)
+	var lines []string
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case out := <-c.Output():
+			switch out.Kind {
+			case OutputPrompt:
+				t.Fatalf("bare-CR line was misclassified as prompt: %q", out.Payload)
+			case OutputLine:
+				lines = append(lines, out.Payload)
+				if out.Payload == "marker" {
+					if len(lines) != 2 || lines[0] != "complete line" {
+						t.Fatalf("lines = %q", lines)
+					}
+					return
+				}
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for bare-CR line")
+		}
+	}
+}
+
+func TestEmptyGAAndEORDoNotEmitTextEvents(t *testing.T) {
+	addr := telnetServer(t, func(t *testing.T, conn net.Conn) {
+		conn.Write([]byte{CmdIAC, CmdGA, CmdIAC, CmdEOR})
+		conn.Write([]byte("marker\r\n"))
+
+		buf := make([]byte, 1)
+		conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+		conn.Read(buf)
+	})
+
+	c := connectLoopback(t, addr)
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case out := <-c.Output():
+			switch out.Kind {
+			case OutputPrompt, OutputPartial:
+				t.Fatalf("empty GA/EOR emitted text event: kind=%v payload=%q", out.Kind, out.Payload)
+			case OutputLine:
+				if out.Payload == "marker" {
+					return
+				}
 			}
 		case <-deadline:
 			t.Fatal("timed out waiting for marker line")

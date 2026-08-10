@@ -1,5 +1,5 @@
 {
-  "description": "GA-terminated prompt lifecycle: overlay display, commit-on-input, replacement by server lines. The second scenario also guards the duplicate-prompt-emission bug fixed in network/client.go (2026-07).",
+  "description": "Prompt-area lifecycle: immediate unfinished text, GA-confirmed prompts, commit-on-input, replacement by server lines, and no-GA login automation.",
   "scenarios": [
     {
       "name": "GA prompt shows in the overlay and commits on input",
@@ -13,14 +13,59 @@
       ]
     },
     {
-      "name": "a server line replaces the prompt without committing it",
+      "name": "a server line commits a confirmed prompt before its output",
       "steps": [
         { "connect": true },
         { "server_prompt": "HP:90> " },
         { "expect_prompt": "HP:90>" },
         { "server_line": "the sun rises" },
-        { "expect_printed": "the sun rises" },
-        { "expect_not_printed": "HP:90>" }
+        { "expect_printed": "HP:90>", "note": "GA made the prompt a separate record" },
+        { "expect_printed": "the sun rises" }
+      ]
+    },
+    {
+      "name": "unterminated login prompts can trigger immediately",
+      "init_lua": [
+        "rune.trigger.exact('Username: ', 'example-user', { on = 'prompt', once = true })",
+        "rune.trigger.exact('Password: ', 'example-password', { on = 'prompt', once = true })"
+      ],
+      "steps": [
+        { "connect": true },
+        {
+          "server_bytes": [85, 115, 101, 114, 110, 97, 109, 101, 58, 32],
+          "note": "Username prompt has no CR/LF, GA, or EOR"
+        },
+        { "expect_prompt": "Username:" },
+        { "expect_sent": "example-user" },
+        {
+          "server_bytes": [80, 97, 115, 115, 119, 111, 114, 100, 58, 32],
+          "note": "sending the username separated the two unfinished tails"
+        },
+        { "expect_prompt": "Password:" },
+        { "expect_sent": "example-password" }
+      ]
+    },
+    {
+      "name": "an automated prompt response closes stale multiline state",
+      "init_lua": [
+        "rune.trigger.starts('Story:', function(matches, ctx)",
+        "  rune.echo('E2E-SPAN-FLUSH=[' .. ctx.text .. ']')",
+        "end, { span = { to = 'NEVER', max = 8 } })",
+        "rune.trigger.exact('Username: ', 'example-user', { on = 'prompt', once = true })"
+      ],
+      "steps": [
+        { "connect": true },
+        { "server_line": "Story: unfinished" },
+        {
+          "server_bytes": [85, 115, 101, 114, 110, 97, 109, 101, 58, 32],
+          "note": "the no-GA prompt is displayed and answered by Lua"
+        },
+        { "expect_prompt": "Username:" },
+        { "expect_sent": "example-user" },
+        {
+          "expect_printed": "E2E-SPAN-FLUSH=[Story: unfinished]",
+          "note": "the outbound line is an ordered local boundary even without UI submission"
+        }
       ]
     }
   ]

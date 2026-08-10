@@ -33,9 +33,9 @@ type TCPClient struct {
 	width, height int
 }
 
-// outMsg is a queued write. line messages are user commands (CRLF
-// appended, prompt buffer cleared); raw messages are protocol bytes
-// such as telnet negotiation replies, written verbatim.
+// outMsg is a queued write. Line messages are commands: they end the current
+// partial epoch, discard its accumulator, and gain CRLF. Raw messages are
+// protocol bytes such as Telnet negotiation replies, written verbatim.
 type outMsg struct {
 	data []byte
 	line bool
@@ -47,6 +47,12 @@ type connection struct {
 	conn   net.Conn
 	parser *Parser
 	output *OutputBuffer
+
+	// textMu orders complete incoming read batches against outbound command
+	// boundaries. A boundary is published before its command reaches the wire,
+	// and no response batch can be published ahead of it.
+	textMu       sync.Mutex
+	partialEpoch uint64
 
 	// Read source indirection for MCCP2. reader is what readLoop
 	// consumes: the socket normally, a zlib stream while compression
@@ -61,11 +67,6 @@ type connection struct {
 
 	// Identity negotiation responder (TTYPE/MTTS, NAWS, CHARSET, MNES)
 	hs *handshake
-
-	// Prompt-mode evidence: set once the first IAC GA or EOR arrives.
-	// Mode keys on received terminators, not negotiation state -
-	// options promise behavior, marks demonstrate it.
-	promptTerminated atomic.Bool
 
 	gmcpActive atomic.Bool // GMCP negotiated on this connection
 
@@ -179,14 +180,15 @@ func (c *TCPClient) Connect(ctx context.Context, address string) error {
 
 	// Create the new connection object
 	cx := &connection{
-		conn:      conn,
-		reader:    conn,
-		raw:       conn,
-		hs:        newHandshake(useTLS, c.width, c.height),
-		parser:    NewParser(defaultCompatibility()),
-		output:    NewOutputBuffer(TelnetModeUnterminated),
-		sendQueue: make(chan outMsg, 4096),
-		done:      make(chan struct{}),
+		conn:         conn,
+		reader:       conn,
+		raw:          conn,
+		hs:           newHandshake(useTLS, c.width, c.height),
+		parser:       NewParser(defaultCompatibility()),
+		output:       NewOutputBuffer(),
+		sendQueue:    make(chan outMsg, 4096),
+		done:         make(chan struct{}),
+		partialEpoch: 1,
 	}
 	cx.localEcho.Store(true)
 
@@ -360,23 +362,34 @@ func (c *TCPClient) readLoop(cx *connection) {
 // resulting events. Returns false when the connection is done and the
 // read loop should exit.
 func (c *TCPClient) processIncoming(cx *connection, data []byte) bool {
+	// A socket read is one indivisible observation of the incoming stream.
+	// Serialize the whole batch with command boundaries so a boundary cannot
+	// discard half a batch or let post-command output overtake its control
+	// event. MCCP setup below is deliberately outside this lock because
+	// zlib.NewReader may need to read more bytes from the socket.
+	cx.textMu.Lock()
+	locked := true
+	defer func() {
+		if locked {
+			cx.textMu.Unlock()
+		}
+	}()
+
 	// MCCP2 activation is deferred to the end of the batch: the parser
 	// stops parsing at IAC SB 86 IAC SE and hands back the remaining
 	// raw (compressed) bytes, so nothing after the marker is parsed.
 	startMCCP := false
 	var mccpRest []byte
+	var rawFrames [][]byte
 	sawText := false
 
 	for _, ev := range cx.parser.Receive(data) {
 		switch ev.Kind {
 		case TelnetEventDataSend:
-			// Negotiation replies go through the send queue so a
-			// single goroutine owns the socket writes and their
-			// deadlines. Blocking here is fine: writeLoop drains
-			// continuously, and done unblocks us on teardown.
-			if !cx.enqueueRaw(ev.Data) {
-				return false
-			}
+			// Queue replies after releasing textMu. enqueueRaw is lossless and
+			// may block behind user commands; blocking here could deadlock with
+			// writeLoop waiting for this batch's text boundary lock.
+			rawFrames = append(rawFrames, ev.Data)
 
 		case TelnetEventDataReceive:
 			sawText = true
@@ -391,30 +404,35 @@ func (c *TCPClient) processIncoming(cx *connection, data []byte) bool {
 
 		case TelnetEventIAC:
 			if ev.Command == CmdGA || ev.Command == CmdEOR {
-				// A received mark is evidence the server terminates its
-				// prompts; the first one switches modes for good.
-				cx.markPromptTerminated()
-				if cx.output.HasNewData() {
-					prompt := cx.output.Prompt(true)
-					if prompt != "" {
-						select {
-						case c.outputChan <- Output{Kind: OutputPrompt, Payload: prompt, PromptConfirmed: true}:
-						case <-cx.done:
-							return false
-						}
+				text, completedLine := cx.output.ConsumePrompt()
+				if completedLine {
+					select {
+					case c.outputChan <- Output{Kind: OutputLine, Payload: text}:
+					case <-cx.done:
+						return false
 					}
-				} else {
-					// Just flush even if no new data
-					cx.output.Prompt(true)
+				} else if text != "" {
+					terminator := PromptTerminatorGA
+					if ev.Command == CmdEOR {
+						terminator = PromptTerminatorEOR
+					}
+					select {
+					case c.outputChan <- Output{
+						Kind:             OutputPrompt,
+						Payload:          text,
+						PromptTerminator: terminator,
+						PartialEpoch:     cx.partialEpoch,
+					}:
+					case <-cx.done:
+						return false
+					}
 				}
 			}
 
 		case TelnetEventNegotiation:
 			cx.applyNegotiation(ev.Command, ev.Option)
 			for _, frame := range cx.hs.onNegotiation(ev.Command, ev.Option) {
-				if !cx.enqueueRaw(frame) {
-					return false
-				}
+				rawFrames = append(rawFrames, frame)
 			}
 			if ev.Option == OptGMCP {
 				switch ev.Command {
@@ -446,9 +464,7 @@ func (c *TCPClient) processIncoming(cx *connection, data []byte) bool {
 				}
 			default:
 				for _, frame := range cx.hs.onSubnegotiation(ev.Option, ev.Data) {
-					if !cx.enqueueRaw(frame) {
-						return false
-					}
+					rawFrames = append(rawFrames, frame)
 				}
 			}
 
@@ -460,19 +476,31 @@ func (c *TCPClient) processIncoming(cx *connection, data []byte) bool {
 		}
 	}
 
-	// Unterminated-prompt peek runs once per batch, AFTER any GA/EOR in
+	// An unfinished-tail peek runs once per batch, AFTER any GA/EOR in
 	// the same batch has consumed the buffer. Peeking inside the
 	// DataReceive case emitted "HP:100> " twice for a single
 	// "HP:100> " + IAC GA read - once from the peek, once from the GA
 	// flush - and the session committed the duplicate to scrollback.
-	if sawText && cx.telnetMode() == TelnetModeUnterminated {
-		prompt := cx.output.Prompt(false)
-		if prompt != "" {
+	if sawText {
+		partial := cx.output.PeekPartial()
+		if partial != "" {
 			select {
-			case c.outputChan <- Output{Kind: OutputPrompt, Payload: prompt}:
+			case c.outputChan <- Output{
+				Kind:         OutputPartial,
+				Payload:      partial,
+				PartialEpoch: cx.partialEpoch,
+			}:
 			case <-cx.done:
 				return false
 			}
+		}
+	}
+
+	cx.textMu.Unlock()
+	locked = false
+	for _, frame := range rawFrames {
+		if !cx.enqueueRaw(frame) {
+			return false
 		}
 	}
 
@@ -540,20 +568,14 @@ func (c *TCPClient) writeLoop(cx *connection) {
 		case <-cx.done:
 			return
 		case msg := <-cx.sendQueue:
-			data := msg.data
 			if msg.line {
-				// Clear prompt buffer before sending - in unterminated mode,
-				// the server will reprint the prompt after echoing our input
-				cx.output.InputSent()
-				// Line data is text: double IAC bytes so the server
-				// reads them as data, not commands. Raw messages are
-				// protocol frames and pass through untouched.
-				if bytes.IndexByte(data, CmdIAC) >= 0 {
-					data = EscapeIAC(data)
+				if !c.writeLine(cx, msg.data) {
+					return
 				}
-				data = append(data, '\r', '\n')
+				continue
 			}
 
+			data := msg.data
 			cx.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 			_, err := cx.conn.Write(data)
 			cx.conn.SetWriteDeadline(time.Time{})
@@ -565,6 +587,45 @@ func (c *TCPClient) writeLoop(cx *connection) {
 			}
 		}
 	}
+}
+
+// writeLine publishes and applies one local text boundary atomically with the
+// socket write. The boundary always fires, even when GA/EOR already consumed
+// the accumulator: a prompt trigger may enqueue a send before Session has
+// finished painting that confirmed prompt. Holding textMu through Write keeps
+// the server's response behind the boundary on outputChan.
+func (c *TCPClient) writeLine(cx *connection, data []byte) bool {
+	cx.textMu.Lock()
+	defer cx.textMu.Unlock()
+
+	endedEpoch := cx.partialEpoch
+	cx.partialEpoch++
+	cx.output.DiscardPartial()
+
+	select {
+	case c.outputChan <- Output{
+		Kind:         OutputSendBoundary,
+		PartialEpoch: endedEpoch,
+	}:
+	case <-cx.done:
+		return false
+	}
+
+	// Line data is text: double IAC bytes so the server reads them as data,
+	// not commands. Raw messages are protocol frames and bypass this path.
+	if bytes.IndexByte(data, CmdIAC) >= 0 {
+		data = EscapeIAC(data)
+	}
+	data = append(data, '\r', '\n')
+
+	cx.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	_, err := cx.conn.Write(data)
+	cx.conn.SetWriteDeadline(time.Time{})
+	if err != nil {
+		cx.conn.Close()
+		return false
+	}
+	return true
 }
 
 // close cleanly shuts down the connection resources
@@ -581,11 +642,6 @@ func (cx *connection) shutdown() {
 }
 
 // applyNegotiation updates local echo state from telnet negotiation.
-// EOR/SGA negotiation deliberately does not drive prompt mode: WILL is
-// a promise about future marks and DO concerns our own output, so a
-// server could negotiate either and still send unterminated prompts.
-// Only received GA/EOR marks switch modes (markPromptTerminated), the
-// way other MUD clients detect prompts.
 func (cx *connection) applyNegotiation(cmd, opt byte) {
 	switch opt {
 	case OptEcho:
@@ -598,21 +654,4 @@ func (cx *connection) applyNegotiation(cmd, opt byte) {
 			cx.localEcho.Store(true)
 		}
 	}
-}
-
-// markPromptTerminated records received GA/EOR evidence. From the
-// first mark on, the unterminated-prompt peek turns off and the output
-// buffer stops clearing on input; sticky for the connection.
-func (cx *connection) markPromptTerminated() {
-	if !cx.promptTerminated.Swap(true) {
-		cx.output.SetMode(TelnetModeTerminatedPrompt)
-	}
-}
-
-// telnetMode returns the current prompt-detection mode.
-func (cx *connection) telnetMode() TelnetMode {
-	if cx.promptTerminated.Load() {
-		return TelnetModeTerminatedPrompt
-	}
-	return TelnetModeUnterminated
 }

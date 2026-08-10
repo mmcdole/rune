@@ -429,7 +429,7 @@ func TestParserDiff10(t *testing.T) {
 }
 
 func TestOutputBuffer(t *testing.T) {
-	ob := NewOutputBuffer(TelnetModeUnterminated)
+	ob := NewOutputBuffer()
 
 	// Test basic line splitting
 	lines := ob.Receive([]byte("line1\r\nline2\nline3"))
@@ -441,19 +441,22 @@ func TestOutputBuffer(t *testing.T) {
 	}
 
 	// Prompt should have remaining data
-	prompt := ob.Prompt(false)
+	prompt := ob.PeekPartial()
 	if prompt != "line3" {
 		t.Errorf("Expected 'line3', got '%s'", prompt)
 	}
 
 	// Consume prompt
-	prompt = ob.Prompt(true)
+	prompt, completedLine := ob.ConsumePrompt()
 	if prompt != "line3" {
 		t.Errorf("Expected 'line3', got '%s'", prompt)
 	}
+	if completedLine {
+		t.Error("unterminated tail was classified as a completed line")
+	}
 
 	// Should be empty now
-	prompt = ob.Prompt(false)
+	prompt = ob.PeekPartial()
 	if prompt != "" {
 		t.Errorf("Expected empty prompt, got '%s'", prompt)
 	}
@@ -479,7 +482,7 @@ func TestOutputBufferNewlineVariants(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ob := NewOutputBuffer(TelnetModeUnterminated)
+			ob := NewOutputBuffer()
 			lines := ob.Receive([]byte(tt.input))
 			if len(lines) != len(tt.expected) {
 				t.Errorf("Expected %d lines, got %d: %v", len(tt.expected), len(lines), lines)
@@ -513,7 +516,7 @@ func TestOutputBufferFragmentation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ob := NewOutputBuffer(TelnetModeUnterminated)
+			ob := NewOutputBuffer()
 			var lines []string
 			for _, p := range tt.packets {
 				lines = append(lines, ob.Receive([]byte(p))...)
@@ -526,26 +529,27 @@ func TestOutputBufferFragmentation(t *testing.T) {
 					t.Errorf("Line %d: expected %q, got %q", i, tt.lines[i], lines[i])
 				}
 			}
-			if got := ob.Prompt(false); got != tt.prompt {
+			if got := ob.PeekPartial(); got != tt.prompt {
 				t.Errorf("Prompt: expected %q, got %q", tt.prompt, got)
 			}
 		})
 	}
 }
 
-// Consuming a prompt that ends in a held \r must still swallow the \n
-// half of the pair when it arrives in the next read.
-func TestOutputBufferPromptConsumeHeldCR(t *testing.T) {
-	ob := NewOutputBuffer(TelnetModeUnterminated)
-	if lines := ob.Receive([]byte("HP:10> \r")); len(lines) != 0 {
+// GA/EOR following a held CR completes the line rather than turning it into a
+// prompt. Telnet commands are not data, so a later LF still pairs with the CR.
+func TestOutputBufferPromptBoundaryCompletesHeldBareCR(t *testing.T) {
+	ob := NewOutputBuffer()
+	if lines := ob.Receive([]byte("complete line\r")); len(lines) != 0 {
 		t.Fatalf("Expected no lines, got %q", lines)
 	}
-	if got := ob.Prompt(true); got != "HP:10> " {
-		t.Fatalf("Prompt: expected %q, got %q", "HP:10> ", got)
+	got, completedLine := ob.ConsumePrompt()
+	if got != "complete line" || !completedLine {
+		t.Fatalf("boundary = (%q, %v), want (%q, true)", got, completedLine, "complete line")
 	}
 	lines := ob.Receive([]byte("\nnext line\r\n"))
 	if len(lines) != 1 || lines[0] != "next line" {
-		t.Fatalf("Expected [next line], got %q", lines)
+		t.Fatalf("expected only next line, got %q", lines)
 	}
 }
 
@@ -773,85 +777,27 @@ func TestSubnegotiationMethod(t *testing.T) {
 	}
 }
 
-func TestOutputBufferHasNewData(t *testing.T) {
-	ob := NewOutputBuffer(TelnetModeUnterminated)
-
-	// Initially no new data
-	if ob.HasNewData() {
-		t.Error("Expected no new data initially")
-	}
-
-	// After receive, should have new data
-	ob.Receive([]byte("some text"))
-	if !ob.HasNewData() {
-		t.Error("Expected new data after Receive")
-	}
-
-	// After consuming prompt, should have no new data
-	ob.Prompt(true)
-	if ob.HasNewData() {
-		t.Error("Expected no new data after consuming prompt")
-	}
-
-	// Receive more data
-	ob.Receive([]byte("more text"))
-	if !ob.HasNewData() {
-		t.Error("Expected new data after second Receive")
-	}
-
-	// Non-consuming Prompt should keep new data flag
-	ob.Prompt(false)
-	if !ob.HasNewData() {
-		t.Error("Expected new data to persist after non-consuming Prompt")
-	}
-}
-
-func TestOutputBufferInputSent(t *testing.T) {
-	// In unterminated mode, InputSent should clear the buffer
-	ob := NewOutputBuffer(TelnetModeUnterminated)
+func TestOutputBufferDiscardPartial(t *testing.T) {
+	ob := NewOutputBuffer()
 	ob.Receive([]byte("prompt> "))
 
 	if ob.Len() == 0 {
 		t.Error("Buffer should have data")
 	}
 
-	ob.InputSent()
+	ob.DiscardPartial()
 
 	if ob.Len() != 0 {
-		t.Error("Buffer should be empty after InputSent in unterminated mode")
-	}
-	if ob.HasNewData() {
-		t.Error("Should have no new data after InputSent")
-	}
-
-	// In terminated mode, InputSent should NOT clear the buffer
-	ob2 := NewOutputBuffer(TelnetModeTerminatedPrompt)
-	ob2.Receive([]byte("prompt> "))
-
-	if ob2.Len() == 0 {
-		t.Error("Buffer should have data")
-	}
-
-	ob2.InputSent()
-
-	if ob2.Len() == 0 {
-		t.Error("Buffer should NOT be cleared in terminated mode")
+		t.Error("buffer should be empty after DiscardPartial")
 	}
 }
 
-func TestOutputBufferClearResetsNewData(t *testing.T) {
-	ob := NewOutputBuffer(TelnetModeTerminatedPrompt)
+func TestOutputBufferClear(t *testing.T) {
+	ob := NewOutputBuffer()
 	ob.Receive([]byte("data"))
-
-	if !ob.HasNewData() {
-		t.Error("Should have new data")
-	}
 
 	ob.Clear()
 
-	if ob.HasNewData() {
-		t.Error("Clear should reset new data flag")
-	}
 	if ob.Len() != 0 {
 		t.Error("Clear should empty buffer")
 	}
@@ -859,10 +805,10 @@ func TestOutputBufferClearResetsNewData(t *testing.T) {
 
 // TestOutputBufferConcurrentAccess pins the OutputBuffer data race:
 // the read loop parses into the buffer while the write loop calls
-// InputSent to drop a pending prompt. The suite runs under -race, so
+// DiscardPartial to drop a pending prompt. The suite runs under -race, so
 // unsynchronized access here fails deterministically.
 func TestOutputBufferConcurrentAccess(t *testing.T) {
-	buf := NewOutputBuffer(TelnetModeUnterminated)
+	buf := NewOutputBuffer()
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -870,15 +816,14 @@ func TestOutputBufferConcurrentAccess(t *testing.T) {
 		defer wg.Done()
 		for i := 0; i < 1000; i++ {
 			buf.Receive([]byte("HP:100"))
-			buf.Prompt(false)
+			buf.PeekPartial()
 			buf.Receive([]byte("> a line arrives\r\n"))
 		}
 	}()
 	go func() { // write loop
 		defer wg.Done()
 		for i := 0; i < 1000; i++ {
-			buf.InputSent()
-			buf.HasNewData()
+			buf.DiscardPartial()
 			buf.Len()
 		}
 	}()

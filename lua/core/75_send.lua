@@ -142,18 +142,17 @@ end, { priority = 100 })
 
 -- Register output handler
 rune.hooks.on("output", function(line)
-    local modified, show = rune.trigger.process(line)
+    local modified, show = rune.trigger.process(line, "output")
     if not show then
         return false
     end
     return modified
 end, { priority = 100 })
 
--- Register prompt handler. Only GA/EOR-confirmed prompts are semantic
--- boundaries that flush open spans. Unterminated snapshots still take this
--- same trigger/style/display path, but remain speculative.
-rune.hooks.on("prompt", function(line, confirmed)
-    local modified, show = rune.trigger.process(line, confirmed)
+-- Prompt triggers are explicitly opt-in because unfinished snapshots may be
+-- ordinary output split across socket reads and can be delivered repeatedly.
+rune.hooks.on("prompt_update", function(line, prompt_confirmed)
+    local modified, show = rune.trigger.process(line, "prompt", prompt_confirmed)
     if not show then
         return false
     end

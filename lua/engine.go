@@ -324,25 +324,26 @@ func (e *Engine) OnOutput(line text.Line) (string, bool) {
 
 // OnPrompt handles a server prompt confirmed by Telnet GA/EOR.
 func (e *Engine) OnPrompt(line text.Line) string {
-	return e.onPrompt(line, true)
+	e.FlushSpans()
+	return e.onPromptUpdate(line, true)
 }
 
-// OnPromptPreview handles an unterminated partial-line snapshot. It follows
-// the same hook and display path as a confirmed prompt, but tells core trigger
-// processing not to finalize spans at an arbitrary socket-read boundary.
-func (e *Engine) OnPromptPreview(line text.Line) string {
-	return e.onPrompt(line, false)
+// OnPartial handles the current unfinished output tail. The same bytes may
+// later arrive again as a complete line or a GA/EOR-confirmed prompt, so this
+// path may update presentation but cannot finalize span state.
+func (e *Engine) OnPartial(line text.Line) string {
+	return e.onPromptUpdate(line, false)
 }
 
-func (e *Engine) onPrompt(line text.Line, confirmed bool) string {
-	results, found, err := e.callHooks(2, "prompt",
+func (e *Engine) onPromptUpdate(line text.Line, confirmed bool) string {
+	results, found, err := e.callHooks(2, "prompt_update",
 		script.Obj{Type: "line", Payload: &line}, confirmed)
 	if !found {
 		e.reportHooksBroken()
 		return line.Raw
 	}
 	if err != nil {
-		e.reportError("prompt dispatch", err)
+		e.reportError("prompt update dispatch", err)
 		return line.Raw
 	}
 
@@ -351,6 +352,30 @@ func (e *Engine) onPrompt(line text.Line, confirmed bool) string {
 		return ""
 	}
 	return modified.String()
+}
+
+// FlushSpans closes incomplete multiline trigger records at an explicit
+// boundary. Confirmed prompts, user submission, and outbound command writes
+// call it; arbitrary socket-read boundaries must never reach this operation.
+func (e *Engine) FlushSpans() {
+	if err := e.guard(func() error {
+		_, _, err := e.vm.CallModule("rune.trigger", "_flush_spans", 0)
+		return err
+	}); err != nil {
+		e.reportError("span flush", err)
+	}
+}
+
+// DiscardSpans drops incomplete multiline trigger records without firing
+// their actions. It is used when the collected output no longer belongs to
+// the active server stream.
+func (e *Engine) DiscardSpans() {
+	if err := e.guard(func() error {
+		_, _, err := e.vm.CallModule("rune.trigger", "_discard_spans", 0)
+		return err
+	}); err != nil {
+		e.reportError("span discard", err)
+	}
 }
 
 // OnGMCP dispatches a GMCP message to Lua: the raw JSON is decoded

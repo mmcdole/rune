@@ -7,7 +7,7 @@ import "testing"
 // wizard
 // "I" command builds one logical row with several write() calls. When those
 // writes arrive in separate socket reads, Rune exposes the growing tail as
-// prompt snapshots before the terminating CRLF arrives.
+// partial snapshots in the prompt overlay before the terminating CRLF arrives.
 //
 // Each wait is a causal barrier: the next fragment is not written until the
 // live client has displayed the preceding snapshot. This makes the read
@@ -20,12 +20,12 @@ func TestFragmentedLineDoesNotCommitPromptSnapshots(t *testing.T) {
 	complete := partial + " /players/test/item#1 <-> a test item."
 
 	c.mud.write([]byte(partial))
-	c.waitFor("first fragmented-line prompt snapshot", func() bool {
+	c.waitFor("first fragmented-line partial snapshot", func() bool {
 		return c.ui.promptContains(partial)
 	})
 
 	c.mud.write([]byte(complete[len(partial):]))
-	c.waitFor("completed fragmented-line prompt snapshot", func() bool {
+	c.waitFor("completed fragmented-line partial snapshot", func() bool {
 		return c.ui.promptContains(complete)
 	})
 
