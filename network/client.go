@@ -431,9 +431,7 @@ func (c *TCPClient) processIncoming(cx *connection, data []byte) bool {
 
 		case TelnetEventNegotiation:
 			cx.applyNegotiation(ev.Command, ev.Option)
-			for _, frame := range cx.hs.onNegotiation(ev.Command, ev.Option) {
-				rawFrames = append(rawFrames, frame)
-			}
+			rawFrames = append(rawFrames, cx.hs.onNegotiation(ev.Command, ev.Option)...)
 			if ev.Option == OptGMCP {
 				switch ev.Command {
 				case CmdWILL, CmdDO:
@@ -463,9 +461,7 @@ func (c *TCPClient) processIncoming(cx *connection, data []byte) bool {
 					}
 				}
 			default:
-				for _, frame := range cx.hs.onSubnegotiation(ev.Option, ev.Data) {
-					rawFrames = append(rawFrames, frame)
-				}
+				rawFrames = append(rawFrames, cx.hs.onSubnegotiation(ev.Option, ev.Data)...)
 			}
 
 		case TelnetEventDecompressImmediate:
