@@ -53,6 +53,7 @@ The scripting language is the same; the API names differ:
 | `matches[2]` (first capture) | `matches[1]`; there is no whole-match slot |
 | `tempTimer(5, code)` | `rune.timer.after(5, action)` |
 | `tempRegexTrigger(pattern, code)` | `rune.trigger.regex(pattern, action)` |
+| prompt trigger | `rune.trigger.regex(pattern, action, { on = "prompt", confirmed_only = true })` |
 | script editor window | your `$EDITOR`; `Ctrl+E` edits the input line in it too |
 
 ## From MUSHclient
@@ -71,9 +72,46 @@ need to covert those to Lua first.
 | `tempRegexTrigger(pattern, code)` | `rune.trigger.regex(pattern, action)` |
 | `EnableTrigger("tname",false)`    | `rune.trigger.disable("tname")`       |
 | `SetVariable("varname","value")`  | `rune.store.set("varname","value")`   |
+| `OnPluginPartialLine`              | `rune.hooks.on("prompt_update", handler)` |
 
 Some functions such as ColourNote have no direct equivalent, but a simple
 wrapper function could replace it with Lua. (using `rune.style.*`)
+
+## Prompt terminology across clients
+
+Clients use “prompt” for different wire behavior. Rune keeps the uncertainty
+visible instead of guessing with a timer:
+
+| Client concept | Rune equivalent |
+|---|---|
+| TinTin++ `RECEIVED PROMPT` / `PROCESSED LINE` prompt flag | `{ on = "prompt" }`; inspect `ctx.prompt_confirmed` instead of relying on a packet-patch timer |
+| zMUD/CMUD trigger-on-Prompt option | trigger with `{ on = "prompt" }` |
+| Blightmud trigger with `prompt = true` | trigger with `{ on = "prompt" }` |
+| Mudlet GA/EOR prompt trigger | `{ on = "prompt", confirmed_only = true }` |
+| MUSHclient `OnPluginPartialLine` | `prompt_update` hook with `prompt_confirmed == false` |
+
+Rune's prompt trigger channel includes live unfinished text and GA/EOR-marked
+prompts. It excludes completed lines. The hook receives
+`(line, prompt_confirmed)` so low-level scripts can distinguish those cases.
+
+## Migrating Rune prompt scripts
+
+The old `prompt` hook has been renamed, and ordinary triggers no longer run on
+unfinished text automatically:
+
+```lua
+-- Before
+rune.hooks.on("prompt", repaint)
+rune.trigger.exact("Username: ", login)
+
+-- Now
+rune.hooks.on("prompt_update", repaint)
+rune.trigger.exact("Username: ", login, { on = "prompt" })
+```
+
+This is intentionally a safe-default change: output automation sees only
+completed lines unless it explicitly opts into updates that can repeat or
+later turn out to be part of a normal line.
 
 ## Capture references
 

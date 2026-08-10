@@ -23,17 +23,39 @@ Handlers run in priority order:
 | Event | Handler receives | Notes |
 |---|---|---|
 | `input` | submitted text, context | Return `false` to consume; other returns are ignored. `context.mode` is read-only and always `"command"` or `"verbatim"`. |
-| `output` | a line object | `false` gags, a string rewrites. The core handler runs triggers at priority 100. |
-| `prompt` | a line object | Same, for prompt fragments. |
+| `output` | a line object | Once per completed line. `false` gags, a string rewrites. The core handler runs output triggers at priority 100. |
+| `prompt_update` | a line object, `prompt_confirmed` | Live unfinished text (`false`) or a GA/EOR-confirmed prompt (`true`). The core runs opted-in prompt triggers at priority 100. |
 | `echo` | one physical line of typed text | Like `output` but a plain string. The `> ` prefix is the core handler; replace it if you like. |
 
-For `output`, `prompt`, and `echo`, rewrites chain: a handler returning a
+For `output`, `prompt_update`, and `echo`, rewrites chain: a handler returning a
 string replaces the text for every subsequent handler, and `false` stops the
 chain (gags the line or hides the echo). For `input`, only `false` means
 anything. The hook fires once per submission: in verbatim mode `text` is the
 whole draft and may contain LF characters. Existing handlers that accept only
 `text` continue to work because Lua ignores extra arguments. To rewrite normal
 command input, use an [alias](/scripting/aliases/).
+
+An unconfirmed `prompt_update` is not a claim that the text is a prompt. With
+no line delimiter, GA, or EOR, Rune cannot tell `Username:` from the first half
+of a longer line. Rune displays the unfinished text immediately and reports
+that uncertainty to Lua. Updates can repeat as the text grows; if it later
+ends as a normal line, the complete text also fires once through `output`,
+unless an outbound command separated the unfinished text first. If GA/EOR
+arrives separately, identical text can fire again with `prompt_confirmed`
+changing from `false` to `true`. A marker with no current text does not fire
+`prompt_update`.
+
+If more server text follows, Rune commits a confirmed prompt before the new
+record, even when that record first arrives as a partial. It replaces an
+unconfirmed preview without committing it separately. A confirmed prompt also
+flushes open multi-line triggers before `prompt_update` handlers run.
+
+```lua
+-- Repaint from the latest snapshot; do not accumulate per update.
+rune.hooks.on("prompt_update", function(line, prompt_confirmed)
+    current_prompt = line:clean()
+end)
+```
 
 ```lua
 -- Timestamp every line, after triggers have run

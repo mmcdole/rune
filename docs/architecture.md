@@ -38,7 +38,7 @@ graph TD
 
     %% Data Flow
     Input -->|Msg: Key/Intents| Session
-    NetRead -->|Msg: Server Line| Session
+    NetRead -->|Msg: Line / Partial / Prompt| Session
     Timer -->|Msg: Tick| Session
 
     Session -->|Update: Layout/Content| Model
@@ -131,7 +131,50 @@ Rune implements a bespoke Telnet parser (`network/telnet.go`) ported from `libmu
 
 - **State Machine:** Handles negotiation (WILL/WONT/DO/DONT) and subnegotiation.
 - **Compatibility Table:** Tracks the state of every Telnet option to prevent negotiation loops.
-- **Output Buffer:** A smart buffer that handles incoming byte streams, detecting lines, and managing prompts (terminated vs. unterminated) based on GA/EOR signals.
+- **Output Buffer:** A fragmentation-safe accumulator that reports three facts: delimiter-terminated lines, non-consuming snapshots of the unfinished tail, and tails consumed by GA/EOR.
+
+### 4.1 Server text lifecycle
+
+TCP read boundaries do not carry meaning. If the current buffer contains
+`Username:`, it may be a complete login prompt with no terminator or merely the
+first part of a longer line. Rune does not use a timeout or a configured prompt
+pattern to guess which one it is.
+
+The network layer reports only what it knows:
+
+| Event | Meaning | Consumes the accumulator |
+|---|---|---|
+| `OutputLine` | Text ended by CRLF, LFCR, LF, or bare CR | yes |
+| `OutputPartial` | Snapshot of the current unfinished tail | no |
+| `OutputPrompt` | GA/EOR ended a nonempty current tail | yes |
+
+Partials are displayed immediately in the prompt overlay. They may grow across
+reads and the same bytes may later arrive once as an `OutputLine` or
+`OutputPrompt`. Lua receives overlay changes through `prompt_update`; the
+confirmation boolean is false for `OutputPartial` and true for `OutputPrompt`.
+Ordinary trigger actions consume only `OutputLine`. Prompt triggers opt into
+the speculative overlay path. As a presentation safeguard, declarative
+`gag = true` output patterns are checked read-only against unconfirmed
+partials, without firing actions or changing trigger state. A GA/EOR marker
+received with no current tail has no text to report, so it produces no output
+event.
+
+When later server text supersedes the overlay, an unconfirmed partial is
+replaced without being committed because it may be a preview of that text. A
+confirmed prompt is first committed to scrollback because GA/EOR made it a
+separate record. This applies even when the following record first arrives as
+another partial.
+
+Only explicit boundaries may finalize multiline trigger state: a nonempty tail
+terminated by GA/EOR, a user submission, or an outbound command that closes an
+active prompt-overlay epoch. A partial, an empty GA/EOR marker, and an
+unrelated outbound command never change span state. Before writing any outbound
+line, the network writer publishes an ordered boundary and discards the
+unfinished accumulator, so an automated response to `Username:` cannot be
+joined to the following `Password:`. This is the unavoidable no-timer
+trade-off: if a command is sent during an ordinary line split, the text before
+that send belongs to the previous accumulator epoch. Connecting,
+disconnecting, and reloading discard unfinished spans without firing them.
 
 ## 5. Design Patterns Used
 
@@ -167,4 +210,3 @@ Interaction between UI and Session is message-passing (commands), not function c
 - `ui/`: UI interface and messages
   - `tui/`: Bubble Tea implementation
   - `tui/widget/`: Reusable widgets (Input, Picker, Viewport, Pane, Bar)
-

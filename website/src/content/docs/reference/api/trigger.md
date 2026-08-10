@@ -16,8 +16,11 @@ rune.trigger.regex(pattern, action, opts?)   -- Go regexp, with captures
 ```
 
 All constructors return a [handle](/reference/api/#handles) and accept
-the [common options](/reference/api/#options) plus `gag`, `raw`, and
-[`span`](#multi-line-triggers).
+the [common options](/reference/api/#options) plus `gag`, `raw`, `on`,
+`confirmed_only`, and [`span`](#multi-line-triggers).
+
+Triggers match completed output lines by default. Set `on = "prompt"` to
+match live prompt-area updates instead.
 
 ## Matching
 
@@ -44,7 +47,7 @@ rune.trigger.regex(pattern, action, opts?) -> handle
   substituted from captures), or `function(matches, ctx)`. `nil` is
   allowed with `gag = true`.
 - `opts` (table, optional) — [common options](/reference/api/#options)
-  plus `gag`, `raw`.
+  plus the options below.
 
 ```lua
 rune.trigger.regex("^(\\w+) tells you: follow me$", function(m)
@@ -56,7 +59,8 @@ end)
 
 A string action is sent as a command. A function action receives
 `(matches, ctx)` — `ctx.line` is the [line object](/reference/api/state-lines/)
-with `:raw()` and `:clean()` — and its return value controls the line:
+with `:raw()` and `:clean()`. Prompt-trigger actions also receive
+`ctx.prompt_confirmed`, a boolean. The return value controls the line:
 
 | Return | Effect |
 |---|---|
@@ -76,7 +80,51 @@ Beyond the [common options](/reference/api/#options):
 |---|---|---|---|
 | `gag` | bool | false | Hide the matching line (equivalent to returning `false`) |
 | `raw` | bool | false | Match against the raw line, ANSI codes included |
+| `on` | string | `"output"` | `"output"` for completed lines or `"prompt"` for live prompt-area updates |
+| `confirmed_only` | bool | false | With `on = "prompt"`, match only updates terminated by Telnet GA/EOR |
 | `span` | table | — | Collect a multi-line message; see [Multi-line triggers](#multi-line-triggers) |
+
+## Prompt triggers
+
+Some MUD prompts, especially `Username:` and `Password:`, have no line
+delimiter and no Telnet GA/EOR marker. Rune displays such text immediately,
+but the client cannot know whether it is a prompt or merely part of an
+ordinary line split across socket reads. Prompt triggers opt into that
+ambiguous path:
+
+```lua
+rune.trigger.exact("Username: ", function()
+    rune.send("example-user")
+end, { on = "prompt", once = true })
+```
+
+The output and prompt channels are exclusive. A default trigger runs once
+when a delimiter completes a line; its action and state never process
+prompt-area updates. A prompt trigger sees unfinished snapshots and
+GA/EOR-confirmed prompts, but not completed lines. One presentation-only
+exception prevents hidden output from flashing while incomplete: Rune checks
+declarative `gag = true` output patterns read-only against unconfirmed updates.
+It does not run their actions, consume `once`, or change span state.
+
+Unfinished snapshots are cumulative in the common case and can repeat as
+text grows. The same text can also run twice—first unconfirmed, then confirmed—
+if GA/EOR arrives in a later socket read. A prompt action should therefore be
+idempotent, or use `once` for one-shot work such as login.
+`ctx.prompt_confirmed` is `false` for ambiguous unfinished text and `true` for
+GA/EOR. Use `confirmed_only = true` for Mudlet-style, protocol-confirmed
+prompt matching:
+
+```lua
+rune.trigger.regex("^HP:(\\d+)/(\\d+)>", update_vitals,
+    { on = "prompt", confirmed_only = true })
+```
+
+Before an outbound line is written, Rune discards the current unfinished
+accumulator. This cleanly separates no-GA login prompts such as `Username:`
+and `Password:`. The unavoidable trade-off is that sending during an ordinary
+line split makes the later completed line start after that send. A direct Lua
+send clears the matching prompt overlay without adding it to scrollback; a
+user submission commits the overlay first.
 
 ## Multi-line triggers
 
@@ -116,8 +164,17 @@ Behavior:
 - Collected lines still run through other triggers and hooks. A span
   sees each line as this trigger would have — including rewrites from
   higher-priority triggers.
-- A prompt ends any open span (the action fires with what was
-  collected). `/reload` discards open spans.
+- Partial prompt-area updates never open, extend, or end spans. A nonempty
+  tail terminated by GA/EOR, any user submission, or an outbound command that
+  closes an active prompt-overlay epoch ends open spans. The outbound case
+  includes commands sent by Lua, so no-GA login automation creates the same
+  boundary as typing the response; an unrelated timer or output trigger send
+  does not truncate a span.
+  A GA/EOR marker with no current tail produces no text event and does not
+  flush spans. Connecting, disconnecting, and `/reload` discard open spans
+  without firing them.
+- A confirmed prompt flushes spans before `prompt_update` hooks and prompt
+  triggers run. This boundary transition is not controlled by hook priority.
 - One open span per trigger: if the pattern matches again mid-span,
   the previous message fires and a new span starts.
 - If the first line also matches `to`, the message is complete
@@ -130,7 +187,8 @@ Standard registry management applies:
 `rune.trigger.enable/disable/remove(name)`, `.list()`, `.count()`,
 `.clear()`, `.remove_group(group)` — see
 [Registries](/reference/api/#managing). `/triggers` lists everything;
-`/test <line>` feeds a fake line through the trigger pipeline.
+`/test <line>` feeds a fake completed line through the output-trigger
+pipeline. It does not exercise prompt triggers.
 
 **Related:** [Triggers guide](/scripting/triggers/) ·
 [rune.alias](/reference/api/alias/) · [rune.regex](/reference/api/regex/) ·

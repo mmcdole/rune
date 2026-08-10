@@ -31,7 +31,7 @@ rune.trigger.contains("What is your name", function()
         rune.send(pending)
         pending = nil   -- fire once per connection
     end
-end)
+end, { on = "prompt" })
 ```
 
 ## How it works
@@ -50,14 +50,25 @@ Two options, in order of preference.
 system keychain or an environment variable, never in Lua or `store.json`:
 
 ```lua
-rune.trigger.contains("Password:", function()
-    local pw = os.getenv("MUD_PASSWORD")
-    if pw then rune.send_raw(pw) end
+local password_sent = false
+
+rune.hooks.on("connecting", function()
+    password_sent = false
 end)
+
+rune.trigger.contains("Password:", function()
+    if password_sent then return end
+    local pw = os.getenv("MUD_PASSWORD")
+    if pw then
+        password_sent = true
+        rune.send_raw(pw)
+    end
+end, { on = "prompt" })
 ```
 
 `send_raw` skips command expansion, so a password containing `;` or `#`
-arrives intact.
+arrives intact. The guard matters because unfinished prompt text can be
+reported more than once as it grows; it resets for each connection attempt.
 
 **Type it yourself:** don't automate the password line at all. The client
 already suppresses local echo while the server hides input, so nothing

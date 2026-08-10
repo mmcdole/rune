@@ -3,9 +3,10 @@ title: Triggers
 description: React to server output with four match modes and string or function actions that run your own logic, send commands, and can rewrite or gag the line.
 ---
 
-A trigger fires when a line arrives from the server. Two decisions define
-one: how it matches (exact line, prefix, substring, or regex) and what it
-does (a string sent as a command, or a Lua function).
+A trigger normally fires when a completed line arrives from the server. Two
+decisions define one: how it matches (exact line, prefix, substring, or regex)
+and what it does (a string sent as a command, or a Lua function). A trigger
+can instead opt into live prompt-area updates.
 
 A string action is a canned response:
 
@@ -71,12 +72,14 @@ gagging are function-return features, plus the `gag` option.
 ## Options
 
 Triggers take the [common options](/scripting/model/#options) — `name`,
-`group`, `priority`, `once` — plus two of their own:
+`group`, `priority`, `once` — plus:
 
 | Option | Effect |
 |---|---|
 | `gag` | Hides matching lines (no action required). |
 | `raw` | Matches against the raw line, ANSI codes included. |
+| `on` | `"output"` (default) for completed lines, or `"prompt"` for live prompt-area updates. |
+| `confirmed_only` | With `on = "prompt"`, ignores updates not terminated by GA/EOR. |
 | `span` | Collects a multi-line message before firing. See [Multi-line triggers](#multi-line-triggers). |
 
 ## Examples
@@ -109,8 +112,46 @@ One-shot login prompt:
 ```lua
 rune.trigger.contains("What is your name", function()
     rune.send("Ragnar")
-end, { once = true })
+end, { on = "prompt", once = true })
 ```
+
+## Prompts and unfinished text
+
+Many MUDs send login or command prompts without CR/LF, GA, or EOR. Until more
+bytes arrive, `Username:` is indistinguishable from the first part of a normal
+line split by TCP. Rune does not delay the display with a timer and does not
+require a per-MUD prompt regex. It paints the unfinished text immediately and
+lets a trigger opt into it:
+
+```lua
+rune.trigger.exact("Username: ", "Ragnar",
+    { on = "prompt", once = true })
+```
+
+`on = "output"` and `on = "prompt"` are exclusive. The safe default sees
+only delimiter-completed lines; its actions and state never process prompt
+updates. The prompt channel sees both unfinished updates and GA/EOR-confirmed
+prompts, but not completed lines. In a function action,
+`ctx.prompt_confirmed` tells them apart. Declarative `gag = true` is the one
+presentation-only exception: output patterns are checked read-only against an
+unconfirmed update so text that will be hidden does not flash first. No action
+runs and no trigger state changes during that check.
+
+Prompt updates may repeat as the unfinished text grows—for example `User`,
+then `Username:`. The same text can also run again with
+`ctx.prompt_confirmed` changing from `false` to `true` if GA/EOR arrives in a
+later socket read. Write prompt actions to set state from the latest text, not
+to increment state per call. Use `once = true` for one-shot login automation,
+or `confirmed_only = true` when the MUD reliably sends GA/EOR and the action
+must not run speculatively.
+
+Sending a command discards the current unfinished accumulator before the
+network write. That is what separates a no-GA `Username:` from the following
+`Password:`. If you send while an ordinary line is split at that exact point,
+the later `output` line begins after the send; without a terminator or timer,
+the client cannot distinguish those two cases. A Lua send clears the matching
+prompt overlay without committing it to scrollback. A user submission commits
+the overlay before sending.
 
 Rewrites chain: later triggers match against (and receive) the rewritten
 line, so a highlighter and a tagger compose:
@@ -125,10 +166,10 @@ end)
 -- output: "!! <red line>"
 ```
 
-Test any of this without a server: `/test <line>` runs a line through your
-triggers and shows what would happen. Multi-line spans collect across
-`/test` invocations, one line per call — handy for exercising them
-offline.
+Test output triggers without a server: `/test <line>` runs one completed line
+through the output channel and shows what would happen. Multi-line spans
+collect across `/test` invocations, one line per call. `/test` does not run
+prompt triggers.
 
 ## Multi-line triggers
 
@@ -194,10 +235,12 @@ suite is in the [API reference](/reference/api/#managing). In the client,
 - Patterns are Go regexp (RE2), not Lua patterns: `\\d`, `\\w`, and `\\s`
   work, backreferences and lookaround do not — see
   [rune.regex](/reference/api/regex/) for the syntax notes.
-- Prompts (partial lines) run through triggers too. Anchor with `^...$`
-  when you only want complete lines.
-- A prompt ends any open multi-line span (the action fires with what
-  was collected), and `/reload` discards open spans.
+- Prompt-area updates run only through triggers with `on = "prompt"`.
+- An unfinished update never changes a multi-line span. A nonempty tail
+  terminated by GA/EOR, any user submission, or an outbound command that
+  closes an active prompt-overlay epoch ends open spans. An unrelated send
+  does not. An empty GA/EOR marker carries no text event and does not flush
+  spans; connect, disconnect, and `/reload` discard them without firing.
 - A trigger that errors three times in a row is
   [quarantined](/scripting/model/#quarantine).
 

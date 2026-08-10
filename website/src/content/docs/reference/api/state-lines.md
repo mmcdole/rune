@@ -56,7 +56,7 @@ end)
 ## Line objects
 
 Server output arrives in handlers as line objects, not plain strings:
-`"output"` and `"prompt"` [hook](/reference/api/hooks/) handlers
+`"output"` and `"prompt_update"` [hook](/reference/api/hooks/) handlers
 receive one, and trigger function actions get one as
 [`ctx.line`](/scripting/model/#the-context-object). Two methods:
 

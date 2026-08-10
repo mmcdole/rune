@@ -46,7 +46,7 @@ end, {name = "auto-look"})
 
 Handlers run in priority order (lower first, default 50).
 
-For `output`, `prompt`, and `echo`: `nil` passes through, a string
+For `output`, `prompt_update`, and `echo`: `nil` passes through, a string
 replaces the text for subsequent handlers (rewrites chain), and `false`
 stops the chain (gag or hide).
 
@@ -57,9 +57,41 @@ call `rune.send`/`rune.send_raw` yourself and return `false`.
 | Event | Handler receives | Fired |
 |---|---|---|
 | `input` | submitted text, context | Once per submission, before command or verbatim routing |
-| `output` | line object (`:raw()`, `:clean()`) | On every complete server line |
-| `prompt` | line object | On prompt fragments (no newline, or GA/EOR terminated) |
+| `output` | line object (`:raw()`, `:clean()`) | Once for every delimiter-terminated server line |
+| `prompt_update` | line object, `prompt_confirmed` boolean | When unfinished text changes, or GA/EOR confirms it as a prompt |
 | `echo` | typed text | On each physical line of local echo; skipped while the server has echo suppressed (passwords) |
+
+`prompt_update` drives the live text above the input line. When
+`prompt_confirmed` is `false`, the text is unfinished and ambiguous: it might
+be a real prompt such as `Username:`, or only part of an ordinary line split
+across socket reads. It may be delivered again as it grows, and normally the
+full text later fires once through `output` if a line delimiter arrives. An
+outbound command deliberately starts a new unfinished-text epoch so prompts
+such as `Username:` and `Password:` do not join together. `true` means the
+server ended the text with Telnet GA or EOR. If that marker arrives in a later
+socket read, the hook can receive identical text twice: first with `false`,
+then with `true`. A GA/EOR marker with no current text carries no update and
+does not fire this hook.
+
+A direct Lua send clears the matching prompt overlay without committing it to
+scrollback. When the player submits input, Rune commits the overlay first.
+If more server text follows without a send, a confirmed prompt is committed
+before the new record—even when that record first arrives as a partial. An
+unconfirmed partial is replaced without being committed separately.
+
+```lua
+rune.hooks.on("prompt_update", function(line, prompt_confirmed)
+    if prompt_confirmed then
+        rune.echo("Server-confirmed prompt: " .. line:clean())
+    end
+end)
+```
+
+Handlers that act on unconfirmed updates should be idempotent: set current
+state from the supplied text rather than incrementing a counter on every call.
+A nonempty GA/EOR boundary flushes open multi-line triggers before
+`prompt_update` handlers run; hook priority orders handlers within the update,
+not ahead of that boundary transition.
 
 Every `input` handler receives `(text, context)`. The context is read-only, and
 `context.mode` is always `"command"` or `"verbatim"`:
@@ -81,10 +113,13 @@ command interpretation. Existing one-argument handlers remain valid because
 Lua ignores extra arguments.
 
 The core registers its own handlers at priority 100: command or verbatim
-routing on `input`, trigger processing on `output`/`prompt`,
-the `> ` styling on `echo`. For `output`/`prompt`/`echo`, register
+routing on `input`, trigger processing on `output`/`prompt_update`,
+the `> ` styling on `echo`. For `output`/`prompt_update`/`echo`, register
 below 100 to run before the core, or above 100 to see its results
 (post-trigger rewrites; gagged lines never reach you).
+
+The former `prompt` hook was renamed to `prompt_update`. Registering the old
+name raises an error with the replacement instead of silently doing nothing.
 
 :::caution
 The core `input` handler always returns `false`, so `input` handlers
