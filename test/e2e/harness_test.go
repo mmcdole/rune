@@ -187,10 +187,23 @@ func (m *mockUI) Echo(text string) {
 	m.echoed = append(m.echoed, text)
 }
 
+// FinishEcho is presentation ordering owned by the Bubble Tea model. The E2E
+// mock records echoes directly and has no deferred display queue to resolve.
+func (m *mockUI) FinishEcho(bool) {}
+
 func (m *mockUI) SetPrompt(text string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.prompts = append(m.prompts, text)
+}
+
+func (m *mockUI) CommitPrompt(text string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if text != "" {
+		m.printed = append(m.printed, text)
+	}
+	m.prompts = append(m.prompts, "")
 }
 
 func (m *mockUI) SetInput(text string) {

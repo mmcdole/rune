@@ -267,7 +267,7 @@ func (v *Viewport) maxOffset() int {
 	return max
 }
 
-// SetPrompt sets the server prompt.
+// SetPrompt replaces the live prompt-area overlay.
 func (v *Viewport) SetPrompt(text string) {
 	if v.prompt != text {
 		v.prompt = text

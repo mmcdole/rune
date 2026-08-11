@@ -805,7 +805,7 @@ func TestOutputBufferClear(t *testing.T) {
 
 // TestOutputBufferConcurrentAccess pins the OutputBuffer data race:
 // the read loop parses into the buffer while the write loop calls
-// DiscardPartial to drop a pending prompt. The suite runs under -race, so
+// DiscardPartial to drop an unfinished tail. The suite runs under -race, so
 // unsynchronized access here fails deterministically.
 func TestOutputBufferConcurrentAccess(t *testing.T) {
 	buf := NewOutputBuffer()

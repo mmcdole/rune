@@ -72,7 +72,7 @@ need to covert those to Lua first.
 | `tempRegexTrigger(pattern, code)` | `rune.trigger.regex(pattern, action)` |
 | `EnableTrigger("tname",false)`    | `rune.trigger.disable("tname")`       |
 | `SetVariable("varname","value")`  | `rune.store.set("varname","value")`   |
-| `OnPluginPartialLine`              | `rune.hooks.on("prompt_update", handler)` |
+| `OnPluginPartialLine`              | `rune.hooks.on("prompt", handler)` |
 
 Some functions such as ColourNote have no direct equivalent, but a simple
 wrapper function could replace it with Lua. (using `rune.style.*`)
@@ -84,20 +84,21 @@ visible instead of guessing with a timer:
 
 | Client concept | Rune equivalent |
 |---|---|
-| TinTin++ `RECEIVED PROMPT` / `PROCESSED LINE` prompt flag | `{ on = "prompt" }`; inspect `ctx.prompt_confirmed` instead of relying on a packet-patch timer |
+| TinTin++ `RECEIVED PROMPT` / `PROCESSED LINE` prompt flag | `{ on = "prompt" }`; inspect `ctx.confirmed` instead of relying on a packet-patch timer |
 | zMUD/CMUD trigger-on-Prompt option | trigger with `{ on = "prompt" }` |
 | Blightmud trigger with `prompt = true` | trigger with `{ on = "prompt" }` |
 | Mudlet GA/EOR prompt trigger | `{ on = "prompt", confirmed_only = true }` |
-| MUSHclient `OnPluginPartialLine` | `prompt_update` hook with `prompt_confirmed == false` |
+| MUSHclient `OnPluginPartialLine` | `prompt` hook with `confirmed == false` |
 
 Rune's prompt trigger channel includes live unfinished text and GA/EOR-marked
 prompts. It excludes completed lines. The hook receives
-`(line, prompt_confirmed)` so low-level scripts can distinguish those cases.
+`(line, confirmed)` so low-level scripts can distinguish those cases.
 
 ## Migrating Rune prompt scripts
 
-The old `prompt` hook has been renamed, and ordinary triggers no longer run on
-unfinished text automatically:
+The `prompt` hook keeps its name and adds a `confirmed` argument.
+Existing one-argument handlers remain valid. Ordinary triggers no longer run
+on unfinished text automatically:
 
 ```lua
 -- Before
@@ -105,7 +106,9 @@ rune.hooks.on("prompt", repaint)
 rune.trigger.exact("Username: ", login)
 
 -- Now
-rune.hooks.on("prompt_update", repaint)
+rune.hooks.on("prompt", function(line, confirmed)
+    repaint(line)
+end)
 rune.trigger.exact("Username: ", login, { on = "prompt" })
 ```
 

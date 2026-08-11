@@ -1,14 +1,14 @@
 {
-  "description": "Prompt-area lifecycle: immediate unfinished text, GA-confirmed prompts, commit-on-input, replacement by server lines, and no-GA login automation.",
+  "description": "Prompt-area lifecycle: immediate unfinished text, GA-confirmed prompts, commit-on-game-send, replacement by server lines, and no-GA login automation.",
   "scenarios": [
     {
-      "name": "GA prompt shows in the overlay and commits on input",
+      "name": "GA prompt shows in the overlay and commits when a game line is accepted",
       "steps": [
         { "connect": true },
         { "server_prompt": "HP:100> " },
         { "expect_prompt": "HP:100>" },
         { "type": "look" },
-        { "expect_printed": "HP:100>", "note": "prompt commits to scrollback when the user acts" },
+        { "expect_printed": "HP:100>", "note": "the submitted game line commits the prompt to scrollback" },
         { "expect_sent": "look" }
       ]
     },

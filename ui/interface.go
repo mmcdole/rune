@@ -13,7 +13,9 @@ type UI interface {
 	Outbound() <-chan UIEvent
 	Print(text string)
 	Echo(text string)
+	FinishEcho(waitForPrompt bool)
 	SetPrompt(text string)
+	CommitPrompt(text string)
 	SetInput(text string)
 	SetInputSubmission(submission input.Submission)
 

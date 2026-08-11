@@ -10,7 +10,7 @@ introduction, see [Scripting Basics](/getting-started/scripting-basics/).
 
 ```lua
 rune.send(text)        -- process aliases and expansion, then send
-rune.send_raw(text)    -- straight to the socket, no processing
+rune.send_raw(text)    -- one game-text line, bypassing command processing
 rune.echo(text)        -- print to the local display only
 rune.connect(address)  -- "host:port", optional tls:// scheme
 rune.disconnect()      -- close the connection
@@ -55,12 +55,33 @@ rune.send("#2 {get bread bag;eat bread}")  -- get/eat, twice
 rune.send_raw(text) -> true | nil, err
 ```
 
-- `text` (string) — sent to the server as-is: no aliases, no `;`
-  splitting, no `#N` repeats.
+- `text` (string) — sent as one game-text line: no aliases, no `;`
+  splitting, and no `#N` repeats.
 
 Returns `true`, or `nil` plus an error message (which is also echoed)
 when the send fails — typically because you're disconnected. This is
 what alias and trigger string actions ultimately call.
+
+Every physical game-text line accepted by the network writer ends an active
+prompt-area record. Rune commits its visible, possibly rewritten text to
+scrollback, clears the unfinished server-text accumulator, and closes open
+multi-line trigger spans. The network orders that transition ahead of later
+server output. This rule applies equally to lines produced by `rune.send` and
+`rune.send_raw`; despite its name, `send_raw` is game text rather than raw
+Telnet or GMCP protocol traffic. An alias or local command that sends no line
+creates no boundary, and a send with no active prompt-area record does not
+affect spans.
+
+When local echo is enabled, the display holds that echo behind live
+prompt-area text. A game-send commit therefore reaches scrollback in the usual
+order: prompt first, echoed command second. A submission that sends no
+game-text line releases its echo and any local output behind it without
+committing the still-live server text.
+
+Without a timer or configured prompt pattern, this has one unavoidable
+trade-off: if a game line is accepted while ordinary server output is split across
+socket reads, Rune commits the visible first fragment from the prompt area and
+the later suffix arrives through `output` as a separate line.
 
 ### rune.connect
 

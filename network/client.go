@@ -33,9 +33,9 @@ type TCPClient struct {
 	width, height int
 }
 
-// outMsg is a queued write. Line messages are commands: they end the current
-// partial epoch, discard its accumulator, and gain CRLF. Raw messages are
-// protocol bytes such as Telnet negotiation replies, written verbatim.
+// outMsg is a queued write. Line messages are commands: they discard the
+// unfinished text accumulator, publish a boundary, and gain CRLF. Raw messages
+// are protocol bytes such as Telnet negotiation replies, written verbatim.
 type outMsg struct {
 	data []byte
 	line bool
@@ -51,8 +51,7 @@ type connection struct {
 	// textMu orders complete incoming read batches against outbound command
 	// boundaries. A boundary is published before its command reaches the wire,
 	// and no response batch can be published ahead of it.
-	textMu       sync.Mutex
-	partialEpoch uint64
+	textMu sync.Mutex
 
 	// Read source indirection for MCCP2. reader is what readLoop
 	// consumes: the socket normally, a zlib stream while compression
@@ -180,15 +179,14 @@ func (c *TCPClient) Connect(ctx context.Context, address string) error {
 
 	// Create the new connection object
 	cx := &connection{
-		conn:         conn,
-		reader:       conn,
-		raw:          conn,
-		hs:           newHandshake(useTLS, c.width, c.height),
-		parser:       NewParser(defaultCompatibility()),
-		output:       NewOutputBuffer(),
-		sendQueue:    make(chan outMsg, 4096),
-		done:         make(chan struct{}),
-		partialEpoch: 1,
+		conn:      conn,
+		reader:    conn,
+		raw:       conn,
+		hs:        newHandshake(useTLS, c.width, c.height),
+		parser:    NewParser(defaultCompatibility()),
+		output:    NewOutputBuffer(),
+		sendQueue: make(chan outMsg, 4096),
+		done:      make(chan struct{}),
 	}
 	cx.localEcho.Store(true)
 
@@ -380,16 +378,21 @@ func (c *TCPClient) processIncoming(cx *connection, data []byte) bool {
 	// raw (compressed) bytes, so nothing after the marker is parsed.
 	startMCCP := false
 	var mccpRest []byte
-	var rawFrames [][]byte
+	gmcpStateSeen := false
+	gmcpFinalActive := cx.gmcpActive.Load()
+	deferGMCPMessages := false
+	var deferredGMCP []Output
 	sawText := false
 
 	for _, ev := range cx.parser.Receive(data) {
 		switch ev.Kind {
 		case TelnetEventDataSend:
-			// Queue replies after releasing textMu. enqueueRaw is lossless and
-			// may block behind user commands; blocking here could deadlock with
-			// writeLoop waiting for this batch's text boundary lock.
-			rawFrames = append(rawFrames, ev.Data)
+			// Queue protocol replies before publishing any later text from the
+			// same batch. A trigger reacting to that text may send immediately,
+			// but its command must remain behind the earlier Telnet reply.
+			if !cx.enqueueRaw(ev.Data) {
+				return false
+			}
 
 		case TelnetEventDataReceive:
 			sawText = true
@@ -421,7 +424,6 @@ func (c *TCPClient) processIncoming(cx *connection, data []byte) bool {
 						Kind:             OutputPrompt,
 						Payload:          text,
 						PromptTerminator: terminator,
-						PartialEpoch:     cx.partialEpoch,
 					}:
 					case <-cx.done:
 						return false
@@ -431,18 +433,25 @@ func (c *TCPClient) processIncoming(cx *connection, data []byte) bool {
 
 		case TelnetEventNegotiation:
 			cx.applyNegotiation(ev.Command, ev.Option)
-			rawFrames = append(rawFrames, cx.hs.onNegotiation(ev.Command, ev.Option)...)
+			for _, frame := range cx.hs.onNegotiation(ev.Command, ev.Option) {
+				if !cx.enqueueRaw(frame) {
+					return false
+				}
+			}
 			if ev.Option == OptGMCP {
 				switch ev.Command {
 				case CmdWILL, CmdDO:
-					if !cx.gmcpActive.Swap(true) {
-						select {
-						case c.outputChan <- Output{Kind: OutputGMCPEnabled}:
-						case <-cx.done:
-							return false
-						}
+					gmcpStateSeen = true
+					gmcpFinalActive = true
+					if !cx.gmcpActive.Load() {
+						deferGMCPMessages = true
 					}
 				case CmdWONT, CmdDONT:
+					gmcpStateSeen = true
+					gmcpFinalActive = false
+					// Stop accepting sends as soon as the server disables
+					// GMCP. Re-enablement waits until its negotiation reply
+					// has been queued below.
 					cx.gmcpActive.Store(false)
 				}
 			}
@@ -454,14 +463,23 @@ func (c *TCPClient) processIncoming(cx *connection, data []byte) bool {
 			case OptGMCP:
 				pkg, payload := splitGMCP(ev.Data)
 				if pkg != "" {
-					select {
-					case c.outputChan <- Output{Kind: OutputGMCP, Package: pkg, Payload: payload}:
-					case <-cx.done:
-						return false
+					out := Output{Kind: OutputGMCP, Package: pkg, Payload: payload}
+					if deferGMCPMessages {
+						deferredGMCP = append(deferredGMCP, out)
+					} else {
+						select {
+						case c.outputChan <- out:
+						case <-cx.done:
+							return false
+						}
 					}
 				}
 			default:
-				rawFrames = append(rawFrames, cx.hs.onSubnegotiation(ev.Option, ev.Data)...)
+				for _, frame := range cx.hs.onSubnegotiation(ev.Option, ev.Data) {
+					if !cx.enqueueRaw(frame) {
+						return false
+					}
+				}
 			}
 
 		case TelnetEventDecompressImmediate:
@@ -482,9 +500,8 @@ func (c *TCPClient) processIncoming(cx *connection, data []byte) bool {
 		if partial != "" {
 			select {
 			case c.outputChan <- Output{
-				Kind:         OutputPartial,
-				Payload:      partial,
-				PartialEpoch: cx.partialEpoch,
+				Kind:    OutputPartial,
+				Payload: partial,
 			}:
 			case <-cx.done:
 				return false
@@ -494,9 +511,31 @@ func (c *TCPClient) processIncoming(cx *connection, data []byte) bool {
 
 	cx.textMu.Unlock()
 	locked = false
-	for _, frame := range rawFrames {
-		if !cx.enqueueRaw(frame) {
+	if gmcpStateSeen && gmcpFinalActive && !cx.gmcpActive.Swap(true) {
+		// Publishing activation only after the negotiation reply is in
+		// sendQueue guarantees that an immediate Core.Hello follows the
+		// IAC DO/WILL response on the wire.
+		select {
+		case c.outputChan <- Output{Kind: OutputGMCPEnabled}:
+		case <-cx.done:
 			return false
+		}
+	}
+	// A server may send WILL GMCP and its first GMCP payload in one socket
+	// read. Hold those payloads until the negotiation replies are queued and
+	// the activation edge is visible, so handlers can answer immediately.
+	// Ordinary text in the same read is still published under textMu above and
+	// may therefore appear before these held GMCP events; preserving text/send
+	// boundary ordering takes precedence over cross-domain batch ordering. If
+	// the batch ends by disabling GMCP, drop the held payloads rather than
+	// dispatch them without an activation edge.
+	if gmcpFinalActive {
+		for _, out := range deferredGMCP {
+			select {
+			case c.outputChan <- out:
+			case <-cx.done:
+				return false
+			}
 		}
 	}
 
@@ -512,7 +551,9 @@ func (c *TCPClient) processIncoming(cx *connection, data []byte) bool {
 	return true
 }
 
-// enqueueRaw queues protocol bytes for writeLoop. Returns false if the
+// enqueueRaw queues protocol bytes for writeLoop. It is safe while textMu is
+// held: writeLoop removes a queued item before a line write acquires textMu,
+// so a full channel cannot form a lock cycle. Returns false when the
 // connection is shutting down.
 func (cx *connection) enqueueRaw(data []byte) bool {
 	select {
@@ -585,27 +626,24 @@ func (c *TCPClient) writeLoop(cx *connection) {
 	}
 }
 
-// writeLine publishes and applies one local text boundary atomically with the
-// socket write. The boundary always fires, even when GA/EOR already consumed
-// the accumulator: a prompt trigger may enqueue a send before Session has
-// finished painting that confirmed prompt. Holding textMu through Write keeps
-// the server's response behind the boundary on outputChan.
+// writeLine publishes and applies one local text boundary before writing the
+// command. The boundary always fires, even when GA/EOR already consumed the
+// accumulator: a prompt trigger may enqueue a send before Session has
+// finished painting that confirmed prompt. Releasing textMu after publishing
+// the boundary lets incoming parsing continue while a socket write blocks;
+// any later incoming batch remains ordered behind the boundary on outputChan.
 func (c *TCPClient) writeLine(cx *connection, data []byte) bool {
 	cx.textMu.Lock()
-	defer cx.textMu.Unlock()
 
-	endedEpoch := cx.partialEpoch
-	cx.partialEpoch++
 	cx.output.DiscardPartial()
 
 	select {
-	case c.outputChan <- Output{
-		Kind:         OutputSendBoundary,
-		PartialEpoch: endedEpoch,
-	}:
+	case c.outputChan <- Output{Kind: OutputSendBoundary}:
 	case <-cx.done:
+		cx.textMu.Unlock()
 		return false
 	}
+	cx.textMu.Unlock()
 
 	// Line data is text: double IAC bytes so the server reads them as data,
 	// not commands. Raw messages are protocol frames and bypass this path.

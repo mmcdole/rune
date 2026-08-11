@@ -12,6 +12,7 @@ import (
 	"crypto/x509/pkix"
 	"math/big"
 	"net"
+	"sync"
 	"testing"
 	"time"
 )
@@ -210,6 +211,46 @@ func nextOutput(t *testing.T, c *TCPClient, kind OutputKind, what string) Output
 	}
 }
 
+// blockedWriteConn makes a socket write observable and keeps it blocked until
+// release is called. It lets ordering tests exercise the text lock without
+// relying on kernel buffer sizes.
+type blockedWriteConn struct {
+	writeStarted chan struct{}
+	writeRelease chan struct{}
+	startOnce    sync.Once
+	releaseOnce  sync.Once
+}
+
+func newBlockedWriteConn() *blockedWriteConn {
+	return &blockedWriteConn{
+		writeStarted: make(chan struct{}),
+		writeRelease: make(chan struct{}),
+	}
+}
+
+func (c *blockedWriteConn) Read([]byte) (int, error) { return 0, net.ErrClosed }
+
+func (c *blockedWriteConn) Write(p []byte) (int, error) {
+	c.startOnce.Do(func() { close(c.writeStarted) })
+	<-c.writeRelease
+	return len(p), nil
+}
+
+func (c *blockedWriteConn) Close() error {
+	c.release()
+	return nil
+}
+
+func (c *blockedWriteConn) LocalAddr() net.Addr              { return &net.TCPAddr{} }
+func (c *blockedWriteConn) RemoteAddr() net.Addr             { return &net.TCPAddr{} }
+func (c *blockedWriteConn) SetDeadline(time.Time) error      { return nil }
+func (c *blockedWriteConn) SetReadDeadline(time.Time) error  { return nil }
+func (c *blockedWriteConn) SetWriteDeadline(time.Time) error { return nil }
+
+func (c *blockedWriteConn) release() {
+	c.releaseOnce.Do(func() { close(c.writeRelease) })
+}
+
 // --- Identity negotiation (Phase 1) over a real socket ---
 
 func TestIdentityNegotiationLoopback(t *testing.T) {
@@ -350,10 +391,141 @@ func TestMCCP2CorruptStreamDisconnects(t *testing.T) {
 	nextOutput(t, c, OutputDisconnect, "disconnect on corrupt stream")
 }
 
+func TestNegotiationReplyPrecedesCommandTriggeredByLaterBatchText(t *testing.T) {
+	c := &TCPClient{outputChan: make(chan Output)}
+	cx := &connection{
+		parser:    NewParser(defaultCompatibility()),
+		output:    NewOutputBuffer(),
+		hs:        newHandshake(false, 0, 0),
+		sendQueue: make(chan outMsg, 2),
+		done:      make(chan struct{}),
+	}
+
+	wire := append([]byte{CmdIAC, CmdWILL, OptEOR}, []byte("marker\r\npartial")...)
+	processed := make(chan bool, 1)
+	go func() { processed <- c.processIncoming(cx, wire) }()
+
+	line := nextOutput(t, c, OutputLine, "same-batch line after negotiation")
+	if line.Payload != "marker" {
+		t.Fatalf("same-batch line = %q, want marker", line.Payload)
+	}
+	// Model a trigger reacting immediately to the line. The Telnet reply for
+	// the earlier wire event must already be ahead of this command. The later
+	// partial keeps processIncoming inside the same batch until after the
+	// command is queued, making the ordering assertion deterministic.
+	cx.sendQueue <- outMsg{data: []byte("look"), line: true}
+	partial := nextOutput(t, c, OutputPartial, "same-batch partial after line")
+	if partial.Payload != "partial" {
+		t.Fatalf("same-batch partial = %q, want partial", partial.Payload)
+	}
+	if ok := <-processed; !ok {
+		t.Fatal("processIncoming stopped while ordering negotiation reply")
+	}
+
+	first := <-cx.sendQueue
+	second := <-cx.sendQueue
+	if first.line || !bytes.Equal(first.data, []byte{CmdIAC, CmdDO, OptEOR}) {
+		t.Fatalf("first queued write = %+v, want DO EOR reply", first)
+	}
+	if !second.line || string(second.data) != "look" {
+		t.Fatalf("second queued write = %+v, want triggered command", second)
+	}
+}
+
 // --- GMCP (Phase 3) ---
 
+func TestGMCPBatchQueuesReplyBeforeActivationAndMessage(t *testing.T) {
+	c := &TCPClient{outputChan: make(chan Output, 4)}
+	cx := &connection{
+		parser:    NewParser(defaultCompatibility()),
+		output:    NewOutputBuffer(),
+		hs:        newHandshake(false, 0, 0),
+		sendQueue: make(chan outMsg, 1),
+		done:      make(chan struct{}),
+	}
+
+	// Occupy the only queue slot so processIncoming cannot enqueue DO GMCP.
+	// No later text or activation event may overtake that reply.
+	cx.sendQueue <- outMsg{data: []byte("occupied")}
+	wire := append([]byte{CmdIAC, CmdWILL, OptGMCP},
+		subnegFrame(OptGMCP, []byte(`Char.Vitals {"hp":100}`))...)
+	wire = append(wire, []byte("GMCP-marker\r\n")...)
+	processed := make(chan bool, 1)
+	go func() { processed <- c.processIncoming(cx, wire) }()
+
+	if cx.gmcpActive.Load() {
+		t.Fatal("GMCP became active before DO GMCP was queued")
+	}
+
+	<-cx.sendQueue // release the occupied slot
+	if ok := <-processed; !ok {
+		t.Fatal("processIncoming stopped while queuing GMCP negotiation")
+	}
+
+	reply := <-cx.sendQueue
+	if want := []byte{CmdIAC, CmdDO, OptGMCP}; !bytes.Equal(reply.data, want) {
+		t.Fatalf("negotiation reply = %v, want %v", reply.data, want)
+	}
+	if reply.line {
+		t.Fatal("GMCP negotiation reply was queued as line data")
+	}
+	first := nextOutput(t, c, OutputLine, "same-batch marker after reply queue")
+	if first.Payload != "GMCP-marker" {
+		t.Fatalf("same-batch marker = %+v", first)
+	}
+	nextOutput(t, c, OutputGMCPEnabled, "GMCP enabled after reply queue")
+	if !cx.gmcpActive.Load() {
+		t.Fatal("GMCP remained inactive after its reply was queued")
+	}
+	message := nextOutput(t, c, OutputGMCP, "same-batch GMCP after activation")
+	if message.Package != "Char.Vitals" || message.Payload != `{"hp":100}` {
+		t.Fatalf("same-batch GMCP message = (%q, %q)", message.Package, message.Payload)
+	}
+}
+
+func TestGMCPEnableThenDisableInOneBatchDoesNotActivate(t *testing.T) {
+	c := &TCPClient{outputChan: make(chan Output, 4)}
+	cx := &connection{
+		parser:    NewParser(defaultCompatibility()),
+		output:    NewOutputBuffer(),
+		hs:        newHandshake(false, 0, 0),
+		sendQueue: make(chan outMsg, 4),
+		done:      make(chan struct{}),
+	}
+
+	wire := []byte{CmdIAC, CmdWILL, OptGMCP}
+	wire = append(wire,
+		subnegFrame(OptGMCP, []byte(`Char.Vitals {"hp":100}`))...)
+	wire = append(wire,
+		CmdIAC, CmdWONT, OptGMCP,
+		'G', 'M', 'C', 'P', '-', 'o', 'f', 'f', '\r', '\n')
+	if !c.processIncoming(cx, wire) {
+		t.Fatal("processIncoming stopped during GMCP negotiation")
+	}
+	if cx.gmcpActive.Load() {
+		t.Fatal("GMCP remained active after same-batch WONT")
+	}
+
+	var out Output
+	select {
+	case out = <-c.outputChan:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for same-batch disable marker")
+	}
+	if out.Kind != OutputLine || out.Payload != "GMCP-off" {
+		t.Fatalf("first output after same-batch disable = %+v", out)
+	}
+	select {
+	case out := <-c.outputChan:
+		if out.Kind == OutputGMCPEnabled {
+			t.Fatal("published GMCP enabled for a batch ending in WONT")
+		}
+		t.Fatalf("unexpected output after GMCP disable: %+v", out)
+	default:
+	}
+}
+
 func TestGMCPLoopback(t *testing.T) {
-	fromServer := make(chan []byte, 1)
 	addr := telnetServer(t, func(t *testing.T, conn net.Conn) {
 		conn.Write([]byte{CmdIAC, CmdWILL, OptGMCP})
 		expectBytes(t, conn, []byte{CmdIAC, CmdDO, OptGMCP}, "DO GMCP")
@@ -362,8 +534,8 @@ func TestGMCPLoopback(t *testing.T) {
 
 		// Then wait for the client's own GMCP message
 		want := subnegFrame(OptGMCP, []byte(`Core.Hello {"client":"Rune"}`))
-		got := expectBytes(t, conn, want, "client Core.Hello frame")
-		fromServer <- got
+		expectBytes(t, conn, want, "client Core.Hello frame")
+		conn.Write([]byte("GMCP-send-marker\r\n"))
 	})
 
 	c := connectLoopback(t, addr)
@@ -378,10 +550,24 @@ func TestGMCPLoopback(t *testing.T) {
 	if err := c.SendGMCP("Core.Hello", `{"client":"Rune"}`); err != nil {
 		t.Fatalf("SendGMCP: %v", err)
 	}
-	select {
-	case <-fromServer:
-	case <-time.After(5 * time.Second):
-		t.Fatal("server never received the client's GMCP frame")
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case out := <-c.Output():
+			switch out.Kind {
+			case OutputSendBoundary:
+				t.Fatal("GMCP send published a game-text boundary")
+			case OutputLine:
+				if out.Payload != "GMCP-send-marker" {
+					t.Fatalf("line after GMCP send = %q", out.Payload)
+				}
+				return
+			case OutputDisconnect:
+				t.Fatal("connection dropped before the GMCP send marker")
+			}
+		case <-deadline:
+			t.Fatal("server never acknowledged the client's GMCP frame")
+		}
 	}
 }
 
@@ -640,7 +826,7 @@ func TestSentLineSeparatesUnterminatedPrompts(t *testing.T) {
 	}
 }
 
-func TestSentLineEndsPartialEpochBeforeResponse(t *testing.T) {
+func TestSentLinePublishesBoundaryBeforeLaterServerText(t *testing.T) {
 	addr := telnetServer(t, func(t *testing.T, conn net.Conn) {
 		conn.Write([]byte("first half"))
 		expectBytes(t, conn, []byte("look\r\n"), "command after partial")
@@ -653,8 +839,8 @@ func TestSentLineEndsPartialEpochBeforeResponse(t *testing.T) {
 
 	c := connectLoopback(t, addr)
 	first := nextOutput(t, c, OutputPartial, "first partial")
-	if first.Payload != "first half" || first.PartialEpoch == 0 {
-		t.Fatalf("first partial = (%q, epoch %d)", first.Payload, first.PartialEpoch)
+	if first.Payload != "first half" {
+		t.Fatalf("first partial = %q", first.Payload)
 	}
 	if err := c.Send("look"); err != nil {
 		t.Fatal(err)
@@ -671,9 +857,6 @@ func TestSentLineEndsPartialEpochBeforeResponse(t *testing.T) {
 				if sawBoundary {
 					t.Fatal("duplicate send boundary")
 				}
-				if out.PartialEpoch != first.PartialEpoch {
-					t.Fatalf("boundary epoch = %d, want %d", out.PartialEpoch, first.PartialEpoch)
-				}
 				sawBoundary = true
 			case OutputLine:
 				if !sawBoundary {
@@ -689,9 +872,6 @@ func TestSentLineEndsPartialEpochBeforeResponse(t *testing.T) {
 				}
 				if out.Payload != "next tail" {
 					t.Fatalf("new partial = %q", out.Payload)
-				}
-				if out.PartialEpoch != first.PartialEpoch+1 {
-					t.Fatalf("new partial epoch = %d, want %d", out.PartialEpoch, first.PartialEpoch+1)
 				}
 				return
 			}
@@ -713,19 +893,103 @@ func TestSentLineEmitsBoundaryAfterConsumedPrompt(t *testing.T) {
 	})
 
 	c := connectLoopback(t, addr)
-	prompt := nextOutput(t, c, OutputPrompt, "confirmed prompt")
-	if prompt.PartialEpoch == 0 {
-		t.Fatal("confirmed prompt did not carry its partial epoch")
-	}
+	nextOutput(t, c, OutputPrompt, "confirmed prompt")
 	if err := c.Send("look"); err != nil {
 		t.Fatal(err)
 	}
-	boundary := nextOutput(t, c, OutputSendBoundary, "send boundary")
-	if boundary.PartialEpoch != prompt.PartialEpoch {
-		t.Fatalf("boundary epoch = %d, want prompt epoch %d", boundary.PartialEpoch, prompt.PartialEpoch)
-	}
+	nextOutput(t, c, OutputSendBoundary, "send boundary")
 	if got := nextOutput(t, c, OutputLine, "response line").Payload; got != "marker" {
 		t.Fatalf("response line = %q", got)
+	}
+}
+
+func TestRapidSentLinesPublishBoundariesBeforeLaterServerText(t *testing.T) {
+	addr := telnetServer(t, func(t *testing.T, conn net.Conn) {
+		conn.Write([]byte("Username: "))
+		expectBytes(t, conn, []byte("player\r\npassword\r\n"), "two rapid login lines")
+		conn.Write([]byte("accepted\r\n"))
+
+		buf := make([]byte, 1)
+		conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+		conn.Read(buf)
+	})
+
+	c := connectLoopback(t, addr)
+	if got := nextOutput(t, c, OutputPartial, "username prompt").Payload; got != "Username: " {
+		t.Fatalf("partial = %q", got)
+	}
+	if err := c.Send("player"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Send("password"); err != nil {
+		t.Fatal(err)
+	}
+
+	boundaries := 0
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case out := <-c.Output():
+			switch out.Kind {
+			case OutputSendBoundary:
+				boundaries++
+			case OutputLine:
+				if out.Payload != "accepted" {
+					t.Fatalf("line after rapid sends = %q", out.Payload)
+				}
+				if boundaries != 2 {
+					t.Fatalf("response arrived after %d send boundaries, want 2", boundaries)
+				}
+				return
+			case OutputDisconnect:
+				t.Fatal("connection dropped while waiting for rapid-send response")
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for two send boundaries and response")
+		}
+	}
+}
+
+func TestBlockedLineWriteDoesNotStopIncomingParsing(t *testing.T) {
+	conn := newBlockedWriteConn()
+	t.Cleanup(conn.release)
+	c := &TCPClient{outputChan: make(chan Output, 4)}
+	cx := &connection{
+		conn:      conn,
+		parser:    NewParser(defaultCompatibility()),
+		output:    NewOutputBuffer(),
+		sendQueue: make(chan outMsg, 1),
+		done:      make(chan struct{}),
+	}
+
+	writeDone := make(chan bool, 1)
+	go func() { writeDone <- c.writeLine(cx, []byte("look")) }()
+	nextOutput(t, c, OutputSendBoundary, "boundary before blocked write")
+	<-conn.writeStarted
+
+	parseStarted := make(chan struct{})
+	parseDone := make(chan bool, 1)
+	go func() {
+		close(parseStarted)
+		parseDone <- c.processIncoming(cx, []byte("write-block-marker\r\n"))
+	}()
+	<-parseStarted
+
+	select {
+	case out := <-c.outputChan:
+		if out.Kind != OutputLine || out.Payload != "write-block-marker" {
+			t.Fatalf("incoming output during blocked write = %+v", out)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("incoming parsing blocked behind the socket write")
+	}
+
+	conn.release()
+	if ok := <-writeDone; !ok {
+		t.Fatal("writeLine failed after releasing the socket")
+	}
+	if ok := <-parseDone; !ok {
+		t.Fatal("processIncoming stopped during blocked write test")
 	}
 }
 

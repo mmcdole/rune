@@ -187,6 +187,145 @@ func TestEchoFlushesPendingServerLines(t *testing.T) {
 	}
 }
 
+// TestPromptCommitOrdersPromptBeforeDeferredSubmissionOutput verifies that
+// committing an active prompt is one UI operation: earlier server rows render
+// first, then the committed prompt, then the local echo and any output created
+// while handling that submission.
+func TestPromptCommitOrdersPromptBeforeDeferredSubmissionOutput(t *testing.T) {
+	m := newBareModel(t)
+
+	next, _ := m.Update(ui.PrintLineMsg("line 1")) // immediate, opens window
+	m = next.(*Model)
+	next, _ = m.Update(ui.PrintLineMsg("line 2")) // batched
+	m = next.(*Model)
+	next, _ = m.Update(ui.PromptMsg("Username:"))
+	m = next.(*Model)
+	next, _ = m.Update(ui.EchoLineMsg("> player"))
+	m = next.(*Model)
+	next, _ = m.Update(ui.PrintLineMsg("login hook sent username"))
+	m = next.(*Model)
+
+	wantScrollback(t, m, "line 1")
+
+	next, _ = m.Update(ui.PromptCommitMsg("Username:"))
+	m = next.(*Model)
+
+	wantScrollback(t, m,
+		"line 1", "line 2", "Username:", "> player", "login hook sent username")
+	if m.lastPrompt != "" {
+		t.Fatalf("live prompt = %q after commit, want empty", m.lastPrompt)
+	}
+}
+
+// TestLocalSubmissionReleaseOrdersEchoBeforeOutput verifies a local command
+// that sends nothing does not need a prompt commit. Session explicitly marks
+// handling complete, which releases the echo before buffered local output and
+// leaves the server prompt live.
+func TestLocalSubmissionReleaseOrdersEchoBeforeOutput(t *testing.T) {
+	m := newBareModel(t)
+
+	next, _ := m.Update(ui.PromptMsg("HP>"))
+	m = next.(*Model)
+	next, _ = m.Update(ui.EchoLineMsg("> /help"))
+	m = next.(*Model)
+	next, _ = m.Update(ui.PrintLineMsg("local help"))
+	m = next.(*Model)
+
+	// Print alone cannot prove that no later send will answer the prompt.
+	wantScrollback(t, m)
+
+	next, _ = m.Update(ui.EchoDispositionMsg{WaitForPrompt: false})
+	m = next.(*Model)
+
+	wantScrollback(t, m, "> /help", "local help")
+	if got := m.lastPrompt; got != "HP>" {
+		t.Fatalf("live prompt = %q after local output, want %q", got, "HP>")
+	}
+}
+
+// TestSilentLocalSubmissionReleasesEcho verifies the no-output case: a local
+// command can consume a submission silently, so the explicit completion signal
+// must be sufficient to release its echo while preserving the live prompt.
+func TestSilentLocalSubmissionReleasesEcho(t *testing.T) {
+	m := newBareModel(t)
+
+	next, _ := m.Update(ui.PromptMsg("HP>"))
+	m = next.(*Model)
+	next, _ = m.Update(ui.EchoLineMsg("> /silent"))
+	m = next.(*Model)
+
+	wantScrollback(t, m)
+
+	next, _ = m.Update(ui.EchoDispositionMsg{WaitForPrompt: false})
+	m = next.(*Model)
+
+	wantScrollback(t, m, "> /silent")
+	if got := m.lastPrompt; got != "HP>" {
+		t.Fatalf("live prompt = %q after local submission, want %q", got, "HP>")
+	}
+}
+
+// TestLaterLocalSubmissionWaitsForEarlierPromptCommit verifies dispositions
+// compose across queued submissions. A local command cannot release output for
+// an earlier game send that is still waiting to commit the live prompt.
+func TestLaterLocalSubmissionWaitsForEarlierPromptCommit(t *testing.T) {
+	m := newBareModel(t)
+
+	next, _ := m.Update(ui.PromptMsg("HP>"))
+	m = next.(*Model)
+	next, _ = m.Update(ui.EchoLineMsg("> north"))
+	m = next.(*Model)
+	next, _ = m.Update(ui.EchoDispositionMsg{WaitForPrompt: true})
+	m = next.(*Model)
+
+	next, _ = m.Update(ui.EchoLineMsg("> /silent"))
+	m = next.(*Model)
+	next, _ = m.Update(ui.EchoDispositionMsg{WaitForPrompt: false})
+	m = next.(*Model)
+
+	wantScrollback(t, m)
+
+	next, _ = m.Update(ui.PromptCommitMsg("HP>"))
+	m = next.(*Model)
+
+	wantScrollback(t, m, "HP>", "> north", "> /silent")
+}
+
+// TestEchoWithoutPromptIsImmediate verifies the ordinary path remains eager:
+// only a live prompt-area record can hold a local echo back.
+func TestEchoWithoutPromptIsImmediate(t *testing.T) {
+	m := newBareModel(t)
+
+	next, _ := m.Update(ui.EchoLineMsg("> look"))
+	m = next.(*Model)
+
+	wantScrollback(t, m, "> look")
+}
+
+// TestPromptClearReleasesEchoAfterReplacement verifies cumulative prompt
+// updates keep an echo deferred, while clearing the overlay releases it. This
+// prevents disconnects and completed-line replacement from stranding echoes.
+func TestPromptClearReleasesEchoAfterReplacement(t *testing.T) {
+	m := newBareModel(t)
+
+	next, _ := m.Update(ui.PromptMsg("User"))
+	m = next.(*Model)
+	next, _ = m.Update(ui.EchoLineMsg("> player"))
+	m = next.(*Model)
+	next, _ = m.Update(ui.PromptMsg("Username:"))
+	m = next.(*Model)
+
+	wantScrollback(t, m)
+
+	next, _ = m.Update(ui.PromptMsg(""))
+	m = next.(*Model)
+
+	wantScrollback(t, m, "> player")
+	if m.lastPrompt != "" {
+		t.Fatalf("live prompt = %q after clear, want empty", m.lastPrompt)
+	}
+}
+
 // wantScrollback asserts the scrollback holds exactly want, in order.
 func wantScrollback(t *testing.T, m *Model, want ...string) {
 	t.Helper()

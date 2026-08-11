@@ -132,26 +132,30 @@ rune.trigger.exact("Username: ", "Ragnar",
 only delimiter-completed lines; its actions and state never process prompt
 updates. The prompt channel sees both unfinished updates and GA/EOR-confirmed
 prompts, but not completed lines. In a function action,
-`ctx.prompt_confirmed` tells them apart. Declarative `gag = true` is the one
+`ctx.confirmed` tells them apart. Declarative `gag = true` is the one
 presentation-only exception: output patterns are checked read-only against an
 unconfirmed update so text that will be hidden does not flash first. No action
-runs and no trigger state changes during that check.
+runs and no trigger state changes during that check. GA/EOR confirmation ends
+this provisional projection; use a prompt trigger with `gag = true` when the
+confirmed prompt record must also stay hidden.
 
-Prompt updates may repeat as the unfinished text grows—for example `User`,
+Prompt updates may repeat as the unfinished text grows, for example `User`,
 then `Username:`. The same text can also run again with
-`ctx.prompt_confirmed` changing from `false` to `true` if GA/EOR arrives in a
+`ctx.confirmed` changing from `false` to `true` if GA/EOR arrives in a
 later socket read. Write prompt actions to set state from the latest text, not
 to increment state per call. Use `once = true` for one-shot login automation,
 or `confirmed_only = true` when the MUD reliably sends GA/EOR and the action
 must not run speculatively.
 
-Sending a command discards the current unfinished accumulator before the
-network write. That is what separates a no-GA `Username:` from the following
-`Password:`. If you send while an ordinary line is split at that exact point,
-the later `output` line begins after the send; without a terminator or timer,
-the client cannot distinguish those two cases. A Lua send clears the matching
-prompt overlay without committing it to scrollback. A user submission commits
-the overlay before sending.
+Sending a game-text line commits the active prompt-area record and discards the
+current unfinished accumulator. The network orders that transition ahead of
+later server output. That is what separates a no-GA `Username:` from the
+following `Password:`. Typed commands and commands sent by aliases, triggers,
+or timers follow the same rule. If you send while an ordinary line is split at
+that exact point, the visible first fragment is committed and the later
+`output` line begins after the send; without a terminator or timer, the client
+cannot distinguish those two cases. A local command that sends nothing and raw
+protocol traffic such as GMCP do not create this boundary.
 
 Rewrites chain: later triggers match against (and receive) the rewritten
 line, so a highlighter and a tagger compose:
@@ -237,10 +241,13 @@ suite is in the [API reference](/reference/api/#managing). In the client,
   [rune.regex](/reference/api/regex/) for the syntax notes.
 - Prompt-area updates run only through triggers with `on = "prompt"`.
 - An unfinished update never changes a multi-line span. A nonempty tail
-  terminated by GA/EOR, any user submission, or an outbound command that
-  closes an active prompt-overlay epoch ends open spans. An unrelated send
-  does not. An empty GA/EOR marker carries no text event and does not flush
-  spans; connect, disconnect, and `/reload` discard them without firing.
+  terminated by GA/EOR ends open spans. An outbound game-text line also ends
+  them when it closes an active prompt-area record, regardless of whether the
+  command came from the player, an alias, a trigger, or a timer. A send with no
+  active record, a local command that sends nothing, and raw protocol traffic
+  such as GMCP do not. An empty GA/EOR marker carries no text event and does
+  not flush spans; connect, disconnect, and `/reload` discard them without
+  firing.
 - A trigger that errors three times in a row is
   [quarantined](/scripting/model/#quarantine).
 

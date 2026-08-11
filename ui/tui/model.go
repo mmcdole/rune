@@ -65,6 +65,12 @@ type Model struct {
 	outbound    chan<- ui.UIEvent
 	initialized bool
 	pendingRows []string
+	// A local echo submitted while prompt-area text is visible waits until the
+	// submission either sends a game line (and commits the prompt) or completes
+	// locally. Output produced after that echo waits with it in event order.
+	submissionOutputDeferred  bool
+	deferredSubmissionRows    []string
+	deferredUntilPromptCommit bool
 	// flushScheduled is true while a batch-window tick is outstanding.
 	// At most one tick is ever in flight: it is armed only on the
 	// idle->hot transition and re-armed only from handleTick while
@@ -124,7 +130,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleConfigUpdate(msg)
 
 	// Server output
-	case ui.PrintLineMsg, ui.EchoLineMsg, ui.PromptMsg:
+	case ui.PrintLineMsg, ui.EchoLineMsg, ui.EchoDispositionMsg, ui.PromptMsg, ui.PromptCommitMsg:
 		return m.handleServerOutput(msg)
 
 	// Pane operations
@@ -287,6 +293,11 @@ func (m *Model) syncBars(content map[string]ui.BarContent) {
 func (m *Model) handleServerOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case ui.PrintLineMsg:
+		if m.submissionOutputDeferred {
+			m.deferredSubmissionRows = append(
+				m.deferredSubmissionRows, splitRows(string(msg), m.width)...)
+			return m, nil
+		}
 		rows := splitRows(string(msg), m.width)
 		if m.flushScheduled {
 			// Inside a batch window: coalesce with the burst.
@@ -299,18 +310,61 @@ func (m *Model) handleServerOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.flushScheduled = true
 		return m, doTick()
 	case ui.EchoLineMsg:
+		if m.lastPrompt != "" {
+			m.submissionOutputDeferred = true
+			m.deferredSubmissionRows = append(
+				m.deferredSubmissionRows, splitRows(string(msg), m.width)...)
+			return m, nil
+		}
 		// Flush batched server lines first so the echo cannot render
 		// ahead of output that arrived before it.
 		m.flushPending()
 		m.appendMessage(string(msg))
+	case ui.EchoDispositionMsg:
+		if !m.submissionOutputDeferred {
+			break
+		}
+		if msg.WaitForPrompt {
+			m.deferredUntilPromptCommit = true
+			break
+		}
+		if !m.deferredUntilPromptCommit {
+			m.flushPending()
+			m.flushDeferredSubmissionOutput()
+		}
 	case ui.PromptMsg:
 		text := util.ExpandTabs(string(msg))
 		if text != m.lastPrompt {
 			m.viewport.SetPrompt(text)
 			m.lastPrompt = text
 		}
+		if text == "" && m.submissionOutputDeferred {
+			// A discarded or superseded prompt has no commit message to
+			// release submission output. Preserve earlier server-row ordering,
+			// then let that output proceed once the overlay is gone.
+			m.flushPending()
+			m.flushDeferredSubmissionOutput()
+		}
+	case ui.PromptCommitMsg:
+		m.flushPending()
+		if text := util.ExpandTabs(string(msg)); text != "" {
+			m.appendMessage(text)
+		}
+		m.viewport.SetPrompt("")
+		m.lastPrompt = ""
+		m.flushDeferredSubmissionOutput()
 	}
 	return m, nil
+}
+
+func (m *Model) flushDeferredSubmissionOutput() {
+	if !m.submissionOutputDeferred {
+		return
+	}
+	m.appendRows(m.deferredSubmissionRows...)
+	m.deferredSubmissionRows = nil
+	m.submissionOutputDeferred = false
+	m.deferredUntilPromptCommit = false
 }
 
 func (m *Model) handlePaneMsg(msg tea.Msg) (tea.Model, tea.Cmd) {

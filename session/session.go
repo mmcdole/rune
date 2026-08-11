@@ -87,15 +87,19 @@ type Session struct {
 	barTicker    *time.Ticker
 
 	// State
-	lastPrompt      string // current prompt-overlay text, including partial output
-	promptActive    bool   // true even when Lua gagged the visible prompt text
-	promptConfirmed bool   // true only when GA/EOR completed the overlay record
-	promptEpoch     uint64 // outbound-command generation that produced the overlay
-	connectTarget   string // CLI connect target; consumed on first boot only
-	config          Config
-	clientState     lua.ClientState
-	currentInput    string // Tracked so Lua can query via rune.input.get()
-	currentCursor   int    // Zero-based UTF-8 byte offset exposed to Lua
+	prompt        promptOverlay
+	connectTarget string // CLI connect target; consumed on first boot only
+	config        Config
+	clientState   lua.ClientState
+	currentInput  string // Tracked so Lua can query via rune.input.get()
+	currentCursor int    // Zero-based UTF-8 byte offset exposed to Lua
+
+	// Submission processing is synchronous on the session goroutine. These
+	// fields record whether any Send call made by its echo or input hooks was
+	// accepted, which tells the UI whether to wait for a prompt commit before
+	// releasing the local echo.
+	trackingSubmissionSend  bool
+	submissionSendSucceeded bool
 }
 
 // New creates a new Session. It is passive - no goroutines start here.
@@ -112,6 +116,7 @@ func New(net Network, uiInstance ui.UI, cfg Config) *Session {
 		historyEntries: make([]input.Submission, 0, 10000),
 		historyLimit:   10000,
 		sessionStore:   make(map[string]string),
+		prompt:         newPromptOverlay(uiInstance),
 	}
 
 	s.engine = lua.NewEngine(s)
@@ -215,11 +220,11 @@ func (s *Session) handleNetworkOutput(out network.Output) {
 	case network.OutputLine:
 		s.handleServerLine(out.Payload)
 	case network.OutputPartial:
-		s.handleServerPartial(out.Payload, out.PartialEpoch)
+		s.handleServerPartial(out.Payload)
 	case network.OutputPrompt:
-		s.handleServerPrompt(out.Payload, out.PartialEpoch)
+		s.handleServerPrompt(out.Payload)
 	case network.OutputSendBoundary:
-		s.handleSendBoundary(out.PartialEpoch)
+		s.handleSendBoundary()
 	case network.OutputDisconnect:
 		s.Disconnect()
 	case network.OutputGMCP:
@@ -235,14 +240,7 @@ func (s *Session) handleServerLine(payload string) {
 	// delimiter. Preserve its wire order when asynchronous output follows. An
 	// unconfirmed partial is only a preview of this OutputLine and must never be
 	// printed separately.
-	if s.promptActive && s.promptConfirmed && s.lastPrompt != "" {
-		s.ui.Print(s.lastPrompt)
-	}
-	s.lastPrompt = ""
-	s.promptActive = false
-	s.promptConfirmed = false
-	s.promptEpoch = 0
-	s.ui.SetPrompt("")
+	s.prompt.beforeLine()
 
 	line := text.NewLine(payload)
 	if modified, show := s.engine.OnOutput(line); show {
@@ -254,41 +252,33 @@ func (s *Session) handleServerLine(payload string) {
 }
 
 // handleServerPartial processes the current unfinished output tail.
-func (s *Session) handleServerPartial(payload string, epoch uint64) {
-	s.handlePromptUpdate(payload, false, epoch)
+func (s *Session) handleServerPartial(payload string) {
+	s.handlePromptUpdate(payload, false)
 }
 
 // handleServerPrompt processes a GA/EOR-confirmed prompt.
-func (s *Session) handleServerPrompt(payload string, epoch uint64) {
-	s.handlePromptUpdate(payload, true, epoch)
+func (s *Session) handleServerPrompt(payload string) {
+	s.handlePromptUpdate(payload, true)
 }
 
-// handlePromptUpdate replaces the overlay
-// and is never committed to scrollback here. Partial snapshots are cumulative
-// peeks of the growing tail, so committing a superseded one
-// would turn socket read boundaries into visible lines (issue #25). GA/EOR
+// handlePromptUpdate replaces the overlay without committing the new update
+// to scrollback. Partial snapshots are cumulative peeks of the growing tail,
+// so committing a superseded one would turn socket read boundaries into
+// visible lines (issue #25). GA/EOR
 // makes each confirmed prompt a separate record, so later server text commits
-// it before replacing the overlay. Input submission commits any active update.
-// Partial and confirmed prompts share the same display path. A confirmed
-// prompt flushes multiline triggers; partials do not.
-func (s *Session) handlePromptUpdate(payload string, confirmed bool, epoch uint64) {
+// it before replacing the overlay. An outbound game-text boundary commits any
+// active update. Partial and confirmed prompts share the same display path. A
+// confirmed prompt flushes multiline triggers; partials do not.
+func (s *Session) handlePromptUpdate(payload string, confirmed bool) {
 	// GA/EOR ended the previous overlay record. Any later server text starts a
 	// new record, even when that text first arrives as an unfinished partial.
 	// Commit before dispatching the new update so TCP fragmentation cannot
 	// decide whether the confirmed prompt reaches scrollback.
-	if s.promptActive && s.promptConfirmed {
-		if s.lastPrompt != "" {
-			s.ui.Print(s.lastPrompt)
-		}
-		s.lastPrompt = ""
-		s.promptActive = false
-		s.promptConfirmed = false
-		s.promptEpoch = 0
-	}
+	s.prompt.beforeUpdate()
 
 	line := text.NewLine(payload)
-	// Sanitized before storing so the overlay and the later
-	// scrollback commit (handleSubmission) both stay chrome-safe.
+	// Sanitized before storing so the overlay and a later scrollback commit
+	// both stay chrome-safe.
 	var modified string
 	if confirmed {
 		modified = s.engine.OnPrompt(line)
@@ -296,29 +286,17 @@ func (s *Session) handlePromptUpdate(payload string, confirmed bool, epoch uint6
 		modified = s.engine.OnPartial(line)
 	}
 	modified = text.SanitizeDisplay(modified)
-	s.lastPrompt = modified
-	s.promptActive = true
-	s.promptConfirmed = confirmed
-	s.promptEpoch = epoch
-	s.ui.SetPrompt(modified)
+	s.prompt.replace(modified, confirmed)
 }
 
-// handleSendBoundary closes the unfinished-text generation that existed when
-// an outbound command was written. The network writer publishes this event
-// before the socket write, so the server's response cannot overtake it. A Lua
-// prompt trigger may enqueue that write while its update is still being
-// dispatched; matching epochs let this later event clear that freshly painted
-// overlay without clearing response text from a newer generation.
-func (s *Session) handleSendBoundary(epoch uint64) {
-	if !s.promptActive || s.promptEpoch != epoch {
-		return
+// handleSendBoundary commits any unfinished server record associated with an
+// outbound game-text line. The network orders this event ahead of later server
+// output. A boundary without an active overlay carries no server-output
+// meaning and therefore does not close spans.
+func (s *Session) handleSendBoundary() {
+	if s.prompt.commit() {
+		s.engine.FlushSpans()
 	}
-	s.lastPrompt = ""
-	s.promptActive = false
-	s.promptConfirmed = false
-	s.promptEpoch = 0
-	s.ui.SetPrompt("")
-	s.engine.FlushSpans()
 }
 
 // handleSubmission processes an immutable input snapshot. Command submissions
@@ -326,23 +304,15 @@ func (s *Session) handleSendBoundary(epoch uint64) {
 // verbatim submissions bypass that interpretation and send physical lines as
 // written.
 func (s *Session) handleSubmission(submission input.Submission) {
-	// Commit the active prompt-area update before processing the submission.
-	// The active bit is separate from the text because a gagged update still
-	// has boundary semantics.
-	if s.promptActive {
-		if s.lastPrompt != "" {
-			s.ui.Print(s.lastPrompt)
-		}
-		s.lastPrompt = ""
-		s.promptActive = false
-		s.promptConfirmed = false
-		s.promptEpoch = 0
-		s.ui.SetPrompt("")
-	}
-	// Submission is a boundary even when the prompt was gagged, a complete
-	// line most recently cleared the overlay, or the server never displayed a
-	// prompt at all.
-	s.engine.FlushSpans()
+	s.trackingSubmissionSend = true
+	s.submissionSendSucceeded = false
+	defer func() {
+		sent := s.submissionSendSucceeded
+		s.trackingSubmissionSend = false
+		s.submissionSendSucceeded = false
+		s.ui.FinishEcho(sent)
+	}()
+
 	s.addHistorySubmission(submission)
 	if s.net.LocalEchoEnabled() {
 		lines := []string{submission.Text}

@@ -22,7 +22,6 @@ var undocumentedInternal = map[string]bool{
 	"rune.registry.new":        true,
 	"rune.command.dispatch":    true,
 	"rune.alias.process":       true,
-	"rune.trigger.process":     true,
 	"rune.hooks.call":          true,
 }
 

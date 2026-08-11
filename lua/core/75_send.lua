@@ -142,7 +142,7 @@ end, { priority = 100 })
 
 -- Register output handler
 rune.hooks.on("output", function(line)
-    local modified, show = rune.trigger.process(line, "output")
+    local modified, show = rune.trigger._process_output(line)
     if not show then
         return false
     end
@@ -151,8 +151,8 @@ end, { priority = 100 })
 
 -- Prompt triggers are explicitly opt-in because unfinished snapshots may be
 -- ordinary output split across socket reads and can be delivered repeatedly.
-rune.hooks.on("prompt_update", function(line, prompt_confirmed)
-    local modified, show = rune.trigger.process(line, "prompt", prompt_confirmed)
+rune.hooks.on("prompt", function(line, confirmed)
+    local modified, show = rune.trigger._process_prompt(line, confirmed)
     if not show then
         return false
     end

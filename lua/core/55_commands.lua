@@ -289,7 +289,7 @@ rune.command.add("test", function(args)
 
     rune.echo("[Test Input] " .. args)
 
-    local modified, show = rune.trigger.process(rune.line.new(args), "output")
+    local modified, show = rune.trigger._process_output(rune.line.new(args))
     if show and modified ~= "" then
         rune.echo("[Test Output] " .. modified)
     else

@@ -1,5 +1,5 @@
 {
-  "description": "Regression: an unfinished socket tail between wrapped tell lines is only a display preview. It must not end the multiline trigger before the rest of the tell arrives.",
+  "description": "Regression: a socket-read boundary alone must not end a wrapped tell span. If a game command deliberately ends the unfinished tail, its visible text is committed instead of silently discarded.",
   "scenarios": [
     {
       "name": "a fragmented wrapped tell reaches its multiline trigger in full",
@@ -21,6 +21,34 @@
         {
           "expect_printed": "E2E-TELL=[A long example starts and continues onto the final physical line FINAL]"
         }
+      ]
+    },
+    {
+      "name": "a game send commits an unfinished tail instead of silently dropping it",
+      "issue": "https://github.com/mmcdole/rune/issues/103",
+      "init_lua": [
+        "local save_scheduled = false",
+        "rune.hooks.on('prompt', function(line, confirmed)",
+        "  if not confirmed and not save_scheduled and line:clean() == 'E2E-FIRST-FRAGMENT' then",
+        "    save_scheduled = true",
+        "    rune.timer.after(0.01, 'save')",
+        "  end",
+        "end)"
+      ],
+      "steps": [
+        { "connect": true },
+        {
+          "server_bytes": [69, 50, 69, 45, 70, 73, 82, 83, 84, 45, 70, 82, 65, 71, 77, 69, 78, 84],
+          "note": "an ordinary line happens to stop at a socket-read boundary"
+        },
+        { "expect_prompt": "E2E-FIRST-FRAGMENT" },
+        { "expect_sent": "save", "note": "every game send ends the active prompt-area record" },
+        {
+          "expect_printed": "E2E-FIRST-FRAGMENT",
+          "note": "the accepted split remains visible instead of being silently discarded"
+        },
+        { "server_line": "-E2E-SECOND-FRAGMENT" },
+        { "expect_printed": "-E2E-SECOND-FRAGMENT" }
       ]
     }
   ]

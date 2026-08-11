@@ -43,7 +43,7 @@ func serverLine(s *Session, text string) {
 }
 
 func serverPartial(s *Session, text string) {
-	s.handleNetworkOutput(network.Output{Kind: network.OutputPartial, Payload: text, PartialEpoch: 1})
+	s.handleNetworkOutput(network.Output{Kind: network.OutputPartial, Payload: text})
 }
 
 func serverPrompt(s *Session, text string) {
@@ -51,7 +51,6 @@ func serverPrompt(s *Session, text string) {
 		Kind:             network.OutputPrompt,
 		Payload:          text,
 		PromptTerminator: network.PromptTerminatorGA,
-		PartialEpoch:     1,
 	})
 }
 
@@ -69,10 +68,10 @@ func contains(list []string, substr string) bool {
 // suite in test/e2e/scenarios/. The tests here assert synchronous internals
 // the scenario vocabulary cannot express.
 
-// Prompt-area text must be committed to scrollback exactly once, when input is
-// submitted while it is displayed. New snapshots replace the overlay,
-// and a completed server line clears it without committing it.
-func TestPromptCommitOrdering(t *testing.T) {
+// Prompt-area text is committed to scrollback exactly once when an outbound
+// game-text line is accepted by the network writer. Submitting input alone is not that
+// boundary: a local command may consume the submission without sending.
+func TestPromptOverlayCommitOrdering(t *testing.T) {
 	s, net, uiMock := newTestSession(t)
 	net.connected = true
 
@@ -94,8 +93,18 @@ func TestPromptCommitOrdering(t *testing.T) {
 		t.Fatalf("superseded prompt snapshot committed to scrollback: %v", printed)
 	}
 
-	// Submitting input commits only the latest pending prompt before processing.
+	// Submitting input does not commit the overlay by itself.
 	userInput(s, "north")
+	if printed := uiMock.drainPrinted(); len(printed) != 0 {
+		t.Fatalf("submission committed prompt before network send: %v", printed)
+	}
+	if prompts := uiMock.drainPrompts(); len(prompts) != 0 {
+		t.Fatalf("submission repainted prompt before network send: %v", prompts)
+	}
+
+	// The network writer publishes the actual game-send boundary. Only the
+	// latest snapshot is committed.
+	s.handleNetworkOutput(network.Output{Kind: network.OutputSendBoundary})
 	printed := uiMock.drainPrinted()
 	promptCount := 0
 	for _, line := range printed {
@@ -132,6 +141,34 @@ func TestConfirmedPromptCommitsBeforeFollowingLine(t *testing.T) {
 	printed := uiMock.drainPrinted()
 	if len(printed) != 2 || printed[0] != "HP:100>" || printed[1] != "A bell rings." {
 		t.Fatalf("confirmed prompt and following line out of order: %v", printed)
+	}
+}
+
+func TestConfirmedPromptFlushesOpenSpan(t *testing.T) {
+	s, _, uiMock := newTestSession(t)
+
+	if err := s.engine.DoString("open span", `
+		fired = 0
+		rune.trigger.starts("Story:", function()
+			fired = fired + 1
+		end, { span = { to = "NEVER", max = 8 } })
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	serverLine(s, "Story: unfinished")
+	uiMock.drainPrinted()
+	uiMock.drainPrompts()
+	serverPrompt(s, "HP:100>")
+
+	if err := s.engine.DoString("assert", `assert(fired == 1, "confirmed prompt did not flush span")`); err != nil {
+		t.Fatal(err)
+	}
+	if printed := uiMock.drainPrinted(); len(printed) != 0 {
+		t.Fatalf("confirmed prompt committed before supersession: %q", printed)
+	}
+	if prompts := uiMock.drainPrompts(); len(prompts) != 1 || prompts[0] != "HP:100>" {
+		t.Fatalf("confirmed prompt did not remain in overlay: %q", prompts)
 	}
 }
 
@@ -187,8 +224,15 @@ func TestDisconnectDiscardsOpenSpans(t *testing.T) {
 
 	serverLine(s, "Old session: unfinished")
 	uiMock.drainPrinted()
+	serverPartial(s, "Username:")
+	uiMock.drainPrompts()
 	s.Disconnect()
-	uiMock.drainPrinted()
+	if contains(uiMock.drainPrinted(), "Username:") {
+		t.Fatal("disconnect committed stale prompt overlay")
+	}
+	if prompts := uiMock.drainPrompts(); len(prompts) == 0 || prompts[len(prompts)-1] != "" {
+		t.Fatalf("disconnect did not clear prompt overlay: %q", prompts)
+	}
 
 	serverLine(s, "New session output")
 	if printed := uiMock.drainPrinted(); !contains(printed, "New session output") {
@@ -199,13 +243,47 @@ func TestDisconnectDiscardsOpenSpans(t *testing.T) {
 	}
 }
 
+func TestConnectDiscardsOpenSpansAndPromptOverlay(t *testing.T) {
+	s, _, uiMock := newTestSession(t)
+
+	if err := s.engine.DoString("open old connection span", `
+		fired = 0
+		rune.trigger.starts("Old session:", function()
+			fired = fired + 1
+		end, { gag = true, span = { to = "NEVER", max = 8 } })
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	serverLine(s, "Old session: unfinished")
+	uiMock.drainPrinted()
+	serverPartial(s, "Username:")
+	uiMock.drainPrompts()
+
+	s.Connect("example.test:4000")
+	if contains(uiMock.drainPrinted(), "Username:") {
+		t.Fatal("connect committed stale prompt overlay")
+	}
+	if prompts := uiMock.drainPrompts(); len(prompts) == 0 || prompts[len(prompts)-1] != "" {
+		t.Fatalf("connect did not clear prompt overlay: %q", prompts)
+	}
+
+	serverLine(s, "New session output")
+	if err := s.engine.DoString("assert", `assert(fired == 0, "connect fired discarded span")`); err != nil {
+		t.Fatal(err)
+	}
+	if printed := uiMock.drainPrinted(); !contains(printed, "New session output") {
+		t.Fatalf("discarded span consumed new connection output: %q", printed)
+	}
+}
+
 func TestSessionRoutesPartialAndConfirmedPromptUpdates(t *testing.T) {
 	s, _, _ := newTestSession(t)
 
 	if err := s.engine.DoString("observe prompt updates", `
 		confirmations = {}
-		rune.hooks.on("prompt_update", function(line, prompt_confirmed)
-			confirmations[#confirmations + 1] = prompt_confirmed
+		rune.hooks.on("prompt", function(line, confirmed)
+			confirmations[#confirmations + 1] = confirmed
 		end, { priority = 10 })
 	`); err != nil {
 		t.Fatal(err)
@@ -222,37 +300,52 @@ func TestSessionRoutesPartialAndConfirmedPromptUpdates(t *testing.T) {
 	}
 }
 
-func TestSendBoundaryClearsOnlyItsPromptEpoch(t *testing.T) {
+func TestSendBoundaryCommitsActivePartialAndFlushesSpan(t *testing.T) {
 	s, _, uiMock := newTestSession(t)
 
-	s.handleNetworkOutput(network.Output{
-		Kind: network.OutputPartial, Payload: "Username:", PartialEpoch: 7,
-	})
-	uiMock.drainPrompts()
-	s.handleNetworkOutput(network.Output{
-		Kind: network.OutputSendBoundary, PartialEpoch: 7,
-	})
-	if s.promptActive || s.lastPrompt != "" {
-		t.Fatalf("matching send boundary left prompt active: active=%v text=%q",
-			s.promptActive, s.lastPrompt)
-	}
-	if prompts := uiMock.drainPrompts(); len(prompts) != 1 || prompts[0] != "" {
-		t.Fatalf("matching send boundary did not clear overlay: %q", prompts)
+	if err := s.engine.DoString("open span", `
+		fired = 0
+		rune.trigger.starts("Story:", function()
+			fired = fired + 1
+		end, { span = { to = "NEVER", max = 8 } })
+	`); err != nil {
+		t.Fatal(err)
 	}
 
-	s.handleNetworkOutput(network.Output{
-		Kind: network.OutputPartial, Payload: "Password:", PartialEpoch: 8,
-	})
+	serverLine(s, "Story: unfinished")
+	uiMock.drainPrinted()
+	serverPartial(s, "Tundra tells you: meet me at the")
 	uiMock.drainPrompts()
-	s.handleNetworkOutput(network.Output{
-		Kind: network.OutputSendBoundary, PartialEpoch: 7,
-	})
-	if !s.promptActive || s.lastPrompt != "Password:" {
-		t.Fatalf("old send boundary cleared newer prompt: active=%v text=%q",
-			s.promptActive, s.lastPrompt)
+
+	s.handleNetworkOutput(network.Output{Kind: network.OutputSendBoundary})
+
+	if printed := uiMock.drainPrinted(); len(printed) != 1 || printed[0] != "Tundra tells you: meet me at the" {
+		t.Fatalf("send boundary did not commit pending text: %q", printed)
 	}
-	if prompts := uiMock.drainPrompts(); len(prompts) != 0 {
-		t.Fatalf("old send boundary repainted newer overlay: %q", prompts)
+	if prompts := uiMock.drainPrompts(); len(prompts) != 1 || prompts[0] != "" {
+		t.Fatalf("send boundary did not clear overlay: %q", prompts)
+	}
+	if err := s.engine.DoString("assert", `assert(fired == 1, "send boundary did not flush span")`); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOrderedSendBoundariesCommitEachActiveOverlay(t *testing.T) {
+	s, _, uiMock := newTestSession(t)
+
+	serverPartial(s, "Username:")
+	uiMock.drainPrompts()
+	s.handleNetworkOutput(network.Output{Kind: network.OutputSendBoundary})
+
+	// A fast server response may arrive before the next queued command is
+	// written. FIFO network events put that response between the two boundaries.
+	serverPartial(s, "Password:")
+	uiMock.drainPrompts()
+	s.handleNetworkOutput(network.Output{Kind: network.OutputSendBoundary})
+
+	if printed := uiMock.drainPrinted(); len(printed) != 2 ||
+		printed[0] != "Username:" || printed[1] != "Password:" {
+		t.Fatalf("ordered send boundaries committed %q", printed)
 	}
 }
 
@@ -271,9 +364,7 @@ func TestSendBoundaryWithoutPromptDoesNotFlushOpenSpan(t *testing.T) {
 	}
 
 	serverLine(s, "Story: unfinished")
-	s.handleNetworkOutput(network.Output{
-		Kind: network.OutputSendBoundary, PartialEpoch: 1,
-	})
+	s.handleNetworkOutput(network.Output{Kind: network.OutputSendBoundary})
 	if err := s.engine.DoString("assert", `assert(fired == 0, "unrelated send flushed span")`); err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +379,7 @@ func TestSendBoundaryWithoutPromptDoesNotFlushOpenSpan(t *testing.T) {
 	}
 }
 
-func TestSubmissionFlushesSpanAfterGaggedPartial(t *testing.T) {
+func TestSendBoundaryClosesGaggedPartialWithoutVisualLeak(t *testing.T) {
 	s, net, uiMock := newTestSession(t)
 	net.connected = true
 
@@ -308,12 +399,13 @@ func TestSubmissionFlushesSpanAfterGaggedPartial(t *testing.T) {
 	if prompts := uiMock.drainPrompts(); len(prompts) == 0 || prompts[len(prompts)-1] != "" {
 		t.Fatalf("gagged partial should leave an empty overlay, got %q", prompts)
 	}
-	if !s.promptActive {
-		t.Fatal("gagged partial lost its active boundary state")
+	userInput(s, "secret")
+	if err := s.engine.DoString("assert", `assert(fired == 0, "submission flushed span before network send")`); err != nil {
+		t.Fatal(err)
 	}
 
-	userInput(s, "secret")
-	if err := s.engine.DoString("assert", `assert(fired == 1, "submission did not flush span")`); err != nil {
+	s.handleNetworkOutput(network.Output{Kind: network.OutputSendBoundary})
+	if err := s.engine.DoString("assert", `assert(fired == 1, "send boundary did not flush span")`); err != nil {
 		t.Fatal(err)
 	}
 	if contains(uiMock.drainPrinted(), "Password:") {
@@ -321,23 +413,104 @@ func TestSubmissionFlushesSpanAfterGaggedPartial(t *testing.T) {
 	}
 }
 
-func TestSubmissionFlushesSpanWithoutPromptOverlay(t *testing.T) {
-	s, net, _ := newTestSession(t)
+func TestLocalSubmissionLeavesPromptOverlayAndSpanOpen(t *testing.T) {
+	s, net, uiMock := newTestSession(t)
 	net.connected = true
 
 	if err := s.engine.DoString("open span", `
 		fired = 0
-		rune.trigger.starts("Story:", function()
+		got_text = nil
+		rune.trigger.starts("Story:", function(matches, ctx)
 			fired = fired + 1
-		end, { span = { to = "NEVER", max = 8 } })
+			got_text = ctx.text
+		end, { span = { to = "END$", max = 8 } })
 	`); err != nil {
 		t.Fatal(err)
 	}
 
 	serverLine(s, "Story: unfinished")
+	uiMock.drainPrinted()
+	serverPartial(s, "Username:")
+	uiMock.drainPrompts()
+
 	userInput(s, "/help")
-	if err := s.engine.DoString("assert", `assert(fired == 1, "submission did not flush span")`); err != nil {
+	if got := uiMock.drainEchoDispositions(); len(got) != 1 || got[0] {
+		t.Fatalf("local submission echo disposition = %v, want [false]", got)
+	}
+	if sent := net.drainSent(); len(sent) != 0 {
+		t.Fatalf("local command unexpectedly reached network: %q", sent)
+	}
+	if contains(uiMock.drainPrinted(), "Username:") {
+		t.Fatal("local command committed prompt overlay")
+	}
+	if prompts := uiMock.drainPrompts(); len(prompts) != 0 {
+		t.Fatalf("local command repainted prompt overlay: %q", prompts)
+	}
+	if err := s.engine.DoString("assert", `assert(fired == 0, "local command flushed span")`); err != nil {
 		t.Fatal(err)
+	}
+
+	serverLine(s, "continuation END")
+	if err := s.engine.DoString("assert", `
+		assert(fired == 1, "span did not finish after local command")
+		assert(got_text == "Story: unfinished continuation END",
+			"local command truncated span: " .. tostring(got_text))
+	`); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSuccessfulInputSendWaitsForPromptCommitToReleaseEcho(t *testing.T) {
+	s, net, uiMock := newTestSession(t)
+	net.connected = true
+
+	serverPartial(s, "HP>")
+	uiMock.drainPrompts()
+	userInput(s, "look")
+
+	if sent := net.drainSent(); len(sent) != 1 || sent[0] != "look" {
+		t.Fatalf("input sent %q, want [look]", sent)
+	}
+	if got := uiMock.drainEchoDispositions(); len(got) != 1 || !got[0] {
+		t.Fatalf("successful input echo disposition = %v, want [true]", got)
+	}
+}
+
+func TestSuccessfulEchoHookSendWaitsForPromptCommitToReleaseEcho(t *testing.T) {
+	s, net, uiMock := newTestSession(t)
+	net.connected = true
+
+	if err := s.engine.DoString("echo hook send", `
+		rune.hooks.on("echo", function(text)
+			rune.send_raw("from-echo-hook")
+			return text
+		end, { priority = 1 })
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	serverPartial(s, "HP>")
+	uiMock.drainPrompts()
+	userInput(s, "/help")
+
+	if sent := net.drainSent(); len(sent) != 1 || sent[0] != "from-echo-hook" {
+		t.Fatalf("echo hook sent %q, want [from-echo-hook]", sent)
+	}
+	if got := uiMock.drainEchoDispositions(); len(got) != 1 || !got[0] {
+		t.Fatalf("successful echo-hook disposition = %v, want [true]", got)
+	}
+}
+
+func TestFailedSendReleasesEchoAtSubmissionEnd(t *testing.T) {
+	s, net, uiMock := newTestSession(t)
+	net.connected = false
+
+	serverPartial(s, "HP>")
+	uiMock.drainPrompts()
+	userInput(s, "look")
+
+	if got := uiMock.drainEchoDispositions(); len(got) != 1 || got[0] {
+		t.Fatalf("failed send echo disposition = %v, want [false]", got)
 	}
 }
 

@@ -18,8 +18,20 @@ type PrintLineMsg string
 // text may contain newlines.
 type EchoLineMsg string
 
-// PromptMsg represents a server prompt (partial line without newline).
+// EchoDispositionMsg finishes one submission's local echo. WaitForPrompt holds
+// deferred echo/output until PromptCommitMsg; false releases it unless an
+// earlier submission is still waiting for that commit.
+type EchoDispositionMsg struct {
+	WaitForPrompt bool
+}
+
+// PromptMsg replaces the live prompt-area text below scrollback. The text may
+// be a server prompt or an unfinished fragment of ordinary output.
 type PromptMsg string
+
+// PromptCommitMsg atomically moves prompt-area text to scrollback, clears the
+// live overlay, and releases any local echoes waiting behind that text.
+type PromptCommitMsg string
 
 // PaneWriteMsg appends a line to a named pane.
 type PaneWriteMsg struct {

@@ -11,11 +11,7 @@ import (
 // the session loop keeps draining while the dial is in flight.
 func (s *Session) Connect(addr string) {
 	s.engine.DiscardSpans()
-	s.lastPrompt = ""
-	s.promptActive = false
-	s.promptConfirmed = false
-	s.promptEpoch = 0
-	s.ui.SetPrompt("")
+	s.prompt.discard()
 	s.engine.CallHook("connecting", addr)
 	go func() {
 		// Create a timeout context for the dial attempt.
@@ -49,11 +45,7 @@ func (s *Session) Disconnect() {
 	s.engine.DiscardSpans()
 	s.clientState.Connected = false
 	s.clientState.Address = ""
-	s.lastPrompt = ""
-	s.promptActive = false
-	s.promptConfirmed = false
-	s.promptEpoch = 0
-	s.ui.SetPrompt("")
+	s.prompt.discard()
 	s.engine.UpdateState(s.clientState)
 	s.engine.CallHook("disconnected")
 	s.pushBarUpdates()
@@ -61,7 +53,11 @@ func (s *Session) Disconnect() {
 
 // Send implements lua.Host.
 func (s *Session) Send(data string) error {
-	return s.net.Send(data)
+	err := s.net.Send(data)
+	if err == nil && s.trackingSubmissionSend {
+		s.submissionSendSucceeded = true
+	}
+	return err
 }
 
 // GMCPSend implements lua.Host.

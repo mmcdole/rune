@@ -20,8 +20,9 @@ Rune is a MUD client: Go is the kernel (I/O, memory, concurrency), Lua is user s
 ```
 User Submission -> UI input chan -> Session -> rune.hooks.call("input", text, {mode}) -> network
 Server Line -> net output   -> Session -> rune.hooks.call("output") -> UI print
-Server Partial -> net output -> Session -> rune.hooks.call("prompt_update", line, false) -> UI prompt overlay
-Server GA/EOR Prompt -> net output -> Session -> rune.hooks.call("prompt_update", line, true) -> UI prompt overlay
+Server Partial -> net output -> Session -> rune.hooks.call("prompt", line, false) -> UI prompt overlay
+Server GA/EOR Prompt -> net output -> Session -> rune.hooks.call("prompt", line, true) -> UI prompt overlay
+Game-text line -> network writer -> ordered OutputSendBoundary -> Session commits active prompt-area record / flushes spans
 Timer fire -> timer events  -> Session -> rune.timer._fire(id)
 Key bind -> UI outbound     -> Session -> rune.binds._dispatch(key)
 Bar tick (250ms)            -> Session -> rune.bars._render_all(width) -> UI bars
@@ -48,7 +49,7 @@ These rules keep the boundary consistent; follow them when adding APIs:
 
 ### Hook Event Semantics
 
-Data-flow: `"output"`, `"prompt_update"`, `"echo"` support returning `false` to gag or a string to rewrite (rewrites CHAIN to subsequent handlers; the core `"echo"` handler adds the `"> "` styling). `prompt_update` always receives `(line, prompt_confirmed)`: false is an ambiguous unfinished tail, true is a GA/EOR-terminated prompt. Every `"input"` handler receives `(text, context)` exactly once per submission, with read-only `context.mode` always `"command"` or `"verbatim"`; verbatim `text` may contain LF. Input supports only `false` (consume) - string returns are ignored, and the core input handler at priority 100 always consumes, so custom input handlers must register below 100.
+Data-flow: `"output"`, `"prompt"`, `"echo"` support returning `false` to gag or a string to rewrite (rewrites CHAIN to subsequent handlers; the core `"echo"` handler adds the `"> "` styling). `prompt` always receives `(line, confirmed)`: false is an ambiguous unfinished tail, true is a GA/EOR-terminated prompt. Every `"input"` handler receives `(text, context)` exactly once per submission, with read-only `context.mode` always `"command"` or `"verbatim"`; verbatim `text` may contain LF. Input supports only `false` (consume) - string returns are ignored, and the core input handler at priority 100 always consumes, so custom input handlers must register below 100.
 
 ## Lua API
 

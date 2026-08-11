@@ -8,8 +8,8 @@ const (
 	OutputPartial                   // Current unfinished text tail (not consumed)
 	OutputPrompt                    // Text tail terminated by Telnet GA/EOR
 	// OutputSendBoundary is an internal control event emitted before every
-	// outbound command line. It ends PartialEpoch; server text received after
-	// the write belongs to the next epoch.
+	// outbound command line. It marks where the unfinished accumulator was
+	// discarded; later server text is ordered behind it.
 	OutputSendBoundary
 	OutputDisconnect  // Connection closed
 	OutputGMCP        // GMCP message (Package + raw JSON Payload)
@@ -32,5 +32,4 @@ type Output struct {
 	Payload          string           // Line content, or raw JSON for GMCP (may be empty)
 	Package          string           // GMCP package name (e.g. "Char.Vitals"); GMCP only
 	PromptTerminator PromptTerminator // OutputPrompt only
-	PartialEpoch     uint64           // OutputPartial, OutputPrompt, and OutputSendBoundary only
 }

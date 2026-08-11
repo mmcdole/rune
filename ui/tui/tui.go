@@ -66,9 +66,21 @@ func (b *BubbleTeaUI) Echo(line string) {
 	b.send(ui.EchoLineMsg(line))
 }
 
-// SetPrompt updates the active server prompt (overlay at bottom).
+// FinishEcho tells the renderer whether a submission's echo must wait for the
+// live prompt to be committed by its outbound game-text line.
+func (b *BubbleTeaUI) FinishEcho(waitForPrompt bool) {
+	b.send(ui.EchoDispositionMsg{WaitForPrompt: waitForPrompt})
+}
+
+// SetPrompt updates the live prompt-area overlay at the bottom.
 func (b *BubbleTeaUI) SetPrompt(text string) {
 	b.send(ui.PromptMsg(text))
+}
+
+// CommitPrompt atomically moves prompt-area text to scrollback ahead of any
+// local echo waiting for that prompt to be answered.
+func (b *BubbleTeaUI) CommitPrompt(text string) {
+	b.send(ui.PromptCommitMsg(text))
 }
 
 // Input returns channel for user input.

@@ -110,17 +110,18 @@ func (m *mockNetwork) drainSent() []string {
 
 // mockUI implements ui.UI, capturing display calls.
 type mockUI struct {
-	mu          sync.Mutex
-	printed     []string
-	echoed      []string
-	prompts     []string // every SetPrompt call, including clears
-	inputSet    []string
-	inputModes  []input.Submission
-	inputCursor []int
-	bindsPushed map[string]bool // last UpdateBinds payload
-	input       chan input.Submission
-	outbound    chan ui.UIEvent
-	done        chan struct{}
+	mu               sync.Mutex
+	printed          []string
+	echoed           []string
+	echoDispositions []bool
+	prompts          []string // every SetPrompt call, including clears
+	inputSet         []string
+	inputModes       []input.Submission
+	inputCursor      []int
+	bindsPushed      map[string]bool // last UpdateBinds payload
+	input            chan input.Submission
+	outbound         chan ui.UIEvent
+	done             chan struct{}
 }
 
 var _ ui.UI = (*mockUI)(nil)
@@ -160,6 +161,21 @@ func (m *mockUI) SetPrompt(text string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.prompts = append(m.prompts, text)
+}
+
+func (m *mockUI) CommitPrompt(text string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if text != "" {
+		m.printed = append(m.printed, text)
+	}
+	m.prompts = append(m.prompts, "")
+}
+
+func (m *mockUI) FinishEcho(waitForPrompt bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.echoDispositions = append(m.echoDispositions, waitForPrompt)
 }
 
 func (m *mockUI) SetInput(text string) {
@@ -232,4 +248,12 @@ func (m *mockUI) drainPrompts() []string {
 	prompts := m.prompts
 	m.prompts = nil
 	return prompts
+}
+
+func (m *mockUI) drainEchoDispositions() []bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	dispositions := m.echoDispositions
+	m.echoDispositions = nil
+	return dispositions
 }

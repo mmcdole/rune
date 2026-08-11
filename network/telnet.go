@@ -740,10 +740,10 @@ func (o *OutputBuffer) ConsumePrompt() (text string, completedLine bool) {
 	return text, completedLine
 }
 
-// DiscardPartial discards the unfinished tail. A server cannot respond to the
-// submitted line until after the caller writes it, so later response text
-// cannot be part of this tail. Without a wire terminator there is no way to
-// distinguish a real prompt from an ordinary line split at this boundary.
+// DiscardPartial discards the unfinished tail at an outbound game-line
+// boundary. Later server text starts a new accumulator. Without a wire
+// terminator there is no way to distinguish a real prompt from an ordinary
+// line split at this boundary.
 func (o *OutputBuffer) DiscardPartial() {
 	o.mu.Lock()
 	defer o.mu.Unlock()

@@ -60,7 +60,7 @@ end)
 A string action is sent as a command. A function action receives
 `(matches, ctx)` — `ctx.line` is the [line object](/reference/api/state-lines/)
 with `:raw()` and `:clean()`. Prompt-trigger actions also receive
-`ctx.prompt_confirmed`, a boolean. The return value controls the line:
+`ctx.confirmed`, a boolean. The return value controls the line:
 
 | Return | Effect |
 |---|---|
@@ -104,13 +104,15 @@ prompt-area updates. A prompt trigger sees unfinished snapshots and
 GA/EOR-confirmed prompts, but not completed lines. One presentation-only
 exception prevents hidden output from flashing while incomplete: Rune checks
 declarative `gag = true` output patterns read-only against unconfirmed updates.
-It does not run their actions, consume `once`, or change span state.
+It does not run their actions, consume `once`, or change span state. GA/EOR
+confirmation ends this provisional projection; add a prompt trigger with
+`gag = true` when the confirmed prompt must also stay hidden.
 
 Unfinished snapshots are cumulative in the common case and can repeat as
-text grows. The same text can also run twice—first unconfirmed, then confirmed—
+text grows. The same text can also run twice, first unconfirmed and then confirmed,
 if GA/EOR arrives in a later socket read. A prompt action should therefore be
 idempotent, or use `once` for one-shot work such as login.
-`ctx.prompt_confirmed` is `false` for ambiguous unfinished text and `true` for
+`ctx.confirmed` is `false` for ambiguous unfinished text and `true` for
 GA/EOR. Use `confirmed_only = true` for Mudlet-style, protocol-confirmed
 prompt matching:
 
@@ -119,12 +121,15 @@ rune.trigger.regex("^HP:(\\d+)/(\\d+)>", update_vitals,
     { on = "prompt", confirmed_only = true })
 ```
 
-Before an outbound line is written, Rune discards the current unfinished
-accumulator. This cleanly separates no-GA login prompts such as `Username:`
-and `Password:`. The unavoidable trade-off is that sending during an ordinary
-line split makes the later completed line start after that send. A direct Lua
-send clears the matching prompt overlay without adding it to scrollback; a
-user submission commits the overlay first.
+Every outbound game-text line commits any active prompt-area record and discards
+the current unfinished accumulator. The network orders that transition ahead
+of later server output. This cleanly separates no-GA login prompts such as
+`Username:` and `Password:`. The rule is identical for typed commands and
+commands sent by aliases, triggers, or timers. The unavoidable trade-off is
+that sending during an ordinary line split commits the visible first fragment
+and makes the later completed line start after that send. A send with no active
+record does not affect span state. Local commands that send nothing and raw
+protocol traffic such as GMCP create no boundary.
 
 ## Multi-line triggers
 
@@ -165,15 +170,21 @@ Behavior:
   sees each line as this trigger would have — including rewrites from
   higher-priority triggers.
 - Partial prompt-area updates never open, extend, or end spans. A nonempty
-  tail terminated by GA/EOR, any user submission, or an outbound command that
-  closes an active prompt-overlay epoch ends open spans. The outbound case
-  includes commands sent by Lua, so no-GA login automation creates the same
-  boundary as typing the response; an unrelated timer or output trigger send
-  does not truncate a span.
+  tail terminated by GA/EOR ends open spans. An outbound game-text line also
+  ends them when it closes an active prompt-area record. This rule is uniform:
+  typed commands and commands sent by aliases, prompt actions, output actions,
+  or timers behave alike. A send with no active prompt-area record does not
+  affect an open span. Local commands that send nothing and raw protocol
+  traffic such as GMCP are not boundaries.
+  If a command is sent while an ordinary line is split across socket reads,
+  Rune commits the visible first fragment and treats the later suffix as a
+  separate line. The span may therefore finish at that send boundary. This is
+  the documented trade-off for immediate partial display without a timer or
+  configured prompt pattern.
   A GA/EOR marker with no current tail produces no text event and does not
   flush spans. Connecting, disconnecting, and `/reload` discard open spans
   without firing them.
-- A confirmed prompt flushes spans before `prompt_update` hooks and prompt
+- A confirmed prompt flushes spans before `prompt` hooks and prompt
   triggers run. This boundary transition is not controlled by hook priority.
 - One open span per trigger: if the pattern matches again mid-span,
   the previous message fires and a new span starts.

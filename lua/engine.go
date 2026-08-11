@@ -336,7 +336,7 @@ func (e *Engine) OnPartial(line text.Line) string {
 }
 
 func (e *Engine) onPromptUpdate(line text.Line, confirmed bool) string {
-	results, found, err := e.callHooks(2, "prompt_update",
+	results, found, err := e.callHooks(2, "prompt",
 		script.Obj{Type: "line", Payload: &line}, confirmed)
 	if !found {
 		e.reportHooksBroken()
@@ -355,8 +355,8 @@ func (e *Engine) onPromptUpdate(line text.Line, confirmed bool) string {
 }
 
 // FlushSpans closes incomplete multiline trigger records at an explicit
-// boundary. Confirmed prompts, user submission, and outbound command writes
-// call it; arbitrary socket-read boundaries must never reach this operation.
+// boundary. Confirmed prompts and outbound game lines that close an active
+// prompt-area record call it; socket-read boundaries never do.
 func (e *Engine) FlushSpans() {
 	if err := e.guard(func() error {
 		_, _, err := e.vm.CallModule("rune.trigger", "_flush_spans", 0)

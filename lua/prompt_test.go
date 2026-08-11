@@ -7,16 +7,16 @@ import (
 	"github.com/mmcdole/rune/text"
 )
 
-func TestPromptUpdateHookCarriesExplicitConfirmation(t *testing.T) {
+func TestPromptHookCarriesExplicitConfirmation(t *testing.T) {
 	engine, _, cleanup := setupTest(t)
 	defer cleanup()
 
 	if err := engine.DoString("setup", `
 		updates = {}
-		rune.hooks.on("prompt_update", function(line, prompt_confirmed)
+		rune.hooks.on("prompt", function(line, confirmed)
 			updates[#updates + 1] = {
 				text = line:clean(),
-				confirmed = prompt_confirmed,
+				confirmed = confirmed,
 			}
 			return line:clean() .. " [styled]"
 		end, { priority = 10 })
@@ -40,22 +40,7 @@ func TestPromptUpdateHookCarriesExplicitConfirmation(t *testing.T) {
 	`)
 }
 
-func TestPromptHookRenameFailsLoudly(t *testing.T) {
-	engine, _, cleanup := setupTest(t)
-	defer cleanup()
-
-	err := engine.DoString("old hook", `rune.hooks.on("prompt", function() end)`)
-	if err == nil || !strings.Contains(err.Error(), `renamed to "prompt_update"`) {
-		t.Fatalf("old prompt hook should report the migration, got %v", err)
-	}
-
-	err = engine.DoString("old hook call", `rune.hooks.call("prompt", rune.line.new("HP>"))`)
-	if err == nil || !strings.Contains(err.Error(), `renamed to "prompt_update"`) {
-		t.Fatalf("old prompt hook call should report the migration, got %v", err)
-	}
-}
-
-func TestConfirmedPromptFlushesSpansBeforePromptUpdateHooks(t *testing.T) {
+func TestConfirmedPromptFlushesSpansBeforePromptHooks(t *testing.T) {
 	engine, _, cleanup := setupTest(t)
 	defer cleanup()
 
@@ -64,7 +49,7 @@ func TestConfirmedPromptFlushesSpansBeforePromptUpdateHooks(t *testing.T) {
 		rune.trigger.starts("Story:", function()
 			events[#events + 1] = "span"
 		end, { span = { to = "NEVER", max = 8 } })
-		rune.hooks.on("prompt_update", function()
+		rune.hooks.on("prompt", function()
 			events[#events + 1] = "hook"
 		end, { priority = 1 })
 	`); err != nil {
@@ -80,12 +65,12 @@ func TestConfirmedPromptFlushesSpansBeforePromptUpdateHooks(t *testing.T) {
 	`)
 }
 
-func TestPromptUpdateHookCanGagOverlayText(t *testing.T) {
+func TestPromptHookCanGagOverlayText(t *testing.T) {
 	engine, _, cleanup := setupTest(t)
 	defer cleanup()
 
 	if err := engine.DoString("setup", `
-		rune.hooks.on("prompt_update", function(line)
+		rune.hooks.on("prompt", function(line)
 			if line:clean() == "Password:" then return false end
 		end, { priority = 10 })
 	`); err != nil {
@@ -106,10 +91,10 @@ func TestTriggerChannelsAreExclusive(t *testing.T) {
 		prompt_flags = {}
 		rune.trigger.exact("Username:", function(matches, ctx)
 			output_fired = output_fired + 1
-			assert(ctx.prompt_confirmed == nil)
+			assert(ctx.confirmed == nil)
 		end)
 		rune.trigger.exact("Username:", function(matches, ctx)
-			prompt_flags[#prompt_flags + 1] = ctx.prompt_confirmed
+			prompt_flags[#prompt_flags + 1] = ctx.confirmed
 		end, { on = "prompt" })
 	`); err != nil {
 		t.Fatal(err)
@@ -135,7 +120,7 @@ func TestConfirmedOnlyPromptTrigger(t *testing.T) {
 		fired = 0
 		rune.trigger.starts("HP:", function(matches, ctx)
 			fired = fired + 1
-			assert(ctx.prompt_confirmed == true)
+			assert(ctx.confirmed == true)
 		end, { on = "prompt", confirmed_only = true })
 	`); err != nil {
 		t.Fatal(err)
@@ -218,6 +203,14 @@ func TestPartialProjectsOutputGagWithoutFiringTrigger(t *testing.T) {
 		t.Fatalf("gagged output match flashed in partial overlay as %q", got)
 	}
 	assertLua(t, engine, `assert(fired == 0, "partial fired output trigger")`)
+
+	// GA/EOR makes this a prompt record, not completed output. Output-channel
+	// gag projection is intentionally provisional; prompt-channel policy owns
+	// the confirmed record.
+	if got := engine.OnPrompt(text.NewLine("SECRET")); got != "SECRET" {
+		t.Fatalf("confirmed prompt inherited output-only gag as %q", got)
+	}
+	assertLua(t, engine, `assert(fired == 0, "confirmed prompt fired output trigger")`)
 
 	if _, show := engine.OnOutput(text.NewLine("SECRET")); show {
 		t.Fatal("completed output match should be gagged")

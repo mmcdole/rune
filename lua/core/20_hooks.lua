@@ -16,7 +16,7 @@
 -- Events (data-flow):
 --   "input"        -- User input: (text, context); return false to consume
 --   "output"       -- Server output line object (false gags, string rewrites)
---   "prompt_update"-- Live prompt-area text: (line, prompt_confirmed);
+--   "prompt"       -- Live prompt-area text: (line, confirmed);
 --                     false means the unfinished text is ambiguous, true
 --                     means the server ended it with GA/EOR
 --                     (false gags, string rewrites)
@@ -81,9 +81,6 @@ rune.hooks = {}
 -- Attach a handler to an event
 -- Returns: Handle with :remove(), :enable(), :disable(), :name(), :group()
 function rune.hooks.on(event, handler, opts)
-    if event == "prompt" then
-        error('hook event "prompt" was renamed to "prompt_update"', 2)
-    end
     return registry:add({
         event = event,
         handler = handler,
@@ -146,9 +143,9 @@ local function input_context(mode)
 end
 
 -- Call all handlers for an event
--- For output/prompt_update: chains modifications (each handler sees the
+-- For output/prompt: chains modifications (each handler sees the
 --   previous handler's rewrite), false gags
--- For echo: like output/prompt_update, but the argument is a plain string
+-- For echo: like output/prompt, but the argument is a plain string
 --   (the text the user typed), not a line object
 -- For input: false stops processing
 -- For sys events: all handlers run (notifications)
@@ -158,13 +155,10 @@ end
 --   return string   -> Replace the line for subsequent handlers
 --   return nil      -> Pass through unmodified
 function rune.hooks.call(event, ...)
-    if event == "prompt" then
-        error('hook event "prompt" was renamed to "prompt_update"', 2)
-    end
     local live = by_event[event]
     if not live or #live == 0 then
         -- No handlers registered
-        if event == "output" or event == "prompt_update" then
+        if event == "output" or event == "prompt" then
             local line = select(1, ...)
             return line:raw(), true
         elseif event == "echo" then
@@ -183,22 +177,22 @@ function rune.hooks.call(event, ...)
         handlers[i] = entry
     end
 
-    if event == "output" or event == "prompt_update" then
-        -- Output/prompt_update receive a Line object (:raw() and :clean()).
+    if event == "output" or event == "prompt" then
+        -- Output/prompt receive a Line object (:raw() and :clean()).
         -- True chaining: a handler returning a string replaces the line
         -- for every subsequent handler, so rewrites compose in priority
         -- order instead of last-writer-wins on the original text.
         local line = select(1, ...)
-        local prompt_confirmed = select(2, ...)
-        if event == "prompt_update" and type(prompt_confirmed) ~= "boolean" then
-            error("prompt_update requires an explicit prompt_confirmed boolean", 2)
+        local confirmed = select(2, ...)
+        if event == "prompt" and type(confirmed) ~= "boolean" then
+            error("prompt requires an explicit confirmed boolean", 2)
         end
 
         for _, entry in ipairs(handlers) do
             if registry:active(entry) then
                 local result
-                if event == "prompt_update" then
-                    result = run_handler(entry, line, prompt_confirmed)
+                if event == "prompt" then
+                    result = run_handler(entry, line, confirmed)
                 else
                     result = run_handler(entry, line)
                 end
@@ -215,7 +209,7 @@ function rune.hooks.call(event, ...)
 
     elseif event == "echo" then
         -- Echo receives the typed text as a plain string. Rewrites
-        -- chain like output/prompt_update; false hides the echo entirely.
+        -- chain like output/prompt; false hides the echo entirely.
         local text = select(1, ...)
         for _, entry in ipairs(handlers) do
             if registry:active(entry) then
