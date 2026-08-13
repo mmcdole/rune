@@ -61,14 +61,9 @@ type Model struct {
 	promptText  string
 	width       int
 	height      int
-	inputChan   chan<- input.Submission
-	outbound    chan<- ui.UIEvent
+	events      chan<- ui.UIEvent
 	initialized bool
 	pendingRows []string
-	// With a visible prompt overlay, echo and following rows wait until the
-	// submission finishes locally or a game send commits the prompt.
-	deferredRows        []string
-	waitForPromptCommit bool
 	// flushScheduled is true while a batch-window tick is outstanding.
 	// At most one tick is ever in flight: it is armed only on the
 	// idle->hot transition and re-armed only from handleTick while
@@ -77,7 +72,7 @@ type Model struct {
 }
 
 // NewModel creates a new TUI model.
-func NewModel(inputChan chan<- input.Submission, outbound chan<- ui.UIEvent) *Model {
+func NewModel(events chan<- ui.UIEvent) *Model {
 	styles := style.DefaultStyles()
 	scrollback := widget.NewScrollbackBuffer(100000)
 	viewport := widget.NewViewport(scrollback, styles)
@@ -90,11 +85,10 @@ func NewModel(inputChan chan<- input.Submission, outbound chan<- ui.UIEvent) *Mo
 		viewport:   viewport,
 		input:      input,
 		panes:      panes,
-		inputChan:  inputChan,
-		outbound:   outbound,
+		events:     events,
 		widgets:    make(map[string]widget.Widget),
 	}
-	m.inputCtl = newInputController(input, m.sendOutbound, m.sendLine, m.isBound, m.handleScrollKey, m)
+	m.inputCtl = newInputController(input, m.notifySession, m.submit, m.isBound, m.handleScrollKey, m)
 
 	// Register static widgets
 	m.widgets["input"] = input
@@ -128,7 +122,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleConfigUpdate(msg)
 
 	// Main output
-	case ui.PrintLineMsg, ui.EchoLineMsg, ui.FinishEchoMsg, ui.PromptMsg, ui.PromptCommitMsg:
+	case ui.PrintLineMsg, ui.EchoLineMsg, ui.PromptMsg, ui.PromptCommitMsg:
 		return m.handleOutput(msg)
 
 	// Pane operations
@@ -207,7 +201,7 @@ func (m *Model) handleWindowSize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	m.initialized = true
 	m.syncViewportSize()
 	scrollStateChanged := m.recenterSearchFocus()
-	m.sendOutbound(ui.WindowSizeChangedMsg{Width: msg.Width, Height: msg.Height})
+	m.notifySession(ui.WindowSizeChangedMsg{Width: msg.Width, Height: msg.Height})
 	if scrollStateChanged {
 		m.updateScrollState()
 	}
@@ -291,11 +285,6 @@ func (m *Model) syncBars(content map[string]ui.BarContent) {
 func (m *Model) handleOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case ui.PrintLineMsg:
-		if len(m.deferredRows) > 0 {
-			m.deferredRows = append(
-				m.deferredRows, splitRows(string(msg), m.width)...)
-			return m, nil
-		}
 		rows := splitRows(string(msg), m.width)
 		if m.flushScheduled {
 			// Inside a batch window: coalesce with the burst.
@@ -308,38 +297,15 @@ func (m *Model) handleOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.flushScheduled = true
 		return m, doTick()
 	case ui.EchoLineMsg:
-		if m.promptText != "" {
-			m.deferredRows = append(
-				m.deferredRows, splitRows(string(msg), m.width)...)
-			return m, nil
-		}
 		// Flush batched server lines first so the echo cannot render
 		// ahead of output that arrived before it.
 		m.flushPending()
 		m.appendMessage(string(msg))
-	case ui.FinishEchoMsg:
-		if len(m.deferredRows) == 0 {
-			break
-		}
-		if msg.QueuedLine {
-			m.waitForPromptCommit = true
-			break
-		}
-		if !m.waitForPromptCommit {
-			m.flushPending()
-			m.flushDeferredRows()
-		}
 	case ui.PromptMsg:
 		text := util.ExpandTabs(string(msg))
 		if text != m.promptText {
 			m.viewport.SetPrompt(text)
 			m.promptText = text
-		}
-		if text == "" && len(m.deferredRows) > 0 {
-			// A complete line or disconnect can clear a partial line without a
-			// PromptCommitMsg.
-			m.flushPending()
-			m.flushDeferredRows()
 		}
 	case ui.PromptCommitMsg:
 		m.flushPending()
@@ -348,18 +314,8 @@ func (m *Model) handleOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.viewport.SetPrompt("")
 		m.promptText = ""
-		m.flushDeferredRows()
 	}
 	return m, nil
-}
-
-func (m *Model) flushDeferredRows() {
-	if len(m.deferredRows) == 0 {
-		return
-	}
-	m.appendRows(m.deferredRows...)
-	m.deferredRows = nil
-	m.waitForPromptCommit = false
 }
 
 func (m *Model) handlePaneMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -436,10 +392,10 @@ func (m *Model) appendMessage(text string) {
 	m.appendRows(splitRows(text, m.width)...)
 }
 
-// sendLine offers a submitted input snapshot to the session. It rejects
+// submit offers a submitted input snapshot to the session. It rejects
 // oversized verbatim drafts or a busy engine with a visible warning rather
 // than blocking the render loop; false tells the controller to retain them.
-func (m *Model) sendLine(submission input.Submission) bool {
+func (m *Model) submit(submission input.Submission) bool {
 	if submission.Mode == input.ModeVerbatim {
 		lineCount := len(submission.PhysicalLines())
 		if len(submission.Text) > maxVerbatimBytes || lineCount > maxVerbatimLines {
@@ -447,13 +403,11 @@ func (m *Model) sendLine(submission input.Submission) bool {
 			return false
 		}
 	}
-	select {
-	case m.inputChan <- submission:
+	if m.tryPost(ui.SubmissionMsg{Submission: submission}) {
 		return true
-	default:
-		m.appendMessage(text.Red("[WARNING] Input not sent - engine lagging"))
-		return false
 	}
+	m.showWarning("Input not sent - engine lagging")
+	return false
 }
 
 const (
@@ -465,20 +419,32 @@ func (m *Model) isBound(key string) bool {
 	return m.boundKeys[key]
 }
 
-func (m *Model) sendOutbound(msg ui.UIEvent) {
-	if m.outbound == nil {
+func (m *Model) tryPost(event ui.UIEvent) bool {
+	select {
+	case m.events <- event:
+		return true
+	default:
+		return false
+	}
+}
+
+func (m *Model) notifySession(event ui.UIEvent) {
+	if m.tryPost(event) {
 		return
 	}
-	select {
-	case m.outbound <- msg:
-	default:
-		// The session is not draining UI events. Dropping is the only
-		// safe option here (blocking would deadlock the render loop),
-		// but it must never be silent: a lost InputChangedMsg desyncs
-		// completion state, a lost PickerSelectMsg strands a picker
-		// callback. Make it visible so it can be reported.
-		m.scrollback.Append(text.Red("[WARNING] UI event dropped - engine lagging"))
+	// Blocking would deadlock the render loop, but a lost event must be
+	// visible: it can desync input state or strand a picker callback.
+	m.showWarning("UI event dropped - engine lagging")
+}
+
+// showWarning appends locally without reporting another scroll-state event:
+// this path is reached because the Session event queue is already full.
+func (m *Model) showWarning(message string) {
+	rows := splitRows(text.Red("[WARNING] "+message), m.width)
+	for _, row := range rows {
+		m.scrollback.Append(row)
 	}
+	m.viewport.OnNewRows(len(rows))
 }
 
 func (m *Model) updateScrollState() {
@@ -489,7 +455,7 @@ func (m *Model) updateScrollState() {
 	if mode != widget.ModeLive {
 		modeStr = "scrolled"
 	}
-	m.sendOutbound(ui.ScrollStateChangedMsg{Mode: modeStr, NewLines: newLines})
+	m.notifySession(ui.ScrollStateChangedMsg{Mode: modeStr, NewLines: newLines})
 }
 
 // navigateMainViewport is the single path for deliberate user/script

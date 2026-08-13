@@ -1,5 +1,5 @@
 {
-  "description": "Regression: OutputBuffer.Receive (since 29cd00a) dropped bare \\r as a line delimiter - the original ExtractLines split on \\n, \\r\\n, \\n\\r AND \\r. MUDs overwrite the pending prompt line with bare \\r; the embedded \\r reached the scrollback and the next line rendered at the tab stop over stale cells (ghost columns 0-7). Reported playing VikingMUD 2026-07-08 (tail CHANGES).",
+  "description": "Regression: bare \\r must delimit server lines. MUDs use it to overwrite a pending prompt; treating it as display text leaves stale terminal cells (ghost columns 0-7). Reported playing VikingMUD 2026-07-08 (tail CHANGES).",
   "scenarios": [
     {
       "name": "bare CR is a line boundary, not an embedded control char",

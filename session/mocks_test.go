@@ -3,7 +3,9 @@ package session
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
+	"testing"
 
 	"github.com/mmcdole/rune/input"
 	"github.com/mmcdole/rune/network"
@@ -15,22 +17,17 @@ type mockNetwork struct {
 	mu          sync.Mutex
 	sent        []string
 	gmcpSent    []struct{ Package, Data string }
-	gmcpActive  bool
 	connected   bool
 	connectedTo []string // every Connect address, in order
-	connectErr  error
-	output      chan network.Output
-	localEcho   bool
-	windowW     int
-	windowH     int
+	inbound     chan network.Inbound
+	frames      [][]byte
 }
 
 var _ Network = (*mockNetwork)(nil)
 
 func newMockNetwork() *mockNetwork {
 	return &mockNetwork{
-		output:    make(chan network.Output, 64),
-		localEcho: true,
+		inbound: make(chan network.Inbound, 64),
 	}
 }
 
@@ -39,9 +36,6 @@ func (m *mockNetwork) BeginConnect(connectionID uint64) {}
 func (m *mockNetwork) Connect(ctx context.Context, address string, connectionID uint64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.connectErr != nil {
-		return m.connectErr
-	}
 	m.connected = true
 	m.connectedTo = append(m.connectedTo, address)
 	return nil
@@ -59,7 +53,7 @@ func (m *mockNetwork) Disconnect() {
 	m.connected = false
 }
 
-func (m *mockNetwork) Send(data string) error {
+func (m *mockNetwork) SendLine(connectionID uint64, data string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if !m.connected {
@@ -69,30 +63,22 @@ func (m *mockNetwork) Send(data string) error {
 	return nil
 }
 
-func (m *mockNetwork) Output() <-chan network.Output { return m.output }
-func (m *mockNetwork) LocalEchoEnabled() bool        { return m.localEcho }
-
-func (m *mockNetwork) SendGMCP(pkg, data string) error {
+func (m *mockNetwork) SendFrame(connectionID uint64, frame []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if !m.connected {
 		return errors.New("not connected")
 	}
-	m.gmcpSent = append(m.gmcpSent, struct{ Package, Data string }{pkg, data})
+	m.frames = append(m.frames, append([]byte(nil), frame...))
+	if len(frame) >= 5 && frame[0] == network.CmdIAC && frame[1] == network.CmdSB && frame[2] == network.OptGMCP && frame[len(frame)-2] == network.CmdIAC && frame[len(frame)-1] == network.CmdSE {
+		payload := string(frame[3 : len(frame)-2])
+		pkg, data, _ := strings.Cut(payload, " ")
+		m.gmcpSent = append(m.gmcpSent, struct{ Package, Data string }{pkg, data})
+	}
 	return nil
 }
 
-func (m *mockNetwork) GMCPActive() bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.gmcpActive
-}
-
-func (m *mockNetwork) SetWindowSize(width, height int) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.windowW, m.windowH = width, height
-}
+func (m *mockNetwork) Inbound() <-chan network.Inbound { return m.inbound }
 
 func (m *mockNetwork) drainGMCPSent() []struct{ Package, Data string } {
 	m.mu.Lock()
@@ -100,6 +86,17 @@ func (m *mockNetwork) drainGMCPSent() []struct{ Package, Data string } {
 	sent := m.gmcpSent
 	m.gmcpSent = nil
 	return sent
+}
+
+func (m *mockNetwork) drainFrames() [][]byte {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	frames := make([][]byte, len(m.frames))
+	for i, frame := range m.frames {
+		frames[i] = append([]byte(nil), frame...)
+	}
+	m.frames = nil
+	return frames
 }
 
 func (m *mockNetwork) drainSent() []string {
@@ -112,28 +109,34 @@ func (m *mockNetwork) drainSent() []string {
 
 // mockUI implements ui.UI, capturing display calls.
 type mockUI struct {
-	mu              sync.Mutex
-	printed         []string
-	echoed          []string
-	echoQueuedLines []bool
-	prompts         []string // every SetPrompt call, including clears
-	inputSet        []string
-	inputModes      []input.Submission
-	inputCursor     []int
-	bindsPushed     map[string]bool // last UpdateBinds payload
-	input           chan input.Submission
-	outbound        chan ui.UIEvent
-	done            chan struct{}
+	mu            sync.Mutex
+	printed       []string
+	echoed        []string
+	displayEvents []string
+	prompts       []string // every SetPrompt call, including clears
+	inputModes    []input.Submission
+	inputCursor   []int
+	bindsPushed   map[string]bool // last UpdateBinds payload
+	events        chan ui.UIEvent
+	done          chan struct{}
 }
 
 var _ ui.UI = (*mockUI)(nil)
 
 func newMockUI() *mockUI {
 	return &mockUI{
-		input:    make(chan input.Submission, 64),
-		outbound: make(chan ui.UIEvent, 64),
-		done:     make(chan struct{}),
+		events: make(chan ui.UIEvent, 64),
+		done:   make(chan struct{}),
 	}
+}
+
+func cleanupTestSession(t testing.TB, s *Session) {
+	t.Cleanup(func() {
+		s.stopBackgroundWork()
+		s.engine.Close()
+		s.timer.Stop()
+		s.LogStop()
+	})
 }
 
 func (m *mockUI) Run() error { <-m.done; return nil }
@@ -144,25 +147,27 @@ func (m *mockUI) Quit() {
 		close(m.done)
 	}
 }
-func (m *mockUI) Input() <-chan input.Submission { return m.input }
-func (m *mockUI) Outbound() <-chan ui.UIEvent    { return m.outbound }
+func (m *mockUI) Events() <-chan ui.UIEvent { return m.events }
 
 func (m *mockUI) Print(text string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.printed = append(m.printed, text)
+	m.displayEvents = append(m.displayEvents, "print:"+text)
 }
 
 func (m *mockUI) Echo(text string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.echoed = append(m.echoed, text)
+	m.displayEvents = append(m.displayEvents, "echo:"+text)
 }
 
 func (m *mockUI) SetPrompt(text string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.prompts = append(m.prompts, text)
+	m.displayEvents = append(m.displayEvents, "prompt:"+text)
 }
 
 func (m *mockUI) CommitPrompt(text string) {
@@ -172,24 +177,15 @@ func (m *mockUI) CommitPrompt(text string) {
 		m.printed = append(m.printed, text)
 	}
 	m.prompts = append(m.prompts, "")
-}
-
-func (m *mockUI) FinishEcho(queuedLine bool) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.echoQueuedLines = append(m.echoQueuedLines, queuedLine)
+	m.displayEvents = append(m.displayEvents, "commit:"+text)
 }
 
 func (m *mockUI) SetInput(text string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.inputSet = append(m.inputSet, text)
 }
 
 func (m *mockUI) SetInputSubmission(submission input.Submission) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.inputSet = append(m.inputSet, submission.Text)
 	m.inputModes = append(m.inputModes, submission)
 }
 
@@ -252,10 +248,10 @@ func (m *mockUI) drainPrompts() []string {
 	return prompts
 }
 
-func (m *mockUI) drainEchoQueuedLines() []bool {
+func (m *mockUI) drainDisplayEvents() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	values := m.echoQueuedLines
-	m.echoQueuedLines = nil
-	return values
+	events := m.displayEvents
+	m.displayEvents = nil
+	return events
 }

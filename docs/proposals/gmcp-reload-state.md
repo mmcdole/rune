@@ -1,14 +1,14 @@
 # GMCP state across /reload: query the connection, don't cache it
 
-Status: proposal
+Status: implemented; current ownership is documented in `docs/architecture.md`
 
 ## Problem
 
 `/reload` tears down the Lua VM and re-runs core scripts plus `init.lua` while the
 network connection stays up. GMCP negotiation state, however, is cached inside the VM:
 `70_gmcp.lua` keeps a local `enabled` flag that is set by the `gmcp_enabled` hook and
-cleared on `disconnected`. Go fires `gmcp_enabled` exactly once per connection, at the
-moment negotiation completes (`gmcpActive.Swap(true)` in `network/client.go`).
+cleared on `disconnected`. Go fires `gmcp_enabled` on an inactive-to-active transition
+in the connection's Session-owned `network.Protocol`.
 
 A reload mid-connection therefore leaves the fresh VM with `enabled = false` while GMCP
 is actually negotiated and flowing. Two observable misbehaviors:
@@ -39,7 +39,7 @@ communicated only by events breaks for subscribers created after the event fired
 Delete the cached flag and query the owner. No new state, no persistence.
 
 1. **New primitive `rune._gmcp.is_active()`** — returns whether GMCP is negotiated on
-   the current connection, reading the connection's existing `gmcpActive` atomic.
+   the current connection, reading Session's connection-scoped Protocol state.
    Returns `false` when disconnected (never raises), per the error convention.
 2. **`rune.gmcp.is_enabled()` delegates to the primitive.** The `enabled` local, the
    `gmcp-hello` hook's `enabled = true`, and the `gmcp-reset` disconnect handler are

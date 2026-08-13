@@ -19,9 +19,8 @@ import (
 func newTestModel(t *testing.T) *Model {
 	t.Helper()
 
-	inputChan := make(chan input.Submission, 16)
-	outbound := make(chan ui.UIEvent, 64)
-	m := NewModel(inputChan, outbound)
+	events := make(chan ui.UIEvent, 256)
+	m := NewModel(events)
 
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = next.(*Model)
@@ -81,12 +80,74 @@ func TestMouseNonWheelEventsIgnored(t *testing.T) {
 func newBareModel(t *testing.T) *Model {
 	t.Helper()
 
-	inputChan := make(chan input.Submission, 16)
-	outbound := make(chan ui.UIEvent, 64)
-	m := NewModel(inputChan, outbound)
+	events := make(chan ui.UIEvent, 64)
+	m := NewModel(events)
 
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	return next.(*Model)
+}
+
+func TestAcceptedSubmissionFollowsDraftChangeOnOneUIEventLane(t *testing.T) {
+	events := make(chan ui.UIEvent, 4)
+	m := NewModel(events)
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("look")})
+	m = next.(*Model)
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_ = next.(*Model)
+
+	changed, ok := (<-events).(ui.InputChangedMsg)
+	if !ok || changed.Text != "look" {
+		t.Fatalf("first event = %#v, want draft change to look", changed)
+	}
+	submitted, ok := (<-events).(ui.SubmissionMsg)
+	if !ok || submitted.Submission != input.Command("look") {
+		t.Fatalf("second event = %#v, want command submission", submitted)
+	}
+	select {
+	case event := <-events:
+		t.Fatalf("accepted submission emitted redundant event %#v", event)
+	default:
+	}
+}
+
+func TestFullUIEventQueueRejectsSubmissionWithoutLosingDraft(t *testing.T) {
+	events := make(chan ui.UIEvent, 1)
+	m := NewModel(events)
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("look")})
+	m = next.(*Model)
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(*Model)
+
+	if got := m.inputCtl.input.Value(); got != "look" {
+		t.Fatalf("rejected submission changed draft to %q", got)
+	}
+	if got := m.scrollback.Count(); got != 1 {
+		t.Fatalf("warning rows = %d, want exactly one", got)
+	}
+	if warning := runetext.StripANSI(m.scrollback.At(0)); !strings.Contains(warning, "Input not sent - engine lagging") {
+		t.Fatalf("warning = %q", warning)
+	}
+	if _, ok := (<-events).(ui.InputChangedMsg); !ok {
+		t.Fatal("queue no longer contains the accepted draft change")
+	}
+}
+
+func TestFullUIEventQueueReportsDroppedOrdinaryEvent(t *testing.T) {
+	events := make(chan ui.UIEvent, 1)
+	events <- ui.InputChangedMsg{Text: "queued", Cursor: 6}
+	m := NewModel(events)
+
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = next.(*Model)
+
+	if got := m.scrollback.Count(); got != 1 {
+		t.Fatalf("warning rows = %d, want exactly one", got)
+	}
+	if warning := runetext.StripANSI(m.scrollback.At(0)); !strings.Contains(warning, "UI event dropped - engine lagging") {
+		t.Fatalf("warning = %q", warning)
+	}
 }
 
 // TestFirstLineRendersImmediately verifies the idle->hot transition: a
@@ -130,10 +191,9 @@ func TestBurstCoalescesInBatchWindow(t *testing.T) {
 	}
 }
 
-// TestTickStopsWhenOutputGoesQuiet is the no-perpetual-tick regression
-// guard: a tick that flushed lines re-arms the window, and the first
-// tick that finds nothing pending ends the chain, so an idle client
-// has no standing timer.
+// TestTickStopsWhenOutputGoesQuiet verifies that a flush re-arms the batching
+// window once, while the first tick with no pending lines ends the chain. An
+// idle client must have no standing timer.
 func TestTickStopsWhenOutputGoesQuiet(t *testing.T) {
 	m := newBareModel(t)
 
@@ -187,7 +247,7 @@ func TestEchoFlushesPendingServerLines(t *testing.T) {
 	}
 }
 
-func TestPromptCommitPrecedesDeferredRows(t *testing.T) {
+func TestPromptCommitPrecedesFollowingRows(t *testing.T) {
 	m := newBareModel(t)
 
 	next, _ := m.Update(ui.PrintLineMsg("line 1")) // immediate, opens window
@@ -196,14 +256,13 @@ func TestPromptCommitPrecedesDeferredRows(t *testing.T) {
 	m = next.(*Model)
 	next, _ = m.Update(ui.PromptMsg("Username:"))
 	m = next.(*Model)
+	next, _ = m.Update(ui.PromptCommitMsg("Username:"))
+	m = next.(*Model)
 	next, _ = m.Update(ui.EchoLineMsg("> player"))
 	m = next.(*Model)
 	next, _ = m.Update(ui.PrintLineMsg("login hook sent username"))
 	m = next.(*Model)
-
-	wantScrollback(t, m, "line 1")
-
-	next, _ = m.Update(ui.PromptCommitMsg("Username:"))
+	next, _ = m.Update(tickMsg{})
 	m = next.(*Model)
 
 	wantScrollback(t, m,
@@ -213,69 +272,41 @@ func TestPromptCommitPrecedesDeferredRows(t *testing.T) {
 	}
 }
 
-func TestLocalSubmissionReleaseOrdersEchoBeforeOutput(t *testing.T) {
+func TestOrderedPromptCommitThenLocalSubmissionOutput(t *testing.T) {
 	m := newBareModel(t)
 
 	next, _ := m.Update(ui.PromptMsg("HP>"))
+	m = next.(*Model)
+	next, _ = m.Update(ui.PromptCommitMsg("HP>"))
 	m = next.(*Model)
 	next, _ = m.Update(ui.EchoLineMsg("> /help"))
 	m = next.(*Model)
 	next, _ = m.Update(ui.PrintLineMsg("local help"))
 	m = next.(*Model)
 
-	// Print alone cannot prove that no later send will answer the prompt.
-	wantScrollback(t, m)
-
-	next, _ = m.Update(ui.FinishEchoMsg{QueuedLine: false})
-	m = next.(*Model)
-
-	wantScrollback(t, m, "> /help", "local help")
-	if got := m.promptText; got != "HP>" {
-		t.Fatalf("live prompt = %q after local output, want %q", got, "HP>")
+	wantScrollback(t, m, "HP>", "> /help", "local help")
+	if got := m.promptText; got != "" {
+		t.Fatalf("prompt overlay = %q after commit, want empty", got)
 	}
 }
 
-// A local submission cannot release an earlier game send's echo.
-func TestLaterLocalSubmissionWaitsForEarlierPromptCommit(t *testing.T) {
-	m := newBareModel(t)
-
-	next, _ := m.Update(ui.PromptMsg("HP>"))
-	m = next.(*Model)
-	next, _ = m.Update(ui.EchoLineMsg("> north"))
-	m = next.(*Model)
-	next, _ = m.Update(ui.FinishEchoMsg{QueuedLine: true})
-	m = next.(*Model)
-
-	next, _ = m.Update(ui.EchoLineMsg("> /silent"))
-	m = next.(*Model)
-	next, _ = m.Update(ui.FinishEchoMsg{QueuedLine: false})
-	m = next.(*Model)
-
-	wantScrollback(t, m)
-
-	next, _ = m.Update(ui.PromptCommitMsg("HP>"))
-	m = next.(*Model)
-
-	wantScrollback(t, m, "HP>", "> north", "> /silent")
-}
-
-// A prompt clear has no PromptCommitMsg, so it must release deferred echo.
-func TestPromptClearReleasesDeferredEcho(t *testing.T) {
+func TestPromptClearClearsOverlay(t *testing.T) {
 	m := newBareModel(t)
 
 	next, _ := m.Update(ui.PromptMsg("User"))
-	m = next.(*Model)
-	next, _ = m.Update(ui.EchoLineMsg("> player"))
 	m = next.(*Model)
 	next, _ = m.Update(ui.PromptMsg("Username:"))
 	m = next.(*Model)
 
 	wantScrollback(t, m)
+	if got := m.promptText; got != "Username:" {
+		t.Fatalf("prompt overlay = %q, want %q", got, "Username:")
+	}
 
 	next, _ = m.Update(ui.PromptMsg(""))
 	m = next.(*Model)
 
-	wantScrollback(t, m, "> player")
+	wantScrollback(t, m)
 	if m.promptText != "" {
 		t.Fatalf("prompt overlay = %q after clear, want empty", m.promptText)
 	}
@@ -377,15 +408,15 @@ func TestOversizedVerbatimSubmissionIsRejectedAtomically(t *testing.T) {
 	m := newBareModel(t)
 
 	tooManyLines := input.Verbatim(strings.Repeat("\n", maxVerbatimLines))
-	if m.sendLine(tooManyLines) {
+	if m.submit(tooManyLines) {
 		t.Fatal("over-line-limit verbatim submission was accepted")
 	}
 	tooManyBytes := input.Verbatim(strings.Repeat("x", maxVerbatimBytes+1))
-	if m.sendLine(tooManyBytes) {
+	if m.submit(tooManyBytes) {
 		t.Fatal("over-byte-limit verbatim submission was accepted")
 	}
 	tooManyCRLines := input.Verbatim(strings.Repeat("\r", maxVerbatimLines))
-	if m.sendLine(tooManyCRLines) {
+	if m.submit(tooManyCRLines) {
 		t.Fatal("over-line-limit bare-CR verbatim submission was accepted")
 	}
 
@@ -400,8 +431,8 @@ func TestOversizedVerbatimSubmissionIsRejectedAtomically(t *testing.T) {
 }
 
 func TestVerbatimSubmissionAtLimitsIsAccepted(t *testing.T) {
-	inputChan := make(chan input.Submission, 1)
-	m := NewModel(inputChan, make(chan ui.UIEvent, 8))
+	events := make(chan ui.UIEvent, 1)
+	m := NewModel(events)
 	text := strings.Repeat("x", maxVerbatimBytes-(maxVerbatimLines-1)) +
 		strings.Repeat("\n", maxVerbatimLines-1)
 	submission := input.Verbatim(text)
@@ -409,11 +440,12 @@ func TestVerbatimSubmissionAtLimitsIsAccepted(t *testing.T) {
 	if len(text) != maxVerbatimBytes {
 		t.Fatalf("test setup bytes = %d, want %d", len(text), maxVerbatimBytes)
 	}
-	if !m.sendLine(submission) {
+	if !m.submit(submission) {
 		t.Fatal("at-limit verbatim submission was rejected")
 	}
-	if got := <-inputChan; got != submission {
-		t.Fatalf("queued submission differs: got %+v", got)
+	got, ok := (<-events).(ui.SubmissionMsg)
+	if !ok || got.Submission != submission {
+		t.Fatalf("queued event = %#v, want submission %+v", got, submission)
 	}
 }
 
@@ -464,13 +496,12 @@ func TestLayoutEntryOptsReachWidget(t *testing.T) {
 
 // newInlinePickerModel builds a model with an inline picker open over a
 // command-style item list and the input seeded with text, returning the
-// outbound channel so tests can observe picker cancel messages.
+// event channel so tests can observe picker cancel messages.
 func newInlinePickerModel(t *testing.T, dismissOnSpace bool, initial string) (*Model, chan ui.UIEvent) {
 	t.Helper()
 
-	inputChan := make(chan input.Submission, 16)
-	outbound := make(chan ui.UIEvent, 64)
-	m := NewModel(inputChan, outbound)
+	events := make(chan ui.UIEvent, 64)
+	m := NewModel(events)
 
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = next.(*Model)
@@ -492,17 +523,17 @@ func newInlinePickerModel(t *testing.T, dismissOnSpace bool, initial string) (*M
 	if m.inputCtl.mode != ModePickerInline {
 		t.Fatalf("expected inline picker mode after setup, got %v", m.inputCtl.mode)
 	}
-	drainPickerCancels(outbound) // discard setup noise
-	return m, outbound
+	drainPickerCancels(events) // discard setup noise
+	return m, events
 }
 
-// drainPickerCancels empties the outbound channel and returns any
+// drainPickerCancels empties the event channel and returns any
 // picker cancellation messages (Accepted == false) it contained.
-func drainPickerCancels(outbound chan ui.UIEvent) []ui.PickerSelectMsg {
+func drainPickerCancels(events chan ui.UIEvent) []ui.PickerSelectMsg {
 	var cancels []ui.PickerSelectMsg
 	for {
 		select {
-		case ev := <-outbound:
+		case ev := <-events:
 			if sel, ok := ev.(ui.PickerSelectMsg); ok && !sel.Accepted {
 				cancels = append(cancels, sel)
 			}
@@ -512,11 +543,10 @@ func drainPickerCancels(outbound chan ui.UIEvent) []ui.PickerSelectMsg {
 	}
 }
 
-// TestInlinePickerDismissesOnSpace verifies a dismiss_on_space picker
-// closes (mode reset + callback cancelled) as soon as the user types a
-// space to start arguments - the fix for issue #3.
+// TestInlinePickerDismissesOnSpace verifies that a dismiss_on_space picker
+// resets its mode and cancels its callback when an argument separator is typed.
 func TestInlinePickerDismissesOnSpace(t *testing.T) {
-	m, outbound := newInlinePickerModel(t, true, "/connect")
+	m, events := newInlinePickerModel(t, true, "/connect")
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}})
 	m = next.(*Model)
@@ -524,7 +554,7 @@ func TestInlinePickerDismissesOnSpace(t *testing.T) {
 	if m.inputCtl.mode != ModeNormal {
 		t.Fatalf("expected picker to dismiss on space, mode = %v", m.inputCtl.mode)
 	}
-	cancels := drainPickerCancels(outbound)
+	cancels := drainPickerCancels(events)
 	if len(cancels) != 1 || cancels[0].CallbackID != "cb1" {
 		t.Fatalf("expected one cancel for cb1, got %v", cancels)
 	}
@@ -536,7 +566,7 @@ func TestInlinePickerDismissesOnSpace(t *testing.T) {
 // TestInlinePickerWithoutDismissOnSpaceKeepsFiltering verifies the
 // space behavior is opt-in: a plain inline picker stays open.
 func TestInlinePickerWithoutDismissOnSpaceKeepsFiltering(t *testing.T) {
-	m, outbound := newInlinePickerModel(t, false, "/connect")
+	m, events := newInlinePickerModel(t, false, "/connect")
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}})
 	m = next.(*Model)
@@ -544,7 +574,7 @@ func TestInlinePickerWithoutDismissOnSpaceKeepsFiltering(t *testing.T) {
 	if m.inputCtl.mode != ModePickerInline {
 		t.Fatalf("expected picker to stay open, mode = %v", m.inputCtl.mode)
 	}
-	if cancels := drainPickerCancels(outbound); len(cancels) != 0 {
+	if cancels := drainPickerCancels(events); len(cancels) != 0 {
 		t.Fatalf("expected no cancel, got %v", cancels)
 	}
 }
@@ -552,7 +582,7 @@ func TestInlinePickerWithoutDismissOnSpaceKeepsFiltering(t *testing.T) {
 // TestInlinePickerNormalTypingKeepsFiltering verifies ordinary
 // characters do not close the picker.
 func TestInlinePickerNormalTypingKeepsFiltering(t *testing.T) {
-	m, outbound := newInlinePickerModel(t, true, "/con")
+	m, events := newInlinePickerModel(t, true, "/con")
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
 	m = next.(*Model)
@@ -560,17 +590,15 @@ func TestInlinePickerNormalTypingKeepsFiltering(t *testing.T) {
 	if m.inputCtl.mode != ModePickerInline {
 		t.Fatalf("expected picker to stay open, mode = %v", m.inputCtl.mode)
 	}
-	if cancels := drainPickerCancels(outbound); len(cancels) != 0 {
+	if cancels := drainPickerCancels(events); len(cancels) != 0 {
 		t.Fatalf("expected no cancel, got %v", cancels)
 	}
 }
 
-// TestInlinePickerClosesCleanlyOnEmptiedInput is a regression test for
-// the stuck-mode bug: backspacing the input to empty used to hide the
-// picker at the widget level while leaving the model in
-// ModePickerInline with the Lua callback never cancelled.
+// TestInlinePickerClosesCleanlyOnEmptiedInput verifies that emptying the input
+// closes the picker, resets its mode, and cancels its Lua callback.
 func TestInlinePickerClosesCleanlyOnEmptiedInput(t *testing.T) {
-	m, outbound := newInlinePickerModel(t, true, "/")
+	m, events := newInlinePickerModel(t, true, "/")
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
 	m = next.(*Model)
@@ -581,7 +609,7 @@ func TestInlinePickerClosesCleanlyOnEmptiedInput(t *testing.T) {
 	if m.inputCtl.mode != ModeNormal {
 		t.Fatalf("expected mode reset after input emptied, mode = %v", m.inputCtl.mode)
 	}
-	cancels := drainPickerCancels(outbound)
+	cancels := drainPickerCancels(events)
 	if len(cancels) != 1 || cancels[0].CallbackID != "cb1" {
 		t.Fatalf("expected one cancel for cb1, got %v", cancels)
 	}
@@ -590,7 +618,7 @@ func TestInlinePickerClosesCleanlyOnEmptiedInput(t *testing.T) {
 // TestInlinePickerDismissesOnLuaEditWithSpace verifies Lua-driven input
 // edits (rune.input.set) honor dismiss_on_space too.
 func TestInlinePickerDismissesOnLuaEditWithSpace(t *testing.T) {
-	m, outbound := newInlinePickerModel(t, true, "/connect")
+	m, events := newInlinePickerModel(t, true, "/connect")
 
 	next, _ := m.Update(ui.SetInputMsg("/connect vikingmud.org 2001"))
 	m = next.(*Model)
@@ -598,7 +626,7 @@ func TestInlinePickerDismissesOnLuaEditWithSpace(t *testing.T) {
 	if m.inputCtl.mode != ModeNormal {
 		t.Fatalf("expected picker to dismiss, mode = %v", m.inputCtl.mode)
 	}
-	cancels := drainPickerCancels(outbound)
+	cancels := drainPickerCancels(events)
 	if len(cancels) != 1 || cancels[0].CallbackID != "cb1" {
 		t.Fatalf("expected one cancel for cb1, got %v", cancels)
 	}
@@ -700,9 +728,8 @@ func TestSearchFocusUsesFinalLayoutGeometry(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.ANSI256)
 	t.Cleanup(func() { lipgloss.SetColorProfile(profile) })
 
-	inputChan := make(chan input.Submission, 16)
-	outbound := make(chan ui.UIEvent, 64)
-	m := NewModel(inputChan, outbound)
+	events := make(chan ui.UIEvent, 64)
+	m := NewModel(events)
 
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	m = next.(*Model)
@@ -769,9 +796,8 @@ func TestSearchFocusUsesFinalLayoutGeometry(t *testing.T) {
 }
 
 func TestSearchReportsInteractionStateSeparatelyFromScrollState(t *testing.T) {
-	inputChan := make(chan input.Submission, 4)
-	outbound := make(chan ui.UIEvent, 32)
-	m := NewModel(inputChan, outbound)
+	events := make(chan ui.UIEvent, 32)
+	m := NewModel(events)
 	m.initialized = true
 	m.width = 80
 	m.height = 24
@@ -782,8 +808,8 @@ func TestSearchReportsInteractionStateSeparatelyFromScrollState(t *testing.T) {
 	_ = next.(*Model)
 
 	var states []bool
-	for len(outbound) > 0 {
-		if state, ok := (<-outbound).(ui.SearchStateChangedMsg); ok {
+	for len(events) > 0 {
+		if state, ok := (<-events).(ui.SearchStateChangedMsg); ok {
 			states = append(states, bool(state))
 		}
 	}

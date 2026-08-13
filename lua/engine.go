@@ -315,18 +315,10 @@ func (e *Engine) OnOutput(line text.Line) (string, bool) {
 	return modified.String(), true
 }
 
-// OnPrompt handles a server prompt confirmed by Telnet GA/EOR.
-func (e *Engine) OnPrompt(line text.Line) string {
-	e.FlushSpans()
-	return e.onPromptUpdate(line, true)
-}
-
-// OnPartial updates the prompt overlay without changing span state.
-func (e *Engine) OnPartial(line text.Line) string {
-	return e.onPromptUpdate(line, false)
-}
-
-func (e *Engine) onPromptUpdate(line text.Line, confirmed bool) string {
+// OnPrompt dispatches a current-line observation. Session closes multiline
+// spans before confirmed observations so it can stop if that action changes
+// the connection.
+func (e *Engine) OnPrompt(line text.Line, confirmed bool) string {
 	results, found, err := e.callHooks(2, "prompt",
 		script.Obj{Type: "line", Payload: &line}, confirmed)
 	if !found {
@@ -468,8 +460,8 @@ func escapeRawJSONControlsInStrings(raw string) string {
 	return repaired.String()
 }
 
-// CallHook calls a hook event with string arguments.
-func (e *Engine) CallHook(event string, args ...string) {
+// notify dispatches a fire-and-forget event through the Lua hook registry.
+func (e *Engine) notify(event string, args ...string) {
 	callArgs := make([]any, len(args)+1)
 	callArgs[0] = event
 	for i, arg := range args {
@@ -527,7 +519,7 @@ func (e *Engine) reportError(source string, err error) {
 	}
 	e.reportingError = true
 	defer func() { e.reportingError = false }()
-	e.CallHook("error", msg)
+	e.OnError(msg)
 }
 
 // reportHooksBroken warns the user, once per VM generation, that the

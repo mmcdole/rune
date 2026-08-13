@@ -252,6 +252,139 @@ func TestSpanOnceRemovesAfterCompletion(t *testing.T) {
 	`)
 }
 
+func TestOnceSpanNewHeaderFiresOnlyPreviousSpan(t *testing.T) {
+	engine, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	if err := engine.DoString("setup", `
+		fired = 0
+		got_text = nil
+		rune.trigger.starts("Story:", function(matches, ctx)
+			fired = fired + 1
+			got_text = ctx.text
+		end, {
+			name = "one-story",
+			once = true,
+			gag = true,
+			span = { to = "END$", max = 8 },
+		})
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, show := engine.OnOutput(text.NewLine("Story: first")); show {
+		t.Fatal("the open once-span header should be gagged")
+	}
+	modified, show := engine.OnOutput(text.NewLine("Story: second END"))
+	if !show || modified != "Story: second END" {
+		t.Fatalf("the new header should remain visible, got %q show=%v", modified, show)
+	}
+
+	assertLua(t, engine, `
+		assert(fired == 1, "fires: " .. fired)
+		assert(got_text == "Story: first", "text: " .. tostring(got_text))
+		assert(#rune.trigger.list() == 0, "once trigger should be removed")
+	`)
+}
+
+func TestSpanNewHeaderHonorsActionRemoval(t *testing.T) {
+	engine, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	if err := engine.DoString("setup", `
+		fired = 0
+		rune.trigger.starts("Story:", function()
+			fired = fired + 1
+			rune.trigger.remove("story")
+		end, {
+			name = "story",
+			gag = true,
+			span = { to = "END$", max = 8 },
+		})
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	engine.OnOutput(text.NewLine("Story: first"))
+	modified, show := engine.OnOutput(text.NewLine("Story: second END"))
+	if !show || modified != "Story: second END" {
+		t.Fatalf("the new header should remain visible after removal, got %q show=%v", modified, show)
+	}
+
+	assertLua(t, engine, `
+		assert(fired == 1, "fires: " .. fired)
+		assert(#rune.trigger.list() == 0, "removed trigger remained registered")
+	`)
+}
+
+func TestSpanNewHeaderHonorsActionDisable(t *testing.T) {
+	engine, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	if err := engine.DoString("setup", `
+		fired = 0
+		rune.trigger.starts("Story:", function()
+			fired = fired + 1
+			rune.trigger.disable("story")
+		end, {
+			name = "story",
+			gag = true,
+			span = { to = "END$", max = 8 },
+		})
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	engine.OnOutput(text.NewLine("Story: first"))
+	modified, show := engine.OnOutput(text.NewLine("Story: second END"))
+	if !show || modified != "Story: second END" {
+		t.Fatalf("the new header should remain visible after disable, got %q show=%v", modified, show)
+	}
+
+	assertLua(t, engine, `
+		assert(fired == 1, "fires: " .. fired)
+		local triggers = rune.trigger.list()
+		assert(#triggers == 1, "disabled trigger should remain registered")
+		assert(triggers[1].enabled == false, "trigger should be disabled")
+	`)
+}
+
+func TestSpanNewHeaderHonorsActionReplacement(t *testing.T) {
+	engine, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	if err := engine.DoString("setup", `
+		old_fired = 0
+		new_fired = 0
+		rune.trigger.starts("Story:", function()
+			old_fired = old_fired + 1
+			rune.trigger.starts("Story:", function()
+				new_fired = new_fired + 1
+			end, { name = "story", span = { to = "END$", max = 8 } })
+		end, {
+			name = "story",
+			gag = true,
+			span = { to = "END$", max = 8 },
+		})
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	engine.OnOutput(text.NewLine("Story: first"))
+	modified, show := engine.OnOutput(text.NewLine("Story: second END"))
+	if !show || modified != "Story: second END" {
+		t.Fatalf("the replacement should start on the next line, got %q show=%v", modified, show)
+	}
+	assertLua(t, engine, `
+		assert(old_fired == 1, "old fires: " .. old_fired)
+		assert(new_fired == 0, "replacement fired in the registration pass")
+		assert(#rune.trigger.list() == 1, "upsert should leave one trigger")
+	`)
+
+	engine.OnOutput(text.NewLine("Story: third END"))
+	assertLua(t, engine, `assert(new_fired == 1, "replacement did not fire next pass")`)
+}
+
 func TestSpanActionReturnsIgnored(t *testing.T) {
 	engine, _, cleanup := setupTest(t)
 	defer cleanup()
@@ -375,8 +508,8 @@ func TestPartialLineDoesNotChangeSpan(t *testing.T) {
 	}
 
 	engine.OnOutput(text.NewLine("Story: begins"))
-	engine.OnPartial(text.NewLine("partial"))
-	engine.OnPartial(text.NewLine("partial END"))
+	engine.OnPrompt(text.NewLine("partial"), false)
+	engine.OnPrompt(text.NewLine("partial END"), false)
 	assertLua(t, engine, `assert(fired == 0, "partial terminator fired the span")`)
 	engine.OnOutput(text.NewLine("complete continuation END"))
 	assertLua(t, engine, `

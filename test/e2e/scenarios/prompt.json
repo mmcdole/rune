@@ -1,15 +1,30 @@
 {
-  "description": "Prompt overlay behavior for partial lines, GA/EOR prompts, game sends, and no-GA login.",
+  "description": "Prompt overlay behavior for partial lines, GA/EOR prompts, submissions, accepted game sends, and no-GA login.",
   "scenarios": [
     {
-      "name": "a game send commits a GA/EOR prompt",
+      "name": "an accepted game send commits a GA/EOR prompt",
       "steps": [
         { "connect": true },
         { "server_prompt": "HP:100> " },
         { "expect_prompt": "HP:100>" },
         { "type": "look" },
-        { "expect_printed": "HP:100>", "note": "the game send commits the prompt to scrollback" },
+        { "expect_printed": "HP:100>", "note": "the accepted game send commits the prompt to scrollback" },
         { "expect_sent": "look" }
+      ]
+    },
+    {
+      "name": "a local submission commits a partial prompt before echo and output",
+      "steps": [
+        { "connect": true },
+        {
+          "server_bytes": [87, 104, 97, 116, 32, 105, 115, 32, 121, 111, 117, 114, 32, 110, 97, 109, 101, 58],
+          "note": "What is your name: has no CR/LF, GA, or EOR"
+        },
+        { "expect_prompt": "What is your name:" },
+        { "type": "/help" },
+        { "expect_printed": "What is your name:", "note": "submission commits the partial prompt before local processing" },
+        { "expect_echoed": "/help", "note": "local echo follows the committed prompt" },
+        { "expect_printed": "/aliases", "note": "unique /help output follows the submission" }
       ]
     },
     {
@@ -21,6 +36,23 @@
         { "server_line": "the sun rises" },
         { "expect_printed": "HP:90>", "note": "GA confirmed the prompt before the next line" },
         { "expect_printed": "the sun rises" }
+      ]
+    },
+    {
+      "name": "EOR confirms a prompt through the live client",
+      "init_lua": [
+        "rune.hooks.on('prompt', function(line, confirmed)",
+        "  if confirmed and line:clean() == 'E2E-EOR> ' then rune.echo('E2E-EOR-CONFIRMED') end",
+        "end)"
+      ],
+      "steps": [
+        { "connect": true },
+        {
+          "server_bytes": [69, 50, 69, 45, 69, 79, 82, 62, 32, 255, 239],
+          "note": "E2E-EOR> followed by IAC EOR in one server write"
+        },
+        { "expect_prompt": "E2E-EOR>" },
+        { "expect_printed": "E2E-EOR-CONFIRMED" }
       ]
     },
     {
@@ -37,14 +69,14 @@
         },
         { "expect_prompt": "Username:" },
         { "expect_sent": "example-user" },
-        { "expect_printed": "Username:", "note": "the game send commits the no-GA prompt to scrollback" },
+        { "expect_printed": "Username:", "note": "the accepted trigger send commits the no-GA prompt to scrollback" },
         {
           "server_bytes": [80, 97, 115, 115, 119, 111, 114, 100, 58, 32],
-          "note": "the username send commits the first prompt before Password arrives"
+          "note": "the accepted username send commits the first prompt before Password arrives"
         },
         { "expect_prompt": "Password:" },
         { "expect_sent": "example-password" },
-        { "expect_printed": "Password:", "note": "the password send also commits its prompt" }
+        { "expect_printed": "Password:", "note": "the accepted password send also commits its prompt" }
       ]
     }
   ]

@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,26 +19,36 @@ const (
 	httpMaxBodyBytes = 5 << 20
 )
 
-// HTTPRequest implements lua.Host. The request runs in its own
-// goroutine and the outcome comes back through the async-result
-// channel, so the Lua callback executes on the session goroutine
-// under the watchdog like every other callback. Like Connect's dial
-// goroutine, the channel send may block briefly; the session loop
-// keeps draining while requests are in flight.
+// HTTPRequest implements lua.Host. The request runs in its own goroutine and
+// returns a typed event, so the Lua callback still executes on the Session
+// goroutine under the watchdog. Session shutdown cancels both the request and
+// any wait to publish its result.
 func (s *Session) HTTPRequest(id int, req lua.HTTPRequest) {
+	luaGeneration := s.luaGeneration
+	backgroundCtx := s.backgroundCtx
 	go func() {
-		resp, err := doHTTPRequest(req)
+		resp, err := doHTTPRequest(backgroundCtx, req)
 		errMsg := ""
 		if err != nil {
 			errMsg = err.Error()
 		}
-		s.asyncResults <- func() {
-			s.engine.OnHTTPResult(id, resp, errMsg)
-		}
+		s.postInternalEvent(backgroundCtx, httpFinished{
+			luaGeneration: luaGeneration,
+			callbackID:    id,
+			response:      resp,
+			errorText:     errMsg,
+		})
 	}()
 }
 
-func doHTTPRequest(req lua.HTTPRequest) (*lua.HTTPResponse, error) {
+func (s *Session) handleHTTPFinished(event httpFinished) {
+	if event.luaGeneration != s.luaGeneration {
+		return
+	}
+	s.engine.OnHTTPResult(event.callbackID, event.response, event.errorText)
+}
+
+func doHTTPRequest(ctx context.Context, req lua.HTTPRequest) (*lua.HTTPResponse, error) {
 	timeout := req.Timeout
 	if timeout <= 0 {
 		timeout = httpDefaultTimeout
@@ -47,7 +58,7 @@ func doHTTPRequest(req lua.HTTPRequest) (*lua.HTTPResponse, error) {
 	if req.Body != "" {
 		body = strings.NewReader(req.Body)
 	}
-	httpReq, err := http.NewRequest(req.Method, req.URL, body)
+	httpReq, err := http.NewRequestWithContext(ctx, req.Method, req.URL, body)
 	if err != nil {
 		return nil, err
 	}

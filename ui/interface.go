@@ -8,11 +8,9 @@ type UI interface {
 	Quit()
 
 	// Input/Output
-	Input() <-chan input.Submission
-	Outbound() <-chan UIEvent
+	Events() <-chan UIEvent
 	Print(text string)
 	Echo(text string)
-	FinishEcho(queuedLine bool)
 	SetPrompt(text string)
 	CommitPrompt(text string)
 	SetInput(text string)

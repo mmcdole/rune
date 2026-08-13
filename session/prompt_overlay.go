@@ -27,7 +27,10 @@ func (p *promptOverlay) replace(text string, confirmed bool) {
 
 // beforeLine commits a confirmed prompt and discards a superseded partial line.
 func (p *promptOverlay) beforeLine() {
-	if p.active && p.confirmed {
+	if !p.active {
+		return
+	}
+	if p.confirmed {
 		p.commit()
 		return
 	}
@@ -53,6 +56,9 @@ func (p *promptOverlay) commit() bool {
 }
 
 func (p *promptOverlay) discard() {
+	if !p.active {
+		return
+	}
 	p.clearState()
 	p.display.SetPrompt("")
 }

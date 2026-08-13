@@ -24,9 +24,7 @@ func bootSessionInDir(t *testing.T, dir string) (*Session, *mockNetwork, *mockUI
 	if err := s.boot(); err != nil {
 		t.Fatalf("boot must not fail on user-script errors: %v", err)
 	}
-	t.Cleanup(func() {
-		s.timer.Stop()
-	})
+	cleanupTestSession(t, s)
 	return s, net, uiMock
 }
 
@@ -44,10 +42,9 @@ func TestBootDoesNotReportLuaReentryErrors(t *testing.T) {
 	}
 }
 
-// assertFullyBooted verifies the parts of boot that used to be
-// skipped when a user script failed: the error is visible, binds
-// reached the UI, and the input pipeline works end to end.
-func assertFullyBooted(t *testing.T, s *Session, net *mockNetwork, uiMock *mockUI) {
+// assertSessionUsable checks that core policy and presentation state were
+// installed even when a user script failed.
+func assertSessionUsable(t *testing.T, s *Session, net *mockNetwork, uiMock *mockUI) {
 	t.Helper()
 
 	if binds := uiMock.pushedBinds(); len(binds) == 0 {
@@ -66,9 +63,8 @@ func assertFullyBooted(t *testing.T, s *Session, net *mockNetwork, uiMock *mockU
 	}
 }
 
-// TestBrokenInitLuaStillBootsFully verifies the most predictable new-
-// user failure - a syntax error in init.lua - costs one error report,
-// not a half-dead client.
+// TestBrokenInitLuaStillBootsFully verifies that a syntax error in init.lua is
+// reported without preventing core policy from loading.
 func TestBrokenInitLuaStillBootsFully(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "init.lua"),
@@ -81,25 +77,22 @@ func TestBrokenInitLuaStillBootsFully(t *testing.T) {
 	if printed := uiMock.drainPrinted(); !contains(printed, "[Script Error] init.lua") {
 		t.Errorf("script failure not reported, got %v", printed)
 	}
-	assertFullyBooted(t, s, net, uiMock)
+	assertSessionUsable(t, s, net, uiMock)
 }
 
-// TestReloadWithBrokenScriptKeepsClientAlive verifies /reload into a
-// newly-broken init.lua reports the failure and leaves a working
-// client, so the user can fix and /reload again.
+// TestReloadWithBrokenScriptKeepsClientAlive verifies that /reload reports an
+// init.lua error while leaving the rebuilt Session usable.
 func TestReloadWithBrokenScriptKeepsClientAlive(t *testing.T) {
 	dir := t.TempDir()
 	s, net, uiMock := bootSessionInDir(t, dir)
 	uiMock.drainPrinted()
 
-	// User writes a broken script, then reloads
 	if err := os.WriteFile(filepath.Join(dir, "init.lua"),
 		[]byte("syntax error here ((("), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	s.Reload()
-	cb := <-s.asyncResults // reload is deferred
-	cb()
+	awaitInternalEvent(t, s)
 
 	printed := uiMock.drainPrinted()
 	if !contains(printed, "[Script Error] init.lua") {
@@ -108,5 +101,5 @@ func TestReloadWithBrokenScriptKeepsClientAlive(t *testing.T) {
 	if !contains(printed, "Scripts reloaded") {
 		t.Errorf("reload did not complete, got %v", printed)
 	}
-	assertFullyBooted(t, s, net, uiMock)
+	assertSessionUsable(t, s, net, uiMock)
 }

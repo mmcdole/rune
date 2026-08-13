@@ -24,7 +24,7 @@ Handlers run in priority order:
 |---|---|---|
 | `input` | submitted text, context | Return `false` to consume; other returns are ignored. `context.mode` is read-only and always `"command"` or `"verbatim"`. |
 | `output` | a line object | Once per complete line. `false` gags, a string rewrites. The core handler runs output triggers at priority 100. |
-| `prompt` | a line object, `confirmed` | Partial line (`false`) or GA/EOR-confirmed prompt (`true`). The core runs prompt triggers at priority 100. |
+| `prompt` | a line object, `confirmed` | Cumulative partial-line observation (`false`) or GA/EOR-confirmed prompt (`true`). The core runs prompt triggers at priority 100. |
 | `echo` | one physical line of typed text | Like `output` but a plain string. The `> ` prefix is the core handler; replace it if you like. |
 
 For `output`, `prompt`, and `echo`, rewrites chain: a handler returning a
@@ -40,14 +40,16 @@ is a prompt. A partial line may be `Username:` or the first half of a longer
 line. It can repeat as it grows and later arrive once through `output` as a
 complete line. If GA/EOR arrives separately, the same text may run again with
 `confirmed` changing from `false` to `true`. An empty GA/EOR marker does not
-fire `prompt`.
+fire `prompt`. Rune does not use a timer or prompt pattern to promote it.
 
 A complete line replaces its partial line. A confirmed prompt is committed
 before later server text and closes open spans before `prompt` handlers run.
 
-Sending a game line commits the prompt overlay. Typed input, aliases, triggers,
-and timers all use this rule. Local commands and protocol traffic such as GMCP
-do not.
+Every user submission commits the prompt overlay before history, echo, and
+input hooks, including local slash commands and submissions that are consumed,
+disconnected, or eventually fail to send. Programmatic game lines from aliases,
+triggers, timers, and other callbacks commit it only after Network accepts the
+send. Failed programmatic sends and protocol traffic such as GMCP do not.
 
 ```lua
 -- Replace state from each update; partial lines may repeat.

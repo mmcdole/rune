@@ -176,7 +176,7 @@ func TestGMCPHandshakeAndSubscriptions(t *testing.T) {
 	// Go fires gmcp_enabled only after the option is active on the
 	// connection; mirror that ordering.
 	host.GMCPNegotiated = true
-	engine.CallHook("gmcp_enabled")
+	engine.OnGMCPEnabled()
 
 	if len(host.GMCPSends) < 2 {
 		t.Fatalf("expected Core.Hello + Core.Supports.Set, got %v", host.GMCPSends)

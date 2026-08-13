@@ -12,22 +12,17 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
-// TCPClient owns the active TCP connection and exposes a stable output channel.
+// TCPClient owns the active TCP connection and exposes owned parser batches.
 type TCPClient struct {
 	// Stable across connections; blocking publication applies TCP backpressure.
-	outputChan chan Output
+	inboundChan chan Inbound
 
 	mu                  sync.Mutex
 	current             *connection
 	desiredConnectionID uint64 // Latest connection ID requested by Session
-
-	// Last known window size, retained across connections so NAWS
-	// can answer immediately on the next connect.
-	width, height int
 }
 
 // outMsg is either a game line or raw Telnet protocol data.
@@ -41,10 +36,6 @@ type connection struct {
 	conn         net.Conn
 	connectionID uint64
 	parser       *Parser
-	output       *outputBuffer
-
-	// textMu orders incoming text against send boundaries.
-	textMu sync.Mutex
 
 	// Read source indirection for MCCP2. reader is what readLoop
 	// consumes: the socket normally, a zlib stream while compression
@@ -56,13 +47,7 @@ type connection struct {
 	raw        io.Reader
 	zr         io.ReadCloser
 	compressed bool
-
-	// Identity negotiation responder (TTYPE/MTTS, NAWS, CHARSET, MNES)
-	hs *handshake
-
-	gmcpActive atomic.Bool // GMCP negotiated on this connection
-
-	localEcho atomic.Bool
+	secure     bool
 
 	// writeLoop is the sole socket writer; other goroutines enqueue here.
 	sendQueue chan outMsg
@@ -75,7 +60,7 @@ type connection struct {
 // NewTCPClient creates a new client.
 func NewTCPClient() *TCPClient {
 	return &TCPClient{
-		outputChan: make(chan Output, 256),
+		inboundChan: make(chan Inbound, 256),
 	}
 }
 
@@ -161,11 +146,10 @@ func (c *TCPClient) Connect(ctx context.Context, address string, connectionID ui
 		reader:       conn,
 		raw:          conn,
 		parser:       NewParser(defaultCompatibility()),
-		output:       &outputBuffer{},
 		sendQueue:    make(chan outMsg, 4096),
 		done:         make(chan struct{}),
+		secure:       useTLS,
 	}
-	cx.localEcho.Store(true)
 
 	// Ignore a dial superseded by BeginConnect or Disconnect.
 	c.mu.Lock()
@@ -174,8 +158,6 @@ func (c *TCPClient) Connect(ctx context.Context, address string, connectionID ui
 		conn.Close()
 		return context.Canceled
 	}
-	// Snapshot the latest window size atomically with installation.
-	cx.hs = newHandshake(useTLS, c.width, c.height)
 	old := c.current
 	c.current = cx
 	c.mu.Unlock()
@@ -213,120 +195,66 @@ func (c *TCPClient) Disconnect() {
 	}
 }
 
-// Send queues one game line. It fails without blocking if disconnected or
-// the send queue is full.
-func (c *TCPClient) Send(data string) error {
-	if strings.ContainsAny(data, "\r\n") {
+// SendLine queues one game line for the identified connection. Validation and
+// enqueue happen under the same lock, so a reconnect cannot redirect stale
+// Session work to the new socket.
+func (c *TCPClient) SendLine(connectionID uint64, line string) error {
+	if strings.ContainsAny(line, "\r\n") {
 		return fmt.Errorf("game line cannot contain CR or LF")
 	}
 	c.mu.Lock()
+	defer c.mu.Unlock()
 	cx := c.current
-	c.mu.Unlock()
-
-	if cx == nil {
+	if cx == nil || cx.connectionID != connectionID {
 		return fmt.Errorf("not connected")
 	}
 
 	select {
-	case cx.sendQueue <- outMsg{data: []byte(data), line: true}:
+	case cx.sendQueue <- outMsg{data: []byte(line), line: true}:
 		return nil
+	case <-cx.done:
+		return fmt.Errorf("not connected")
 	default:
 		return fmt.Errorf("send buffer full (network stalled?)")
 	}
 }
 
-// SetWindowSize records the terminal size and, when NAWS is active on
-// the current connection, reports it to the server immediately.
-// The size is retained across connections so the next connect can
-// answer DO NAWS with real numbers.
-func (c *TCPClient) SetWindowSize(width, height int) {
+// SendFrame queues raw Telnet protocol bytes for the identified connection.
+func (c *TCPClient) SendFrame(connectionID uint64, frame []byte) error {
+	owned := bytes.Clone(frame)
 	c.mu.Lock()
-	c.width, c.height = width, height
+	defer c.mu.Unlock()
 	cx := c.current
-	c.mu.Unlock()
-
-	if cx == nil {
-		return
-	}
-	frame := cx.hs.setWindowSize(width, height)
-	if frame == nil {
-		return
-	}
-	select {
-	case cx.sendQueue <- outMsg{data: frame}:
-	default:
-		// Send queue full - drop the resize report; the next resize
-		// (or reconnect) will correct it. Never block the UI path.
-	}
-}
-
-// GMCPActive reports whether GMCP is negotiated on the current
-// connection. False when disconnected.
-func (c *TCPClient) GMCPActive() bool {
-	c.mu.Lock()
-	cx := c.current
-	c.mu.Unlock()
-	return cx != nil && cx.gmcpActive.Load()
-}
-
-// SendGMCP sends a GMCP message: "Package.SubPackage" plus optional
-// raw JSON. Returns an error when disconnected or when the server has
-// not negotiated GMCP.
-func (c *TCPClient) SendGMCP(pkg, data string) error {
-	c.mu.Lock()
-	cx := c.current
-	c.mu.Unlock()
-
-	if cx == nil {
+	if cx == nil || cx.connectionID != connectionID {
 		return fmt.Errorf("not connected")
 	}
-	if !cx.gmcpActive.Load() {
-		return fmt.Errorf("GMCP not negotiated on this connection")
-	}
-
-	payload := pkg
-	if data != "" {
-		payload += " " + data
-	}
-	frame := subnegFrame(OptGMCP, []byte(payload))
-
 	select {
-	case cx.sendQueue <- outMsg{data: frame}:
+	case cx.sendQueue <- outMsg{data: owned}:
 		return nil
+	case <-cx.done:
+		return fmt.Errorf("not connected")
 	default:
 		return fmt.Errorf("send buffer full (network stalled?)")
 	}
 }
 
-// Output returns the stable output channel.
-func (c *TCPClient) Output() <-chan Output {
-	return c.outputChan
+// Inbound returns parser batches and disconnects from all connections. Each
+// message carries its connection ID so Session can reject stale work.
+func (c *TCPClient) Inbound() <-chan Inbound {
+	return c.inboundChan
 }
 
-// LocalEchoEnabled reports whether the current connection prefers local echo.
-// Defaults to true if no active connection.
-func (c *TCPClient) LocalEchoEnabled() bool {
-	c.mu.Lock()
-	cx := c.current
-	c.mu.Unlock()
-	if cx == nil {
-		return true
-	}
-	return cx.localEcho.Load()
-}
-
-// publish tags output so events queued before reconnect can be ignored.
-func (c *TCPClient) publish(cx *connection, out Output) bool {
-	out.ConnectionID = cx.connectionID
+func (c *TCPClient) publish(cx *connection, inbound Inbound) bool {
+	inbound.ConnectionID = cx.connectionID
 	select {
-	case c.outputChan <- out:
+	case c.inboundChan <- inbound:
 		return true
 	case <-cx.done:
 		return false
 	}
 }
 
-// readLoop reads cx and blocks on output publication to apply TCP backpressure.
+// readLoop reads cx and blocks on inbound publication to apply TCP backpressure.
 func (c *TCPClient) readLoop(cx *connection) {
 	buf := make([]byte, 4096)
 
@@ -357,7 +285,7 @@ func (c *TCPClient) readLoop(cx *connection) {
 			c.mu.Unlock()
 
 			if isCurrent {
-				c.publish(cx, Output{Kind: OutputDisconnect})
+				c.publish(cx, Inbound{Kind: InboundDisconnect})
 				cx.shutdown()
 			}
 			return
@@ -365,155 +293,39 @@ func (c *TCPClient) readLoop(cx *connection) {
 	}
 }
 
-// processIncoming feeds bytes to the parser and dispatches the
-// resulting events. Returns false when the connection is done and the
-// read loop should exit.
+// processIncoming consumes transport-local MCCP activation, then publishes any
+// remaining events from this parser call as one owned batch. MCCP activation
+// changes how the next socket bytes must be read; all Session-facing events
+// cross the boundary in their original order.
 func (c *TCPClient) processIncoming(cx *connection, data []byte) bool {
 	events := cx.parser.Receive(data)
-
-	// Queue replies before locking incoming text; a full send queue can block.
-	for _, ev := range events {
-		switch ev.Kind {
-		case TelnetEventDataSend:
-			if !cx.enqueueRaw(ev.Data) {
-				return false
-			}
-
-		case TelnetEventNegotiation:
-			for _, frame := range cx.hs.onNegotiation(ev.Command, ev.Option) {
-				if !cx.enqueueRaw(frame) {
-					return false
-				}
-			}
-
-		case TelnetEventSubnegotiation:
-			if ev.Option != OptMCCP2 && ev.Option != OptGMCP {
-				for _, frame := range cx.hs.onSubnegotiation(ev.Option, ev.Data) {
-					if !cx.enqueueRaw(frame) {
-						return false
-					}
-				}
-			}
-		}
+	if len(events) == 0 {
+		return true
 	}
 
-	// Keep text from this read on one side of a send boundary.
-	cx.textMu.Lock()
-	locked := true
-	defer func() {
-		if locked {
-			cx.textMu.Unlock()
-		}
-	}()
-
-	// MCCP2 activation is deferred to the end of the batch: the parser
-	// stops parsing at IAC SB 86 IAC SE and hands back the remaining
-	// raw (compressed) bytes, so nothing after the marker is parsed.
+	forwarded := make([]TelnetEvent, 0, len(events))
 	startMCCP := false
 	var mccpRest []byte
-	gmcpFinalActive := cx.gmcpActive.Load()
-	deferGMCPMessages := false
-	var deferredGMCP []Output
-	sawText := false
-
-	for _, ev := range events {
-		switch ev.Kind {
-		case TelnetEventDataReceive:
-			sawText = true
-			lines := cx.output.receive(ev.Data)
-			for _, line := range lines {
-				if !c.publish(cx, Output{Kind: OutputLine, Payload: string(line)}) {
-					return false
-				}
-			}
-
-		case TelnetEventIAC:
-			if ev.Command == CmdGA || ev.Command == CmdEOR {
-				text, completedLine := cx.output.consumePrompt()
-				if completedLine {
-					if !c.publish(cx, Output{Kind: OutputLine, Payload: text}) {
-						return false
-					}
-				} else if text != "" {
-					if !c.publish(cx, Output{Kind: OutputPrompt, Payload: text}) {
-						return false
-					}
-				}
-			}
-
-		case TelnetEventNegotiation:
-			cx.applyNegotiation(ev.Command, ev.Option)
-			if ev.Option == OptGMCP {
-				switch ev.Command {
-				case CmdWILL, CmdDO:
-					gmcpFinalActive = true
-					if !cx.gmcpActive.Load() {
-						deferGMCPMessages = true
-					}
-				case CmdWONT, CmdDONT:
-					gmcpFinalActive = false
-					deferGMCPMessages = false
-					deferredGMCP = nil
-					// Disable sends now; re-enable after the next reply is queued.
-					cx.gmcpActive.Store(false)
-				}
-			}
-
-		case TelnetEventSubnegotiation:
-			switch ev.Option {
-			case OptMCCP2:
-				startMCCP = true
-			case OptGMCP:
-				pkg, payload := splitGMCP(ev.Data)
-				if pkg != "" {
-					out := Output{Kind: OutputGMCP, Package: pkg, Payload: payload}
-					if deferGMCPMessages {
-						deferredGMCP = append(deferredGMCP, out)
-					} else {
-						if !c.publish(cx, out) {
-							return false
-						}
-					}
-				}
-			}
-
-		case TelnetEventDecompressImmediate:
-			// Raw compressed bytes that followed IAC SB 86 IAC SE in
-			// the same read. Always the final event of a batch.
+	for _, event := range events {
+		switch {
+		case event.Kind == TelnetEventSubnegotiation && (event.Option == OptMCCP2 || event.Option == OptMCCP3):
 			startMCCP = true
-			mccpRest = ev.Data
+		case event.Kind == TelnetEventDecompressImmediate:
+			startMCCP = true
+			mccpRest = event.Data
+		default:
+			forwarded = append(forwarded, event)
 		}
 	}
 
-	// Publish at most one partial line per read. GA/EOR may consume it first.
-	if sawText {
-		partial := cx.output.peekPartial()
-		if partial != "" {
-			if !c.publish(cx, Output{
-				Kind:    OutputPartial,
-				Payload: partial,
-			}) {
-				return false
-			}
-		}
-	}
-
-	cx.textMu.Unlock()
-	locked = false
-	if gmcpFinalActive && !cx.gmcpActive.Swap(true) {
-		// The reply is queued first, so activation handlers may send immediately.
-		if !c.publish(cx, Output{Kind: OutputGMCPEnabled}) {
-			return false
-		}
-	}
-	// Publish deferred GMCP messages after activation. A later disable in this
-	// parse clears them.
-	if gmcpFinalActive {
-		for _, out := range deferredGMCP {
-			if !c.publish(cx, out) {
-				return false
-			}
-		}
+	if len(forwarded) > 0 && !c.publish(cx, Inbound{
+		Kind: InboundEvents,
+		Batch: EventBatch{
+			Secure: cx.secure,
+			Events: cloneEvents(forwarded),
+		},
+	}) {
+		return false
 	}
 
 	if startMCCP {
@@ -528,14 +340,13 @@ func (c *TCPClient) processIncoming(cx *connection, data []byte) bool {
 	return true
 }
 
-// enqueueRaw blocks until protocol data is queued or the connection closes.
-func (cx *connection) enqueueRaw(data []byte) bool {
-	select {
-	case cx.sendQueue <- outMsg{data: data}:
-		return true
-	case <-cx.done:
-		return false
+func cloneEvents(events []TelnetEvent) []TelnetEvent {
+	owned := make([]TelnetEvent, len(events))
+	copy(owned, events)
+	for i := range owned {
+		owned[i].Data = bytes.Clone(owned[i].Data)
 	}
+	return owned
 }
 
 // startDecompression switches the read path to a zlib stream, seeded
@@ -600,19 +411,8 @@ func (c *TCPClient) writeLoop(cx *connection) {
 	}
 }
 
-// writeLine discards the current partial line and publishes a send boundary
-// before writing.
+// writeLine writes one application line to the socket.
 func (c *TCPClient) writeLine(cx *connection, data []byte) bool {
-	cx.textMu.Lock()
-
-	cx.output.discardPartial()
-
-	if !c.publish(cx, Output{Kind: OutputSendBoundary}) {
-		cx.textMu.Unlock()
-		return false
-	}
-	cx.textMu.Unlock()
-
 	// Line data is text: double IAC bytes so the server reads them as data,
 	// not commands. Raw messages are protocol frames and bypass this path.
 	if bytes.IndexByte(data, CmdIAC) >= 0 {
@@ -641,19 +441,4 @@ func (cx *connection) shutdown() {
 	cx.closeOnce.Do(func() {
 		close(cx.done)
 	})
-}
-
-// applyNegotiation updates local echo state from telnet negotiation.
-func (cx *connection) applyNegotiation(cmd, opt byte) {
-	switch opt {
-	case OptEcho:
-		switch cmd {
-		case CmdWILL:
-			// Server will echo - disable local echo
-			cx.localEcho.Store(false)
-		case CmdWONT, CmdDONT, CmdDO:
-			// Server won't echo or wants us to echo - enable local echo
-			cx.localEcho.Store(true)
-		}
-	}
 }

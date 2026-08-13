@@ -177,7 +177,7 @@ end
 
 -- Match one trigger against a line; returns the captures array on a
 -- match (empty for literal modes), or nil.
-local function match_header(data, match_line)
+local function match_trigger(data, match_line)
     if data.mode == MODE_EXACT then
         if match_line == data.pattern then
             return {}
@@ -239,7 +239,7 @@ local function fire_span(data, st, to_remove)
     end
 end
 
--- Close every open span at a confirmed prompt or send boundary.
+-- Close every open span at a confirmed prompt or current-line finish.
 function rune.trigger._flush_spans()
     if next(open) == nil then return end
     clean_open_spans()
@@ -345,35 +345,39 @@ function rune.trigger._process_output(line)
             local match_line = data.raw and raw_line or clean_line
 
             if open[data] then
-                -- This line belongs to the open span; it cannot also
-                -- header-match the same trigger in this pass.
-                if data.gag then
-                    gagged = true
-                end
-                local matches = match_header(data, match_line)
-                local st
+                local matches = match_trigger(data, match_line)
+                local span_state
                 if matches then
                     -- New header mid-span: flush the previous message and
-                    -- start a new one from this line.
-                    fire_span(data, open[data], to_remove)
+                    -- start a new one from this line if the action left this
+                    -- reusable trigger active.
+                    local previous = open[data]
                     open[data] = nil
-                    st = new_span(data, matches, line, clean_line)
+                    fire_span(data, previous, to_remove)
+                    if not data.once and registry:active(data) then
+                        span_state = new_span(data, matches, line, clean_line)
+                    end
                 else
-                    st = open[data]
-                    st.lines[#st.lines + 1] = line
+                    span_state = open[data]
+                    span_state.lines[#span_state.lines + 1] = line
                     local piece = trim(clean_line)
                     if piece ~= "" then
-                        st.pieces[#st.pieces + 1] = piece
+                        span_state.pieces[#span_state.pieces + 1] = piece
                     end
                 end
-                if span_ends(data, st, raw_line, clean_line) then
-                    fire_span(data, st, to_remove)
-                    open[data] = nil
-                else
-                    open[data] = st
+                if span_state then
+                    if data.gag then
+                        gagged = true
+                    end
+                    if span_ends(data, span_state, raw_line, clean_line) then
+                        open[data] = nil
+                        fire_span(data, span_state, to_remove)
+                    else
+                        open[data] = span_state
+                    end
                 end
             else
-                local matches = match_header(data, match_line)
+                local matches = match_trigger(data, match_line)
                 if matches then
                     if data.span then
                         if data.gag then
@@ -422,7 +426,7 @@ function rune.trigger._process_prompt(line, confirmed)
     for _, data in ipairs(snapshot) do
         if registry:active(data) and data.channel == CHANNEL_PROMPT then
             local match_line = data.raw and raw_line or clean_line
-            local matches = match_header(data, match_line)
+            local matches = match_trigger(data, match_line)
             if matches then
                 local ctx = trigger_context(data, matches, line)
                 ctx.confirmed = confirmed

@@ -1,6 +1,6 @@
 ---
 title: Migrating from Other Clients
-description: A translation map from TinTin++ and Mudlet syntax to rune's Lua API.
+description: Translation notes for bringing TinTin++, Mudlet, MUSHclient, zMUD, and CMUD scripts to Rune's Lua API.
 ---
 
 Rune has no in-client command language: scripting is Lua. Aliases, triggers,
@@ -60,7 +60,7 @@ The scripting language is the same; the API names differ:
 
 The scripting language is the same; the API names differ. If you're using
 MUSHclient's XML syntax for creating triggers, aliases, and timers, you'll
-need to covert those to Lua first.
+need to convert those to Lua first.
 
 | MUSHclient                        | Rune equivalent                       |
 |-----------------------------------|---------------------------------------|
@@ -72,43 +72,27 @@ need to covert those to Lua first.
 | `tempRegexTrigger(pattern, code)` | `rune.trigger.regex(pattern, action)` |
 | `EnableTrigger("tname",false)`    | `rune.trigger.disable("tname")`       |
 | `SetVariable("varname","value")`  | `rune.store.set("varname","value")`   |
-| `OnPluginPartialLine`              | `rune.hooks.on("prompt", handler)` |
+| `OnPluginPartialLine`             | See [Prompt triggers](#prompt-triggers) |
 
-Some functions such as ColourNote have no direct equivalent, but a simple
-wrapper function could replace it with Lua. (using `rune.style.*`)
+Some functions, such as `ColourNote`, have no direct equivalent. A small Lua
+wrapper around `rune.style.*` can usually replace them.
 
-## Prompt terminology across clients
+## Prompt triggers
 
-Clients use “prompt” for different wire behavior. Rune keeps the uncertainty
-visible instead of guessing with a timer:
+Clients expose prompt handling under different names. Rune uses
+`on = "prompt"` as an option on an ordinary trigger:
 
 | Client concept | Rune equivalent |
 |---|---|
-| TinTin++ `RECEIVED PROMPT` / `PROCESSED LINE` prompt flag | `{ on = "prompt" }`; inspect `ctx.confirmed` instead of relying on a packet-patch timer |
-| zMUD/CMUD trigger-on-Prompt option | trigger with `{ on = "prompt" }` |
+| TinTin++ `RECEIVED PROMPT` / `PROCESSED LINE` prompt flag | trigger with `{ on = "prompt" }` |
+| zMUD/CMUD **Trigger on Prompt** | trigger with `{ on = "prompt" }` |
 | Blightmud trigger with `prompt = true` | trigger with `{ on = "prompt" }` |
-| Mudlet GA/EOR prompt trigger | `{ on = "prompt" }`; inspect `ctx.confirmed` in the action if needed |
-| MUSHclient `OnPluginPartialLine` | `prompt` hook with `confirmed == false` |
+| Mudlet prompt trigger | trigger with `{ on = "prompt" }` |
+| MUSHclient `OnPluginPartialLine` | prompt trigger to match text, or the `prompt` hook to observe every update |
 
-Rune's prompt trigger channel includes partial lines and GA/EOR-confirmed
-prompts. It excludes complete lines. The hook receives
-`(line, confirmed)` so low-level scripts can distinguish those cases.
-
-## Rune prompt scripts
-
-The `prompt` hook passes a `confirmed` argument. One-argument handlers remain
-valid because Lua ignores extra arguments. Triggers match complete lines by
-default; add `on = "prompt"` when a trigger should match the prompt overlay:
-
-```lua
-rune.hooks.on("prompt", function(line, confirmed)
-    repaint(line)
-end)
-rune.trigger.exact("Username: ", login, { on = "prompt" })
-```
-
-Output triggers see only complete lines. Prompt triggers opt into partial lines,
-which can repeat or later become part of a complete line.
+Prompt triggers see the unfinished current line and prompts ended by Telnet
+GA/EOR. Complete lines go through output triggers. See
+[Prompt triggers](/scripting/triggers/#prompt-triggers) for the full model.
 
 ## Capture references
 

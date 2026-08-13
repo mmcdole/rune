@@ -18,7 +18,7 @@ import (
 // then the UI notifies the session, which fires input_changed.
 func typeInput(engine *Engine, host *MockHost, text string) {
 	host.SetInput(text)
-	engine.CallHook("input_changed", text)
+	engine.OnInputChanged(text)
 }
 
 func assertInput(t *testing.T, host *MockHost, want string) {
@@ -353,7 +353,7 @@ func TestTabCompletionCyclesByRecency(t *testing.T) {
 		assertInput(t, host, step.want)
 		// The real UI reports the text Tab just set; the identity
 		// check must keep the cycling session alive.
-		engine.CallHook("input_changed", host.GetInput())
+		engine.OnInputChanged(host.GetInput())
 	}
 }
 
@@ -366,7 +366,7 @@ func TestTabCompletionResetsWhenTypingContinues(t *testing.T) {
 	typeInput(engine, host, "go")
 	engine.HandleKeyBind("tab")
 	assertInput(t, host, "goblin ") // most recent match wins
-	engine.CallHook("input_changed", host.GetInput())
+	engine.OnInputChanged(host.GetInput())
 
 	// Typing something new abandons the cycle and re-matches.
 	typeInput(engine, host, "gox")
@@ -441,7 +441,7 @@ func TestCompletionMidLineInsertsWithoutTrailingSpace(t *testing.T) {
 	// Complete in the middle of the line: "kill gob| now".
 	host.SetInput("kill gob now")
 	host.InputSetCursor(8)
-	engine.CallHook("input_changed", host.GetInput())
+	engine.OnInputChanged(host.GetInput())
 
 	engine.HandleKeyBind("tab")
 	// Mid-line completions get no trailing space.
@@ -457,7 +457,7 @@ func TestCompletionMidLineWithMultibyteInput(t *testing.T) {
 
 	host.SetInput("café gob now")
 	host.InputSetCursor(len("café gob"))
-	engine.CallHook("input_changed", host.GetInput())
+	engine.OnInputChanged(host.GetInput())
 
 	engine.HandleKeyBind("tab")
 	assertInput(t, host, "café goblin now")

@@ -58,7 +58,7 @@ call `rune.send`/`rune.send_raw` yourself and return `false`.
 |---|---|---|
 | `input` | submitted text, context | Once per submission, before command or verbatim routing |
 | `output` | line object (`:raw()`, `:clean()`) | Once for every complete server line |
-| `prompt` | line object, `confirmed` boolean | For partial lines and GA/EOR-confirmed prompts |
+| `prompt` | line object, `confirmed` boolean | On cumulative partial-line observations and GA/EOR-confirmed prompts |
 | `echo` | typed text | On each physical line of local echo; skipped while the server has echo suppressed (passwords) |
 
 `prompt` drives the prompt overlay. With `confirmed = false`, the value is a
@@ -67,10 +67,14 @@ it may repeat as it grows. A line delimiter later sends the complete line
 through `output`. With `confirmed = true`, GA/EOR ended the text as a prompt.
 If GA/EOR arrives in a later read, the hook may receive the same text first as
 partial and then as confirmed. An empty GA/EOR marker does not fire the hook.
+Rune never uses a timer or prompt pattern to promote a partial line.
 
-Sending a game line commits the prompt overlay before later server output.
-Typed commands, aliases, triggers, and timers all follow this rule; local
-commands and protocol traffic such as GMCP do not.
+Every user submission commits the prompt overlay before history, echo, and
+input hooks—even a local slash command, consumed submission, disconnected
+submission, or one whose eventual send fails. Separately, a programmatic game
+line from an alias, trigger, timer, or other callback commits the overlay only
+after Network accepts the send. A failed programmatic send and protocol traffic
+such as GMCP do not.
 
 Sending while an ordinary line is partial commits its visible prefix; the
 later suffix arrives through `output` as a new line. This is the trade-off for
@@ -85,7 +89,9 @@ end)
 ```
 
 Handlers for partial lines should be idempotent. A confirmed prompt closes
-open spans before `prompt` handlers run.
+open spans before `prompt` handlers run. Finishing a partial line on submission
+or accepted send commits its latest processed overlay without calling the
+`prompt` hook again.
 
 Every `input` handler receives `(text, context)`. The context is read-only, and
 `context.mode` is always `"command"` or `"verbatim"`:

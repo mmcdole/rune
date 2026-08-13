@@ -25,10 +25,10 @@ func TestPromptHookReportsConfirmation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := engine.OnPartial(text.NewLine("User")); got != "" {
+	if got := engine.OnPrompt(text.NewLine("User"), false); got != "" {
 		t.Fatalf("gagged partial line = %q", got)
 	}
-	if got := engine.OnPrompt(text.NewLine("Username:")); got != "Username: [styled]" {
+	if got := engine.OnPrompt(text.NewLine("Username:"), true); got != "Username: [styled]" {
 		t.Fatalf("confirmed rewrite = %q", got)
 	}
 
@@ -41,7 +41,7 @@ func TestPromptHookReportsConfirmation(t *testing.T) {
 	`)
 }
 
-func TestConfirmedPromptFlushesSpansBeforePromptHooks(t *testing.T) {
+func TestFlushSpansBeforePromptHooks(t *testing.T) {
 	engine, _, cleanup := setupTest(t)
 	defer cleanup()
 
@@ -58,7 +58,8 @@ func TestConfirmedPromptFlushesSpansBeforePromptHooks(t *testing.T) {
 	}
 
 	engine.OnOutput(text.NewLine("Story: unfinished"))
-	engine.OnPrompt(text.NewLine("HP>"))
+	engine.FlushSpans()
+	engine.OnPrompt(text.NewLine("HP>"), true)
 	assertLua(t, engine, `
 		assert(#events == 2, "events: " .. #events)
 		assert(events[1] == "span" and events[2] == "hook",
@@ -84,8 +85,8 @@ func TestPromptTriggerDispatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	engine.OnPartial(text.NewLine("Username:"))
-	engine.OnPrompt(text.NewLine("Username:"))
+	engine.OnPrompt(text.NewLine("Username:"), false)
+	engine.OnPrompt(text.NewLine("Username:"), true)
 	engine.OnOutput(text.NewLine("Username:"))
 
 	assertLua(t, engine, `

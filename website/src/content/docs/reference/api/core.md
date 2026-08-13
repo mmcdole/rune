@@ -64,12 +64,18 @@ Returns `true`, or `nil` plus an error message (which is also echoed)
 when the send fails — typically because you're disconnected. This is
 what alias and trigger string actions ultimately call.
 
-Sending a game line commits the prompt overlay and closes open multiline
-spans. The TUI displays a typed line after an active prompt overlay is
-committed. A local command that sends nothing leaves both unchanged. If the
-overlay holds part of an ordinary line, Rune commits the visible prefix and
-treats later bytes as a new line. Despite its name, `send_raw` sends MUD text,
-not Telnet or GMCP protocol data.
+Before processing any user submission, Rune finishes an active partial line:
+it commits the prompt overlay and closes open multiline spans before history,
+local echo, input hooks, aliases, or slash commands. This is independent of
+local echo, connection state, whether a hook consumes the submission, and
+whether it eventually sends anything.
+
+A game line sent programmatically by an alias, trigger, timer, or other Lua
+callback also finishes the current line once Network accepts it for writing.
+A failed programmatic send leaves the line open. GMCP and other Telnet protocol
+traffic never finish it. If the overlay was really part of an ordinary line,
+Rune commits the visible prefix and treats later bytes as a new line. Despite
+its name, `send_raw` sends MUD text, not Telnet or GMCP protocol data.
 
 ### rune.connect
 

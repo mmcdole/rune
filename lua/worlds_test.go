@@ -71,7 +71,7 @@ func TestReconnectUsesStoredAddress(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 
-	engine.CallHook("connected", "tls://mud.example.com:4000")
+	engine.OnConnected("tls://mud.example.com:4000")
 	engine.OnInput("/reconnect")
 
 	if len(host.ConnectCalls) != 1 || host.ConnectCalls[0] != "tls://mud.example.com:4000" {

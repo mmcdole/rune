@@ -149,8 +149,7 @@ type mockUI struct {
 	echoed   []string
 	prompts  []string // every SetPrompt call, including clears
 	inputSet []string
-	input    chan input.Submission
-	outbound chan ui.UIEvent
+	events   chan ui.UIEvent
 	done     chan struct{}
 }
 
@@ -158,9 +157,8 @@ var _ ui.UI = (*mockUI)(nil)
 
 func newMockUI() *mockUI {
 	return &mockUI{
-		input:    make(chan input.Submission, 64),
-		outbound: make(chan ui.UIEvent, 64),
-		done:     make(chan struct{}),
+		events: make(chan ui.UIEvent, 64),
+		done:   make(chan struct{}),
 	}
 }
 
@@ -172,8 +170,7 @@ func (m *mockUI) Quit() {
 		close(m.done)
 	}
 }
-func (m *mockUI) Input() <-chan input.Submission { return m.input }
-func (m *mockUI) Outbound() <-chan ui.UIEvent    { return m.outbound }
+func (m *mockUI) Events() <-chan ui.UIEvent { return m.events }
 
 func (m *mockUI) Print(text string) {
 	m.mu.Lock()
@@ -186,9 +183,6 @@ func (m *mockUI) Echo(text string) {
 	defer m.mu.Unlock()
 	m.echoed = append(m.echoed, text)
 }
-
-// The headless UI records echoes immediately.
-func (m *mockUI) FinishEcho(bool) {}
 
 func (m *mockUI) SetPrompt(text string) {
 	m.mu.Lock()
@@ -330,7 +324,7 @@ func newClient(t *testing.T, initLua string) *client {
 // connect types /connect at the client and waits for the dial.
 func (c *client) connect() {
 	c.t.Helper()
-	c.ui.input <- input.Command("/connect " + c.mud.addr())
+	c.ui.events <- ui.SubmissionMsg{Submission: input.Command("/connect " + c.mud.addr())}
 	c.mud.accept()
 }
 
@@ -340,7 +334,7 @@ func (c *client) connectRefused() {
 	c.t.Helper()
 	addr := c.mud.addr()
 	c.mud.ln.Close()
-	c.ui.input <- input.Command("/connect " + addr)
+	c.ui.events <- ui.SubmissionMsg{Submission: input.Command("/connect " + addr)}
 }
 
 // waitFor polls cond until it holds or the deadline passes.

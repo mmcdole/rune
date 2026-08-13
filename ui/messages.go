@@ -3,7 +3,7 @@ package ui
 import "github.com/mmcdole/rune/input"
 
 // UIEvent is implemented by all messages sent from UI to Session.
-// This provides compile-time type safety for the outbound channel.
+// One event channel preserves their order.
 type UIEvent interface {
 	uiEvent() // unexported marker method - only this package can implement
 }
@@ -16,12 +16,6 @@ type PrintLineMsg string
 // Lua "echo" hook) to append to scrollback. Like PrintLineMsg, the
 // text may contain newlines.
 type EchoLineMsg string
-
-// FinishEchoMsg completes a submission's local echo and reports whether it
-// queued a game line.
-type FinishEchoMsg struct {
-	QueuedLine bool
-}
 
 // PromptMsg replaces the prompt overlay with a partial line or confirmed prompt.
 type PromptMsg string
@@ -74,13 +68,21 @@ type UpdateLayoutMsg struct {
 
 // --- Push-based UI Messages (UI -> Session) ---
 
+// SubmissionMsg transfers an accepted input snapshot to Session. Once this
+// event is queued, the UI may clear its draft.
+type SubmissionMsg struct {
+	Submission input.Submission
+}
+
+func (SubmissionMsg) uiEvent() {}
+
 // ExecuteBindMsg requests Session to execute a Lua key binding.
 // Sent when UI detects a key that's in the boundKeys map.
 type ExecuteBindMsg string
 
 func (ExecuteBindMsg) uiEvent() {}
 
-// WindowSizeMsg notifies Session of window size changes.
+// WindowSizeChangedMsg notifies Session of window size changes.
 // Session uses this to update rune.state.width/height.
 type WindowSizeChangedMsg struct {
 	Width  int
