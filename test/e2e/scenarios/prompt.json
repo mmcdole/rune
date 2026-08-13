@@ -1,30 +1,30 @@
 {
-  "description": "Prompt-area lifecycle: immediate unfinished text, GA-confirmed prompts, commit-on-game-send, replacement by server lines, and no-GA login automation.",
+  "description": "Prompt overlay behavior for partial lines, GA/EOR prompts, game sends, and no-GA login.",
   "scenarios": [
     {
-      "name": "GA prompt shows in the overlay and commits when a game line is accepted",
+      "name": "a game send commits a GA/EOR prompt",
       "steps": [
         { "connect": true },
         { "server_prompt": "HP:100> " },
         { "expect_prompt": "HP:100>" },
         { "type": "look" },
-        { "expect_printed": "HP:100>", "note": "the submitted game line commits the prompt to scrollback" },
+        { "expect_printed": "HP:100>", "note": "the game send commits the prompt to scrollback" },
         { "expect_sent": "look" }
       ]
     },
     {
-      "name": "a server line commits a confirmed prompt before its output",
+      "name": "a server line follows a committed GA/EOR prompt",
       "steps": [
         { "connect": true },
         { "server_prompt": "HP:90> " },
         { "expect_prompt": "HP:90>" },
         { "server_line": "the sun rises" },
-        { "expect_printed": "HP:90>", "note": "GA made the prompt a separate record" },
+        { "expect_printed": "HP:90>", "note": "GA confirmed the prompt before the next line" },
         { "expect_printed": "the sun rises" }
       ]
     },
     {
-      "name": "unterminated login prompts can trigger immediately",
+      "name": "partial-line login prompts can trigger immediately",
       "init_lua": [
         "rune.trigger.exact('Username: ', 'example-user', { on = 'prompt', once = true })",
         "rune.trigger.exact('Password: ', 'example-password', { on = 'prompt', once = true })"
@@ -37,35 +37,14 @@
         },
         { "expect_prompt": "Username:" },
         { "expect_sent": "example-user" },
+        { "expect_printed": "Username:", "note": "the game send commits the no-GA prompt to scrollback" },
         {
           "server_bytes": [80, 97, 115, 115, 119, 111, 114, 100, 58, 32],
-          "note": "sending the username separated the two unfinished tails"
+          "note": "the username send commits the first prompt before Password arrives"
         },
         { "expect_prompt": "Password:" },
-        { "expect_sent": "example-password" }
-      ]
-    },
-    {
-      "name": "an automated prompt response closes stale multiline state",
-      "init_lua": [
-        "rune.trigger.starts('Story:', function(matches, ctx)",
-        "  rune.echo('E2E-SPAN-FLUSH=[' .. ctx.text .. ']')",
-        "end, { span = { to = 'NEVER', max = 8 } })",
-        "rune.trigger.exact('Username: ', 'example-user', { on = 'prompt', once = true })"
-      ],
-      "steps": [
-        { "connect": true },
-        { "server_line": "Story: unfinished" },
-        {
-          "server_bytes": [85, 115, 101, 114, 110, 97, 109, 101, 58, 32],
-          "note": "the no-GA prompt is displayed and answered by Lua"
-        },
-        { "expect_prompt": "Username:" },
-        { "expect_sent": "example-user" },
-        {
-          "expect_printed": "E2E-SPAN-FLUSH=[Story: unfinished]",
-          "note": "the outbound line is an ordered local boundary even without UI submission"
-        }
+        { "expect_sent": "example-password" },
+        { "expect_printed": "Password:", "note": "the password send also commits its prompt" }
       ]
     }
   ]

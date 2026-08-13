@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/mmcdole/rune/input"
@@ -27,7 +26,8 @@ var _ lua.Host = (*Session)(nil)
 // is *network.TCPClient; tests substitute a mock so the event loop
 // can be exercised without sockets.
 type Network interface {
-	Connect(ctx context.Context, address string) error
+	BeginConnect(connectionID uint64)
+	Connect(ctx context.Context, address string, connectionID uint64) error
 	Disconnect()
 	Send(data string) error
 	SendGMCP(pkg, data string) error
@@ -93,13 +93,10 @@ type Session struct {
 	clientState   lua.ClientState
 	currentInput  string // Tracked so Lua can query via rune.input.get()
 	currentCursor int    // Zero-based UTF-8 byte offset exposed to Lua
+	connectionID  uint64 // Rejects output from previous connections
 
-	// Submission processing is synchronous on the session goroutine. These
-	// fields record whether any Send call made by its echo or input hooks was
-	// accepted, which tells the UI whether to wait for a prompt commit before
-	// releasing the local echo.
-	trackingSubmissionSend  bool
-	submissionSendSucceeded bool
+	// Reset for each submission; Send sets it after queuing a game line.
+	submissionQueuedLine bool
 }
 
 // New creates a new Session. It is passive - no goroutines start here.
@@ -216,6 +213,9 @@ func (s *Session) processEvents(ctx context.Context) {
 
 // handleNetworkOutput dispatches network layer output on the session loop.
 func (s *Session) handleNetworkOutput(out network.Output) {
+	if out.ConnectionID != s.connectionID {
+		return
+	}
 	switch out.Kind {
 	case network.OutputLine:
 		s.handleServerLine(out.Payload)
@@ -236,10 +236,7 @@ func (s *Session) handleNetworkOutput(out network.Output) {
 
 // handleServerLine processes a complete server line.
 func (s *Session) handleServerLine(payload string) {
-	// A GA/EOR-confirmed prompt is a complete record even though it had no line
-	// delimiter. Preserve its wire order when asynchronous output follows. An
-	// unconfirmed partial is only a preview of this OutputLine and must never be
-	// printed separately.
+	// A complete line replaces a partial line, but follows a confirmed prompt.
 	s.prompt.beforeLine()
 
 	line := text.NewLine(payload)
@@ -251,82 +248,53 @@ func (s *Session) handleServerLine(payload string) {
 	}
 }
 
-// handleServerPartial processes the current unfinished output tail.
 func (s *Session) handleServerPartial(payload string) {
 	s.handlePromptUpdate(payload, false)
 }
 
-// handleServerPrompt processes a GA/EOR-confirmed prompt.
 func (s *Session) handleServerPrompt(payload string) {
 	s.handlePromptUpdate(payload, true)
 }
 
-// handlePromptUpdate replaces the overlay without committing the new update
-// to scrollback. Partial snapshots are cumulative peeks of the growing tail,
-// so committing a superseded one would turn socket read boundaries into
-// visible lines (issue #25). GA/EOR
-// makes each confirmed prompt a separate record, so later server text commits
-// it before replacing the overlay. An outbound game-text boundary commits any
-// active update. Partial and confirmed prompts share the same display path. A
-// confirmed prompt flushes multiline triggers; partials do not.
+// handlePromptUpdate runs prompt hooks and replaces the prompt overlay.
+// Partial lines replace each other; confirmed prompts are committed before
+// later server text.
 func (s *Session) handlePromptUpdate(payload string, confirmed bool) {
-	// GA/EOR ended the previous overlay record. Any later server text starts a
-	// new record, even when that text first arrives as an unfinished partial.
-	// Commit before dispatching the new update so TCP fragmentation cannot
-	// decide whether the confirmed prompt reaches scrollback.
+	connectionID := s.connectionID
 	s.prompt.beforeUpdate()
 
 	line := text.NewLine(payload)
-	// Sanitized before storing so the overlay and a later scrollback commit
-	// both stay chrome-safe.
 	var modified string
 	if confirmed {
 		modified = s.engine.OnPrompt(line)
 	} else {
 		modified = s.engine.OnPartial(line)
 	}
+	// A prompt hook may replace the connection before it returns.
+	if s.connectionID != connectionID {
+		return
+	}
 	modified = text.SanitizeDisplay(modified)
 	s.prompt.replace(modified, confirmed)
 }
 
-// handleSendBoundary commits any unfinished server record associated with an
-// outbound game-text line. The network orders this event ahead of later server
-// output. A boundary without an active overlay carries no server-output
-// meaning and therefore does not close spans.
+// handleSendBoundary commits the prompt overlay and closes open spans. Without
+// an active prompt overlay, it leaves spans unchanged.
 func (s *Session) handleSendBoundary() {
 	if s.prompt.commit() {
 		s.engine.FlushSpans()
 	}
 }
 
-// handleSubmission processes an immutable input snapshot. Command submissions
-// retain Rune's normal aliases, delimiters, repeats, and slash commands;
-// verbatim submissions bypass that interpretation and send physical lines as
-// written.
 func (s *Session) handleSubmission(submission input.Submission) {
-	s.trackingSubmissionSend = true
-	s.submissionSendSucceeded = false
+	s.submissionQueuedLine = false
 	defer func() {
-		sent := s.submissionSendSucceeded
-		s.trackingSubmissionSend = false
-		s.submissionSendSucceeded = false
-		s.ui.FinishEcho(sent)
+		s.ui.FinishEcho(s.submissionQueuedLine)
 	}()
 
 	s.addHistorySubmission(submission)
 	if s.net.LocalEchoEnabled() {
-		lines := []string{submission.Text}
-		if submission.Mode == input.ModeVerbatim {
-			// Scrollback entries must be physical lines. An embedded LF in
-			// one entry would render extra terminal rows without the viewport
-			// accounting for them.
-			lines = strings.Split(submission.Text, "\n")
-		}
-		for _, line := range lines {
-			// Styling (and the choice to show the echo at all) is Lua
-			// policy, dispatched through the "echo" hook. Engine.OnEcho owns
-			// the safe display projection; canonical bytes remain untouched
-			// here for history and the wire.
+		for _, line := range submission.PhysicalLines() {
 			if styled, show := s.engine.OnEcho(line); show {
 				s.ui.Echo(styled)
 			}

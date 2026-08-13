@@ -8,9 +8,8 @@ type UIEvent interface {
 	uiEvent() // unexported marker method - only this package can implement
 }
 
-// PrintLineMsg carries output text to append to scrollback. The text
-// may contain newlines; the TUI splits and wraps it into rows.
-// Used for all output: server lines, Lua prints, etc.
+// PrintLineMsg carries text to append to scrollback. It may contain newlines;
+// the TUI splits and wraps it into rows.
 type PrintLineMsg string
 
 // EchoLineMsg carries a local echo (user input, already styled by the
@@ -18,19 +17,16 @@ type PrintLineMsg string
 // text may contain newlines.
 type EchoLineMsg string
 
-// EchoDispositionMsg finishes one submission's local echo. WaitForPrompt holds
-// deferred echo/output until PromptCommitMsg; false releases it unless an
-// earlier submission is still waiting for that commit.
-type EchoDispositionMsg struct {
-	WaitForPrompt bool
+// FinishEchoMsg completes a submission's local echo and reports whether it
+// queued a game line.
+type FinishEchoMsg struct {
+	QueuedLine bool
 }
 
-// PromptMsg replaces the live prompt-area text below scrollback. The text may
-// be a server prompt or an unfinished fragment of ordinary output.
+// PromptMsg replaces the prompt overlay with a partial line or confirmed prompt.
 type PromptMsg string
 
-// PromptCommitMsg atomically moves prompt-area text to scrollback, clears the
-// live overlay, and releases any local echoes waiting behind that text.
+// PromptCommitMsg moves the prompt overlay to scrollback in one update.
 type PromptCommitMsg string
 
 // PaneWriteMsg appends a line to a named pane.

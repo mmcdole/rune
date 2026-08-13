@@ -7,8 +7,8 @@
 -- rewritten, gagged lines are not logged) and the local echo of typed
 -- input. Plain mode (the default) strips ANSI so the log reads like
 -- the screen; raw mode (opts.raw / "/log start raw") keeps the codes
--- for color-faithful transcripts (view with `less -R`). Prompt-area
--- updates are skipped because unfinished snapshots can repeat. Client
+-- for color-faithful transcripts (view with `less -R`). Prompt overlay
+-- updates are skipped because partial lines can repeat. Client
 -- chrome (rune.echo, /help output) is not logged. Register your own
 -- hooks against rune._log.write for a different policy; echo does not
 -- fire while the server hides input (passwords stay out of logs).

@@ -19,8 +19,7 @@
 --   priority = 50         -- Execution order (lower = first)
 --   gag      = true       -- Hide matching line (spans: every collected line)
 --   raw      = true       -- Match against raw line (with ANSI codes)
---   on       = "output"   -- "output" (default) or live "prompt" updates
---   confirmed_only = true -- Prompt triggers: require Telnet GA/EOR
+--   on       = "output"   -- "output" (default) or prompt overlay updates
 --   span     = {          -- Collect a multi-line message; action fires once
 --     to  = "regex",      --   line that ends the span, inclusive (optional)
 --     raw = true,         --   match `to` against the raw line
@@ -60,15 +59,6 @@ local function create_trigger(pattern, action, opts, mode)
         error('trigger on must be "output" or "prompt"', 3)
     end
 
-    local confirmed_only = opts.confirmed_only
-    if confirmed_only == nil then
-        confirmed_only = false
-    elseif type(confirmed_only) ~= "boolean" then
-        error("trigger confirmed_only must be a boolean", 3)
-    elseif confirmed_only and channel ~= CHANNEL_PROMPT then
-        error('trigger confirmed_only requires on = "prompt"', 3)
-    end
-
     if opts.span ~= nil and channel ~= CHANNEL_OUTPUT then
         error('trigger span requires on = "output"', 3)
     end
@@ -106,7 +96,6 @@ local function create_trigger(pattern, action, opts, mode)
         gag = opts.gag or false,
         raw = opts.raw or false,
         channel = channel,
-        confirmed_only = confirmed_only,
         span = span,
         source = rune.caller_source(2),
     }, opts)
@@ -169,7 +158,6 @@ function rune.trigger.list()
             once = data.once,
             raw = data.raw,
             on = data.channel,
-            confirmed_only = data.confirmed_only,
             span = data.span and { to = data.span.to, raw = data.span.raw, max = data.span.max } or nil,
             source = data.source,
         })
@@ -229,8 +217,8 @@ local function clean_open_spans()
     end
 end
 
--- Fire a completed (or explicitly flushed) span. Return values are ignored:
--- every collected line has already passed through the display pipeline.
+-- Fire a complete or explicitly closed span. Its lines have already passed
+-- through the display pipeline, so return values are ignored.
 local function fire_span(data, st, to_remove)
     local ctx = {
         line = st.lines[1],
@@ -251,9 +239,7 @@ local function fire_span(data, st, to_remove)
     end
 end
 
--- A confirmed Telnet prompt, or a game send that closes an active prompt-area
--- record, is a boundary for incomplete multiline records. Partial snapshots
--- and sends made with no active record never call this function.
+-- Close every open span at a confirmed prompt or send boundary.
 function rune.trigger._flush_spans()
     if next(open) == nil then return end
     clean_open_spans()
@@ -276,9 +262,7 @@ function rune.trigger._flush_spans()
     end
 end
 
--- Drop incomplete multiline records without running their actions or
--- removing once-triggers. Connection lifecycle changes use this when the
--- collected lines no longer belong to the active server stream.
+-- Drop open spans without firing actions or removing once-triggers.
 function rune.trigger._discard_spans()
     open = {}
 end
@@ -312,8 +296,7 @@ local function trigger_context(data, matches, line)
     }
 end
 
--- Run one non-span trigger action. The lifecycle-specific caller constructs
--- the context, so output never carries prompt state and prompt always does.
+-- Run one non-span trigger action with context prepared by its caller.
 local function fire_trigger(data, matches, ctx, to_remove)
     local gagged = data.gag
     local replacement = nil
@@ -346,24 +329,7 @@ local function remove_once_triggers(to_remove)
     end
 end
 
--- Unconfirmed prompt-area text may later become ordinary output. Project
--- declarative output gags onto that preview so hidden text does not flash.
--- This is deliberately read-only: it never runs actions or changes spans.
-local function output_gag_matches_preview(snapshot, raw_line, clean_line)
-    for _, data in ipairs(snapshot) do
-        if registry:active(data) and data.channel == CHANNEL_OUTPUT and
-                data.gag then
-            local match_line = data.raw and raw_line or clean_line
-            if (data.span and open[data]) or match_header(data, match_line) then
-                return true
-            end
-        end
-    end
-    return false
-end
-
--- Process one delimiter-terminated output line. This is the only trigger
--- lifecycle that opens, grows, and completes spans.
+-- Process one complete line, including output triggers and spans.
 function rune.trigger._process_output(line)
     clean_open_spans()
 
@@ -445,23 +411,16 @@ function rune.trigger._process_output(line)
     return raw_line, true
 end
 
--- Process one prompt-area snapshot. Prompt triggers explicitly opt into this
--- repeatable lifecycle; it never changes span state.
+-- Process one prompt overlay update without changing span state.
 function rune.trigger._process_prompt(line, confirmed)
-    if type(confirmed) ~= "boolean" then
-        error("prompt trigger processing requires confirmed", 2)
-    end
-
     local raw_line = line:raw()
     local clean_line = line:clean()
     local to_remove = {}
     local snapshot = registry:snapshot()
-    local gagged = not confirmed and
-        output_gag_matches_preview(snapshot, raw_line, clean_line)
+    local gagged = false
 
     for _, data in ipairs(snapshot) do
-        if registry:active(data) and data.channel == CHANNEL_PROMPT and
-                (not data.confirmed_only or confirmed) then
+        if registry:active(data) and data.channel == CHANNEL_PROMPT then
             local match_line = data.raw and raw_line or clean_line
             local matches = match_header(data, match_line)
             if matches then

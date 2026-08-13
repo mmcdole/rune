@@ -5,7 +5,6 @@ package network
 import (
 	"bytes"
 	"strings"
-	"sync"
 )
 
 // Telnet command codes.
@@ -625,19 +624,10 @@ func (p *Parser) processNegotiation(command, opt byte) []TelnetEvent {
 	return responses
 }
 
-// OutputBuffer buffers incoming data and splits it into lines.
-// Lines are delimited by \r\n, \n\r, \n, or a bare \r — the contract of the
-// original ExtractLines. Bare \r matters: muds return the carriage to
-// overwrite their pending prompt line, and an embedded \r that reaches the
-// UI renders the rest of the line over stale cells (ghost columns).
-// Fragmentation-safe: a \r that ends a read is held in the buffer until the
-// next read decides whether it pairs with a following \n, and a delimiter
-// pair split across reads is completed via pendingPartner instead of
-// emitting a spurious empty line.
-// The mutex is required: the read loop parses into the buffer while
-// the write loop calls DiscardPartial before sending a line.
-type OutputBuffer struct {
-	mu     sync.Mutex
+// outputBuffer joins partial lines across reads and extracts lines terminated
+// by LF, CRLF, LFCR, or bare CR. MUDs use bare CR to overwrite prompt lines.
+// A trailing CR is held for the next read. connection.textMu serializes access.
+type outputBuffer struct {
 	buffer bytes.Buffer
 	// pendingPartner is the second byte of a delimiter pair whose first
 	// byte was already consumed at the end of a previous read ('\r' after
@@ -646,13 +636,7 @@ type OutputBuffer struct {
 	pendingPartner byte
 }
 
-func NewOutputBuffer() *OutputBuffer {
-	return &OutputBuffer{}
-}
-
-func (o *OutputBuffer) Receive(data []byte) []string {
-	o.mu.Lock()
-	defer o.mu.Unlock()
+func (o *outputBuffer) receive(data []byte) []string {
 	if o.pendingPartner != 0 {
 		if len(data) > 0 && data[0] == o.pendingPartner {
 			data = data[1:]
@@ -701,11 +685,9 @@ func (o *OutputBuffer) Receive(data []byte) []string {
 	return lines
 }
 
-// PeekPartial returns the current unfinished tail without consuming it. A
-// held trailing \r (a possible half of \r\n) is not part of the snapshot.
-func (o *OutputBuffer) PeekPartial() string {
-	o.mu.Lock()
-	defer o.mu.Unlock()
+// peekPartial returns the current partial line without consuming it. A held
+// trailing \r is omitted until the next read determines whether it forms CRLF.
+func (o *outputBuffer) peekPartial() string {
 	if o.buffer.Len() == 0 {
 		return ""
 	}
@@ -717,14 +699,9 @@ func (o *OutputBuffer) PeekPartial() string {
 	return text
 }
 
-// ConsumePrompt returns and clears the text preceding a Telnet GA/EOR marker.
-// completedLine is true when that text ended in a held bare CR: the marker
-// proves no LF followed it in the data stream, so the text is a completed line
-// rather than a prompt. An empty buffer returns ("", false); empty markers do
-// not create text events.
-func (o *OutputBuffer) ConsumePrompt() (text string, completedLine bool) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
+// consumePrompt clears the text terminated by GA/EOR. A held trailing CR
+// completes a line; a following LF is swallowed as its delimiter partner.
+func (o *outputBuffer) consumePrompt() (text string, completedLine bool) {
 	if o.buffer.Len() == 0 {
 		return "", false
 	}
@@ -740,30 +717,12 @@ func (o *OutputBuffer) ConsumePrompt() (text string, completedLine bool) {
 	return text, completedLine
 }
 
-// DiscardPartial discards the unfinished tail at an outbound game-line
-// boundary. Later server text starts a new accumulator. Without a wire
-// terminator there is no way to distinguish a real prompt from an ordinary
-// line split at this boundary.
-func (o *OutputBuffer) DiscardPartial() {
-	o.mu.Lock()
-	defer o.mu.Unlock()
+// discardPartial drops the current partial line at a send boundary.
+func (o *outputBuffer) discardPartial() {
 	if bytes.HasSuffix(o.buffer.Bytes(), []byte{'\r'}) {
 		o.pendingPartner = '\n' // dropped a held \r; swallow its pair
 	}
 	o.buffer.Reset()
-}
-
-func (o *OutputBuffer) Len() int {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	return o.buffer.Len()
-}
-
-func (o *OutputBuffer) Clear() {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	o.buffer.Reset()
-	o.pendingPartner = 0
 }
 
 // defaultCompatibility advertises ONLY options the client actually

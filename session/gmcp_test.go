@@ -25,7 +25,7 @@ func TestGMCPEnabledTriggersHandshake(t *testing.T) {
 	// The network layer flips gmcpActive before emitting the enabled
 	// notification; mirror that ordering.
 	net.gmcpActive = true
-	s.handleNetworkOutput(network.Output{Kind: network.OutputGMCPEnabled})
+	s.handleNetworkOutput(network.Output{Kind: network.OutputGMCPEnabled, ConnectionID: s.connectionID})
 
 	sent := net.drainGMCPSent()
 	if len(sent) != 2 {

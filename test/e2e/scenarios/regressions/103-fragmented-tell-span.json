@@ -1,8 +1,8 @@
 {
-  "description": "Regression: a socket-read boundary alone must not end a wrapped tell span. If a game command deliberately ends the unfinished tail, its visible text is committed instead of silently discarded.",
+  "description": "Regression: socket reads do not split multiline triggers. If a game line is sent while a partial line is displayed, Rune commits that partial line instead of dropping it.",
   "scenarios": [
     {
-      "name": "a fragmented wrapped tell reaches its multiline trigger in full",
+      "name": "socket fragmentation does not split a multiline trigger",
       "issue": "https://github.com/mmcdole/rune/issues/103",
       "init_lua": [
         "rune.trigger.regex('^You tell ([A-Za-z]+): (.+)$', function(matches, ctx)",
@@ -16,7 +16,7 @@
           "server_bytes": [97, 110, 100, 32, 99, 111, 110, 116, 105, 110, 117, 101, 115],
           "note": "the next physical line is split across socket reads"
         },
-        { "expect_prompt": "and continues", "note": "sync: the unfinished tail was previewed" },
+        { "expect_prompt": "and continues", "note": "the partial line is visible in the prompt overlay" },
         { "server_line": " onto the final physical line FINAL" },
         {
           "expect_printed": "E2E-TELL=[A long example starts and continues onto the final physical line FINAL]"
@@ -24,7 +24,7 @@
       ]
     },
     {
-      "name": "a game send commits an unfinished tail instead of silently dropping it",
+      "name": "a game send commits a partial line",
       "issue": "https://github.com/mmcdole/rune/issues/103",
       "init_lua": [
         "local save_scheduled = false",
@@ -42,10 +42,10 @@
           "note": "an ordinary line happens to stop at a socket-read boundary"
         },
         { "expect_prompt": "E2E-FIRST-FRAGMENT" },
-        { "expect_sent": "save", "note": "every game send ends the active prompt-area record" },
+        { "expect_sent": "save", "note": "the game send commits the partial line" },
         {
           "expect_printed": "E2E-FIRST-FRAGMENT",
-          "note": "the accepted split remains visible instead of being silently discarded"
+          "note": "the first fragment remains visible in scrollback"
         },
         { "server_line": "-E2E-SECOND-FRAGMENT" },
         { "expect_printed": "-E2E-SECOND-FRAGMENT" }

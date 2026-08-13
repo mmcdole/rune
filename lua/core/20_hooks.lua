@@ -16,9 +16,8 @@
 -- Events (data-flow):
 --   "input"        -- User input: (text, context); return false to consume
 --   "output"       -- Server output line object (false gags, string rewrites)
---   "prompt"       -- Live prompt-area text: (line, confirmed);
---                     false means the unfinished text is ambiguous, true
---                     means the server ended it with GA/EOR
+--   "prompt"       -- Prompt overlay: (line, confirmed); false for a
+--                     partial line, true for a GA/EOR-confirmed prompt
 --                     (false gags, string rewrites)
 --   "echo"         -- Local echo of typed input, plain string (false hides,
 --                     string rewrites; core handler adds the "> " styling)
@@ -118,9 +117,7 @@ local function run_handler(entry, ...)
     return nil
 end
 
--- Input contexts describe an immutable submission snapshot. Each handler gets
--- a fresh read-only proxy so even raw mutation cannot change the canonical
--- mode observed by later handlers or by the core router.
+-- Give each input handler its own read-only context.
 local function reject_input_context_write()
     error("input context is read-only", 2)
 end

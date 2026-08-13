@@ -23,42 +23,34 @@ Handlers run in priority order:
 | Event | Handler receives | Notes |
 |---|---|---|
 | `input` | submitted text, context | Return `false` to consume; other returns are ignored. `context.mode` is read-only and always `"command"` or `"verbatim"`. |
-| `output` | a line object | Once per completed line. `false` gags, a string rewrites. The core handler runs output triggers at priority 100. |
-| `prompt` | a line object, `confirmed` | Live unfinished text (`false`) or a GA/EOR-confirmed prompt (`true`). The core runs opted-in prompt triggers at priority 100. |
+| `output` | a line object | Once per complete line. `false` gags, a string rewrites. The core handler runs output triggers at priority 100. |
+| `prompt` | a line object, `confirmed` | Partial line (`false`) or GA/EOR-confirmed prompt (`true`). The core runs prompt triggers at priority 100. |
 | `echo` | one physical line of typed text | Like `output` but a plain string. The `> ` prefix is the core handler; replace it if you like. |
 
 For `output`, `prompt`, and `echo`, rewrites chain: a handler returning a
 string replaces the text for every subsequent handler, and `false` stops the
 chain (gags the line or hides the echo). For `input`, only `false` means
 anything. The hook fires once per submission: in verbatim mode `text` is the
-whole draft and may contain LF characters. Existing handlers that accept only
+whole draft and may contain line breaks. Existing handlers that accept only
 `text` continue to work because Lua ignores extra arguments. To rewrite normal
 command input, use an [alias](/scripting/aliases/).
 
-An unconfirmed `prompt` event is not a claim that the text is a server prompt.
-The name refers to the live prompt area above the input line. With
-no line delimiter, GA, or EOR, Rune cannot tell `Username:` from the first half
-of a longer line. Rune displays the unfinished text immediately and reports
-that uncertainty to Lua. Updates can repeat as the text grows; if it later
-ends as a normal line, the complete text also fires once through `output`,
-unless an outbound command separated the unfinished text first. If GA/EOR
-arrives separately, identical text can fire again with `confirmed`
-changing from `false` to `true`. A marker with no current text does not fire
-`prompt`.
+The `prompt` hook drives the prompt overlay; its name does not mean every value
+is a prompt. A partial line may be `Username:` or the first half of a longer
+line. It can repeat as it grows and later arrive once through `output` as a
+complete line. If GA/EOR arrives separately, the same text may run again with
+`confirmed` changing from `false` to `true`. An empty GA/EOR marker does not
+fire `prompt`.
 
-If more server text follows, Rune commits a confirmed prompt before the new
-record, even when that record first arrives as a partial. It replaces an
-unconfirmed preview without committing it separately. A confirmed prompt also
-flushes open multi-line triggers before `prompt` handlers run.
+A complete line replaces its partial line. A confirmed prompt is committed
+before later server text and closes open spans before `prompt` handlers run.
 
-Every outbound game-text line commits an active prompt-area record, whether it
-came from typed input, an alias, a trigger, or a timer. If the text was really
-the first fragment of an ordinary line, this creates a visible split and the
-later suffix arrives separately through `output`. Local commands that send
-nothing and protocol traffic such as GMCP do not create that boundary.
+Sending a game line commits the prompt overlay. Typed input, aliases, triggers,
+and timers all use this rule. Local commands and protocol traffic such as GMCP
+do not.
 
 ```lua
--- Repaint from the latest snapshot; do not accumulate per update.
+-- Replace state from each update; partial lines may repeat.
 rune.hooks.on("prompt", function(line, confirmed)
     current_prompt = line:clean()
 end)
@@ -83,8 +75,8 @@ end, { priority = 1 })
 ```
 
 The core handler at priority 100 applies aliases, `;` separators, `#N`
-repeats, and slash commands when `context.mode == "command"`. For
-`"verbatim"`, it splits only on LF and sends every physical line as data.
+repeats, and slash commands when `context.mode == "command"`. Verbatim input
+bypasses command processing and recognizes LF, CRLF, and bare CR line breaks.
 
 ## Notification events
 

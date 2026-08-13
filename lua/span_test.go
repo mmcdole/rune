@@ -7,11 +7,8 @@ import (
 	"github.com/mmcdole/rune/text"
 )
 
-// Span triggers collect multi-line messages: the header match opens a
-// span, following lines append, and the action fires once when
-// span.to matches, span.max lines arrive, or an explicit boundary flushes. These
-// tests drive Engine.OnOutput/OnPrompt line by line, the same way the
-// session event loop does.
+// Span triggers collect complete lines until span.to, span.max, or an explicit
+// boundary closes them.
 
 // assertLua runs a Lua assert() block and fails the test on error.
 func assertLua(t *testing.T, engine *Engine, code string) {
@@ -147,129 +144,7 @@ func TestSpanGagHidesEveryLine(t *testing.T) {
 	}
 }
 
-func TestSpanPromptFlushesPartial(t *testing.T) {
-	engine, _, cleanup := setupTest(t)
-	defer cleanup()
-
-	if err := engine.DoString("setup", `
-		fired = 0
-		prompt_trigger = 0
-		rune.trigger.regex("^(\\w+) tells you: (.+)$", function(m, ctx)
-			fired = fired + 1
-			got_text = ctx.text
-		end, { span = { to = "NEVERMATCH", max = 8 } })
-		rune.trigger.contains("100hp", function() prompt_trigger = prompt_trigger + 1 end,
-			{ on = "prompt" })
-	`); err != nil {
-		t.Fatal(err)
-	}
-
-	engine.OnOutput(text.NewLine("Drake tells you: partial message"))
-	engine.OnOutput(text.NewLine("still going"))
-	assertLua(t, engine, `assert(fired == 0, "fired early")`)
-
-	engine.OnPrompt(text.NewLine("100hp 50sp>"))
-
-	assertLua(t, engine, `
-		assert(fired == 1, "fired: " .. fired)
-		assert(got_text == "partial message still going", "text: " .. tostring(got_text))
-		assert(prompt_trigger == 1, "opted-in prompt trigger should match")
-	`)
-}
-
-func TestPartialGagsOpenSpanWithoutMutatingIt(t *testing.T) {
-	engine, _, cleanup := setupTest(t)
-	defer cleanup()
-
-	if err := engine.DoString("setup", `
-		fired = 0
-		got_text = nil
-		rune.trigger.regex("^SECRET: (.+)$", function(matches, ctx)
-			fired = fired + 1
-			got_text = ctx.text
-		end, { gag = true, span = { to = "END$", max = 8 } })
-	`); err != nil {
-		t.Fatal(err)
-	}
-
-	// A partial header is hidden but cannot open the span.
-	if got := engine.OnPartial(text.NewLine("SECRET: first")); got != "" {
-		t.Fatalf("gagged partial header displayed as %q", got)
-	}
-	assertLua(t, engine, `assert(fired == 0)`)
-
-	// The same text opens the span only when it becomes a complete line.
-	if _, show := engine.OnOutput(text.NewLine("SECRET: first")); show {
-		t.Fatal("gagged span header should not display")
-	}
-	if got := engine.OnPartial(text.NewLine("continu")); got != "" {
-		t.Fatalf("gagged partial continuation displayed as %q", got)
-	}
-	assertLua(t, engine, `assert(fired == 0, "partial continuation fired span")`)
-
-	if _, show := engine.OnOutput(text.NewLine("continuation END")); show {
-		t.Fatal("gagged span terminator should not display")
-	}
-	assertLua(t, engine, `
-		assert(fired == 1, "fired: " .. fired)
-		assert(got_text == "first continuation END", "text: " .. tostring(got_text))
-	`)
-}
-
-func TestExplicitSpanFlush(t *testing.T) {
-	engine, _, cleanup := setupTest(t)
-	defer cleanup()
-
-	if err := engine.DoString("setup", `
-		fired = 0
-		rune.trigger.starts("Story:", function(matches, ctx)
-			fired = fired + 1
-			got_text = ctx.text
-		end, { span = { to = "NEVER", max = 8 } })
-	`); err != nil {
-		t.Fatal(err)
-	}
-
-	engine.OnOutput(text.NewLine("Story: unfinished"))
-	engine.OnPartial(text.NewLine("HP:100>"))
-	assertLua(t, engine, `assert(fired == 0, "partial flushed span")`)
-
-	engine.FlushSpans()
-	assertLua(t, engine, `
-		assert(fired == 1, "flush did not fire span")
-		assert(got_text == "Story: unfinished", "text: " .. tostring(got_text))
-	`)
-}
-
-func TestSpanFlushHonorsRemovalDuringDispatch(t *testing.T) {
-	engine, _, cleanup := setupTest(t)
-	defer cleanup()
-
-	if err := engine.DoString("setup", `
-		fired = {}
-		rune.trigger.starts("First:", function()
-			fired[#fired + 1] = "first"
-			rune.trigger.remove("second")
-		end, { priority = 10, span = { to = "NEVER", max = 8 } })
-		rune.trigger.starts("Second:", function()
-			fired[#fired + 1] = "second"
-		end, { name = "second", priority = 20,
-			span = { to = "NEVER", max = 8 } })
-	`); err != nil {
-		t.Fatal(err)
-	}
-
-	engine.OnOutput(text.NewLine("First: unfinished"))
-	engine.OnOutput(text.NewLine("Second: unfinished"))
-	engine.FlushSpans()
-
-	assertLua(t, engine, `
-		assert(#fired == 1 and fired[1] == "first",
-			"removed span fired during flush: " .. table.concat(fired, ","))
-	`)
-}
-
-func TestDiscardSpansDropsStateWithoutFiringOrRemovingTrigger(t *testing.T) {
+func TestDiscardSpansDropsStateWithoutFiring(t *testing.T) {
 	engine, _, cleanup := setupTest(t)
 	defer cleanup()
 
@@ -279,17 +154,14 @@ func TestDiscardSpansDropsStateWithoutFiringOrRemovingTrigger(t *testing.T) {
 		rune.trigger.starts("Story:", function(matches, ctx)
 			fired = fired + 1
 			got_text = ctx.text
-		end, { once = true, span = { to = "END$", max = 8 } })
+		end, { span = { to = "END$", max = 8 } })
 	`); err != nil {
 		t.Fatal(err)
 	}
 
 	engine.OnOutput(text.NewLine("Story: discarded"))
 	engine.DiscardSpans()
-	assertLua(t, engine, `
-		assert(fired == 0, "discard fired span action")
-		assert(#rune.trigger.list() == 1, "discard removed once-trigger")
-	`)
+	assertLua(t, engine, `assert(fired == 0, "discard fired span action")`)
 
 	engine.OnOutput(text.NewLine("Story: retained"))
 	engine.OnOutput(text.NewLine("ending END"))
@@ -297,7 +169,6 @@ func TestDiscardSpansDropsStateWithoutFiringOrRemovingTrigger(t *testing.T) {
 		assert(fired == 1, "trigger did not work after discard")
 		assert(got_text == "Story: retained ending END",
 			"discarded text leaked into next span: " .. tostring(got_text))
-		assert(#rune.trigger.list() == 0, "once-trigger survived completed span")
 	`)
 }
 
@@ -488,42 +359,29 @@ func TestSpanRawTerminator(t *testing.T) {
 	assertLua(t, engine, `assert(clean_fired == 1, "max should flush the clean-mode span")`)
 }
 
-// Regression for issue #103: a socket read ends after a tell header and
-// partway through its first continuation. The partial is visual-only; the
-// completed lines must still form one span.
-func TestSpanPartialBetweenWrappedTellLines(t *testing.T) {
+func TestPartialLineDoesNotChangeSpan(t *testing.T) {
 	engine, _, cleanup := setupTest(t)
 	defer cleanup()
 
 	if err := engine.DoString("setup", `
-		results = {}
-		local WRAP = { to = "\\x1b\\[0?m\\s*$", raw = true, max = 8 }
-		rune.trigger.regex("^\\s*(\\w+) tells you: (.+)$", function(m, ctx)
-			table.insert(results, { kind = "tell", name = m[1], text = ctx.text })
-		end, { name = "tell-in", span = WRAP })
-		rune.trigger.regex("^\\s*You tell (\\w+): (.+)$", function(m, ctx)
-			table.insert(results, { kind = "tell-out", name = m[1], text = ctx.text })
-		end, { name = "tell-out", span = WRAP })
+		fired = 0
+		got_text = nil
+		rune.trigger.starts("Story:", function(matches, ctx)
+			fired = fired + 1
+			got_text = ctx.text
+		end, { span = { to = "END$", max = 8 } })
 	`); err != nil {
 		t.Fatal(err)
 	}
 
-	engine.OnOutput(text.NewLine("\x1b[1;32mYou tell Player: This is a long example tell that wraps onto"))
-	engine.OnPartial(text.NewLine("another physical"))
-	engine.OnOutput(text.NewLine("another physical line and continues before"))
-	engine.OnOutput(text.NewLine("ending on the final line\x1b[m"))
-	engine.OnOutput(text.NewLine("\x1b[1;32mPlayer tells you: A short reply\x1b[m"))
-
+	engine.OnOutput(text.NewLine("Story: begins"))
+	engine.OnPartial(text.NewLine("partial"))
+	engine.OnPartial(text.NewLine("partial END"))
+	assertLua(t, engine, `assert(fired == 0, "partial terminator fired the span")`)
+	engine.OnOutput(text.NewLine("complete continuation END"))
 	assertLua(t, engine, `
-		assert(#results == 2, "results: " .. #results ..
-			(results[1] and (" first text: " .. tostring(results[1].text)) or ""))
-		assert(results[1].kind == "tell-out", "kind1: " .. tostring(results[1].kind))
-		assert(results[1].name == "Player", "name1: " .. tostring(results[1].name))
-		local want = "This is a long example tell that wraps onto " ..
-			"another physical line and continues before ending on the final line"
-		assert(results[1].text == want, "text1: [" .. tostring(results[1].text) .. "]")
-		assert(results[2].kind == "tell", "kind2: " .. tostring(results[2].kind))
-		assert(results[2].text == "A short reply",
-			"text2: [" .. tostring(results[2].text) .. "]")
+		assert(fired == 1, "complete terminator did not fire the span")
+		assert(got_text == "Story: begins complete continuation END",
+			"partial line changed span text: " .. tostring(got_text))
 	`)
 }

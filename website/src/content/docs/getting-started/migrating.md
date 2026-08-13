@@ -53,7 +53,7 @@ The scripting language is the same; the API names differ:
 | `matches[2]` (first capture) | `matches[1]`; there is no whole-match slot |
 | `tempTimer(5, code)` | `rune.timer.after(5, action)` |
 | `tempRegexTrigger(pattern, code)` | `rune.trigger.regex(pattern, action)` |
-| prompt trigger | `rune.trigger.regex(pattern, action, { on = "prompt", confirmed_only = true })` |
+| prompt trigger | `rune.trigger.regex(pattern, action, { on = "prompt" })` |
 | script editor window | your `$EDITOR`; `Ctrl+E` edits the input line in it too |
 
 ## From MUSHclient
@@ -87,34 +87,28 @@ visible instead of guessing with a timer:
 | TinTin++ `RECEIVED PROMPT` / `PROCESSED LINE` prompt flag | `{ on = "prompt" }`; inspect `ctx.confirmed` instead of relying on a packet-patch timer |
 | zMUD/CMUD trigger-on-Prompt option | trigger with `{ on = "prompt" }` |
 | Blightmud trigger with `prompt = true` | trigger with `{ on = "prompt" }` |
-| Mudlet GA/EOR prompt trigger | `{ on = "prompt", confirmed_only = true }` |
+| Mudlet GA/EOR prompt trigger | `{ on = "prompt" }`; inspect `ctx.confirmed` in the action if needed |
 | MUSHclient `OnPluginPartialLine` | `prompt` hook with `confirmed == false` |
 
-Rune's prompt trigger channel includes live unfinished text and GA/EOR-marked
-prompts. It excludes completed lines. The hook receives
+Rune's prompt trigger channel includes partial lines and GA/EOR-confirmed
+prompts. It excludes complete lines. The hook receives
 `(line, confirmed)` so low-level scripts can distinguish those cases.
 
-## Migrating Rune prompt scripts
+## Rune prompt scripts
 
-The `prompt` hook keeps its name and adds a `confirmed` argument.
-Existing one-argument handlers remain valid. Ordinary triggers no longer run
-on unfinished text automatically:
+The `prompt` hook passes a `confirmed` argument. One-argument handlers remain
+valid because Lua ignores extra arguments. Triggers match complete lines by
+default; add `on = "prompt"` when a trigger should match the prompt overlay:
 
 ```lua
--- Before
-rune.hooks.on("prompt", repaint)
-rune.trigger.exact("Username: ", login)
-
--- Now
 rune.hooks.on("prompt", function(line, confirmed)
     repaint(line)
 end)
 rune.trigger.exact("Username: ", login, { on = "prompt" })
 ```
 
-This is intentionally a safe-default change: output automation sees only
-completed lines unless it explicitly opts into updates that can repeat or
-later turn out to be part of a normal line.
+Output triggers see only complete lines. Prompt triggers opt into partial lines,
+which can repeat or later become part of a complete line.
 
 ## Capture references
 

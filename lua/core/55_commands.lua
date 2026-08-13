@@ -271,7 +271,6 @@ rune.command.add("triggers", function(args)
         if t.raw then flags[#flags + 1] = "raw" end
         if t.span then flags[#flags + 1] = "span" end
         if t.on == "prompt" then flags[#flags + 1] = "on:prompt" end
-        if t.confirmed_only then flags[#flags + 1] = "confirmed-only" end
         local name_str = t.name and (" " .. dim("name:") .. t.name) or ""
         local flags_str = #flags > 0 and ("  " .. dim("(" .. table.concat(flags, ", ") .. ")")) or ""
         local src_str = t.source and ("  " .. dim("@" .. t.source)) or ""

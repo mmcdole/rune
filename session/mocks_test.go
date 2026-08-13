@@ -34,7 +34,9 @@ func newMockNetwork() *mockNetwork {
 	}
 }
 
-func (m *mockNetwork) Connect(ctx context.Context, address string) error {
+func (m *mockNetwork) BeginConnect(connectionID uint64) {}
+
+func (m *mockNetwork) Connect(ctx context.Context, address string, connectionID uint64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.connectErr != nil {
@@ -110,18 +112,18 @@ func (m *mockNetwork) drainSent() []string {
 
 // mockUI implements ui.UI, capturing display calls.
 type mockUI struct {
-	mu               sync.Mutex
-	printed          []string
-	echoed           []string
-	echoDispositions []bool
-	prompts          []string // every SetPrompt call, including clears
-	inputSet         []string
-	inputModes       []input.Submission
-	inputCursor      []int
-	bindsPushed      map[string]bool // last UpdateBinds payload
-	input            chan input.Submission
-	outbound         chan ui.UIEvent
-	done             chan struct{}
+	mu              sync.Mutex
+	printed         []string
+	echoed          []string
+	echoQueuedLines []bool
+	prompts         []string // every SetPrompt call, including clears
+	inputSet        []string
+	inputModes      []input.Submission
+	inputCursor     []int
+	bindsPushed     map[string]bool // last UpdateBinds payload
+	input           chan input.Submission
+	outbound        chan ui.UIEvent
+	done            chan struct{}
 }
 
 var _ ui.UI = (*mockUI)(nil)
@@ -172,10 +174,10 @@ func (m *mockUI) CommitPrompt(text string) {
 	m.prompts = append(m.prompts, "")
 }
 
-func (m *mockUI) FinishEcho(waitForPrompt bool) {
+func (m *mockUI) FinishEcho(queuedLine bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.echoDispositions = append(m.echoDispositions, waitForPrompt)
+	m.echoQueuedLines = append(m.echoQueuedLines, queuedLine)
 }
 
 func (m *mockUI) SetInput(text string) {
@@ -250,10 +252,10 @@ func (m *mockUI) drainPrompts() []string {
 	return prompts
 }
 
-func (m *mockUI) drainEchoDispositions() []bool {
+func (m *mockUI) drainEchoQueuedLines() []bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	dispositions := m.echoDispositions
-	m.echoDispositions = nil
-	return dispositions
+	values := m.echoQueuedLines
+	m.echoQueuedLines = nil
+	return values
 }

@@ -32,7 +32,7 @@ func TestGMCPStateSurvivesReloadMidConnection(t *testing.T) {
 	// Server negotiates GMCP on the live connection.
 	net.connected = true
 	net.gmcpActive = true
-	s.handleNetworkOutput(network.Output{Kind: network.OutputGMCPEnabled})
+	s.handleNetworkOutput(network.Output{Kind: network.OutputGMCPEnabled, ConnectionID: s.connectionID})
 
 	sent := net.drainGMCPSent()
 	if len(sent) < 2 || sent[0].Package != "Core.Hello" {

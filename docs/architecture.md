@@ -131,66 +131,48 @@ Rune implements a bespoke Telnet parser (`network/telnet.go`) ported from `libmu
 
 - **State Machine:** Handles negotiation (WILL/WONT/DO/DONT) and subnegotiation.
 - **Compatibility Table:** Tracks the state of every Telnet option to prevent negotiation loops.
-- **Output Buffer:** A fragmentation-safe accumulator that reports three facts: delimiter-terminated lines, non-consuming snapshots of the unfinished tail, and tails consumed by GA/EOR.
+- **Output Buffer:** Joins partial lines across reads and reports complete lines, partial lines, and GA/EOR-confirmed prompts.
 
 ### 4.1 Server text lifecycle
 
-TCP read boundaries do not carry meaning. If the current buffer contains
-`Username:`, it may be a complete login prompt with no terminator or merely the
-first part of a longer line. Rune does not use a timeout or a configured prompt
-pattern to guess which one it is.
+TCP read boundaries do not carry meaning. `Username:` may be a complete login
+prompt or the first part of a longer line. Rune displays it immediately without
+using a timer or prompt pattern to guess.
 
 The network layer reports only what it knows:
 
 | Event | Meaning | Consumes the accumulator |
 |---|---|---|
-| `OutputLine` | Text ended by CRLF, LFCR, LF, or bare CR | yes |
-| `OutputPartial` | Snapshot of the current unfinished tail | no |
-| `OutputPrompt` | GA/EOR ended a nonempty current tail | yes |
+| `OutputLine` | Complete line ended by CRLF, LFCR, LF, or bare CR | yes |
+| `OutputPartial` | Current partial line | no |
+| `OutputPrompt` | Partial line ended by GA/EOR | yes |
 
-Partials are displayed immediately in the prompt overlay. They may grow across
-reads and the same bytes may later arrive once as an `OutputLine` or
-`OutputPrompt`. Lua receives overlay changes through the `prompt` hook; the
-confirmation boolean is false for `OutputPartial` and true for `OutputPrompt`.
-Ordinary trigger actions consume only `OutputLine`. Prompt triggers opt into
-the speculative overlay path. As a presentation safeguard, declarative
-`gag = true` output patterns are checked read-only against unconfirmed
-partials, without firing actions or changing trigger state. A GA/EOR marker
-received with no current tail has no text to report, so it produces no output
+Partial lines appear in the prompt overlay and may repeat as they grow. Lua
+receives them through the `prompt` hook with `confirmed = false`. GA/EOR sends
+the same hook with `confirmed = true`; complete lines use the `output` hook.
+Output triggers do not see prompt overlay updates; prompt triggers opt in.
+Partial lines never change span state. Empty GA/EOR markers produce no output
 event.
 
-When later server text supersedes the overlay, an unconfirmed partial is
-replaced without being committed because it may be a preview of that text. A
-confirmed prompt is first committed to scrollback because GA/EOR made it a
-separate record. This applies even when the following record first arrives as
-another partial.
+A complete line replaces its partial line in the prompt overlay. A confirmed
+prompt is committed first because GA/EOR ended it as a separate record.
 
-Only explicit boundaries may finalize multiline trigger state. A nonempty tail
-terminated by GA/EOR always closes open spans. Before writing any outbound game
-line, the network writer discards the unfinished accumulator and publishes an
-ordered send boundary. If a prompt-area record is active, the Session commits
-its visible text to scrollback, clears the overlay, and closes open spans. With
-no active prompt-area record, the send does not affect display or span state.
-Local commands that send nothing and raw protocol traffic such as GMCP, NAWS,
-and Telnet negotiation do not create this boundary.
+A confirmed prompt closes open spans. Before attempting a game line, the
+network writer discards the current partial line and publishes a send boundary.
+Session then commits the prompt overlay and closes open spans. With no active
+overlay, the boundary does not affect display or spans. Local commands and
+protocol traffic such as GMCP, NAWS, and Telnet negotiation do not create send
+boundaries.
 
-Prompt commit is one display operation rather than `Print` followed by a
-separate overlay clear. While prompt-area text is live, the TUI holds local
-echo behind it; commit appends the prompt, clears the overlay, and then releases
-the echo. When synchronous submission handling sends no game-text line, an
-explicit completion signal releases the echo and any local output buffered
-behind it without committing the still-live server text. This preserves
-`prompt -> typed command` scrollback order without giving local commands
-network-boundary authority.
+Prompt commit appends the overlay to scrollback and clears it in one display
+update. The TUI holds local echo behind a visible overlay until either a send
+boundary commits it or the submission finishes without sending.
 
-This uniform rule deliberately does not guess why a command was sent: typed
-commands, aliases, prompt actions, output actions, and timers behave alike. It
-also states the unavoidable no-timer trade-off plainly. If a command is sent
-while an ordinary line is split across socket reads, the visible first fragment
-is committed as a prompt-area record and the later suffix becomes a separate
-line. The first fragment ran only through the `prompt` hook, not `output`, and
-Lua gagging still applies when it is committed. Connecting, disconnecting, and
-reloading discard unfinished spans without firing them.
+All game lines use the same rule, whether they come from typed input,
+aliases, triggers, or timers. If one is sent while an ordinary line is partial,
+Rune commits the visible prefix and treats the later suffix as a new line. This
+is the trade-off for immediate partial-line display without a timer or prompt
+pattern. Connect, disconnect, and reload discard open spans without firing.
 
 ## 5. Design Patterns Used
 

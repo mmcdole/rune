@@ -5,23 +5,26 @@ import (
 	"time"
 )
 
-// Connect implements lua.Host.
-// The dial runs in its own goroutine; unlike Reload, that goroutine
-// may block on the async-result channel (lossless delivery) because
-// the session loop keeps draining while the dial is in flight.
+// Connect starts a dial without blocking the Session loop.
 func (s *Session) Connect(addr string) {
+	s.connectionID++
+	connectionID := s.connectionID
 	s.engine.DiscardSpans()
 	s.prompt.discard()
 	s.engine.CallHook("connecting", addr)
+	if s.connectionID != connectionID {
+		return // the hook changed the connection again
+	}
+	s.net.BeginConnect(connectionID)
 	go func() {
-		// Create a timeout context for the dial attempt.
-		// We use a separate context because if the Session cancels,
-		// s.net.Disconnect() is called anyway in Run's defer.
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		err := s.net.Connect(ctx, addr)
+		err := s.net.Connect(ctx, addr, connectionID)
 		s.asyncResults <- func() {
+			if s.connectionID != connectionID {
+				return
+			}
 			if err != nil {
 				s.clientState.Connected = false
 				s.clientState.Address = ""
@@ -40,7 +43,12 @@ func (s *Session) Connect(addr string) {
 
 // Disconnect implements lua.Host.
 func (s *Session) Disconnect() {
+	s.connectionID++
+	connectionID := s.connectionID
 	s.engine.CallHook("disconnecting")
+	if s.connectionID != connectionID {
+		return // the hook changed the connection again
+	}
 	s.net.Disconnect()
 	s.engine.DiscardSpans()
 	s.clientState.Connected = false
@@ -54,8 +62,8 @@ func (s *Session) Disconnect() {
 // Send implements lua.Host.
 func (s *Session) Send(data string) error {
 	err := s.net.Send(data)
-	if err == nil && s.trackingSubmissionSend {
-		s.submissionSendSucceeded = true
+	if err == nil {
+		s.submissionQueuedLine = true
 	}
 	return err
 }

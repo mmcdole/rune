@@ -43,11 +43,11 @@ behavior is explicit:
 | `Ctrl+E` | Edit the whole draft in `$EDITOR` |
 | `Escape` twice | Discard the draft; any other key cancels the first warning |
 
-Verbatim submission treats only LF as a line boundary and sends every physical
-line exactly as written. Rune does not expand aliases, split semicolons, apply
-`#N` repeats, or interpret `/quit` and other slash-looking lines. Those are all
-data. The mode remains verbatim after edits even if you remove the last newline
-or tab; it ends when you send or discard the draft.
+Verbatim submission treats LF, CRLF, and bare CR as line breaks and sends each
+physical line without command processing. Rune does not expand aliases, split
+semicolons, apply `#N` repeats, or interpret `/quit` and other slash-looking
+lines. Those are all data. The mode remains verbatim after edits even if you
+remove the last newline or tab; it ends when you send or discard the draft.
 
 Composer editing keys are handled locally rather than by Lua binds. For
 example, `Up`/`Down` move through the draft's visual rows and `PageUp`/`PageDown`

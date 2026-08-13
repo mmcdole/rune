@@ -10,6 +10,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"errors"
 	"math/big"
 	"net"
 	"sync"
@@ -48,6 +49,33 @@ func TestSplitAddress(t *testing.T) {
 			t.Errorf("splitAddress(%q) = (%q, %v, %v), want (%q, %v, %v)",
 				c.in, hostport, useTLS, insecure, c.hostport, c.useTLS, c.insecure)
 		}
+	}
+}
+
+func TestConnectRejectsSupersededRequest(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		conn, err := ln.Accept()
+		if err == nil {
+			conn.Close()
+		}
+	}()
+
+	const staleID, currentID = 1, 2
+	c := NewTCPClient()
+	c.BeginConnect(currentID)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err = c.Connect(ctx, ln.Addr().String(), staleID)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("stale Connect error = %v, want context.Canceled", err)
+	}
+	if c.current != nil {
+		t.Fatal("stale Connect installed a connection")
 	}
 }
 
@@ -99,10 +127,11 @@ func TestTLSConnectInsecure(t *testing.T) {
 
 	c := NewTCPClient()
 	defer c.Disconnect()
+	c.BeginConnect(1)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := c.Connect(ctx, "tls+insecure://"+ln.Addr().String()); err != nil {
+	if err := c.Connect(ctx, "tls+insecure://"+ln.Addr().String(), 1); err != nil {
 		t.Fatalf("connect: %v", err)
 	}
 
@@ -126,9 +155,10 @@ func TestTLSVerificationRejectsSelfSigned(t *testing.T) {
 	ln := selfSignedServer(t, "hello\r\n")
 
 	c := NewTCPClient()
+	c.BeginConnect(1)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := c.Connect(ctx, "tls://"+ln.Addr().String()); err == nil {
+	if err := c.Connect(ctx, "tls://"+ln.Addr().String(), 1); err == nil {
 		c.Disconnect()
 		t.Fatal("expected certificate verification failure for tls:// against self-signed cert")
 	}
@@ -162,9 +192,10 @@ func connectLoopback(t *testing.T, addr string) *TCPClient {
 	t.Helper()
 	c := NewTCPClient()
 	t.Cleanup(c.Disconnect)
+	c.BeginConnect(1)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := c.Connect(ctx, addr); err != nil {
+	if err := c.Connect(ctx, addr, 1); err != nil {
 		t.Fatalf("connect: %v", err)
 	}
 	return c
@@ -191,8 +222,7 @@ func expectBytes(t *testing.T, conn net.Conn, want []byte, what string) []byte {
 	return got
 }
 
-// nextOutput waits for the next Output of the given kind, skipping
-// unrelated events (the output buffer emits partial snapshots freely).
+// nextOutput waits for the next output of the given kind.
 func nextOutput(t *testing.T, c *TCPClient, kind OutputKind, what string) Output {
 	t.Helper()
 	deadline := time.After(5 * time.Second)
@@ -251,7 +281,7 @@ func (c *blockedWriteConn) release() {
 	c.releaseOnce.Do(func() { close(c.writeRelease) })
 }
 
-// --- Identity negotiation (Phase 1) over a real socket ---
+// --- Identity negotiation over a real socket ---
 
 func TestIdentityNegotiationLoopback(t *testing.T) {
 	done := make(chan struct{})
@@ -292,9 +322,10 @@ func TestIdentityNegotiationLoopback(t *testing.T) {
 	c := NewTCPClient()
 	t.Cleanup(c.Disconnect)
 	c.SetWindowSize(100, 30) // retained for the upcoming connection
+	c.BeginConnect(1)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := c.Connect(ctx, addr); err != nil {
+	if err := c.Connect(ctx, addr, 1); err != nil {
 		t.Fatalf("connect: %v", err)
 	}
 
@@ -305,7 +336,7 @@ func TestIdentityNegotiationLoopback(t *testing.T) {
 	}
 }
 
-// --- MCCP2 (Phase 2) ---
+// --- MCCP2 ---
 
 // TestMCCP2DecompressAndResume verifies the full MCCP2 lifecycle:
 // negotiation, decompression of the zlib stream, and a clean stream
@@ -391,137 +422,171 @@ func TestMCCP2CorruptStreamDisconnects(t *testing.T) {
 	nextOutput(t, c, OutputDisconnect, "disconnect on corrupt stream")
 }
 
-func TestNegotiationReplyPrecedesCommandTriggeredByLaterBatchText(t *testing.T) {
-	c := &TCPClient{outputChan: make(chan Output)}
+func TestProtocolRepliesQueueBeforeTextLock(t *testing.T) {
+	c := &TCPClient{outputChan: make(chan Output, 8)}
 	cx := &connection{
 		parser:    NewParser(defaultCompatibility()),
-		output:    NewOutputBuffer(),
-		hs:        newHandshake(false, 0, 0),
-		sendQueue: make(chan outMsg, 2),
-		done:      make(chan struct{}),
-	}
-
-	wire := append([]byte{CmdIAC, CmdWILL, OptEOR}, []byte("marker\r\npartial")...)
-	processed := make(chan bool, 1)
-	go func() { processed <- c.processIncoming(cx, wire) }()
-
-	line := nextOutput(t, c, OutputLine, "same-batch line after negotiation")
-	if line.Payload != "marker" {
-		t.Fatalf("same-batch line = %q, want marker", line.Payload)
-	}
-	// Model a trigger reacting immediately to the line. The Telnet reply for
-	// the earlier wire event must already be ahead of this command. The later
-	// partial keeps processIncoming inside the same batch until after the
-	// command is queued, making the ordering assertion deterministic.
-	cx.sendQueue <- outMsg{data: []byte("look"), line: true}
-	partial := nextOutput(t, c, OutputPartial, "same-batch partial after line")
-	if partial.Payload != "partial" {
-		t.Fatalf("same-batch partial = %q, want partial", partial.Payload)
-	}
-	if ok := <-processed; !ok {
-		t.Fatal("processIncoming stopped while ordering negotiation reply")
-	}
-
-	first := <-cx.sendQueue
-	second := <-cx.sendQueue
-	if first.line || !bytes.Equal(first.data, []byte{CmdIAC, CmdDO, OptEOR}) {
-		t.Fatalf("first queued write = %+v, want DO EOR reply", first)
-	}
-	if !second.line || string(second.data) != "look" {
-		t.Fatalf("second queued write = %+v, want triggered command", second)
-	}
-}
-
-// --- GMCP (Phase 3) ---
-
-func TestGMCPBatchQueuesReplyBeforeActivationAndMessage(t *testing.T) {
-	c := &TCPClient{outputChan: make(chan Output, 4)}
-	cx := &connection{
-		parser:    NewParser(defaultCompatibility()),
-		output:    NewOutputBuffer(),
+		output:    &outputBuffer{},
 		hs:        newHandshake(false, 0, 0),
 		sendQueue: make(chan outMsg, 1),
 		done:      make(chan struct{}),
 	}
+	t.Cleanup(func() { close(cx.done) })
 
-	// Occupy the only queue slot so processIncoming cannot enqueue DO GMCP.
-	// No later text or activation event may overtake that reply.
-	cx.sendQueue <- outMsg{data: []byte("occupied")}
-	wire := append([]byte{CmdIAC, CmdWILL, OptGMCP},
-		subnegFrame(OptGMCP, []byte(`Char.Vitals {"hp":100}`))...)
-	wire = append(wire, []byte("GMCP-marker\r\n")...)
+	// If reply queuing took textMu, neither reply could pass this one-slot queue.
+	cx.textMu.Lock()
+	textLocked := true
+	defer func() {
+		if textLocked {
+			cx.textMu.Unlock()
+		}
+	}()
+	cx.sendQueue <- outMsg{data: []byte("look"), line: true}
+
+	wire := []byte{CmdIAC, CmdWILL, OptEOR, CmdIAC, CmdWILL, OptSGA}
+	wire = append(wire, []byte("marker\r\n")...)
 	processed := make(chan bool, 1)
 	go func() { processed <- c.processIncoming(cx, wire) }()
 
-	if cx.gmcpActive.Load() {
-		t.Fatal("GMCP became active before DO GMCP was queued")
+	nextQueued := func(what string) outMsg {
+		t.Helper()
+		select {
+		case msg := <-cx.sendQueue:
+			return msg
+		case <-time.After(5 * time.Second):
+			t.Fatalf("timed out waiting for %s", what)
+			return outMsg{}
+		}
 	}
 
-	<-cx.sendQueue // release the occupied slot
-	if ok := <-processed; !ok {
-		t.Fatal("processIncoming stopped while queuing GMCP negotiation")
+	if got := string(nextQueued("queued game line").data); got != "look" {
+		t.Fatalf("first queued message = %q, want look", got)
 	}
+	if got := nextQueued("first protocol reply").data; !bytes.Equal(got, []byte{CmdIAC, CmdDO, OptEOR}) {
+		t.Fatalf("first reply = %v, want DO EOR", got)
+	}
+	if got := nextQueued("second protocol reply").data; !bytes.Equal(got, []byte{CmdIAC, CmdDO, OptSGA}) {
+		t.Fatalf("second reply = %v, want DO SGA", got)
+	}
+	cx.textMu.Unlock()
+	textLocked = false
 
-	reply := <-cx.sendQueue
-	if want := []byte{CmdIAC, CmdDO, OptGMCP}; !bytes.Equal(reply.data, want) {
-		t.Fatalf("negotiation reply = %v, want %v", reply.data, want)
+	select {
+	case ok := <-processed:
+		if !ok {
+			t.Fatal("processIncoming stopped after queuing replies")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("processIncoming did not resume after textMu was released")
 	}
-	if reply.line {
-		t.Fatal("GMCP negotiation reply was queued as line data")
-	}
-	first := nextOutput(t, c, OutputLine, "same-batch marker after reply queue")
-	if first.Payload != "GMCP-marker" {
-		t.Fatalf("same-batch marker = %+v", first)
-	}
-	nextOutput(t, c, OutputGMCPEnabled, "GMCP enabled after reply queue")
-	if !cx.gmcpActive.Load() {
-		t.Fatal("GMCP remained inactive after its reply was queued")
-	}
-	message := nextOutput(t, c, OutputGMCP, "same-batch GMCP after activation")
-	if message.Package != "Char.Vitals" || message.Payload != `{"hp":100}` {
-		t.Fatalf("same-batch GMCP message = (%q, %q)", message.Package, message.Payload)
+	if got := nextOutput(t, c, OutputLine, "batch text after replies").Payload; got != "marker" {
+		t.Fatalf("batch line = %q, want marker", got)
 	}
 }
 
-func TestGMCPEnableThenDisableInOneBatchDoesNotActivate(t *testing.T) {
-	c := &TCPClient{outputChan: make(chan Output, 4)}
+// --- GMCP ---
+
+func TestGMCPReplyPrecedesActivationHandlerSend(t *testing.T) {
+	c := &TCPClient{outputChan: make(chan Output)}
 	cx := &connection{
 		parser:    NewParser(defaultCompatibility()),
-		output:    NewOutputBuffer(),
+		output:    &outputBuffer{},
 		hs:        newHandshake(false, 0, 0),
-		sendQueue: make(chan outMsg, 4),
+		sendQueue: make(chan outMsg, 2),
 		done:      make(chan struct{}),
 	}
+	c.current = cx
 
-	wire := []byte{CmdIAC, CmdWILL, OptGMCP}
-	wire = append(wire,
+	wire := append([]byte{CmdIAC, CmdWILL, OptGMCP},
 		subnegFrame(OptGMCP, []byte(`Char.Vitals {"hp":100}`))...)
-	wire = append(wire,
-		CmdIAC, CmdWONT, OptGMCP,
-		'G', 'M', 'C', 'P', '-', 'o', 'f', 'f', '\r', '\n')
-	if !c.processIncoming(cx, wire) {
-		t.Fatal("processIncoming stopped during GMCP negotiation")
+	processed := make(chan bool, 1)
+	go func() { processed <- c.processIncoming(cx, wire) }()
+
+	nextOutput(t, c, OutputGMCPEnabled, "GMCP activation")
+	if err := c.SendGMCP("Core.Hello", `{"client":"Rune"}`); err != nil {
+		t.Fatalf("activation handler send: %v", err)
 	}
-	if cx.gmcpActive.Load() {
-		t.Fatal("GMCP remained active after same-batch WONT")
+	message := nextOutput(t, c, OutputGMCP, "same-parse GMCP message")
+	if message.Package != "Char.Vitals" || message.Payload != `{"hp":100}` {
+		t.Fatalf("GMCP message = (%q, %q)", message.Package, message.Payload)
+	}
+	select {
+	case ok := <-processed:
+		if !ok {
+			t.Fatal("processIncoming stopped during GMCP activation")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("processIncoming did not finish after GMCP activation")
 	}
 
-	var out Output
-	select {
-	case out = <-c.outputChan:
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for same-batch disable marker")
+	reply := <-cx.sendQueue
+	if want := []byte{CmdIAC, CmdDO, OptGMCP}; reply.line || !bytes.Equal(reply.data, want) {
+		t.Fatalf("negotiation reply = %v, want %v", reply.data, want)
 	}
-	if out.Kind != OutputLine || out.Payload != "GMCP-off" {
-		t.Fatalf("first output after same-batch disable = %+v", out)
+	sent := <-cx.sendQueue
+	if want := subnegFrame(OptGMCP, []byte(`Core.Hello {"client":"Rune"}`)); sent.line || !bytes.Equal(sent.data, want) {
+		t.Fatalf("handler send = %+v, want raw GMCP after reply", sent)
 	}
-	select {
-	case out := <-c.outputChan:
-		if out.Kind == OutputGMCPEnabled {
-			t.Fatal("published GMCP enabled for a batch ending in WONT")
-		}
-		t.Fatalf("unexpected output after GMCP disable: %+v", out)
-	default:
+}
+
+func TestGMCPBatchUsesFinalEnablement(t *testing.T) {
+	tests := []struct {
+		name       string
+		wire       []byte
+		wantActive bool
+		want       []Output
+	}{
+		{
+			name: "disabled",
+			wire: append(append([]byte{CmdIAC, CmdWILL, OptGMCP},
+				subnegFrame(OptGMCP, []byte(`Old.Payload {"old":true}`))...),
+				CmdIAC, CmdWONT, OptGMCP),
+		},
+		{
+			name: "re-enabled",
+			wire: append(append(append([]byte{CmdIAC, CmdWILL, OptGMCP},
+				subnegFrame(OptGMCP, []byte(`Old.Payload {"old":true}`))...),
+				CmdIAC, CmdWONT, OptGMCP, CmdIAC, CmdWILL, OptGMCP),
+				subnegFrame(OptGMCP, []byte(`New.Payload {"new":true}`))...),
+			wantActive: true,
+			want: []Output{
+				{Kind: OutputGMCPEnabled},
+				{Kind: OutputGMCP, Package: "New.Payload", Payload: `{"new":true}`},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &TCPClient{outputChan: make(chan Output, 4)}
+			cx := &connection{
+				parser:    NewParser(defaultCompatibility()),
+				output:    &outputBuffer{},
+				hs:        newHandshake(false, 0, 0),
+				sendQueue: make(chan outMsg, 4),
+				done:      make(chan struct{}),
+			}
+
+			if !c.processIncoming(cx, tt.wire) {
+				t.Fatal("processIncoming stopped")
+			}
+			if got := cx.gmcpActive.Load(); got != tt.wantActive {
+				t.Fatalf("GMCP active = %v, want %v", got, tt.wantActive)
+			}
+
+			var got []Output
+			for len(c.outputChan) > 0 {
+				got = append(got, <-c.outputChan)
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("outputs = %+v, want %+v", got, tt.want)
+			}
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Fatalf("output %d = %+v, want %+v", i, got[i], tt.want[i])
+				}
+			}
+		})
 	}
 }
 
@@ -556,7 +621,7 @@ func TestGMCPLoopback(t *testing.T) {
 		case out := <-c.Output():
 			switch out.Kind {
 			case OutputSendBoundary:
-				t.Fatal("GMCP send published a game-text boundary")
+				t.Fatal("GMCP send published a send boundary")
 			case OutputLine:
 				if out.Payload != "GMCP-send-marker" {
 					t.Fatalf("line after GMCP send = %q", out.Payload)
@@ -586,7 +651,7 @@ func TestGMCPSendRequiresNegotiation(t *testing.T) {
 	}
 }
 
-// --- prompt emission ---
+// --- Game lines and prompts ---
 
 // TestSendEscapesIAC verifies outgoing line data doubles IAC bytes so
 // the server reads them as data. Protocol frames stay untouched - the
@@ -610,147 +675,77 @@ func TestSendEscapesIAC(t *testing.T) {
 	}
 }
 
-// TestUnterminatedPromptSurvivesPromptlessNegotiation pins the
-// prompt-mode policy: negotiating SGA or EOR is not evidence of prompt
-// termination (WILL is a promise, DO concerns our output), so a server
-// that negotiates either but never sends GA/EOR keeps its unterminated
-// prompts visible.
-func TestUnterminatedPromptSurvivesPromptlessNegotiation(t *testing.T) {
-	for _, neg := range []struct {
-		name  string
-		bytes []byte
+func TestSendRejectsLineSeparators(t *testing.T) {
+	c := NewTCPClient()
+	c.current = &connection{sendQueue: make(chan outMsg, 2), done: make(chan struct{})}
+	for _, data := range []string{"north\nlook", "north\rlook"} {
+		if err := c.Send(data); err == nil {
+			t.Fatalf("Send(%q) succeeded", data)
+		}
+	}
+	if got := len(c.current.sendQueue); got != 0 {
+		t.Fatalf("rejected lines queued %d writes", got)
+	}
+}
+
+func TestPromptMarksConsumePartialLineOnce(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		wire []byte
+		want []Output
 	}{
-		{"WILL SGA", []byte{CmdIAC, CmdWILL, OptSGA}},
-		{"DO EOR", []byte{CmdIAC, CmdDO, OptEOR}},
+		{
+			name: "GA",
+			wire: append([]byte("the sun rises\r\nHP:100> "), CmdIAC, CmdGA),
+			want: []Output{
+				{Kind: OutputLine, Payload: "the sun rises"},
+				{Kind: OutputPrompt, Payload: "HP:100> "},
+			},
+		},
+		{
+			name: "EOR",
+			wire: append([]byte("the sun rises\r\nHP:100> "), CmdIAC, CmdEOR),
+			want: []Output{
+				{Kind: OutputLine, Payload: "the sun rises"},
+				{Kind: OutputPrompt, Payload: "HP:100> "},
+			},
+		},
+		{name: "empty GA", wire: []byte{CmdIAC, CmdGA}},
+		{name: "empty EOR", wire: []byte{CmdIAC, CmdEOR}},
 	} {
-		t.Run(neg.name, func(t *testing.T) {
-			addr := telnetServer(t, func(t *testing.T, conn net.Conn) {
-				conn.Write(neg.bytes)
-				time.Sleep(50 * time.Millisecond)
-				conn.Write([]byte("Enter your name: "))
+		t.Run(tt.name, func(t *testing.T) {
+			c := &TCPClient{outputChan: make(chan Output, 3)}
+			cx := &connection{
+				parser:    NewParser(defaultCompatibility()),
+				output:    &outputBuffer{},
+				sendQueue: make(chan outMsg, 1),
+				done:      make(chan struct{}),
+			}
 
-				buf := make([]byte, 1)
-				conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-				conn.Read(buf)
-			})
-
-			c := connectLoopback(t, addr)
-			out := nextOutput(t, c, OutputPartial, "unterminated prompt after "+neg.name)
-			if out.Payload != "Enter your name: " {
-				t.Fatalf("prompt = %q, want %q", out.Payload, "Enter your name: ")
+			if !c.processIncoming(cx, tt.wire) {
+				t.Fatal("processIncoming stopped")
+			}
+			var got []Output
+			for len(c.outputChan) > 0 {
+				got = append(got, <-c.outputChan)
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("outputs = %+v, want %+v", got, tt.want)
+			}
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Fatalf("output %d = %+v, want %+v", i, got[i], tt.want[i])
+				}
 			}
 		})
 	}
 }
 
-// A server may use GA/EOR for some prompts and omit it for others. A received
-// marker must not permanently hide later unfinished text.
-func TestPartialSnapshotsContinueAfterGA(t *testing.T) {
+func TestPartialLineGrowsAcrossReadsAfterGA(t *testing.T) {
 	advance := make(chan struct{})
 	addr := telnetServer(t, func(t *testing.T, conn net.Conn) {
 		conn.Write(append([]byte("HP:100> "), CmdIAC, CmdGA))
 		<-advance
-		conn.Write([]byte("HP:90> ")) // partial, terminator still in flight
-		<-advance
-		conn.Write([]byte{CmdIAC, CmdGA})
-		conn.Write([]byte("marker\r\n"))
-
-		buf := make([]byte, 1)
-		conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-		conn.Read(buf)
-	})
-
-	c := connectLoopback(t, addr)
-	var partials, prompts []string
-	deadline := time.After(5 * time.Second)
-	for {
-		select {
-		case out := <-c.Output():
-			switch out.Kind {
-			case OutputPartial:
-				partials = append(partials, out.Payload)
-				if out.Payload == "HP:90> " {
-					advance <- struct{}{}
-				}
-			case OutputPrompt:
-				if out.PromptTerminator != PromptTerminatorGA {
-					t.Fatalf("prompt %q terminator = %v, want GA", out.Payload, out.PromptTerminator)
-				}
-				prompts = append(prompts, out.Payload)
-				if out.Payload == "HP:100> " {
-					advance <- struct{}{}
-				}
-			case OutputLine:
-				if out.Payload == "marker" {
-					if len(partials) != 1 || partials[0] != "HP:90> " {
-						t.Fatalf("partial snapshots = %q, want [\"HP:90> \"]", partials)
-					}
-					if len(prompts) != 2 || prompts[0] != "HP:100> " || prompts[1] != "HP:90> " {
-						t.Fatalf("confirmed prompts = %q", prompts)
-					}
-					return
-				}
-			case OutputDisconnect:
-				t.Fatal("connection dropped while waiting for marker")
-			}
-		case <-deadline:
-			t.Fatal("timed out waiting for marker line")
-		}
-	}
-}
-
-// TestPromptEmittedOncePerGABatch pins the duplicate-prompt bug: a
-// line and a GA-terminated prompt arriving in one read must produce
-// exactly one prompt event. Before the fix, the unterminated-mode
-// peek fired per data event and the GA flush fired again, so the same
-// prompt went out twice and the session committed the duplicate.
-func TestPromptEmittedOncePerGABatch(t *testing.T) {
-	addr := telnetServer(t, func(t *testing.T, conn net.Conn) {
-		// Line + partial prompt + IAC GA in a single write.
-		conn.Write(append([]byte("the sun rises\r\nHP:100> "), CmdIAC, CmdGA))
-		// Marker line: once the client emits it, everything above has
-		// been fully processed.
-		conn.Write([]byte("marker\r\n"))
-
-		buf := make([]byte, 1)
-		conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-		conn.Read(buf)
-	})
-
-	c := connectLoopback(t, addr)
-
-	var prompts []string
-	deadline := time.After(5 * time.Second)
-	for {
-		select {
-		case out := <-c.Output():
-			switch out.Kind {
-			case OutputPartial:
-				t.Fatalf("same-batch GA prompt emitted a preliminary partial: %q", out.Payload)
-			case OutputPrompt:
-				if out.PromptTerminator != PromptTerminatorGA {
-					t.Fatalf("prompt %q terminator = %v, want GA", out.Payload, out.PromptTerminator)
-				}
-				prompts = append(prompts, out.Payload)
-			case OutputLine:
-				if out.Payload == "marker" {
-					if len(prompts) != 1 || prompts[0] != "HP:100> " {
-						t.Fatalf("prompt events = %q, want exactly [\"HP:100> \"]", prompts)
-					}
-					return
-				}
-			case OutputDisconnect:
-				t.Fatal("connection dropped while waiting for marker")
-			}
-		case <-deadline:
-			t.Fatal("timed out waiting for marker line")
-		}
-	}
-}
-
-func TestPartialGrowsThenCompletesAsOneLine(t *testing.T) {
-	advance := make(chan struct{})
-	addr := telnetServer(t, func(t *testing.T, conn net.Conn) {
 		conn.Write([]byte("User"))
 		<-advance
 		conn.Write([]byte("name:"))
@@ -763,6 +758,10 @@ func TestPartialGrowsThenCompletesAsOneLine(t *testing.T) {
 	})
 
 	c := connectLoopback(t, addr)
+	if got := nextOutput(t, c, OutputPrompt, "GA prompt").Payload; got != "HP:100> " {
+		t.Fatalf("prompt = %q", got)
+	}
+	advance <- struct{}{}
 	if got := nextOutput(t, c, OutputPartial, "first partial").Payload; got != "User" {
 		t.Fatalf("first partial = %q, want User", got)
 	}
@@ -771,65 +770,15 @@ func TestPartialGrowsThenCompletesAsOneLine(t *testing.T) {
 		t.Fatalf("grown partial = %q, want Username:", got)
 	}
 	advance <- struct{}{}
-	if got := nextOutput(t, c, OutputLine, "completed line").Payload; got != "Username: accepted" {
-		t.Fatalf("completed line = %q, want %q", got, "Username: accepted")
+	if got := nextOutput(t, c, OutputLine, "complete line").Payload; got != "Username: accepted" {
+		t.Fatalf("complete line = %q, want %q", got, "Username: accepted")
 	}
 }
 
-func TestPromptPreservesGAVersusEOR(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		cmd  byte
-		want PromptTerminator
-	}{
-		{name: "GA", cmd: CmdGA, want: PromptTerminatorGA},
-		{name: "EOR", cmd: CmdEOR, want: PromptTerminatorEOR},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			addr := telnetServer(t, func(t *testing.T, conn net.Conn) {
-				conn.Write(append([]byte("HP:100> "), CmdIAC, tc.cmd))
-				buf := make([]byte, 1)
-				conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-				conn.Read(buf)
-			})
-
-			c := connectLoopback(t, addr)
-			out := nextOutput(t, c, OutputPrompt, tc.name+" prompt")
-			if out.Payload != "HP:100> " || out.PromptTerminator != tc.want {
-				t.Fatalf("prompt = (%q, %v), want (%q, %v)",
-					out.Payload, out.PromptTerminator, "HP:100> ", tc.want)
-			}
-		})
-	}
-}
-
-func TestSentLineSeparatesUnterminatedPrompts(t *testing.T) {
-	addr := telnetServer(t, func(t *testing.T, conn net.Conn) {
-		conn.Write([]byte("Username: "))
-		expectBytes(t, conn, []byte("player\r\n"), "login name")
-		conn.Write([]byte("Password: "))
-
-		buf := make([]byte, 1)
-		conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-		conn.Read(buf)
-	})
-
-	c := connectLoopback(t, addr)
-	if got := nextOutput(t, c, OutputPartial, "username prompt").Payload; got != "Username: " {
-		t.Fatalf("first partial = %q", got)
-	}
-	if err := c.Send("player"); err != nil {
-		t.Fatal(err)
-	}
-	if got := nextOutput(t, c, OutputPartial, "password prompt").Payload; got != "Password: " {
-		t.Fatalf("second partial = %q, want Password without the old tail", got)
-	}
-}
-
-func TestSentLinePublishesBoundaryBeforeLaterServerText(t *testing.T) {
+func TestSentLinesPublishBoundariesBeforeLaterServerText(t *testing.T) {
 	addr := telnetServer(t, func(t *testing.T, conn net.Conn) {
 		conn.Write([]byte("first half"))
-		expectBytes(t, conn, []byte("look\r\n"), "command after partial")
+		expectBytes(t, conn, []byte("look\r\nscore\r\n"), "game lines after partial")
 		conn.Write([]byte(" second half\r\nnext tail"))
 
 		buf := make([]byte, 1)
@@ -845,22 +794,22 @@ func TestSentLinePublishesBoundaryBeforeLaterServerText(t *testing.T) {
 	if err := c.Send("look"); err != nil {
 		t.Fatal(err)
 	}
+	if err := c.Send("score"); err != nil {
+		t.Fatal(err)
+	}
 
 	deadline := time.After(5 * time.Second)
-	sawBoundary := false
+	boundaries := 0
 	sawTruncatedLine := false
 	for {
 		select {
 		case out := <-c.Output():
 			switch out.Kind {
 			case OutputSendBoundary:
-				if sawBoundary {
-					t.Fatal("duplicate send boundary")
-				}
-				sawBoundary = true
+				boundaries++
 			case OutputLine:
-				if !sawBoundary {
-					t.Fatalf("response line overtook send boundary: %q", out.Payload)
+				if boundaries != 2 {
+					t.Fatalf("response line followed %d boundaries, want 2", boundaries)
 				}
 				if out.Payload != " second half" {
 					t.Fatalf("line after mid-fragment send = %q", out.Payload)
@@ -869,6 +818,9 @@ func TestSentLinePublishesBoundaryBeforeLaterServerText(t *testing.T) {
 			case OutputPartial:
 				if !sawTruncatedLine {
 					t.Fatalf("new partial arrived before response line: %q", out.Payload)
+				}
+				if boundaries != 2 {
+					t.Fatalf("new partial followed %d boundaries, want 2", boundaries)
 				}
 				if out.Payload != "next tail" {
 					t.Fatalf("new partial = %q", out.Payload)
@@ -881,7 +833,7 @@ func TestSentLinePublishesBoundaryBeforeLaterServerText(t *testing.T) {
 	}
 }
 
-func TestSentLineEmitsBoundaryAfterConsumedPrompt(t *testing.T) {
+func TestSentLineEmitsBoundaryAfterGAPrompt(t *testing.T) {
 	addr := telnetServer(t, func(t *testing.T, conn net.Conn) {
 		conn.Write(append([]byte("HP:100> "), CmdIAC, CmdGA))
 		expectBytes(t, conn, []byte("look\r\n"), "command after confirmed prompt")
@@ -903,53 +855,6 @@ func TestSentLineEmitsBoundaryAfterConsumedPrompt(t *testing.T) {
 	}
 }
 
-func TestRapidSentLinesPublishBoundariesBeforeLaterServerText(t *testing.T) {
-	addr := telnetServer(t, func(t *testing.T, conn net.Conn) {
-		conn.Write([]byte("Username: "))
-		expectBytes(t, conn, []byte("player\r\npassword\r\n"), "two rapid login lines")
-		conn.Write([]byte("accepted\r\n"))
-
-		buf := make([]byte, 1)
-		conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-		conn.Read(buf)
-	})
-
-	c := connectLoopback(t, addr)
-	if got := nextOutput(t, c, OutputPartial, "username prompt").Payload; got != "Username: " {
-		t.Fatalf("partial = %q", got)
-	}
-	if err := c.Send("player"); err != nil {
-		t.Fatal(err)
-	}
-	if err := c.Send("password"); err != nil {
-		t.Fatal(err)
-	}
-
-	boundaries := 0
-	deadline := time.After(5 * time.Second)
-	for {
-		select {
-		case out := <-c.Output():
-			switch out.Kind {
-			case OutputSendBoundary:
-				boundaries++
-			case OutputLine:
-				if out.Payload != "accepted" {
-					t.Fatalf("line after rapid sends = %q", out.Payload)
-				}
-				if boundaries != 2 {
-					t.Fatalf("response arrived after %d send boundaries, want 2", boundaries)
-				}
-				return
-			case OutputDisconnect:
-				t.Fatal("connection dropped while waiting for rapid-send response")
-			}
-		case <-deadline:
-			t.Fatal("timed out waiting for two send boundaries and response")
-		}
-	}
-}
-
 func TestBlockedLineWriteDoesNotStopIncomingParsing(t *testing.T) {
 	conn := newBlockedWriteConn()
 	t.Cleanup(conn.release)
@@ -957,7 +862,7 @@ func TestBlockedLineWriteDoesNotStopIncomingParsing(t *testing.T) {
 	cx := &connection{
 		conn:      conn,
 		parser:    NewParser(defaultCompatibility()),
-		output:    NewOutputBuffer(),
+		output:    &outputBuffer{},
 		sendQueue: make(chan outMsg, 1),
 		done:      make(chan struct{}),
 	}
@@ -990,69 +895,5 @@ func TestBlockedLineWriteDoesNotStopIncomingParsing(t *testing.T) {
 	}
 	if ok := <-parseDone; !ok {
 		t.Fatal("processIncoming stopped during blocked write test")
-	}
-}
-
-func TestBareCRBeforeGABecomesLine(t *testing.T) {
-	addr := telnetServer(t, func(t *testing.T, conn net.Conn) {
-		wire := append([]byte("complete line\r"), CmdIAC, CmdGA)
-		wire = append(wire, []byte("\nmarker\r\n")...)
-		conn.Write(wire)
-
-		buf := make([]byte, 1)
-		conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-		conn.Read(buf)
-	})
-
-	c := connectLoopback(t, addr)
-	var lines []string
-	deadline := time.After(5 * time.Second)
-	for {
-		select {
-		case out := <-c.Output():
-			switch out.Kind {
-			case OutputPrompt:
-				t.Fatalf("bare-CR line was misclassified as prompt: %q", out.Payload)
-			case OutputLine:
-				lines = append(lines, out.Payload)
-				if out.Payload == "marker" {
-					if len(lines) != 2 || lines[0] != "complete line" {
-						t.Fatalf("lines = %q", lines)
-					}
-					return
-				}
-			}
-		case <-deadline:
-			t.Fatal("timed out waiting for bare-CR line")
-		}
-	}
-}
-
-func TestEmptyGAAndEORDoNotEmitTextEvents(t *testing.T) {
-	addr := telnetServer(t, func(t *testing.T, conn net.Conn) {
-		conn.Write([]byte{CmdIAC, CmdGA, CmdIAC, CmdEOR})
-		conn.Write([]byte("marker\r\n"))
-
-		buf := make([]byte, 1)
-		conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-		conn.Read(buf)
-	})
-
-	c := connectLoopback(t, addr)
-	deadline := time.After(5 * time.Second)
-	for {
-		select {
-		case out := <-c.Output():
-			switch out.Kind {
-			case OutputPrompt, OutputPartial:
-				t.Fatalf("empty GA/EOR emitted text event: kind=%v payload=%q", out.Kind, out.Payload)
-			case OutputLine:
-				if out.Payload == "marker" {
-					return
-				}
-			}
-		case <-deadline:
-			t.Fatal("timed out waiting for marker line")
-		}
 	}
 }

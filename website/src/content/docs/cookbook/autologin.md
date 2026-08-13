@@ -26,12 +26,16 @@ rune.hooks.on("connecting", function(addr)
     end
 end)
 
-rune.trigger.contains("What is your name", function()
+local function send_character()
     if pending then
         rune.send(pending)
         pending = nil   -- fire once per connection
     end
-end, { on = "prompt" })
+end
+
+-- Cover both line-terminated and unterminated login questions.
+rune.trigger.contains("What is your name", send_character)
+rune.trigger.contains("What is your name", send_character, { on = "prompt" })
 ```
 
 ## How it works
@@ -41,6 +45,8 @@ end, { on = "prompt" })
   `rune.world.get()` for the full entry with the extra fields.
 - Clearing `pending` after sending keeps the trigger inert if the phrase
   shows up again mid-session.
+- The two triggers cover both forms used by MUDs: a complete line and a
+  partial line in the prompt overlay.
 
 ## Passwords
 
@@ -56,19 +62,23 @@ rune.hooks.on("connecting", function()
     password_sent = false
 end)
 
-rune.trigger.contains("Password:", function()
+local function send_password()
     if password_sent then return end
     local pw = os.getenv("MUD_PASSWORD")
     if pw then
         password_sent = true
         rune.send_raw(pw)
     end
-end, { on = "prompt" })
+end
+
+rune.trigger.contains("Password:", send_password)
+rune.trigger.contains("Password:", send_password, { on = "prompt" })
 ```
 
 `send_raw` skips command expansion, so a password containing `;` or `#`
-arrives intact. The guard matters because unfinished prompt text can be
-reported more than once as it grows; it resets for each connection attempt.
+arrives intact. The guard handles repeated partial lines and prevents the
+complete-line and prompt triggers from both sending. It resets for each
+connection attempt.
 
 **Type it yourself:** don't automate the password line at all. The client
 already suppresses local echo while the server hides input, so nothing

@@ -97,16 +97,7 @@ func TestVerbatimInputPreservesLinesAndBypassesCommands(t *testing.T) {
 	}
 }
 
-func TestVerbatimInputSplitsOnlyOnLF(t *testing.T) {
-	engine, host, cleanup := setupTest(t)
-	defer cleanup()
-
-	engine.OnSubmission(input.Verbatim("one\r\ntwo\rthree"))
-
-	assertCommands(t, host, []string{"one\r", "two\rthree"})
-}
-
-func TestVerbatimInputDegradedModePreservesEmptyLines(t *testing.T) {
+func TestVerbatimInputDegradedModePreservesPhysicalLines(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 
@@ -114,7 +105,7 @@ func TestVerbatimInputDegradedModePreservesEmptyLines(t *testing.T) {
 		t.Fatalf("sabotage failed: %v", err)
 	}
 
-	engine.OnSubmission(input.Verbatim("first\n\n/quit\n"))
+	engine.OnSubmission(input.Verbatim("first\r\n\r/quit\r"))
 
 	assertCommands(t, host, []string{"first", "", "/quit", ""})
 	if host.QuitCalled {
@@ -144,8 +135,6 @@ func TestCommandInputHookReceivesContext(t *testing.T) {
 		t.Fatalf("setup failed: %v", err)
 	}
 
-	// The convenience wrapper and explicit command submissions share the
-	// same uniform hook contract.
 	engine.OnInput("look")
 	assertCommands(t, host, []string{"command|look"})
 }
@@ -156,7 +145,8 @@ func TestVerbatimInputHookReceivesContextAndCanConsume(t *testing.T) {
 
 	if err := engine.DoString("setup", `
 		rune.hooks.on("input", function(text, context)
-			rune.send_raw(context.mode .. "|" .. text)
+			observed_text = text
+			observed_mode = context.mode
 			return false
 		end, { priority = 90 })
 	`); err != nil {
@@ -166,9 +156,11 @@ func TestVerbatimInputHookReceivesContextAndCanConsume(t *testing.T) {
 	draft := "first;second\n/quit"
 	engine.OnSubmission(input.Verbatim(draft))
 
-	// The observer receives the complete submission once. Returning false
-	// prevents the core verbatim sender from emitting either physical line.
-	assertCommands(t, host, []string{"verbatim|" + draft})
+	assertCommands(t, host, nil)
+	assertLua(t, engine, `
+		assert(observed_mode == "verbatim")
+		assert(observed_text == "first;second\n/quit")
+	`)
 }
 
 func TestInputHookCannotMutateVerbatimRouting(t *testing.T) {
@@ -203,7 +195,7 @@ func TestOneArgumentInputHookStillObservesVerbatim(t *testing.T) {
 
 	if err := engine.DoString("setup", `
 		rune.hooks.on("input", function(text)
-			rune.send_raw("observed:" .. text)
+			observed = text
 		end, { priority = 90 })
 	`); err != nil {
 		t.Fatalf("setup failed: %v", err)
@@ -211,5 +203,16 @@ func TestOneArgumentInputHookStillObservesVerbatim(t *testing.T) {
 
 	engine.OnSubmission(input.Verbatim("one\ntwo"))
 
-	assertCommands(t, host, []string{"observed:one\ntwo", "one", "two"})
+	assertCommands(t, host, []string{"one", "two"})
+	assertLua(t, engine, `assert(observed == "one\ntwo")`)
+}
+
+func TestSendRawSplitsEmbeddedNewlines(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	if err := engine.DoString("test", `rune.send_raw("north\nlook\r\nsay hi\rwait\n")`); err != nil {
+		t.Fatal(err)
+	}
+	assertCommands(t, host, []string{"north", "look", "say hi", "wait", ""})
 }

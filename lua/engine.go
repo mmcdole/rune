@@ -232,10 +232,7 @@ func (e *Engine) callHooks(nret int, args ...any) ([]script.Result, bool, error)
 	return results, found, err
 }
 
-// OnSubmission dispatches one immutable input snapshot through Lua. Every
-// input hook receives the same context shape; mode is always either "command"
-// or "verbatim". Verbatim submissions still traverse user input hooks, but
-// the core sender bypasses slash commands, aliases, repeats, and delimiters.
+// OnSubmission runs input hooks and command or verbatim routing.
 func (e *Engine) OnSubmission(submission input.Submission) {
 	ctx := script.Tree{V: map[string]any{"mode": submission.Mode.String()}}
 
@@ -266,19 +263,15 @@ func (e *Engine) OnSubmission(submission input.Submission) {
 	}
 }
 
-// sendVerbatimFallback is the no-Lua escape hatch. strings.Split preserves
-// leading, adjacent, and trailing empty lines and treats only LF as a boundary.
-func (e *Engine) sendVerbatimFallback(input string) {
-	for _, line := range strings.Split(input, "\n") {
+// sendVerbatimFallback sends verbatim input when the Lua input hook is missing.
+func (e *Engine) sendVerbatimFallback(text string) {
+	for _, line := range input.Verbatim(text).PhysicalLines() {
 		_ = e.host.Send(line)
 	}
 }
 
-// OnEcho styles the local echo of typed input by dispatching the
-// "echo" hook: presentation belongs to Lua, so the "> " prefix and
-// color live in the core echo handler, and user handlers may rewrite
-// or hide the echo. Degraded mode falls back to Go-side styling so
-// input stays visible.
+// OnEcho runs the echo hook. The core adds styling; user hooks may rewrite or
+// hide the result.
 func (e *Engine) OnEcho(in string) (string, bool) {
 	// Echo is a presentation boundary. Preserve canonical submission bytes
 	// elsewhere, but never let pasted terminal controls reach either Lua
@@ -328,9 +321,7 @@ func (e *Engine) OnPrompt(line text.Line) string {
 	return e.onPromptUpdate(line, true)
 }
 
-// OnPartial handles the current unfinished output tail. The same bytes may
-// later arrive again as a complete line or a GA/EOR-confirmed prompt, so this
-// path may update presentation but cannot finalize span state.
+// OnPartial updates the prompt overlay without changing span state.
 func (e *Engine) OnPartial(line text.Line) string {
 	return e.onPromptUpdate(line, false)
 }
@@ -354,9 +345,7 @@ func (e *Engine) onPromptUpdate(line text.Line, confirmed bool) string {
 	return modified.String()
 }
 
-// FlushSpans closes incomplete multiline trigger records at an explicit
-// boundary. Confirmed prompts and outbound game lines that close an active
-// prompt-area record call it; socket-read boundaries never do.
+// FlushSpans fires and closes every open multiline trigger.
 func (e *Engine) FlushSpans() {
 	if err := e.guard(func() error {
 		_, _, err := e.vm.CallModule("rune.trigger", "_flush_spans", 0)
@@ -366,9 +355,7 @@ func (e *Engine) FlushSpans() {
 	}
 }
 
-// DiscardSpans drops incomplete multiline trigger records without firing
-// their actions. It is used when the collected output no longer belongs to
-// the active server stream.
+// DiscardSpans drops every open multiline trigger without firing it.
 func (e *Engine) DiscardSpans() {
 	if err := e.guard(func() error {
 		_, _, err := e.vm.CallModule("rune.trigger", "_discard_spans", 0)

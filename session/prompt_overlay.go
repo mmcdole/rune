@@ -5,9 +5,8 @@ type promptOverlayDisplay interface {
 	SetPrompt(string)
 }
 
-// promptOverlay owns the mutable text displayed below scrollback. Its active
-// bit is independent from text because Lua may gag an update to an empty
-// string without removing the boundary represented by that update.
+// promptOverlay tracks server text displayed below scrollback. active remains
+// true when Lua gags the text to an empty string.
 type promptOverlay struct {
 	display   promptOverlayDisplay
 	text      string
@@ -19,8 +18,6 @@ func newPromptOverlay(display promptOverlayDisplay) promptOverlay {
 	return promptOverlay{display: display}
 }
 
-// replace installs the latest snapshot. Partial snapshots replace each other;
-// committing them here would expose socket read boundaries in scrollback.
 func (p *promptOverlay) replace(text string, confirmed bool) {
 	p.text = text
 	p.active = true
@@ -28,8 +25,7 @@ func (p *promptOverlay) replace(text string, confirmed bool) {
 	p.display.SetPrompt(text)
 }
 
-// beforeLine preserves a confirmed prompt as its own record, but discards an
-// unconfirmed preview because the completed line contains the same bytes.
+// beforeLine commits a confirmed prompt and discards a superseded partial line.
 func (p *promptOverlay) beforeLine() {
 	if p.active && p.confirmed {
 		p.commit()
@@ -38,16 +34,15 @@ func (p *promptOverlay) beforeLine() {
 	p.discard()
 }
 
-// beforeUpdate preserves a confirmed prompt before the next server record
-// replaces it. Unconfirmed snapshots are replaced in place.
+// beforeUpdate commits a confirmed prompt before replacing the overlay.
 func (p *promptOverlay) beforeUpdate() {
 	if p.active && p.confirmed {
 		p.commit()
 	}
 }
 
-// commit moves an active, visible overlay record to scrollback, then clears
-// the overlay. It returns whether a record existed, including a gagged record.
+// commit moves the active prompt overlay to scrollback. It returns true even
+// when Lua gagged the overlay text.
 func (p *promptOverlay) commit() bool {
 	if !p.active {
 		return false
@@ -57,9 +52,6 @@ func (p *promptOverlay) commit() bool {
 	return true
 }
 
-// discard clears the state and presentation without adding anything to
-// scrollback. It also clears the presentation when no record is active, which
-// makes it suitable for complete-line and connection-reset paths.
 func (p *promptOverlay) discard() {
 	p.clearState()
 	p.display.SetPrompt("")

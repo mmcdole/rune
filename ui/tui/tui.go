@@ -13,9 +13,7 @@ import (
 	"github.com/mmcdole/rune/ui"
 )
 
-// BubbleTeaUI implements interfaces.UI using Bubble Tea.
-// It bridges the existing channel-based architecture with Bubble Tea's
-// model/update/view event loop.
+// BubbleTeaUI implements ui.UI with Bubble Tea.
 type BubbleTeaUI struct {
 	program   *tea.Program
 	inputChan chan input.Submission
@@ -54,8 +52,7 @@ func (b *BubbleTeaUI) send(msg tea.Msg) {
 	}
 }
 
-// Print appends text to the main scrollback buffer.
-// All output (server lines, Lua prints) goes through this single method.
+// Print appends server lines and Lua output to scrollback.
 func (b *BubbleTeaUI) Print(text string) {
 	b.send(ui.PrintLineMsg(text))
 }
@@ -66,19 +63,18 @@ func (b *BubbleTeaUI) Echo(line string) {
 	b.send(ui.EchoLineMsg(line))
 }
 
-// FinishEcho tells the renderer whether a submission's echo must wait for the
-// live prompt to be committed by its outbound game-text line.
-func (b *BubbleTeaUI) FinishEcho(waitForPrompt bool) {
-	b.send(ui.EchoDispositionMsg{WaitForPrompt: waitForPrompt})
+// FinishEcho completes a submission's local echo and reports whether it queued
+// a game line.
+func (b *BubbleTeaUI) FinishEcho(queuedLine bool) {
+	b.send(ui.FinishEchoMsg{QueuedLine: queuedLine})
 }
 
-// SetPrompt updates the live prompt-area overlay at the bottom.
+// SetPrompt replaces the prompt overlay.
 func (b *BubbleTeaUI) SetPrompt(text string) {
 	b.send(ui.PromptMsg(text))
 }
 
-// CommitPrompt atomically moves prompt-area text to scrollback ahead of any
-// local echo waiting for that prompt to be answered.
+// CommitPrompt moves the prompt overlay to scrollback in one update.
 func (b *BubbleTeaUI) CommitPrompt(text string) {
 	b.send(ui.PromptCommitMsg(text))
 }

@@ -2,8 +2,7 @@ package ui
 
 import "github.com/mmcdole/rune/input"
 
-// UI defines the contract for the terminal display layer.
-// Implementation lives in the same package (BubbleTeaUI).
+// UI is the Session-facing display and input contract.
 type UI interface {
 	Run() error
 	Quit()
@@ -13,7 +12,7 @@ type UI interface {
 	Outbound() <-chan UIEvent
 	Print(text string)
 	Echo(text string)
-	FinishEcho(waitForPrompt bool)
+	FinishEcho(queuedLine bool)
 	SetPrompt(text string)
 	CommitPrompt(text string)
 	SetInput(text string)

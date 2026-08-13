@@ -92,21 +92,9 @@ local function send_impl(input, depth)
     end
 end
 
--- Send an entire submission without interpreting any of it as a Rune command.
--- Only LF separates outbound lines; whitespace, CR bytes, delimiters, repeats,
--- slash commands, and empty lines remain data. This is private core policy,
--- closed over by the input hook rather than exposed on a Go-owned rune._ table.
+-- Send verbatim input without interpreting aliases or commands.
 local function send_verbatim(input)
-    local start = 1
-    while true do
-        local pos = input:find("\n", start, true)
-        if not pos then
-            rune.send_raw(input:sub(start))
-            return
-        end
-        rune.send_raw(input:sub(start, pos - 1))
-        start = pos + 1
-    end
+    rune.send_raw(input)
 end
 
 -- PUBLIC: Send commands to the MUD
@@ -149,8 +137,7 @@ rune.hooks.on("output", function(line)
     return modified
 end, { priority = 100 })
 
--- Prompt triggers are explicitly opt-in because unfinished snapshots may be
--- ordinary output split across socket reads and can be delivered repeatedly.
+-- Prompt triggers opt into partial lines, which may repeat as they grow.
 rune.hooks.on("prompt", function(line, confirmed)
     local modified, show = rune.trigger._process_prompt(line, confirmed)
     if not show then

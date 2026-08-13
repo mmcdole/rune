@@ -57,37 +57,24 @@ call `rune.send`/`rune.send_raw` yourself and return `false`.
 | Event | Handler receives | Fired |
 |---|---|---|
 | `input` | submitted text, context | Once per submission, before command or verbatim routing |
-| `output` | line object (`:raw()`, `:clean()`) | Once for every delimiter-terminated server line |
-| `prompt` | line object, `confirmed` boolean | When unfinished text changes, or GA/EOR confirms it as a prompt |
+| `output` | line object (`:raw()`, `:clean()`) | Once for every complete server line |
+| `prompt` | line object, `confirmed` boolean | For partial lines and GA/EOR-confirmed prompts |
 | `echo` | typed text | On each physical line of local echo; skipped while the server has echo suppressed (passwords) |
 
-`prompt` drives the live text above the input line. The hook name describes
-that display role, not certainty that its current text is a server prompt. When
-`confirmed` is `false`, the text is unfinished and ambiguous: it might
-be a real prompt such as `Username:`, or only part of an ordinary line split
-across socket reads. It may be delivered again as it grows, and normally the
-full text later fires once through `output` if a line delimiter arrives. An
-outbound game-text line deliberately ends the active unfinished record so
-prompts such as `Username:` and `Password:` do not join together. `true` means the
-server ended the text with Telnet GA or EOR. If that marker arrives in a later
-socket read, the hook can receive identical text twice: first with `false`,
-then with `true`. A GA/EOR marker with no current text carries no update and
-does not fire this hook.
+`prompt` drives the prompt overlay. With `confirmed = false`, the value is a
+partial line. It may be `Username:` or only the start of an ordinary line, and
+it may repeat as it grows. A line delimiter later sends the complete line
+through `output`. With `confirmed = true`, GA/EOR ended the text as a prompt.
+If GA/EOR arrives in a later read, the hook may receive the same text first as
+partial and then as confirmed. An empty GA/EOR marker does not fire the hook.
 
-Every outbound game-text line commits an active prompt-area record. The
-network orders that transition ahead of later server output. This applies
-equally to typed commands and commands sent by aliases, triggers, or timers. A
-local command that sends nothing, and protocol traffic such as GMCP, do not
-commit it. If more server text follows without a send, a confirmed prompt is
-committed before the new record, even when that record first arrives as a
-partial. An unconfirmed partial is replaced without being committed
-separately.
+Sending a game line commits the prompt overlay before later server output.
+Typed commands, aliases, triggers, and timers all follow this rule; local
+commands and protocol traffic such as GMCP do not.
 
-Because Rune uses no timer or configured prompt pattern, sending during an
-ordinary line split creates a deliberate visual split: the visible first
-fragment is committed from the prompt area, and the later suffix arrives
-through `output` as a separate line. Lua gagging still applies to the committed
-fragment.
+Sending while an ordinary line is partial commits its visible prefix; the
+later suffix arrives through `output` as a new line. This is the trade-off for
+immediate partial-line display without a timer or prompt pattern.
 
 ```lua
 rune.hooks.on("prompt", function(line, confirmed)
@@ -97,11 +84,8 @@ rune.hooks.on("prompt", function(line, confirmed)
 end)
 ```
 
-Handlers that act on unconfirmed updates should be idempotent: set current
-state from the supplied text rather than incrementing a counter on every call.
-A nonempty GA/EOR boundary flushes open multi-line triggers before
-`prompt` handlers run; hook priority orders handlers within the update,
-not ahead of that boundary transition.
+Handlers for partial lines should be idempotent. A confirmed prompt closes
+open spans before `prompt` handlers run.
 
 Every `input` handler receives `(text, context)`. The context is read-only, and
 `context.mode` is always `"command"` or `"verbatim"`:
@@ -109,28 +93,22 @@ Every `input` handler receives `(text, context)`. The context is read-only, and
 ```lua
 rune.hooks.on("input", function(text, context)
     if context.mode == "verbatim" then
-        -- text is the whole submission and may contain LF characters
-        local _, breaks = text:gsub("\n", "")
-        rune.echo("Sending " .. tostring(breaks + 1) .. " lines")
+        rune.echo("Sending verbatim input")
     end
 end, { priority = 10 })
 ```
 
-Command mode applies Rune aliases, separators, repeats, and slash commands in
-the core handler. Verbatim mode still passes through custom `input` handlers
-once, but the core treats only LF as a physical-line boundary and bypasses all
-command interpretation. Existing one-argument handlers remain valid because
-Lua ignores extra arguments.
+Command mode applies Rune aliases, separators, repeats, and slash commands.
+Verbatim mode bypasses command processing and splits LF, CRLF, and bare CR into
+physical lines. Custom `input` handlers still receive the whole submission
+once. Existing one-argument handlers remain valid because Lua ignores extra
+arguments.
 
 The core registers its own handlers at priority 100: command or verbatim
 routing on `input`, trigger processing on `output`/`prompt`,
 the `> ` styling on `echo`. For `output`/`prompt`/`echo`, register
 below 100 to run before the core, or above 100 to see its results
 (post-trigger rewrites; gagged lines never reach you).
-
-The `confirmed` argument is additional context on the existing
-`prompt` hook. Existing one-argument prompt handlers remain valid because Lua
-ignores extra arguments.
 
 :::caution
 The core `input` handler always returns `false`, so `input` handlers

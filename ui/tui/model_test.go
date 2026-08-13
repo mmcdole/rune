@@ -187,11 +187,7 @@ func TestEchoFlushesPendingServerLines(t *testing.T) {
 	}
 }
 
-// TestPromptCommitOrdersPromptBeforeDeferredSubmissionOutput verifies that
-// committing an active prompt is one UI operation: earlier server rows render
-// first, then the committed prompt, then the local echo and any output created
-// while handling that submission.
-func TestPromptCommitOrdersPromptBeforeDeferredSubmissionOutput(t *testing.T) {
+func TestPromptCommitPrecedesDeferredRows(t *testing.T) {
 	m := newBareModel(t)
 
 	next, _ := m.Update(ui.PrintLineMsg("line 1")) // immediate, opens window
@@ -212,15 +208,11 @@ func TestPromptCommitOrdersPromptBeforeDeferredSubmissionOutput(t *testing.T) {
 
 	wantScrollback(t, m,
 		"line 1", "line 2", "Username:", "> player", "login hook sent username")
-	if m.lastPrompt != "" {
-		t.Fatalf("live prompt = %q after commit, want empty", m.lastPrompt)
+	if m.promptText != "" {
+		t.Fatalf("prompt overlay = %q after commit, want empty", m.promptText)
 	}
 }
 
-// TestLocalSubmissionReleaseOrdersEchoBeforeOutput verifies a local command
-// that sends nothing does not need a prompt commit. Session explicitly marks
-// handling complete, which releases the echo before buffered local output and
-// leaves the server prompt live.
 func TestLocalSubmissionReleaseOrdersEchoBeforeOutput(t *testing.T) {
 	m := newBareModel(t)
 
@@ -234,40 +226,16 @@ func TestLocalSubmissionReleaseOrdersEchoBeforeOutput(t *testing.T) {
 	// Print alone cannot prove that no later send will answer the prompt.
 	wantScrollback(t, m)
 
-	next, _ = m.Update(ui.EchoDispositionMsg{WaitForPrompt: false})
+	next, _ = m.Update(ui.FinishEchoMsg{QueuedLine: false})
 	m = next.(*Model)
 
 	wantScrollback(t, m, "> /help", "local help")
-	if got := m.lastPrompt; got != "HP>" {
+	if got := m.promptText; got != "HP>" {
 		t.Fatalf("live prompt = %q after local output, want %q", got, "HP>")
 	}
 }
 
-// TestSilentLocalSubmissionReleasesEcho verifies the no-output case: a local
-// command can consume a submission silently, so the explicit completion signal
-// must be sufficient to release its echo while preserving the live prompt.
-func TestSilentLocalSubmissionReleasesEcho(t *testing.T) {
-	m := newBareModel(t)
-
-	next, _ := m.Update(ui.PromptMsg("HP>"))
-	m = next.(*Model)
-	next, _ = m.Update(ui.EchoLineMsg("> /silent"))
-	m = next.(*Model)
-
-	wantScrollback(t, m)
-
-	next, _ = m.Update(ui.EchoDispositionMsg{WaitForPrompt: false})
-	m = next.(*Model)
-
-	wantScrollback(t, m, "> /silent")
-	if got := m.lastPrompt; got != "HP>" {
-		t.Fatalf("live prompt = %q after local submission, want %q", got, "HP>")
-	}
-}
-
-// TestLaterLocalSubmissionWaitsForEarlierPromptCommit verifies dispositions
-// compose across queued submissions. A local command cannot release output for
-// an earlier game send that is still waiting to commit the live prompt.
+// A local submission cannot release an earlier game send's echo.
 func TestLaterLocalSubmissionWaitsForEarlierPromptCommit(t *testing.T) {
 	m := newBareModel(t)
 
@@ -275,12 +243,12 @@ func TestLaterLocalSubmissionWaitsForEarlierPromptCommit(t *testing.T) {
 	m = next.(*Model)
 	next, _ = m.Update(ui.EchoLineMsg("> north"))
 	m = next.(*Model)
-	next, _ = m.Update(ui.EchoDispositionMsg{WaitForPrompt: true})
+	next, _ = m.Update(ui.FinishEchoMsg{QueuedLine: true})
 	m = next.(*Model)
 
 	next, _ = m.Update(ui.EchoLineMsg("> /silent"))
 	m = next.(*Model)
-	next, _ = m.Update(ui.EchoDispositionMsg{WaitForPrompt: false})
+	next, _ = m.Update(ui.FinishEchoMsg{QueuedLine: false})
 	m = next.(*Model)
 
 	wantScrollback(t, m)
@@ -291,21 +259,8 @@ func TestLaterLocalSubmissionWaitsForEarlierPromptCommit(t *testing.T) {
 	wantScrollback(t, m, "HP>", "> north", "> /silent")
 }
 
-// TestEchoWithoutPromptIsImmediate verifies the ordinary path remains eager:
-// only a live prompt-area record can hold a local echo back.
-func TestEchoWithoutPromptIsImmediate(t *testing.T) {
-	m := newBareModel(t)
-
-	next, _ := m.Update(ui.EchoLineMsg("> look"))
-	m = next.(*Model)
-
-	wantScrollback(t, m, "> look")
-}
-
-// TestPromptClearReleasesEchoAfterReplacement verifies cumulative prompt
-// updates keep an echo deferred, while clearing the overlay releases it. This
-// prevents disconnects and completed-line replacement from stranding echoes.
-func TestPromptClearReleasesEchoAfterReplacement(t *testing.T) {
+// A prompt clear has no PromptCommitMsg, so it must release deferred echo.
+func TestPromptClearReleasesDeferredEcho(t *testing.T) {
 	m := newBareModel(t)
 
 	next, _ := m.Update(ui.PromptMsg("User"))
@@ -321,12 +276,11 @@ func TestPromptClearReleasesEchoAfterReplacement(t *testing.T) {
 	m = next.(*Model)
 
 	wantScrollback(t, m, "> player")
-	if m.lastPrompt != "" {
-		t.Fatalf("live prompt = %q after clear, want empty", m.lastPrompt)
+	if m.promptText != "" {
+		t.Fatalf("prompt overlay = %q after clear, want empty", m.promptText)
 	}
 }
 
-// wantScrollback asserts the scrollback holds exactly want, in order.
 func wantScrollback(t *testing.T, m *Model, want ...string) {
 	t.Helper()
 	if got := m.scrollback.Count(); got != len(want) {
@@ -430,9 +384,13 @@ func TestOversizedVerbatimSubmissionIsRejectedAtomically(t *testing.T) {
 	if m.sendLine(tooManyBytes) {
 		t.Fatal("over-byte-limit verbatim submission was accepted")
 	}
+	tooManyCRLines := input.Verbatim(strings.Repeat("\r", maxVerbatimLines))
+	if m.sendLine(tooManyCRLines) {
+		t.Fatal("over-line-limit bare-CR verbatim submission was accepted")
+	}
 
-	if got := m.scrollback.Count(); got != 2 {
-		t.Fatalf("warning count = %d, want 2", got)
+	if got := m.scrollback.Count(); got != 3 {
+		t.Fatalf("warning count = %d, want 3", got)
 	}
 	for n := 0; n < m.scrollback.Count(); n++ {
 		if warning := m.scrollback.At(n); !strings.Contains(warning, "Verbatim input not sent") {
@@ -683,7 +641,7 @@ func TestPrintedTabsAreExpanded(t *testing.T) {
 	}
 	next, _ = m.Update(ui.PromptMsg("HP\t> "))
 	m = next.(*Model)
-	if got := m.lastPrompt; got != "HP      > " {
+	if got := m.promptText; got != "HP      > " {
 		t.Errorf("prompt = %q, want tab expanded", got)
 	}
 }

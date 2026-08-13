@@ -58,19 +58,17 @@ type Model struct {
 	}
 
 	// State
-	lastPrompt  string
+	promptText  string
 	width       int
 	height      int
 	inputChan   chan<- input.Submission
 	outbound    chan<- ui.UIEvent
 	initialized bool
 	pendingRows []string
-	// A local echo submitted while prompt-area text is visible waits until the
-	// submission either sends a game line (and commits the prompt) or completes
-	// locally. Output produced after that echo waits with it in event order.
-	submissionOutputDeferred  bool
-	deferredSubmissionRows    []string
-	deferredUntilPromptCommit bool
+	// With a visible prompt overlay, echo and following rows wait until the
+	// submission finishes locally or a game send commits the prompt.
+	deferredRows        []string
+	waitForPromptCommit bool
 	// flushScheduled is true while a batch-window tick is outstanding.
 	// At most one tick is ever in flight: it is armed only on the
 	// idle->hot transition and re-armed only from handleTick while
@@ -129,9 +127,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ui.UpdateBindsMsg, ui.UpdateBarsMsg, ui.UpdateLayoutMsg:
 		return m.handleConfigUpdate(msg)
 
-	// Server output
-	case ui.PrintLineMsg, ui.EchoLineMsg, ui.EchoDispositionMsg, ui.PromptMsg, ui.PromptCommitMsg:
-		return m.handleServerOutput(msg)
+	// Main output
+	case ui.PrintLineMsg, ui.EchoLineMsg, ui.FinishEchoMsg, ui.PromptMsg, ui.PromptCommitMsg:
+		return m.handleOutput(msg)
 
 	// Pane operations
 	case ui.PaneCreateMsg, ui.PaneWriteMsg, ui.PaneToggleMsg, ui.PaneSetVisibleMsg, ui.PaneClearMsg:
@@ -290,12 +288,12 @@ func (m *Model) syncBars(content map[string]ui.BarContent) {
 	m.barContent = content
 }
 
-func (m *Model) handleServerOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *Model) handleOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case ui.PrintLineMsg:
-		if m.submissionOutputDeferred {
-			m.deferredSubmissionRows = append(
-				m.deferredSubmissionRows, splitRows(string(msg), m.width)...)
+		if len(m.deferredRows) > 0 {
+			m.deferredRows = append(
+				m.deferredRows, splitRows(string(msg), m.width)...)
 			return m, nil
 		}
 		rows := splitRows(string(msg), m.width)
@@ -310,40 +308,38 @@ func (m *Model) handleServerOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.flushScheduled = true
 		return m, doTick()
 	case ui.EchoLineMsg:
-		if m.lastPrompt != "" {
-			m.submissionOutputDeferred = true
-			m.deferredSubmissionRows = append(
-				m.deferredSubmissionRows, splitRows(string(msg), m.width)...)
+		if m.promptText != "" {
+			m.deferredRows = append(
+				m.deferredRows, splitRows(string(msg), m.width)...)
 			return m, nil
 		}
 		// Flush batched server lines first so the echo cannot render
 		// ahead of output that arrived before it.
 		m.flushPending()
 		m.appendMessage(string(msg))
-	case ui.EchoDispositionMsg:
-		if !m.submissionOutputDeferred {
+	case ui.FinishEchoMsg:
+		if len(m.deferredRows) == 0 {
 			break
 		}
-		if msg.WaitForPrompt {
-			m.deferredUntilPromptCommit = true
+		if msg.QueuedLine {
+			m.waitForPromptCommit = true
 			break
 		}
-		if !m.deferredUntilPromptCommit {
+		if !m.waitForPromptCommit {
 			m.flushPending()
-			m.flushDeferredSubmissionOutput()
+			m.flushDeferredRows()
 		}
 	case ui.PromptMsg:
 		text := util.ExpandTabs(string(msg))
-		if text != m.lastPrompt {
+		if text != m.promptText {
 			m.viewport.SetPrompt(text)
-			m.lastPrompt = text
+			m.promptText = text
 		}
-		if text == "" && m.submissionOutputDeferred {
-			// A discarded or superseded prompt has no commit message to
-			// release submission output. Preserve earlier server-row ordering,
-			// then let that output proceed once the overlay is gone.
+		if text == "" && len(m.deferredRows) > 0 {
+			// A complete line or disconnect can clear a partial line without a
+			// PromptCommitMsg.
 			m.flushPending()
-			m.flushDeferredSubmissionOutput()
+			m.flushDeferredRows()
 		}
 	case ui.PromptCommitMsg:
 		m.flushPending()
@@ -351,20 +347,19 @@ func (m *Model) handleServerOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.appendMessage(text)
 		}
 		m.viewport.SetPrompt("")
-		m.lastPrompt = ""
-		m.flushDeferredSubmissionOutput()
+		m.promptText = ""
+		m.flushDeferredRows()
 	}
 	return m, nil
 }
 
-func (m *Model) flushDeferredSubmissionOutput() {
-	if !m.submissionOutputDeferred {
+func (m *Model) flushDeferredRows() {
+	if len(m.deferredRows) == 0 {
 		return
 	}
-	m.appendRows(m.deferredSubmissionRows...)
-	m.deferredSubmissionRows = nil
-	m.submissionOutputDeferred = false
-	m.deferredUntilPromptCommit = false
+	m.appendRows(m.deferredRows...)
+	m.deferredRows = nil
+	m.waitForPromptCommit = false
 }
 
 func (m *Model) handlePaneMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -446,7 +441,7 @@ func (m *Model) appendMessage(text string) {
 // than blocking the render loop; false tells the controller to retain them.
 func (m *Model) sendLine(submission input.Submission) bool {
 	if submission.Mode == input.ModeVerbatim {
-		lineCount := 1 + strings.Count(submission.Text, "\n")
+		lineCount := len(submission.PhysicalLines())
 		if len(submission.Text) > maxVerbatimBytes || lineCount > maxVerbatimLines {
 			m.appendMessage(text.Red("[WARNING] Verbatim input not sent - limit is 1000 lines or 256 KiB"))
 			return false

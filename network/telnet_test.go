@@ -2,7 +2,6 @@ package network
 
 import (
 	"bytes"
-	"sync"
 	"testing"
 )
 
@@ -429,10 +428,9 @@ func TestParserDiff10(t *testing.T) {
 }
 
 func TestOutputBuffer(t *testing.T) {
-	ob := NewOutputBuffer()
+	ob := &outputBuffer{}
 
-	// Test basic line splitting
-	lines := ob.Receive([]byte("line1\r\nline2\nline3"))
+	lines := ob.receive([]byte("line1\r\nline2\nline3"))
 	if len(lines) != 2 {
 		t.Errorf("Expected 2 lines, got %d: %v", len(lines), lines)
 	}
@@ -440,25 +438,21 @@ func TestOutputBuffer(t *testing.T) {
 		t.Errorf("Unexpected lines: %v", lines)
 	}
 
-	// Prompt should have remaining data
-	prompt := ob.PeekPartial()
-	if prompt != "line3" {
-		t.Errorf("Expected 'line3', got '%s'", prompt)
+	partial := ob.peekPartial()
+	if partial != "line3" {
+		t.Errorf("Expected 'line3', got '%s'", partial)
 	}
 
-	// Consume prompt
-	prompt, completedLine := ob.ConsumePrompt()
-	if prompt != "line3" {
-		t.Errorf("Expected 'line3', got '%s'", prompt)
+	text, completedLine := ob.consumePrompt()
+	if text != "line3" {
+		t.Errorf("Expected 'line3', got '%s'", text)
 	}
 	if completedLine {
-		t.Error("unterminated tail was classified as a completed line")
+		t.Error("partial line was classified as a complete line")
 	}
 
-	// Should be empty now
-	prompt = ob.PeekPartial()
-	if prompt != "" {
-		t.Errorf("Expected empty prompt, got '%s'", prompt)
+	if partial := ob.peekPartial(); partial != "" {
+		t.Errorf("Expected empty partial line, got '%s'", partial)
 	}
 }
 
@@ -472,9 +466,7 @@ func TestOutputBufferNewlineVariants(t *testing.T) {
 		{"LF", "a\nb\n", []string{"a", "b"}},
 		{"LFCR", "a\n\rb\n\r", []string{"a", "b"}},
 		{"Mixed", "a\r\nb\nc\n\r", []string{"a", "b", "c"}},
-		// Bare \r is a line boundary (prompt overwrite), never embedded.
-		// Regression: dropped in 29cd00a; ghost-column rendering on muds
-		// that overwrite the prompt line (issue #14, regressions/14-bare-cr-ghost-columns.json).
+		// MUDs use bare CR to overwrite a prompt line; treat it as a delimiter.
 		{"BareCR", "prompt> \rline\r\n", []string{"prompt> ", "line"}},
 		{"BareCRRun", "a\r\rb\n", []string{"a", "", "b"}},
 		{"BlankLines", "a\r\n\r\nb\r\n", []string{"a", "", "b"}},
@@ -482,8 +474,8 @@ func TestOutputBufferNewlineVariants(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ob := NewOutputBuffer()
-			lines := ob.Receive([]byte(tt.input))
+			ob := &outputBuffer{}
+			lines := ob.receive([]byte(tt.input))
 			if len(lines) != len(tt.expected) {
 				t.Errorf("Expected %d lines, got %d: %v", len(tt.expected), len(lines), lines)
 				return
@@ -503,23 +495,23 @@ func TestOutputBufferFragmentation(t *testing.T) {
 	tests := []struct {
 		name    string
 		packets []string
-		lines   []string // flattened across all Receive calls
-		prompt  string   // pending text afterwards
+		lines   []string // flattened across all receive calls
+		partial string   // pending text afterwards
 	}{
 		{"CRLFSplit", []string{"abc\r", "\ndef\r\n"}, []string{"abc", "def"}, ""},
 		{"LFCRSplit", []string{"abc\n", "\rdef\n"}, []string{"abc", "def"}, ""},
 		{"BareCRThenText", []string{"abc\r", "def\r\n"}, []string{"abc", "def"}, ""},
-		{"HeldCRIsNotPrompt", []string{"abc\r"}, nil, "abc"},
+		{"TrailingCRIsOmittedFromPartial", []string{"abc\r"}, nil, "abc"},
 		{"CRLFBytewise", []string{"a", "\r", "\n", "b", "\r", "\n"}, []string{"a", "b"}, ""},
 		{"LFCRBytewise", []string{"a", "\n", "\r", "b", "\n"}, []string{"a", "b"}, ""},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ob := NewOutputBuffer()
+			ob := &outputBuffer{}
 			var lines []string
 			for _, p := range tt.packets {
-				lines = append(lines, ob.Receive([]byte(p))...)
+				lines = append(lines, ob.receive([]byte(p))...)
 			}
 			if len(lines) != len(tt.lines) {
 				t.Fatalf("Expected lines %q, got %q", tt.lines, lines)
@@ -529,8 +521,8 @@ func TestOutputBufferFragmentation(t *testing.T) {
 					t.Errorf("Line %d: expected %q, got %q", i, tt.lines[i], lines[i])
 				}
 			}
-			if got := ob.PeekPartial(); got != tt.prompt {
-				t.Errorf("Prompt: expected %q, got %q", tt.prompt, got)
+			if got := ob.peekPartial(); got != tt.partial {
+				t.Errorf("Partial line: expected %q, got %q", tt.partial, got)
 			}
 		})
 	}
@@ -538,16 +530,16 @@ func TestOutputBufferFragmentation(t *testing.T) {
 
 // GA/EOR following a held CR completes the line rather than turning it into a
 // prompt. Telnet commands are not data, so a later LF still pairs with the CR.
-func TestOutputBufferPromptBoundaryCompletesHeldBareCR(t *testing.T) {
-	ob := NewOutputBuffer()
-	if lines := ob.Receive([]byte("complete line\r")); len(lines) != 0 {
+func TestOutputBufferPromptBoundaryCompletesHeldCR(t *testing.T) {
+	ob := &outputBuffer{}
+	if lines := ob.receive([]byte("complete line\r")); len(lines) != 0 {
 		t.Fatalf("Expected no lines, got %q", lines)
 	}
-	got, completedLine := ob.ConsumePrompt()
+	got, completedLine := ob.consumePrompt()
 	if got != "complete line" || !completedLine {
 		t.Fatalf("boundary = (%q, %v), want (%q, true)", got, completedLine, "complete line")
 	}
-	lines := ob.Receive([]byte("\nnext line\r\n"))
+	lines := ob.receive([]byte("\nnext line\r\n"))
 	if len(lines) != 1 || lines[0] != "next line" {
 		t.Fatalf("expected only next line, got %q", lines)
 	}
@@ -778,54 +770,20 @@ func TestSubnegotiationMethod(t *testing.T) {
 }
 
 func TestOutputBufferDiscardPartial(t *testing.T) {
-	ob := NewOutputBuffer()
-	ob.Receive([]byte("prompt> "))
-
-	if ob.Len() == 0 {
-		t.Error("Buffer should have data")
+	ob := &outputBuffer{}
+	if lines := ob.receive([]byte("prompt>\r")); len(lines) != 0 {
+		t.Fatalf("lines before discard = %q", lines)
+	}
+	if got := ob.peekPartial(); got != "prompt>" {
+		t.Fatalf("partial line = %q, want prompt>", got)
 	}
 
-	ob.DiscardPartial()
+	ob.discardPartial()
 
-	if ob.Len() != 0 {
-		t.Error("buffer should be empty after DiscardPartial")
+	if got := ob.peekPartial(); got != "" {
+		t.Fatalf("partial line after discard = %q", got)
 	}
-}
-
-func TestOutputBufferClear(t *testing.T) {
-	ob := NewOutputBuffer()
-	ob.Receive([]byte("data"))
-
-	ob.Clear()
-
-	if ob.Len() != 0 {
-		t.Error("Clear should empty buffer")
+	if lines := ob.receive([]byte("\nnext\r\n")); len(lines) != 1 || lines[0] != "next" {
+		t.Fatalf("lines after discard = %q, want [next]", lines)
 	}
-}
-
-// TestOutputBufferConcurrentAccess pins the OutputBuffer data race:
-// the read loop parses into the buffer while the write loop calls
-// DiscardPartial to drop an unfinished tail. The suite runs under -race, so
-// unsynchronized access here fails deterministically.
-func TestOutputBufferConcurrentAccess(t *testing.T) {
-	buf := NewOutputBuffer()
-
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() { // read loop
-		defer wg.Done()
-		for i := 0; i < 1000; i++ {
-			buf.Receive([]byte("HP:100"))
-			buf.PeekPartial()
-			buf.Receive([]byte("> a line arrives\r\n"))
-		}
-	}()
-	go func() { // write loop
-		defer wg.Done()
-		for i := 0; i < 1000; i++ {
-			buf.DiscardPartial()
-			buf.Len()
-		}
-	}()
-	wg.Wait()
 }

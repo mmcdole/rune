@@ -31,9 +31,8 @@ func TestDialOverride(t *testing.T) {
 	}
 }
 
-// TestConnectHonorsDialOverride proves the seam end to end: a canonical
-// address that would never resolve connects to a local listener instead,
-// while the client keeps the canonical address as its identity.
+// TestConnectHonorsDialOverride verifies that a canonical address dials the
+// configured local endpoint.
 func TestConnectHonorsDialOverride(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -50,9 +49,10 @@ func TestConnectHonorsDialOverride(t *testing.T) {
 	t.Setenv("RUNE_DIAL_OVERRIDES", "mud.invalid:4000="+ln.Addr().String())
 
 	c := NewTCPClient()
+	c.BeginConnect(1)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if err := c.Connect(ctx, "mud.invalid:4000"); err != nil {
+	if err := c.Connect(ctx, "mud.invalid:4000", 1); err != nil {
 		t.Fatalf("Connect via override: %v", err)
 	}
 	defer c.Disconnect()
