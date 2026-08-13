@@ -227,8 +227,8 @@ Every submission is a display boundary regardless of local echo, whether an
 input hook consumes it, whether it is a slash command, connection state, or a
 later send failure. Separately, Lua actions from aliases, triggers, timers, and
 other callbacks finish the current line only when their game send is accepted
-by Network. During inbound processing, `activeNetworkEventBatchState` points to
-the temporary `networkEventBatchState` for one `network.EventBatch`. That state
+by Network. During inbound processing, `activeNetworkBatch` points to the
+temporary `networkBatchState` for one `network.EventBatch`. That state
 records whether the server tail changed and whether an accepted send owes a
 visual line finish. Only after the complete batch has run does Session publish
 any remaining provisional prompt and perform the owed finish. Multiple
