@@ -20,6 +20,7 @@ var undocumentedInternal = map[string]bool{
 	"rune.caller_source":       true,
 	"rune.substitute_captures": true,
 	"rune.registry.new":        true,
+	"rune.registry.keyed_opts": true,
 	"rune.command.dispatch":    true,
 	"rune.alias.process":       true,
 	"rune.hooks.call":          true,
@@ -33,6 +34,7 @@ var undocumentedPrefixes = []string{
 // registry contract on reference/api/index.md (#managing), rather than
 // enumerated on every namespace page.
 var sharedContractSuffixes = map[string]bool{
+	"get":          true,
 	"enable":       true,
 	"disable":      true,
 	"remove":       true,

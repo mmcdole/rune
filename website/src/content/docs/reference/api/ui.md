@@ -12,12 +12,15 @@ introductions, see [Layout & UI](/interface/layout/) and
 ```lua
 rune.ui.layout(config)               -- set the dock layout
 rune.ui.bar(name, render_fn, opts?)  -- register a bar renderer
+rune.bars.get(name)                  -- the bar's handle, or nil
 rune.ui.refresh_bars()               -- request an immediate re-render
 rune.ui.search(opts?)                -- open the scrollback-search overlay
 ```
 
 `rune.ui.bar` returns a [handle](/reference/api/#handles) and accepts
-the [common options](/reference/api/#options).
+the [common option](/reference/api/#options) `group`. The bar's layout
+name is its registry name, so passing `name` in `opts` is an error; see
+[items that name themselves](/reference/api/#items-that-name-themselves).
 
 ### rune.ui.layout
 
@@ -67,8 +70,8 @@ A bar or pane renders only if a layout dock names it — see
 rune.ui.bar(name, render_fn, opts?) -> handle
 ```
 
-- `name` (string) — the bar's layout name (`"status"` replaces the
-  built-in status bar).
+- `name` (string): the bar's layout name, and its registry name
+  (`"status"` replaces the built-in status bar).
 - `render_fn` (function) — `function(width)`; called on the render
   tick (roughly every 250ms) with the terminal width. Return a string,
   a `{left, center, right}` table, or `nil` to skip this render.
@@ -124,11 +127,10 @@ scan stopped at its cap and older matches exist beyond it. After
 
 ## Managing
 
-Standard registry management applies:
-`rune.bars.enable/disable/remove(name)`, `.list()`, `.count()`,
-`.clear()`, `.remove_group(group)` — see
-[Registries](/reference/api/#managing). These address the `name`
-option, not the bar name. `/bars` lists everything.
+Standard registry management applies, addressed by the bar's layout name:
+`rune.bars.get/enable/disable/remove(name)`, `.list()`, `.count()`,
+`.clear()`, `.remove_group(group)`. See
+[Registries](/reference/api/#managing). `/bars` lists everything.
 
 **Related:** [Bars guide](/interface/bars/) ·
 [rune.pane](/reference/api/pane/) ·

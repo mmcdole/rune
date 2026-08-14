@@ -120,6 +120,10 @@ function rune.timer.every(seconds, action, opts)
 end
 
 -- Management by name
+function rune.timer.get(name)
+    return registry:get(name)
+end
+
 function rune.timer.disable(name)
     return registry:disable(name)
 end

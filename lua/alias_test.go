@@ -217,20 +217,20 @@ func TestAliasHandles(t *testing.T) {
 			want:  []string{"north"},
 		},
 		{
-			name: "exact disable by name",
+			name: "exact disable by phrase",
 			setup: `
-				rune.alias.exact('n', 'north', {name = 'go_north'})
-				rune.alias.disable('go_north')
+				rune.alias.exact('n', 'north')
+				rune.alias.disable('n')
 			`,
 			input: "n",
 			want:  []string{"n"},
 		},
 		{
-			name: "exact enable by name",
+			name: "exact enable by phrase",
 			setup: `
-				rune.alias.exact('n', 'north', {name = 'go_north'})
-				rune.alias.disable('go_north')
-				rune.alias.enable('go_north')
+				rune.alias.exact('n', 'north')
+				rune.alias.disable('n')
+				rune.alias.enable('n')
 			`,
 			input: "n",
 			want:  []string{"north"},

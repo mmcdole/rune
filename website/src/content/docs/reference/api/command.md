@@ -11,15 +11,26 @@ task-oriented introduction, see [Slash Commands](/scripting/commands/).
 ```lua
 rune.command.add(name, handler, description?, opts?)  -- register /name
 rune.command.remove(name)                             -- unregister; true if it existed
-rune.command.get(name)                                -- the raw handler, or nil
+rune.command.get(name)                                -- the command's handle, or nil
 rune.command.enable(name)                             -- re-enable (also recovers from quarantine)
 rune.command.disable(name)                            -- disable without unregistering
 rune.command.list()                                   -- array of {name, description, enabled, group, source}
 ```
 
 `add` returns a [handle](/reference/api/#handles); `opts` accepts
-`group` from the [common options](/reference/api/#options) (the item's
-name is the command name itself).
+`group` from the [common options](/reference/api/#options). The command
+name is the registry name, so passing `name` in `opts` is an error;
+see [items that name themselves](/reference/api/#items-that-name-themselves).
+
+To wrap a built-in, capture its action before replacing it:
+
+```lua
+local quit = assert(rune.command.get("quit")):action()
+rune.command.add("quit", function(args)
+    rune.send("save")
+    quit(args)
+end, "Save, then exit")
+```
 
 ### rune.command.add
 
@@ -52,7 +63,7 @@ and input handling keeps working. Fix the error and
 ## Managing
 
 Standard registry management applies:
-`rune.command.enable/disable/remove(name)`, `.list()` — see
+`rune.command.get/enable/disable/remove(name)`, `.list()`. See
 [Registries](/reference/api/#managing). `/help` lists everything.
 
 **Related:** [Slash Commands guide](/scripting/commands/) ·

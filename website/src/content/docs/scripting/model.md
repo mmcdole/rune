@@ -29,6 +29,23 @@ replaces the old entry instead of adding a second one, which is what keeps
 `/reload` from stacking a duplicate trigger every time you edit a script.
 Name anything you expect to re-register.
 
+Some things name themselves. A key binding, a bar, a slash command and an
+exact alias each have an obvious identity already, so that is their name:
+
+```lua
+rune.bind("ctrl+g", toggle_map)          -- named "ctrl+g"
+rune.ui.bar("status", render)            -- named "status"
+rune.command.add("greet", greet)         -- named "greet"
+rune.alias.exact("gc", "get all corpse") -- named "gc"
+
+rune.binds.disable("ctrl+g")
+rune.bars.disable("status")
+```
+
+Those four take `group` but not `name`, since a second identity is what
+the single name is there to prevent. Everything else, including regex
+aliases, takes `name` as an ordinary option.
+
 Individual registries add their own options. Triggers take `gag` and `raw`,
 for example. Each [API reference page](/reference/api/) lists its extras; the
 four above work everywhere.
@@ -85,10 +102,17 @@ rune.trigger.contains("spam", nil, { gag = true, name = "spam-gag" })
 rune.trigger.disable("spam-gag")
 ```
 
-Every registry exposes the same functions, taking the item name: `enable`,
-`disable`, `remove`, plus `list()`, `count()`, `clear()`, and
+Every registry exposes the same functions, taking the item name: `get`,
+`enable`, `disable`, `remove`, plus `list()`, `count()`, `clear()`, and
 `remove_group(group)`. The full contract is in the
 [API reference](/reference/api/#managing).
+
+`get` returns the handle, which is how you reach something you did not
+register yourself:
+
+```lua
+rune.bars.get("status"):disable()
+```
 
 ## Handles
 
@@ -103,12 +127,25 @@ h:enable()   -- resume
 h:remove()   -- unregister
 h:name()     -- "spam-gag"
 h:group()    -- nil (no group set)
+h:action()   -- the registered action
 ```
 
 Methods chain, which is handy for registering something already switched off:
 
 ```lua
 rune.trigger.contains("Weather:", nil, {gag = true}):disable()
+```
+
+`h:action()` gives back what you registered, which is how you extend
+something instead of replacing it. Calling the result runs it directly,
+skipping the enabled and group checks and the failure quarantine:
+
+```lua
+local scroll = assert(rune.binds.get("pageup")):action()
+rune.bind("pageup", function()
+    scroll()
+    rune.echo("scrolled")
+end)
 ```
 
 ## Groups

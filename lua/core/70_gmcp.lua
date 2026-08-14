@@ -41,6 +41,7 @@ end
 
 local registry = rune.registry.new{
     kind = "gmcp",
+    action_field = "handler",
     on_add = function(data)
         local handlers = by_package[data.package]
         if not handlers then
@@ -80,6 +81,10 @@ end
 
 function rune.gmcp.remove(name)
     return registry:remove(name)
+end
+
+function rune.gmcp.get(name)
+    return registry:get(name)
 end
 
 function rune.gmcp.enable(name)

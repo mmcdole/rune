@@ -11,15 +11,28 @@ introduction, see [Keybindings](/scripting/keybindings/).
 ```lua
 rune.bind(key, callback, opts?)   -- bind a key; rebinding replaces (upsert by key)
 rune.unbind(key)                  -- remove a binding; true if one existed
+rune.binds.get(key)               -- the binding's handle, or nil
 ```
 
 `rune.bind` returns a [handle](/reference/api/#handles) and accepts the
-[common options](/reference/api/#options) `name` and `group`. A disabled
-bind (or one in a disabled group) swallows its key without running the
-callback.
+[common option](/reference/api/#options) `group`. The key is the registry
+name, so passing `name` is an error; see
+[items that name themselves](/reference/api/#items-that-name-themselves).
+A disabled bind (or one in a disabled group) swallows its key without
+running the callback.
 
 ```lua
-rune.bind("f1", function() rune.send("north") end, {name = "go-north"})
+rune.bind("f1", function() rune.send("north") end, {group = "combat"})
+```
+
+To extend a default rather than discard it, capture its action first:
+
+```lua
+local scroll = assert(rune.binds.get("pageup")):action()
+rune.bind("pageup", function()
+    scroll()
+    rune.echo("scrolled")
+end)
 ```
 
 ## Key formats
@@ -94,9 +107,9 @@ delete-word.
 
 ## Managing
 
-Standard registry management applies:
-`rune.binds.enable/disable/remove(name)`, `.list()`, `.count()`,
-`.clear()`, `.remove_group(group)` — see
+Standard registry management applies, addressed by key:
+`rune.binds.get/enable/disable/remove(key)`, `.list()`, `.count()`,
+`.clear()`, `.remove_group(group)`. See
 [Registries](/reference/api/#managing). `/binds` lists everything.
 
 **Related:** [Keybindings guide](/scripting/keybindings/) ·

@@ -8,6 +8,7 @@
 -- Usage:
 --   local reg = rune.registry.new{
 --       kind = "trigger",               -- label for messages
+--       action_field = "action",        -- data field holding the callback
 --       on_add = function(data) end,    -- optional, after insertion
 --       on_remove = function(data) end, -- optional, after removal
 --   }
@@ -23,7 +24,15 @@
 --   once     -- opts.once, module removes the item after first fire
 --   _handle  -- back-reference to the handle
 --
--- Handle API: :enable() :disable() :remove() :name() :group()
+-- Name is the ONLY identity. Registries whose entries have a natural
+-- key (a bind's key, a bar's layout name, a command's name, an exact
+-- alias's phrase) pass that key as the name via rune.registry.keyed_opts,
+-- so `reg:get(key)` and the management suite address the same thing the
+-- user typed. Those registries must not also upsert by their own index:
+-- the name upsert below already replaces the old entry, firing on_remove
+-- for it before on_add for the new one.
+--
+-- Handle API: :enable() :disable() :remove() :name() :group() :action()
 
 rune.registry = {}
 
@@ -53,13 +62,42 @@ function Handle:group()
     return self._data.group
 end
 
+-- The registered action: a function, or the command string for the
+-- string-action forms. Calling it directly bypasses the enabled/group
+-- checks and the failure quarantine, so this is for capturing and
+-- wrapping an existing entry, not for dispatch.
+function Handle:action()
+    return self._data[self._registry.action_field]
+end
+
 local Registry = {}
 Registry.__index = Registry
+
+-- Build the opts table for a registry whose entries have a natural key,
+-- making that key the name. An explicit name is refused rather than
+-- silently ignored: two identities for one entry is the bug this avoids.
+function rune.registry.keyed_opts(key, opts, label)
+    if opts ~= nil and type(opts) ~= "table" then
+        error(label .. ": opts must be a table", 3)
+    end
+    if opts and opts.name ~= nil then
+        error(label .. ": name is not accepted here, the key is the name", 3)
+    end
+    local merged = {}
+    if opts then
+        for k, v in pairs(opts) do
+            merged[k] = v
+        end
+    end
+    merged.name = key
+    return merged
+end
 
 function rune.registry.new(opts)
     opts = opts or {}
     return setmetatable({
         kind = opts.kind or "item",
+        action_field = opts.action_field or "action",
         on_add = opts.on_add,
         on_remove = opts.on_remove,
         list = {},     -- all items, sorted by (priority, id)

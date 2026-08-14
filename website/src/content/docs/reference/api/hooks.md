@@ -155,7 +155,7 @@ harvesting, priority 200).
 ## Managing
 
 Standard registry management applies:
-`rune.hooks.enable/disable/remove(name)`, `.list()`, `.count()`,
+`rune.hooks.get/enable/disable/remove(name)`, `.list()`, `.count()`,
 `.clear()`, `.remove_group(group)` — see
 [Registries](/reference/api/#managing). `/hooks` lists everything.
 

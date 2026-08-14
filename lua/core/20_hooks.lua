@@ -51,6 +51,7 @@ end
 
 local registry = rune.registry.new{
     kind = "hook",
+    action_field = "handler",
     on_add = function(data)
         local handlers = by_event[data.event]
         if not handlers then
@@ -88,6 +89,10 @@ function rune.hooks.on(event, handler, opts)
 end
 
 -- Management by name
+function rune.hooks.get(name)
+    return registry:get(name)
+end
+
 function rune.hooks.disable(name)
     return registry:disable(name)
 end

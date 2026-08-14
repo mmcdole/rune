@@ -101,7 +101,7 @@ rune.gmcp.subscribe("Room", 2)
 
 ## Managing
 
-`rune.gmcp.enable/disable/remove(name)` manage handlers by name;
+`rune.gmcp.get/enable/disable/remove(name)` manage handlers by name;
 `rune.gmcp.list()` returns them — see
 [Registries](/reference/api/#managing). `/gmcp` shows negotiation
 state, subscriptions, and handlers; `/gmcp send <package> [json]`

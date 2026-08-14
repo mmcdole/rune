@@ -49,9 +49,14 @@ Every creation function (`rune.trigger.*`, `rune.alias.*`,
 | `h:remove()` | Unregister (timers also accept `h:cancel()`) |
 | `h:name()` | The item's name, or nil |
 | `h:group()` | The item's group, or nil |
+| `h:action()` | The registered action: the function, or the string for string actions |
 
 Methods are chainable. See
 [The Scripting Model](/scripting/model/#handles) for usage.
+
+`h:action()` returns the callback as registered, so calling it runs
+neither the enabled and group checks nor the failure quarantine. It is
+for capturing an existing action and wrapping it, not for dispatch.
 
 ## Options
 
@@ -59,12 +64,28 @@ Common `opts` fields accepted by every creation function:
 
 | Option | Type | Default | Applies to |
 |---|---|---|---|
-| `name` | string | none | All — unique ID; same name replaces (upsert) |
-| `group` | string | none | All — membership for batch operations |
-| `priority` | number | 50 | Regex aliases, triggers, hooks — lower runs first |
-| `once` | bool | false | Aliases, triggers — remove after first match |
+| `name` | string | none | Triggers, timers, hooks, GMCP handlers, regex aliases. Unique ID; same name replaces (upsert) |
+| `group` | string | none | All: membership for batch operations |
+| `priority` | number | 50 | Regex aliases, triggers, hooks. Lower runs first |
+| `once` | bool | false | Aliases, triggers. Remove after first match |
 
 Page-specific extras (e.g. trigger `gag`/`raw`) are listed on each page.
+
+### Items that name themselves
+
+An entry with a natural key is registered under that key, and passing
+`name` for one is an error rather than a second identity:
+
+| Creation function | Its name |
+|---|---|
+| `rune.bind(key, ...)` | the key, `"ctrl+g"` |
+| `rune.ui.bar(name, ...)` | the bar's layout name, `"status"` |
+| `rune.command.add(name, ...)` | the command, `"greet"` |
+| `rune.alias.exact(phrase, ...)` | the normalized phrase, `"chat off"` |
+
+So `rune.binds.disable("ctrl+g")` and `rune.bars.get("status")` address
+these by the same string you registered them with, including the core's
+own binds, bars and commands.
 
 ## Managing
 
@@ -73,6 +94,7 @@ by item name:
 
 | Function | Effect |
 |---|---|
+| `.get(name)` | The item's handle, or nil |
 | `.enable(name)` / `.disable(name)` | Toggle an item |
 | `.remove(name)` | Unregister an item |
 | `.list()` | All items with name, enabled state, group, and source `file:line` |

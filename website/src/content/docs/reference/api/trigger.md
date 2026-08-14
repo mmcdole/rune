@@ -178,7 +178,7 @@ Behavior:
 ## Managing
 
 Standard registry management applies:
-`rune.trigger.enable/disable/remove(name)`, `.list()`, `.count()`,
+`rune.trigger.get/enable/disable/remove(name)`, `.list()`, `.count()`,
 `.clear()`, `.remove_group(group)` — see
 [Registries](/reference/api/#managing). `/triggers` lists everything;
 `/test <line>` feeds a fake complete line through the output-trigger

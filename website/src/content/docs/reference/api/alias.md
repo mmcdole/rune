@@ -12,10 +12,16 @@ the server. For a task-oriented introduction, see
 ```lua
 rune.alias.exact(phrase, action, opts?)   -- leading command phrase matches literally
 rune.alias.regex(pattern, action, opts?)  -- Go regexp on the full input line
+rune.alias.get(name)                      -- the alias's handle, or nil
 ```
 
 Both constructors return a [handle](/reference/api/#handles) and accept
-the [common options](/reference/api/#options).
+the [common options](/reference/api/#options), except that an exact
+alias is named for its normalized phrase, so passing `name` to
+`rune.alias.exact` is an error. `rune.alias.disable("chat off")` then
+addresses it by that phrase; see
+[items that name themselves](/reference/api/#items-that-name-themselves).
+Regex aliases have no natural key and take `name` as usual.
 
 ## Matching
 
@@ -85,8 +91,8 @@ consume the input entirely (the function already did the work).
 ## Managing
 
 Standard registry management applies:
-`rune.alias.enable/disable/remove(name)`, `.list()`, `.count()`,
-`.clear()`, `.remove_group(group)` — see
+`rune.alias.get/enable/disable/remove(name)`, `.list()`, `.count()`,
+`.clear()`, `.remove_group(group)`. See
 [Registries](/reference/api/#managing). `/aliases` lists everything.
 
 **Related:** [Aliases guide](/scripting/aliases/) ·

@@ -101,6 +101,11 @@ Aliases take the [common options](/scripting/model/#options): `name`,
 `group`, `priority` (order among regex aliases), and `once`. No
 alias-specific extras.
 
+An exact alias is named for its phrase, so `rune.alias.disable("gc")`
+works without you naming anything, and passing `name` to
+`rune.alias.exact` is an error. Regex aliases have no such key and take
+`name` as usual.
+
 ## Examples
 
 Chaining and repeats compose with aliases, since expansion runs on the

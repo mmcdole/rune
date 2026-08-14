@@ -40,9 +40,22 @@ structured text enters the [verbatim composer](/interface/input/#multiline-verba
 
 ## Options
 
-Binds take the [common options](/scripting/model/#options) `name` and
-`group`. Rebinding a key always replaces whatever was on it, named or
-not.
+Binds take the [common option](/scripting/model/#options) `group`. The
+key is the bind's name, so rebinding a key always replaces whatever was
+on it, and `rune.binds.disable("ctrl+g")` addresses it by the same
+string you bound.
+
+To extend a default instead of discarding it, capture its action first.
+`rune.binds.get(key)` returns the handle; `:action()` is the raw
+callback:
+
+```lua
+local scroll = assert(rune.binds.get("pageup")):action()
+rune.bind("pageup", function()
+    scroll()
+    rune.echo("scrolled")
+end)
+```
 
 ## Examples
 
@@ -70,7 +83,7 @@ Rebinding a key in your `init.lua` replaces the default.
 
 ## Managing
 
-By name: `rune.binds.disable/enable/remove(name)` — the full management
+By key: `rune.binds.get/disable/enable/remove(key)`. The full management
 suite is in the [API reference](/reference/api/#managing). In the client,
 `/binds` lists every binding with its state, group, and the `file:line`
 that registered it.
