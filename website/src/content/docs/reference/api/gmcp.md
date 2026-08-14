@@ -59,7 +59,7 @@ the server is reported and dropped before any handler runs.
 rune.gmcp.send(package, value?) -> true | nil, err
 ```
 
-- `package` (string) — the message name (`"Char.Skills.Get"`).
+- `package` (string) — the message name (`"Core.Hello"`).
 - `value` (optional) — a string, number, boolean, or JSON-able table;
   `nil` sends the bare package name.
 
@@ -68,7 +68,7 @@ not connected, GMCP not negotiated, or the value cannot be encoded.
 Failures are also echoed to the screen.
 
 ```lua
-rune.gmcp.send("Char.Skills.Get", { group = "combat" })
+rune.gmcp.send("Core.Hello", { client = "rune", version = rune.version })
 rune.gmcp.send("Core.Ping")
 ```
 
