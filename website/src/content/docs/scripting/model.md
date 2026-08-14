@@ -18,40 +18,43 @@ Every registration has a name. It is what you pass to `get`, `enable`,
 `disable` and `remove`, what a re-registration replaces on, and what
 `/triggers`, `/binds` and the other listings show.
 
-For most registries you supply it:
+Most registries take the name from you. Four take it from what you passed
+first:
+
+| Creation function | Name | Because |
+|---|---|---|
+| `rune.trigger.*` | the `name` you give it | several triggers can match one line |
+| `rune.alias.regex` | the `name` you give it | several can match one line |
+| `rune.timer.*` | the `name` you give it | nothing about a timer is unique |
+| `rune.hooks.on` | the `name` you give it | several handlers per event |
+| `rune.gmcp.on` | the `name` you give it | several handlers per package |
+| `rune.bind` | the key, `"ctrl+g"` | one bind per key |
+| `rune.ui.bar` | the layout name, `"status"` | one renderer per slot |
+| `rune.command.add` | the command, `"greet"` | one handler per `/command` |
+| `rune.alias.exact` | the phrase, `"chat off"` | one expansion per typed phrase |
+
+Read down the last column and the split explains itself: where several
+entries can share a first argument you name them, and where only one can
+exist the first argument is already the name.
+
+Either way you manage it the same way:
 
 ```lua
 rune.trigger.contains("food", "eat bread", { name = "feeder" })
+rune.bind("ctrl+g", toggle_map)
+
 rune.trigger.disable("feeder")
-```
-
-Naming does more than label. Registering the same name again replaces the
-old entry instead of adding a second one, which is what keeps `/reload`
-from stacking a duplicate trigger every time you edit a script. Name
-anything you expect to re-register.
-
-Four registries give themselves a name, because the thing you pass first
-already identifies one entry:
-
-```lua
-rune.bind("ctrl+g", toggle_map)          -- named "ctrl+g"
-rune.ui.bar("status", render)            -- named "status"
-rune.command.add("greet", greet)         -- named "greet"
-rune.alias.exact("gc", "get all corpse") -- named "gc"
-
 rune.binds.disable("ctrl+g")
-rune.bars.disable("status")
 ```
 
-There is one bind per key, one renderer per bar slot, one handler per
-`/command`, and one expansion per typed phrase, so a separate name would
-have nothing to distinguish. It is also why you can reach the core's own
-binds and bars, which are registered without options at all.
+Registering the same name again replaces the old entry rather than adding
+a second one. That is what keeps `/reload` from stacking a duplicate
+trigger each time you edit a script, so name anything you expect to
+re-register.
 
-The test for any registry: can two entries share the same first argument?
-Triggers, timers, hooks, GMCP handlers and regex aliases can, so you name
-them. The four above cannot, so they are named for you. Passing `name` to
-one of them is ignored, with a notice telling you the key to manage it by.
+Passing `name` to one of the four is ignored, with a notice telling you
+the key to manage it by. It is also why you can reach the core's own binds
+and bars, which are registered without options at all.
 
 ## Options
 

@@ -64,29 +64,38 @@ Every registration has a name. It is what you pass to
 [`get`, `enable`, `disable` and `remove`](#managing), what a
 re-registration replaces on, and what the listing commands show.
 
-For most registries you supply it:
-
-```lua
-rune.trigger.contains("food", "eat bread", { name = "feeder" })
-```
-
-Four give themselves one:
+Most registries take the name from you. Four take it from what you passed
+first:
 
 | Creation function | Name | Because |
 |---|---|---|
-| `rune.bind(key, ...)` | the key, `"ctrl+g"` | one bind per key |
-| `rune.ui.bar(name, ...)` | the layout name, `"status"` | one renderer per slot |
-| `rune.command.add(name, ...)` | the command, `"greet"` | one handler per `/command` |
-| `rune.alias.exact(phrase, ...)` | the normalized phrase, `"chat off"` | one expansion per typed phrase |
+| `rune.trigger.*` | the `name` you give it | several triggers can match one line |
+| `rune.alias.regex` | the `name` you give it | several can match one line |
+| `rune.timer.*` | the `name` you give it | nothing about a timer is unique |
+| `rune.hooks.on` | the `name` you give it | several handlers per event |
+| `rune.gmcp.on` | the `name` you give it | several handlers per package |
+| `rune.bind` | the key, `"ctrl+g"` | one bind per key |
+| `rune.ui.bar` | the layout name, `"status"` | one renderer per slot |
+| `rune.command.add` | the command, `"greet"` | one handler per `/command` |
+| `rune.alias.exact` | the phrase, `"chat off"` | one expansion per typed phrase |
 
-Each holds one entry per key, so there is nothing a separate name would
-distinguish. That is why `rune.binds.disable("ctrl+g")` and
+Read down the last column and the split explains itself: where several
+entries can share a first argument you name them, and where only one can
+exist the first argument is already the name.
+
+Either way the management calls look the same:
+
+```lua
+rune.trigger.contains("food", "eat bread", { name = "feeder" })
+rune.bind("ctrl+g", toggle_map)
+
+rune.trigger.disable("feeder")
+rune.binds.disable("ctrl+g")
+```
+
+That is also why `rune.binds.disable("ctrl+g")` and
 `rune.bars.get("status")` reach the core's own binds and bars, which are
-registered without options.
-
-The test for any registry: can two entries share the same first argument?
-Triggers, timers, hooks, GMCP handlers and regex aliases can, so you name
-them. The four above cannot, so they are named for you.
+registered without options at all.
 
 These four accepted a `name` option before rune 0.9. Passing one now is
 ignored with a `[Deprecated]` notice giving the key to manage it by, so
