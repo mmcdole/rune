@@ -14,28 +14,30 @@ once you have registered a few things.
 
 ## Names
 
-Every registration has a name. It is what you pass to `get`, `enable`,
-`disable` and `remove`, what a re-registration replaces on, and what
+A registry name identifies one registration. It is what you pass to `get`,
+`enable`, `disable` and `remove`, what a re-registration replaces, and what
 `/triggers`, `/binds` and the other listings show.
 
-Most registries take the name from you. Four take it from what you passed
-first:
+Some creation functions assign this name automatically. For the others, set
+`opts.name` when you want to look up, manage or replace the registration by
+name.
 
 | Creation function | Name | Because |
 |---|---|---|
-| `rune.trigger.*` | the `name` you give it | several triggers can match one line |
-| `rune.alias.regex` | the `name` you give it | several can match one line |
-| `rune.timer.*` | the `name` you give it | nothing about a timer is unique |
-| `rune.hooks.on` | the `name` you give it | several handlers per event |
-| `rune.gmcp.on` | the `name` you give it | several handlers per package |
-| `rune.bind` | the key, `"ctrl+g"` | one bind per key |
-| `rune.ui.bar` | the layout name, `"status"` | one renderer per slot |
-| `rune.command.add` | the command, `"greet"` | one handler per `/command` |
-| `rune.alias.exact` | the phrase, `"chat off"` | one expansion per typed phrase |
+| `rune.bind` | the key, `"ctrl+g"` | Only one binding can use a key |
+| `rune.ui.bar` | the layout name, `"status"` | Only one renderer can use a layout name |
+| `rune.command.add` | the command, `"greet"` | Only one handler can use a command name |
+| `rune.alias.exact` | the normalized phrase, `"chat off"` | Only one expansion can use a typed phrase |
+| `rune.trigger.*` | `opts.name` | Several triggers may match the same text |
+| `rune.alias.regex` | `opts.name` | Several regex aliases may use the same pattern |
+| `rune.timer.*` | `opts.name` | Several timers may use the same delay or interval |
+| `rune.hooks.on` | `opts.name` | Several handlers may listen to the same event |
+| `rune.gmcp.on` | `opts.name` | Several handlers may listen to the same package |
 
-Read down the last column and the split explains itself: where several
-entries can share a first argument you name them, and where only one can
-exist the first argument is already the name.
+When only one registration can use a value, that value is already its name.
+A binding is named by its key, a bar by its layout name, a command by its
+command name, and an exact alias by its phrase. When several registrations
+can share the same value, give each one its own name with `opts.name`.
 
 Either way you manage it the same way:
 
@@ -47,14 +49,22 @@ rune.trigger.disable("feeder")
 rune.binds.disable("ctrl+g")
 ```
 
-Registering the same name again replaces the old entry rather than adding
-a second one. That is what keeps `/reload` from stacking a duplicate
-trigger each time you edit a script, so name anything you expect to
-re-register.
+A registration without a name can still be managed through the handle
+returned when it was created:
 
-Passing `name` to one of the four is ignored, with a notice telling you
-the key to manage it by. It is also why you can reach the core's own binds
-and bars, which are registered without options at all.
+```lua
+local h = rune.trigger.contains("food", "eat bread")
+h:disable()
+```
+
+Registering the same name again replaces the old entry rather than adding a
+second one. That is what keeps `/reload` from stacking a duplicate trigger
+each time you edit a script, so name anything you expect to re-register.
+
+Passing `opts.name` to one of the four automatically named functions is
+ignored, with a notice telling you the name to manage it by. Automatic naming
+also lets you reach the core's own binds, bars and commands, which are
+registered without options at all.
 
 ## Options
 
