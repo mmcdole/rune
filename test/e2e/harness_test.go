@@ -324,7 +324,7 @@ func newClient(t *testing.T, initLua string) *client {
 // connect types /connect at the client and waits for the dial.
 func (c *client) connect() {
 	c.t.Helper()
-	c.ui.events <- ui.SubmissionMsg{Submission: input.Command("/connect " + c.mud.addr())}
+	c.ui.events <- ui.InputSubmittedMsg{Submission: input.Command("/connect " + c.mud.addr())}
 	c.mud.accept()
 }
 
@@ -334,7 +334,7 @@ func (c *client) connectRefused() {
 	c.t.Helper()
 	addr := c.mud.addr()
 	c.mud.ln.Close()
-	c.ui.events <- ui.SubmissionMsg{Submission: input.Command("/connect " + addr)}
+	c.ui.events <- ui.InputSubmittedMsg{Submission: input.Command("/connect " + addr)}
 }
 
 // waitFor polls cond until it holds or the deadline passes.

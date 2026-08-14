@@ -5,26 +5,26 @@ import (
 	"testing"
 )
 
-func TestServerLineBufferExtractsLinesAndRecordMarkedTail(t *testing.T) {
-	var serverLine serverLineBuffer
+func TestPartialLineBufferExtractsLinesAndPromptBoundaryTail(t *testing.T) {
+	var partialLine partialLineBuffer
 
-	lines := serverLine.appendData([]byte("line1\r\nline2\nline3"))
+	lines := partialLine.appendData([]byte("line1\r\nline2\nline3"))
 	if len(lines) != 2 || lines[0] != "line1" || lines[1] != "line2" {
 		t.Fatalf("lines = %q, want [line1 line2]", lines)
 	}
-	if got := serverLine.peekPartial(); got != "line3" {
+	if got := partialLine.peek(); got != "line3" {
 		t.Fatalf("partial = %q, want line3", got)
 	}
 
-	if text := serverLine.consumeAtRecordMark(); text != "line3" {
+	if text := partialLine.consumeAtPromptBoundary(); text != "line3" {
 		t.Fatalf("prompt boundary = %q, want line3", text)
 	}
-	if got := serverLine.peekPartial(); got != "" {
+	if got := partialLine.peek(); got != "" {
 		t.Fatalf("partial after consume = %q, want empty", got)
 	}
 }
 
-func TestServerLineBufferDelimitersAcrossChunks(t *testing.T) {
+func TestPartialLineBufferDelimitersAcrossChunks(t *testing.T) {
 	tests := []struct {
 		name    string
 		chunks  []string
@@ -48,59 +48,59 @@ func TestServerLineBufferDelimitersAcrossChunks(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var serverLine serverLineBuffer
+			var partialLine partialLineBuffer
 			var lines []string
 			for _, chunk := range tt.chunks {
-				lines = append(lines, serverLine.appendData([]byte(chunk))...)
+				lines = append(lines, partialLine.appendData([]byte(chunk))...)
 			}
 			if !slices.Equal(lines, tt.lines) {
 				t.Fatalf("lines = %q, want %q", lines, tt.lines)
 			}
-			if got := serverLine.peekPartial(); got != tt.partial {
+			if got := partialLine.peek(); got != tt.partial {
 				t.Fatalf("partial = %q, want %q", got, tt.partial)
 			}
 		})
 	}
 }
 
-func TestServerLineRecordMarkAfterCRHasNoPrompt(t *testing.T) {
-	var serverLine serverLineBuffer
-	if lines := serverLine.appendData([]byte("complete line\r")); len(lines) != 1 || lines[0] != "complete line" {
+func TestPartialLinePromptBoundaryAfterCRHasNoPrompt(t *testing.T) {
+	var partialLine partialLineBuffer
+	if lines := partialLine.appendData([]byte("complete line\r")); len(lines) != 1 || lines[0] != "complete line" {
 		t.Fatalf("lines before boundary = %q, want [complete line]", lines)
 	}
-	if got := serverLine.consumeAtRecordMark(); got != "" {
+	if got := partialLine.consumeAtPromptBoundary(); got != "" {
 		t.Fatalf("boundary = %q, want empty", got)
 	}
-	if lines := serverLine.appendData([]byte("\nnext line\r\n")); len(lines) != 1 || lines[0] != "next line" {
+	if lines := partialLine.appendData([]byte("\nnext line\r\n")); len(lines) != 1 || lines[0] != "next line" {
 		t.Fatalf("lines after boundary = %q, want [next line]", lines)
 	}
 }
 
-func TestServerLineBufferDiscard(t *testing.T) {
-	var serverLine serverLineBuffer
-	if lines := serverLine.appendData([]byte("prompt>")); len(lines) != 0 {
+func TestPartialLineBufferDiscard(t *testing.T) {
+	var partialLine partialLineBuffer
+	if lines := partialLine.appendData([]byte("prompt>")); len(lines) != 0 {
 		t.Fatalf("lines before discard = %q, want none", lines)
 	}
-	if got := serverLine.peekPartial(); got != "prompt>" {
+	if got := partialLine.peek(); got != "prompt>" {
 		t.Fatalf("partial = %q, want prompt>", got)
 	}
 
-	serverLine.discard()
+	partialLine.discard()
 
-	if got := serverLine.peekPartial(); got != "" {
+	if got := partialLine.peek(); got != "" {
 		t.Fatalf("partial after discard = %q, want empty", got)
 	}
-	if lines := serverLine.appendData([]byte("next\r\n")); len(lines) != 1 || lines[0] != "next" {
+	if lines := partialLine.appendData([]byte("next\r\n")); len(lines) != 1 || lines[0] != "next" {
 		t.Fatalf("lines after discard = %q, want [next]", lines)
 	}
 }
 
-func TestServerLineBufferResetClearsDelimiterState(t *testing.T) {
-	var serverLine serverLineBuffer
-	serverLine.appendData([]byte("old\r"))
-	serverLine.reset()
+func TestPartialLineBufferResetClearsDelimiterState(t *testing.T) {
+	var partialLine partialLineBuffer
+	partialLine.appendData([]byte("old\r"))
+	partialLine.reset()
 
-	if lines := serverLine.appendData([]byte("\nnew\n")); len(lines) != 2 || lines[0] != "" || lines[1] != "new" {
+	if lines := partialLine.appendData([]byte("\nnew\n")); len(lines) != 2 || lines[0] != "" || lines[1] != "new" {
 		t.Fatalf("new connection lines = %q, want [\"\" new]", lines)
 	}
 }

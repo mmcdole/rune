@@ -64,21 +64,25 @@ call `rune.send`/`rune.send_raw` yourself and return `false`.
 `prompt` drives the prompt overlay. With `confirmed = false`, the value is a
 partial line. It may be `Username:` or only the start of an ordinary line, and
 it may repeat as it grows. A line delimiter later sends the complete line
-through `output`. With `confirmed = true`, GA/EOR ended the text as a prompt.
-If GA/EOR arrives in a later read, the hook may receive the same text first as
-partial and then as confirmed. An empty GA/EOR marker does not fire the hook.
-Rune never uses a timer or prompt pattern to promote a partial line.
+through `output`. With `confirmed = true`, a GA/EOR prompt boundary confirmed
+the text as a prompt. If the boundary arrives in a later batch, the hook may
+receive the same text first as partial and then as confirmed. An empty prompt
+boundary does not fire the hook. Rune never uses a timer or prompt pattern to
+confirm a partial line.
 
-Every user submission commits the prompt overlay before history, echo, and
-input hooks—even a local slash command, consumed submission, disconnected
-submission, or one whose eventual send fails. Separately, a programmatic game
-line from an alias, trigger, timer, or other callback commits the overlay only
-after Network accepts the send. A failed programmatic send and protocol traffic
-such as GMCP do not.
+Finishing a partial line means one thing throughout Rune: the prompt overlay
+is committed to scrollback and open trigger spans close. Every user submission
+finishes the partial line before history, echo, and input hooks run, even for
+a local slash command, a consumed submission, a disconnected submission, or
+one whose eventual send fails. Separately, a programmatic game line from an
+alias, trigger, timer, or other callback finishes it only after the connection
+accepts the send. A failed programmatic send and protocol traffic such as GMCP
+do not.
 
-Sending while an ordinary line is partial commits its visible prefix; the
-later suffix arrives through `output` as a new line. This is the trade-off for
-immediate partial-line display without a timer or prompt pattern.
+If the partial text was really the start of a fragmented ordinary line,
+sending commits the visible prefix; the rest arrives through `output` as a new
+line. This is the trade-off for immediate partial-line display without a timer
+or prompt pattern.
 
 ```lua
 rune.hooks.on("prompt", function(line, confirmed)
@@ -88,7 +92,7 @@ rune.hooks.on("prompt", function(line, confirmed)
 end)
 ```
 
-Handlers for partial lines should be idempotent. A confirmed prompt closes
+Handlers for partial lines should be safe to repeat. A confirmed prompt closes
 open spans before `prompt` handlers run. Finishing a partial line on submission
 or accepted send commits its latest processed overlay without calling the
 `prompt` hook again.
@@ -99,7 +103,8 @@ Every `input` handler receives `(text, context)`. The context is read-only, and
 ```lua
 rune.hooks.on("input", function(text, context)
     if context.mode == "verbatim" then
-        rune.echo("Sending verbatim input")
+        -- The handler sees the whole submission once, line breaks included.
+        rune.echo("Sending verbatim block (" .. #text .. " bytes)")
     end
 end, { priority = 10 })
 ```

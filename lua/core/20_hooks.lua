@@ -16,9 +16,9 @@
 -- Events (data-flow):
 --   "input"        -- User input: (text, context); return false to consume
 --   "output"       -- Server output line object (false gags, string rewrites)
---   "prompt"       -- Prompt overlay: (line, confirmed); false for a
---                     partial line, true for a GA/EOR-confirmed prompt
---                     (false gags, string rewrites)
+--   "prompt"       -- Prompt observation: (line, confirmed); confirmed is
+--                     false for a partial line, true for a GA/EOR-confirmed
+--                     prompt (false gags, string rewrites)
 --   "echo"         -- Local echo of typed input, plain string (false hides,
 --                     string rewrites; core handler adds the "> " styling)
 -- Events (notifications):

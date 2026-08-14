@@ -25,8 +25,8 @@ func (p *promptOverlay) replace(text string, confirmed bool) {
 	p.display.SetPrompt(text)
 }
 
-// beforeLine commits a confirmed prompt and discards a superseded partial line.
-func (p *promptOverlay) beforeLine() {
+// commitOrDiscard commits a confirmed prompt and discards a superseded partial line.
+func (p *promptOverlay) commitOrDiscard() {
 	if !p.active {
 		return
 	}
@@ -37,8 +37,8 @@ func (p *promptOverlay) beforeLine() {
 	p.discard()
 }
 
-// beforeUpdate commits a confirmed prompt before replacing the overlay.
-func (p *promptOverlay) beforeUpdate() {
+// commitIfConfirmed commits a confirmed prompt before replacing the overlay.
+func (p *promptOverlay) commitIfConfirmed() {
 	if p.active && p.confirmed {
 		p.commit()
 	}
@@ -51,7 +51,7 @@ func (p *promptOverlay) commit() bool {
 		return false
 	}
 	p.display.CommitPrompt(p.text)
-	p.clearState()
+	p.reset()
 	return true
 }
 
@@ -59,11 +59,11 @@ func (p *promptOverlay) discard() {
 	if !p.active {
 		return
 	}
-	p.clearState()
+	p.reset()
 	p.display.SetPrompt("")
 }
 
-func (p *promptOverlay) clearState() {
+func (p *promptOverlay) reset() {
 	p.text = ""
 	p.active = false
 	p.confirmed = false

@@ -121,9 +121,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ui.UpdateBindsMsg, ui.UpdateBarsMsg, ui.UpdateLayoutMsg:
 		return m.handleConfigUpdate(msg)
 
-	// Main output
-	case ui.PrintLineMsg, ui.EchoLineMsg, ui.PromptMsg, ui.PromptCommitMsg:
-		return m.handleOutput(msg)
+	// Scrollback appends and the prompt overlay
+	case ui.PrintLineMsg, ui.EchoLineMsg, ui.SetPromptMsg, ui.CommitPromptMsg:
+		return m.handleDisplayOutput(msg)
 
 	// Pane operations
 	case ui.PaneCreateMsg, ui.PaneWriteMsg, ui.PaneToggleMsg, ui.PaneSetVisibleMsg, ui.PaneClearMsg:
@@ -282,7 +282,7 @@ func (m *Model) syncBars(content map[string]ui.BarContent) {
 	m.barContent = content
 }
 
-func (m *Model) handleOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *Model) handleDisplayOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case ui.PrintLineMsg:
 		rows := splitRows(string(msg), m.width)
@@ -301,13 +301,13 @@ func (m *Model) handleOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// ahead of output that arrived before it.
 		m.flushPending()
 		m.appendMessage(string(msg))
-	case ui.PromptMsg:
+	case ui.SetPromptMsg:
 		text := util.ExpandTabs(string(msg))
 		if text != m.promptText {
 			m.viewport.SetPrompt(text)
 			m.promptText = text
 		}
-	case ui.PromptCommitMsg:
+	case ui.CommitPromptMsg:
 		m.flushPending()
 		if text := util.ExpandTabs(string(msg)); text != "" {
 			m.appendMessage(text)
@@ -399,11 +399,13 @@ func (m *Model) submit(submission input.Submission) bool {
 	if submission.Mode == input.ModeVerbatim {
 		lineCount := len(submission.PhysicalLines())
 		if len(submission.Text) > maxVerbatimBytes || lineCount > maxVerbatimLines {
+			// A size rejection is local validation, not queue pressure, so
+			// the normal reporting append keeps scroll state in sync.
 			m.appendMessage(text.Red("[WARNING] Verbatim input not sent - limit is 1000 lines or 256 KiB"))
 			return false
 		}
 	}
-	if m.tryPost(ui.SubmissionMsg{Submission: submission}) {
+	if m.tryPost(ui.InputSubmittedMsg{Submission: submission}) {
 		return true
 	}
 	m.showWarning("Input not sent - engine lagging")
@@ -438,7 +440,7 @@ func (m *Model) notifySession(event ui.UIEvent) {
 }
 
 // showWarning appends locally without reporting another scroll-state event:
-// this path is reached because the Session event queue is already full.
+// this path is reached only when the Session event queue is already full.
 func (m *Model) showWarning(message string) {
 	rows := splitRows(text.Red("[WARNING] "+message), m.width)
 	for _, row := range rows {

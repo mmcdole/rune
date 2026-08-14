@@ -25,8 +25,8 @@ func TestLogCapturesSessionToFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	serverLine(s, "Hello \x1b[31mred\x1b[0m world")
-	serverLine(s, "a secret line")
+	completeLine(s, "Hello \x1b[31mred\x1b[0m world")
+	completeLine(s, "a secret line")
 	userInput(s, "kill rat")
 	userInput(s, "/log stop")
 
@@ -92,7 +92,7 @@ func TestLogSurvivesReload(t *testing.T) {
 		t.Fatalf("log did not survive reload: path=%q active=%v", got, active)
 	}
 
-	serverLine(s, "after reload")
+	completeLine(s, "after reload")
 	userInput(s, "/log stop")
 
 	data, err := os.ReadFile(path)

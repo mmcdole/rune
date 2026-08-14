@@ -18,7 +18,7 @@
       ]
     },
     {
-      "name": "editor clear arriving as an unterminated prompt block is ignored",
+      "name": "editor clear arriving as a partial prompt block is ignored",
       "issue": "https://github.com/mmcdole/rune/issues/69",
       "steps": [
         { "connect": true },

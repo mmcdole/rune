@@ -33,7 +33,7 @@ local function send_character()
     end
 end
 
--- Cover both line-terminated and unterminated login questions.
+-- Cover both complete-line and partial-line login questions.
 rune.trigger.contains("What is your name", send_character)
 rune.trigger.contains("What is your name", send_character, { on = "prompt" })
 ```

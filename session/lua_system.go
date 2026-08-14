@@ -17,7 +17,7 @@ func (s *Session) Quit() {
 // goroutine (called from inside a Lua dispatch), so blocking on the
 // internal-event channel here would deadlock the loop that drains it.
 func (s *Session) Reload() {
-	s.engine.OnReloading()
+	s.engine.NotifyReloading()
 	select {
 	case s.internalEvents <- reloadRequested{}:
 	default:
@@ -29,7 +29,7 @@ func (s *Session) handleReloadRequested() {
 	if err := s.boot(); err != nil {
 		s.ui.Print(text.Red(fmt.Sprintf("Reload Failed: %v", err)))
 	} else {
-		s.engine.OnReloaded()
+		s.engine.NotifyReloaded()
 	}
 }
 

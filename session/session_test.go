@@ -40,7 +40,7 @@ func serverData(s *Session, data string) {
 	serverBatch(s, network.TelnetEvent{Kind: network.TelnetEventDataReceive, Data: []byte(data)})
 }
 
-func serverLine(s *Session, line string) {
+func completeLine(s *Session, line string) {
 	serverData(s, line+"\r\n")
 }
 
@@ -54,7 +54,7 @@ func serverEOR(s *Session) {
 
 func serverBatch(s *Session, events ...network.TelnetEvent) {
 	s.handleInbound(network.Inbound{
-		Kind:         network.InboundEvents,
+		Kind:         network.InboundBatch,
 		ConnectionID: s.connectionID,
 		Batch:        network.EventBatch{Events: events},
 	})
@@ -117,12 +117,12 @@ func TestFragmentedLineUsesCumulativePromptUpdatesThenOneOutput(t *testing.T) {
 	if printed := uiMock.drainPrinted(); !slices.Equal(printed, []string{"Username: accepted"}) {
 		t.Fatalf("printed = %q, want completed line once", printed)
 	}
-	if s.prompt.active || s.serverLine.peekPartial() != "" {
-		t.Fatalf("completed line left current state: prompt=%+v partial=%q", s.prompt, s.serverLine.peekPartial())
+	if s.prompt.active || s.partialLine.peek() != "" {
+		t.Fatalf("completed line left current state: prompt=%+v partial=%q", s.prompt, s.partialLine.peek())
 	}
 }
 
-func TestSubmissionCommitsLatestCurrentLineBeforeLocalOutput(t *testing.T) {
+func TestSubmissionCommitsLatestPartialLineBeforeLocalOutput(t *testing.T) {
 	s, net, uiMock := newTestSession(t)
 	net.connected = true
 
@@ -152,17 +152,17 @@ func TestSubmissionCommitsLatestCurrentLineBeforeLocalOutput(t *testing.T) {
 	if sent := net.drainSent(); len(sent) != 0 {
 		t.Fatalf("local /help sent game data: %q", sent)
 	}
-	if s.prompt.active || s.serverLine.peekPartial() != "" {
-		t.Fatalf("submission left current line: prompt=%+v partial=%q", s.prompt, s.serverLine.peekPartial())
+	if s.prompt.active || s.partialLine.peek() != "" {
+		t.Fatalf("submission left partial line: prompt=%+v partial=%q", s.prompt, s.partialLine.peek())
 	}
 
-	serverLine(s, "Welcome")
+	completeLine(s, "Welcome")
 	if printed := uiMock.drainPrinted(); !contains(printed, "Welcome") || contains(printed, "What is your name:Welcome") {
 		t.Fatalf("post-submission output reused committed prefix: %q", printed)
 	}
 }
 
-func TestEverySubmissionFinishesCurrentLine(t *testing.T) {
+func TestEverySubmissionFinishesPartialLine(t *testing.T) {
 	tests := []struct {
 		name      string
 		connected bool
@@ -217,11 +217,11 @@ func TestEverySubmissionFinishesCurrentLine(t *testing.T) {
 			uiMock.drainPrompts()
 			userInput(s, tt.input)
 
-			if s.prompt.active || s.serverLine.peekPartial() != "" {
-				t.Fatalf("submission left current line: prompt=%+v partial=%q", s.prompt, s.serverLine.peekPartial())
+			if s.prompt.active || s.partialLine.peek() != "" {
+				t.Fatalf("submission left partial line: prompt=%+v partial=%q", s.prompt, s.partialLine.peek())
 			}
 			if printed := uiMock.drainPrinted(); !contains(printed, "Question:") {
-				t.Fatalf("submission did not commit current line: %q", printed)
+				t.Fatalf("submission did not commit partial line: %q", printed)
 			} else if tt.wantError && !contains(printed, "not connected") {
 				t.Fatalf("failed game send did not report error: %q", printed)
 			}
@@ -257,12 +257,12 @@ func TestGAAndEORConfirmAndConsumeCurrentPrompt(t *testing.T) {
 				assert(#flags == 2, "flags: " .. #flags)
 				assert(flags[1] == false and flags[2] == true)
 			`)
-			if s.serverLine.peekPartial() != "" || !s.prompt.active || !s.prompt.confirmed {
-				t.Fatalf("confirmed prompt state = prompt=%+v partial=%q", s.prompt, s.serverLine.peekPartial())
+			if s.partialLine.peek() != "" || !s.prompt.active || !s.prompt.confirmed {
+				t.Fatalf("confirmed prompt state = prompt=%+v partial=%q", s.prompt, s.partialLine.peek())
 			}
 
 			uiMock.drainPrinted()
-			serverLine(s, "A bell rings.")
+			completeLine(s, "A bell rings.")
 			if printed := uiMock.drainPrinted(); !slices.Equal(printed, []string{"HP:100>", "A bell rings."}) {
 				t.Fatalf("printed = %q", printed)
 			}
@@ -270,15 +270,15 @@ func TestGAAndEORConfirmAndConsumeCurrentPrompt(t *testing.T) {
 	}
 }
 
-func TestPromptMarkerInDataBatchOnlyEmitsConfirmedPrompt(t *testing.T) {
-	for _, marker := range []struct {
+func TestPromptBoundaryInDataBatchOnlyEmitsConfirmedPrompt(t *testing.T) {
+	for _, boundary := range []struct {
 		name    string
 		command byte
 	}{
 		{name: "GA", command: network.CmdGA},
 		{name: "EOR", command: network.CmdEOR},
 	} {
-		t.Run(marker.name, func(t *testing.T) {
+		t.Run(boundary.name, func(t *testing.T) {
 			s, _, _ := newTestSession(t)
 			if err := s.engine.DoString("observe batch prompt", `
 				seen = {}
@@ -291,7 +291,7 @@ func TestPromptMarkerInDataBatchOnlyEmitsConfirmedPrompt(t *testing.T) {
 
 			serverBatch(s,
 				network.TelnetEvent{Kind: network.TelnetEventDataReceive, Data: []byte("HP:100>")},
-				network.TelnetEvent{Kind: network.TelnetEventIAC, Command: marker.command},
+				network.TelnetEvent{Kind: network.TelnetEventIAC, Command: boundary.command},
 			)
 
 			assertSessionLua(t, s.engine, `
@@ -303,7 +303,7 @@ func TestPromptMarkerInDataBatchOnlyEmitsConfirmedPrompt(t *testing.T) {
 	}
 }
 
-func TestRecordMarksPreservePromptAndTailOrderWithinBatch(t *testing.T) {
+func TestPromptBoundariesPreservePromptAndTailOrderWithinBatch(t *testing.T) {
 	for _, tt := range []struct {
 		name           string
 		events         []network.TelnetEvent
@@ -366,7 +366,7 @@ func TestRecordMarksPreservePromptAndTailOrderWithinBatch(t *testing.T) {
 			if !s.prompt.active || s.prompt.text != tt.wantPrompt || s.prompt.confirmed != tt.confirmed {
 				t.Fatalf("current prompt = %+v, want text %q confirmed=%v", s.prompt, tt.wantPrompt, tt.confirmed)
 			}
-			if got := s.serverLine.peekPartial(); got != tt.wantBufferTail {
+			if got := s.partialLine.peek(); got != tt.wantBufferTail {
 				t.Fatalf("server-line tail = %q, want %q", got, tt.wantBufferTail)
 			}
 		})
@@ -390,7 +390,7 @@ func TestOncePromptTriggerUsesFirstMatchingObservation(t *testing.T) {
 			wantConfirmed: true,
 		},
 		{
-			name: "later marker follows provisional match",
+			name: "later boundary follows partial match",
 			deliver: func(s *Session) {
 				serverData(s, "Username:")
 				serverGA(s)
@@ -494,8 +494,8 @@ func TestConfirmedPromptBatchFinishesAfterRewriteOrGag(t *testing.T) {
 			if commits != 1 {
 				t.Fatalf("final prompt committed %d times, want once", commits)
 			}
-			if s.prompt.active || s.serverLine.peekPartial() != "" {
-				t.Fatalf("finished prompt remained active: prompt=%+v line=%q", s.prompt, s.serverLine.peekPartial())
+			if s.prompt.active || s.partialLine.peek() != "" {
+				t.Fatalf("finished prompt remained active: prompt=%+v line=%q", s.prompt, s.partialLine.peek())
 			}
 		})
 	}
@@ -556,19 +556,19 @@ func TestBareCRLinePrecedesLaterProtocolEffectsInBatch(t *testing.T) {
 	`)
 }
 
-func TestEmptyPromptMarkerDoesNothing(t *testing.T) {
+func TestEmptyPromptBoundaryDoesNothing(t *testing.T) {
 	s, _, uiMock := newTestSession(t)
 	serverGA(s)
 	serverEOR(s)
-	if s.prompt.active || s.serverLine.peekPartial() != "" {
-		t.Fatalf("empty markers changed current line: prompt=%+v partial=%q", s.prompt, s.serverLine.peekPartial())
+	if s.prompt.active || s.partialLine.peek() != "" {
+		t.Fatalf("empty boundaries changed partial line: prompt=%+v partial=%q", s.prompt, s.partialLine.peek())
 	}
 	if printed := uiMock.drainPrinted(); len(printed) != 0 {
-		t.Fatalf("empty markers printed %q", printed)
+		t.Fatalf("empty boundaries printed %q", printed)
 	}
 }
 
-func TestCRBeforePromptMarkerIsAlwaysAnOrdinaryLine(t *testing.T) {
+func TestCRBeforePromptBoundaryIsAlwaysAnOrdinaryLine(t *testing.T) {
 	for _, tt := range []struct {
 		name    string
 		deliver func(*Session)
@@ -609,7 +609,7 @@ func TestCRBeforePromptMarkerIsAlwaysAnOrdinaryLine(t *testing.T) {
 	}
 }
 
-func TestSuccessfulSendFinishesCurrentLineAndFlushesSpan(t *testing.T) {
+func TestSuccessfulSendFinishesPartialLineAndFlushesSpan(t *testing.T) {
 	s, net, uiMock := newTestSession(t)
 	net.connected = true
 
@@ -622,7 +622,7 @@ func TestSuccessfulSendFinishesCurrentLineAndFlushesSpan(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	serverLine(s, "Story: unfinished")
+	completeLine(s, "Story: unfinished")
 	uiMock.drainPrinted()
 	serverData(s, "Tundra tells you: meet me at the")
 	uiMock.drainPrompts()
@@ -632,7 +632,7 @@ func TestSuccessfulSendFinishesCurrentLineAndFlushesSpan(t *testing.T) {
 	}
 
 	if printed := uiMock.drainPrinted(); len(printed) != 1 || printed[0] != "Tundra tells you: meet me at the" {
-		t.Fatalf("send did not commit current line: %q", printed)
+		t.Fatalf("send did not commit partial line: %q", printed)
 	}
 	if prompts := uiMock.drainPrompts(); len(prompts) != 1 || prompts[0] != "" {
 		t.Fatalf("send did not clear overlay: %q", prompts)
@@ -665,8 +665,8 @@ func TestPromptTriggerSendCommitsFinalRewrite(t *testing.T) {
 	if printed := uiMock.drainPrinted(); len(printed) != 1 || printed[0] != "Final login prompt" {
 		t.Fatalf("send committed %q, want final prompt rewrite", printed)
 	}
-	if s.prompt.active || s.serverLine.peekPartial() != "" {
-		t.Fatalf("trigger send left current line: prompt=%+v partial=%q", s.prompt, s.serverLine.peekPartial())
+	if s.prompt.active || s.partialLine.peek() != "" {
+		t.Fatalf("trigger send left partial line: prompt=%+v partial=%q", s.prompt, s.partialLine.peek())
 	}
 }
 
@@ -708,7 +708,7 @@ func TestSendFromConfirmedPromptSpanFlushCommitsOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	serverLine(s, "Story: unfinished")
+	completeLine(s, "Story: unfinished")
 	uiMock.drainPrinted()
 	serverData(s, "HP>")
 	uiMock.drainPrinted()
@@ -737,7 +737,7 @@ func TestConfirmedPromptSpanConnectionChangeStopsPromptDispatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	serverLine(s, "Story: unfinished")
+	completeLine(s, "Story: unfinished")
 	serverBatch(s,
 		network.TelnetEvent{Kind: network.TelnetEventDataReceive, Data: []byte("HP>")},
 		network.TelnetEvent{Kind: network.TelnetEventIAC, Command: network.CmdGA},
@@ -771,12 +771,12 @@ func TestOutputTriggerSendProcessesAndCommitsLaterTailInSameData(t *testing.T) {
 	if printed := uiMock.drainPrinted(); !slices.Equal(printed, []string{"Fire", "Final HP>"}) {
 		t.Fatalf("printed = %q, want line then final prompt", printed)
 	}
-	if s.prompt.active || s.serverLine.peekPartial() != "" {
-		t.Fatalf("deferred send left current line: prompt=%+v partial=%q", s.prompt, s.serverLine.peekPartial())
+	if s.prompt.active || s.partialLine.peek() != "" {
+		t.Fatalf("deferred send left partial line: prompt=%+v partial=%q", s.prompt, s.partialLine.peek())
 	}
 }
 
-func TestFailedSendLeavesCurrentLineOpen(t *testing.T) {
+func TestFailedSendLeavesPartialLineOpen(t *testing.T) {
 	s, _, uiMock := newTestSession(t)
 	serverData(s, "User")
 	uiMock.drainPrompts()
@@ -785,14 +785,14 @@ func TestFailedSendLeavesCurrentLineOpen(t *testing.T) {
 	}
 	serverData(s, "name:")
 	if prompts := uiMock.drainPrompts(); !slices.Equal(prompts, []string{"Username:"}) {
-		t.Fatalf("current line after failed send = %q", prompts)
+		t.Fatalf("partial line after failed send = %q", prompts)
 	}
 	if printed := uiMock.drainPrinted(); len(printed) != 0 {
-		t.Fatalf("failed send committed current line: %q", printed)
+		t.Fatalf("failed send committed partial line: %q", printed)
 	}
 }
 
-func TestGMCPSendDoesNotFinishCurrentLine(t *testing.T) {
+func TestGMCPSendDoesNotFinishPartialLine(t *testing.T) {
 	s, net, uiMock := newTestSession(t)
 	net.connected = true
 	serverNegotiatesGMCP(s)
@@ -806,14 +806,14 @@ func TestGMCPSendDoesNotFinishCurrentLine(t *testing.T) {
 	serverData(s, "name:")
 
 	if prompts := uiMock.drainPrompts(); !slices.Equal(prompts, []string{"Username:"}) {
-		t.Fatalf("GMCP send changed current line: %q", prompts)
+		t.Fatalf("GMCP send changed partial line: %q", prompts)
 	}
 	if printed := uiMock.drainPrinted(); len(printed) != 0 {
-		t.Fatalf("GMCP send committed current line: %q", printed)
+		t.Fatalf("GMCP send committed partial line: %q", printed)
 	}
 }
 
-func TestSuccessfulSendWithoutCurrentLineDoesNotFlushOpenSpan(t *testing.T) {
+func TestSuccessfulSendWithoutPartialLineDoesNotFlushOpenSpan(t *testing.T) {
 	s, net, _ := newTestSession(t)
 	net.connected = true
 
@@ -828,7 +828,7 @@ func TestSuccessfulSendWithoutCurrentLineDoesNotFlushOpenSpan(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	serverLine(s, "Story: unfinished")
+	completeLine(s, "Story: unfinished")
 	if err := s.Send("look"); err != nil {
 		t.Fatal(err)
 	}
@@ -836,7 +836,7 @@ func TestSuccessfulSendWithoutCurrentLineDoesNotFlushOpenSpan(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	serverLine(s, "continuation END")
+	completeLine(s, "continuation END")
 	if err := s.engine.DoString("assert", `
 		assert(fired == 1, "span did not finish")
 		assert(got_text == "Story: unfinished continuation END",
@@ -846,7 +846,7 @@ func TestSuccessfulSendWithoutCurrentLineDoesNotFlushOpenSpan(t *testing.T) {
 	}
 }
 
-func TestSubmissionClosesSpanWithoutPrintingGaggedCurrentLine(t *testing.T) {
+func TestSubmissionClosesSpanWithoutPrintingGaggedPartialLine(t *testing.T) {
 	s, _, uiMock := newTestSession(t)
 
 	if err := s.engine.DoString("span and prompt gag", `
@@ -859,7 +859,7 @@ func TestSubmissionClosesSpanWithoutPrintingGaggedCurrentLine(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	serverLine(s, "Story: unfinished")
+	completeLine(s, "Story: unfinished")
 	uiMock.drainPrinted()
 	serverData(s, "Password:")
 	if prompts := uiMock.drainPrompts(); len(prompts) == 0 || prompts[len(prompts)-1] != "" {
@@ -875,7 +875,7 @@ func TestSubmissionClosesSpanWithoutPrintingGaggedCurrentLine(t *testing.T) {
 	}
 }
 
-func TestLocalSubmissionCommitsCurrentLineAndFlushesSpan(t *testing.T) {
+func TestLocalSubmissionCommitsPartialLineAndFlushesSpan(t *testing.T) {
 	s, net, uiMock := newTestSession(t)
 	net.connected = true
 
@@ -890,7 +890,7 @@ func TestLocalSubmissionCommitsCurrentLineAndFlushesSpan(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	serverLine(s, "Story: unfinished")
+	completeLine(s, "Story: unfinished")
 	uiMock.drainPrinted()
 	serverData(s, "Username:")
 	uiMock.drainPrompts()
@@ -900,13 +900,13 @@ func TestLocalSubmissionCommitsCurrentLineAndFlushesSpan(t *testing.T) {
 		t.Fatalf("local command unexpectedly reached network: %q", sent)
 	}
 	if !contains(uiMock.drainPrinted(), "Username:") {
-		t.Fatal("local command did not commit current line")
+		t.Fatal("local command did not commit partial line")
 	}
 	if err := s.engine.DoString("assert", `assert(fired == 1, "local command did not flush span")`); err != nil {
 		t.Fatal(err)
 	}
 
-	serverLine(s, "continuation END")
+	completeLine(s, "continuation END")
 	if err := s.engine.DoString("assert", `
 		assert(fired == 1, "old span fired twice")
 	`); err != nil {
@@ -914,7 +914,7 @@ func TestLocalSubmissionCommitsCurrentLineAndFlushesSpan(t *testing.T) {
 	}
 }
 
-func TestConnectionChangeDiscardsCurrentLineAndRemainingData(t *testing.T) {
+func TestConnectionChangeDiscardsPartialLineAndRemainingData(t *testing.T) {
 	s, net, uiMock := newTestSession(t)
 	net.connected = true
 	if err := s.engine.DoString("disconnect on first line", `
@@ -926,13 +926,13 @@ func TestConnectionChangeDiscardsCurrentLineAndRemainingData(t *testing.T) {
 	}
 
 	serverData(s, "old one\r\nold two\r\nold tail")
-	if s.prompt.active || s.serverLine.peekPartial() != "" {
-		t.Fatalf("old connection data survived: prompt=%+v partial=%q", s.prompt, s.serverLine.peekPartial())
+	if s.prompt.active || s.partialLine.peek() != "" {
+		t.Fatalf("old connection data survived: prompt=%+v partial=%q", s.prompt, s.partialLine.peek())
 	}
 	if contains(uiMock.drainPrinted(), "old two") {
 		t.Fatal("processed data following a connection-changing hook")
 	}
-	serverLine(s, "new output")
+	completeLine(s, "new output")
 	if printed := uiMock.drainPrinted(); !contains(printed, "new output") {
 		t.Fatalf("new output missing: %q", printed)
 	}
@@ -993,9 +993,9 @@ func TestConnectionChangeLaterInBatchCancelsDeferredSendFinish(t *testing.T) {
 			if s.connectionID == oldConnection {
 				t.Fatal("connection-changing callback did not advance the generation")
 			}
-			if s.activeNetworkBatch != nil || s.prompt.active || s.serverLine.peekPartial() != "" {
+			if s.activeBatch != nil || s.prompt.active || s.partialLine.peek() != "" {
 				t.Fatalf("old inbound state survived: batch=%+v prompt=%+v tail=%q",
-					s.activeNetworkBatch, s.prompt, s.serverLine.peekPartial())
+					s.activeBatch, s.prompt, s.partialLine.peek())
 			}
 			for _, event := range uiMock.drainDisplayEvents() {
 				if event == "commit:Old prompt rewritten>" || strings.Contains(event, "stale data") {
@@ -1004,9 +1004,9 @@ func TestConnectionChangeLaterInBatchCancelsDeferredSendFinish(t *testing.T) {
 			}
 
 			serverData(s, "New prompt>")
-			if !s.prompt.active || s.prompt.text != "New prompt>" || s.serverLine.peekPartial() != "New prompt>" {
+			if !s.prompt.active || s.prompt.text != "New prompt>" || s.partialLine.peek() != "New prompt>" {
 				t.Fatalf("new connection tail restored old state: prompt=%+v tail=%q",
-					s.prompt, s.serverLine.peekPartial())
+					s.prompt, s.partialLine.peek())
 			}
 			if contains(uiMock.drainPrinted(), "Old prompt rewritten>") {
 				t.Fatal("deferred finish committed the old prompt after connection change")
@@ -1031,8 +1031,8 @@ func TestPromptHookDisconnectDoesNotRestorePreviousPrompt(t *testing.T) {
 	if net.connected {
 		t.Fatal("prompt hook did not disconnect")
 	}
-	if s.prompt.active || s.serverLine.peekPartial() != "" {
-		t.Fatalf("outer handler restored old current line: prompt=%+v partial=%q", s.prompt, s.serverLine.peekPartial())
+	if s.prompt.active || s.partialLine.peek() != "" {
+		t.Fatalf("outer handler restored old partial line: prompt=%+v partial=%q", s.prompt, s.partialLine.peek())
 	}
 	for _, prompt := range uiMock.drainPrompts() {
 		if prompt != "" {
@@ -1050,12 +1050,12 @@ func TestStaleInboundBatchCannotChangeCurrentConnection(t *testing.T) {
 	serverData(s, "new Username:")
 	uiMock.drainPrompts()
 
-	s.handleInbound(network.Inbound{Kind: network.InboundEvents, ConnectionID: oldConnection, Batch: network.EventBatch{Events: []network.TelnetEvent{
+	s.handleInbound(network.Inbound{Kind: network.InboundBatch, ConnectionID: oldConnection, Batch: network.EventBatch{Events: []network.TelnetEvent{
 		{Kind: network.TelnetEventDataReceive, Data: []byte("old")},
 		{Kind: network.TelnetEventIAC, Command: network.CmdGA},
 	}}})
-	if got := s.serverLine.peekPartial(); got != "new Username:" {
-		t.Fatalf("stale facts changed current line to %q", got)
+	if got := s.partialLine.peek(); got != "new Username:" {
+		t.Fatalf("stale facts changed partial line to %q", got)
 	}
 	if printed := uiMock.drainPrinted(); len(printed) != 0 {
 		t.Fatalf("stale facts printed %q", printed)
@@ -1069,7 +1069,7 @@ func TestRequiredProtocolReplyFailureDisconnectsAndStopsBatch(t *testing.T) {
 	// The mock is deliberately not connected, so queuing the required reply
 	// fails before the later server-data effect can run.
 	s.handleInbound(network.Inbound{
-		Kind:         network.InboundEvents,
+		Kind:         network.InboundBatch,
 		ConnectionID: connectionID,
 		Batch: network.EventBatch{Events: []network.TelnetEvent{
 			{Kind: network.TelnetEventDataSend, Data: []byte{network.CmdIAC, network.CmdDO, network.OptEcho}},
@@ -1208,8 +1208,8 @@ func TestSetInputSubmissionForwardsExplicitMode(t *testing.T) {
 
 	s.SetInputSubmission(want)
 
-	if len(uiMock.inputModes) != 1 || uiMock.inputModes[0] != want {
-		t.Fatalf("explicit input updates = %+v, want [%+v]", uiMock.inputModes, want)
+	if len(uiMock.submissions) != 1 || uiMock.submissions[0] != want {
+		t.Fatalf("explicit input updates = %+v, want [%+v]", uiMock.submissions, want)
 	}
 	if got := s.GetInput(); got != want.Text {
 		t.Fatalf("Session input mirror = %q, want %q", got, want.Text)
@@ -1236,7 +1236,7 @@ func TestSubmissionEventClearsInputBeforeInputHooks(t *testing.T) {
 	}
 
 	s.handleUIEvent(ui.InputChangedMsg{Text: "look", Cursor: 4})
-	s.handleUIEvent(ui.SubmissionMsg{Submission: input.Command("look")})
+	s.handleUIEvent(ui.InputSubmittedMsg{Submission: input.Command("look")})
 
 	if got := s.GetInput(); got != "" {
 		t.Fatalf("input after accepted submission = %q, want empty", got)
@@ -1358,5 +1358,45 @@ func TestSubmissionEchoVisualizesControlsWithoutChangingWireData(t *testing.T) {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("safe echo missing %q: %q", want, plain)
 		}
+	}
+}
+
+func TestConnectingHookSendsOnTheExistingConnection(t *testing.T) {
+	s, net, _ := newTestSession(t)
+	net.connected = true
+	s.clientState.Connected = true
+	s.engine.UpdateState(s.clientState)
+
+	if err := s.engine.DoString("hook", `
+		rune.hooks.on("connecting", function() rune.send_raw("goodbye") end)
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	s.Connect("mud.example.com:4000")
+
+	if sent := net.drainSent(); !slices.Equal(sent, []string{"goodbye"}) {
+		t.Fatalf("connecting hook sent %q, want goodbye on the old connection", sent)
+	}
+	if s.clientState.Connected {
+		t.Fatal("retiring the old socket left clientState.Connected true")
+	}
+	assertSessionLua(t, s.engine, `assert(rune.state.connected == false, "rune.state.connected still true while dialing")`)
+}
+
+func TestDisconnectingHookSendsOnTheLiveConnection(t *testing.T) {
+	s, net, _ := newTestSession(t)
+	net.connected = true
+
+	if err := s.engine.DoString("hook", `
+		rune.hooks.on("disconnecting", function() rune.send_raw("farewell") end)
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	s.Disconnect()
+
+	if sent := net.drainSent(); !slices.Equal(sent, []string{"farewell"}) {
+		t.Fatalf("disconnecting hook sent %q, want farewell on the live connection", sent)
 	}
 }

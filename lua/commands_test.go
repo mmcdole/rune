@@ -146,7 +146,7 @@ func TestErrorTagIsRed(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 
-	engine.OnError("something broke")
+	engine.NotifyError("something broke")
 	engine.OnInput("/nosuchcommand")
 
 	printed := strings.Join(host.DrainPrintCalls(), "\n")

@@ -74,7 +74,7 @@ func (e *Engine) registerCoreFuncs() {
 				c.Return(nil, err.Error())
 				return nil
 			}
-			e.notify("loaded", path)
+			e.NotifyLoaded(path)
 			c.Return(true)
 			return nil
 		},

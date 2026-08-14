@@ -79,10 +79,13 @@ type Session struct {
 	historyEntries []input.Submission
 	historyLimit   int
 
-	// Inbound text and its display lifecycle
-	serverLine         serverLineBuffer
-	prompt             promptOverlay
-	activeNetworkBatch *networkBatchState
+	// Inbound text and its display lifecycle.
+	// activeBatch is set only while one event batch is being applied, so a
+	// re-entrant Send can defer its partial-line finish until the batch's
+	// prompt callbacks have installed their final rewrite or gag.
+	partialLine partialLineBuffer
+	prompt      promptOverlay
+	activeBatch *eventBatchState
 
 	// Durable state and active log
 	store        map[string]json.RawMessage
@@ -92,19 +95,18 @@ type Session struct {
 	logPath      string
 }
 
-// networkBatchState holds decisions that must wait until Session has
-// applied every effect from one network.EventBatch. Session stores the active
-// state only so a re-entrant Send can defer its visual line finish until the
-// batch's prompt callbacks have installed their final rewrite or gag.
-type networkBatchState struct {
-	connectionID               uint64
-	checkForPartialPromptAtEnd bool
-	lineFinishPending          bool
+// eventBatchState holds the decisions scoped to one network.EventBatch.
+type eventBatchState struct {
+	connectionID                  uint64
+	serverDataSincePromptBoundary bool // a batch ending with it observes the partial line
+	partialFinishPending          bool // an accepted send finishes the partial line at batch end
 }
 
 // New creates a new Session. It is passive - no goroutines start here.
 func New(net Network, uiInstance ui.UI, cfg Config) *Session {
 	timerEvents := make(chan timer.Event, 256)
+	// Run replaces this context with one scoped to its caller; it exists so
+	// the fields are usable in tests that never call Run.
 	backgroundCtx, cancelBackgroundWork := context.WithCancel(context.Background())
 
 	s := &Session{
@@ -134,7 +136,7 @@ func New(net Network, uiInstance ui.UI, cfg Config) *Session {
 // Run starts the session and blocks until exit.
 func (s *Session) Run(ctx context.Context) error {
 	// The event loop and its asynchronous producers share the caller's lifetime.
-	s.stopBackgroundWork()
+	s.cancelBackgroundWork()
 	ctx, cancel := context.WithCancel(ctx)
 	s.backgroundCtx = ctx
 	s.cancelBackgroundWork = cancel
@@ -207,70 +209,71 @@ func (s *Session) handleInbound(inbound network.Inbound) {
 	switch inbound.Kind {
 	case network.InboundDisconnect:
 		s.Disconnect()
-	case network.InboundEvents:
-		s.handleNetworkEventBatch(inbound.ConnectionID, inbound.Batch)
+	case network.InboundBatch:
+		s.handleEventBatch(inbound.ConnectionID, inbound.Batch)
 	}
 }
 
-// handleNetworkEventBatch synchronously applies one parser-produced network
-// batch, including any Lua callbacks caused by its Protocol effects.
-func (s *Session) handleNetworkEventBatch(connectionID uint64, batch network.EventBatch) {
-	state := &networkBatchState{connectionID: connectionID}
-	s.activeNetworkBatch = state
-	defer s.endNetworkEventBatch(state)
+// handleEventBatch synchronously applies one event batch, including any Lua
+// callbacks caused by its Protocol effects.
+func (s *Session) handleEventBatch(connectionID uint64, batch network.EventBatch) {
+	state := &eventBatchState{connectionID: connectionID}
+	s.activeBatch = state
+	defer s.endEventBatch(state)
 
 	applyEffect := func(effect network.Effect) bool {
 		s.applyProtocolEffect(state, effect)
 		return s.connectionID == state.connectionID
 	}
 	processedAll := s.protocol.Process(batch, applyEffect)
-	if !processedAll || !state.checkForPartialPromptAtEnd {
+	if !processedAll || !state.serverDataSincePromptBoundary {
 		return
 	}
 
-	if partial := s.serverLine.peekPartial(); partial != "" {
+	if partial := s.partialLine.peek(); partial != "" {
 		s.handlePromptObservation(partial, false)
 	}
 }
 
-// endNetworkEventBatch closes the scope visible to re-entrant Send calls and
-// applies an accepted send's pending display boundary to the same connection.
-func (s *Session) endNetworkEventBatch(state *networkBatchState) {
-	if s.activeNetworkBatch == state {
-		s.activeNetworkBatch = nil
+// endEventBatch closes the scope visible to re-entrant Send calls and
+// performs an accepted send's deferred partial-line finish on the same
+// connection.
+func (s *Session) endEventBatch(state *eventBatchState) {
+	if s.activeBatch == state {
+		s.activeBatch = nil
 	}
-	if s.connectionID == state.connectionID && state.lineFinishPending {
-		s.finishCurrentLine()
+	if s.connectionID == state.connectionID && state.partialFinishPending {
+		s.finishPartialLine()
 	}
 }
 
 // applyProtocolEffect performs one synchronous consequence of a Telnet event.
 // The Process callback decides separately whether the connection is still
 // current and the batch may continue.
-func (s *Session) applyProtocolEffect(state *networkBatchState, effect network.Effect) {
+func (s *Session) applyProtocolEffect(state *eventBatchState, effect network.Effect) {
 	switch effect.Kind {
 	case network.EffectSendFrame:
 		if err := s.net.SendFrame(state.connectionID, effect.Data); err != nil {
 			s.Disconnect()
 		}
 	case network.EffectServerData:
-		state.checkForPartialPromptAtEnd = true
+		state.serverDataSincePromptBoundary = true
 		s.handleServerData(effect.Data, state.connectionID)
 	case network.EffectGA, network.EffectEOR:
-		state.checkForPartialPromptAtEnd = false
+		state.serverDataSincePromptBoundary = false
 		s.handlePromptBoundary()
 	case network.EffectGMCPEnabled:
-		s.engine.OnGMCPEnabled()
+		s.engine.NotifyGMCPEnabled()
 	case network.EffectGMCPMessage:
 		s.engine.OnGMCP(effect.Package, effect.Payload)
 	}
 }
 
-// handleServerData extends the one mutable server line. It processes complete
-// lines immediately and leaves any incomplete tail for a provisional prompt
-// observation at batch end.
+// handleServerData extends the partial line. It processes complete lines
+// immediately and leaves any partial remainder for a prompt observation at
+// batch end.
 func (s *Session) handleServerData(payload []byte, connectionID uint64) {
-	lines := s.serverLine.appendData(payload)
+	lines := s.partialLine.appendData(payload)
 	for _, line := range lines {
 		s.handleServerLine(line)
 		if s.connectionID != connectionID {
@@ -279,10 +282,10 @@ func (s *Session) handleServerData(payload []byte, connectionID uint64) {
 	}
 }
 
-// handlePromptBoundary interprets a Telnet GA/EOR marker by confirming and
-// consuming the current incomplete server line.
+// handlePromptBoundary interprets a Telnet GA/EOR prompt boundary by
+// confirming and consuming the partial line.
 func (s *Session) handlePromptBoundary() {
-	payload := s.serverLine.consumeAtRecordMark()
+	payload := s.partialLine.consumeAtPromptBoundary()
 	if payload != "" {
 		s.handlePromptObservation(payload, true)
 	}
@@ -291,7 +294,7 @@ func (s *Session) handlePromptBoundary() {
 // handleServerLine processes a complete server line.
 func (s *Session) handleServerLine(payload string) {
 	// A complete line replaces a partial line, but follows a confirmed prompt.
-	s.prompt.beforeLine()
+	s.prompt.commitOrDiscard()
 
 	connectionID := s.connectionID
 	line := text.NewLine(payload)
@@ -316,7 +319,7 @@ func (s *Session) handleServerLine(payload string) {
 // later server text.
 func (s *Session) handlePromptObservation(payload string, confirmed bool) {
 	connectionID := s.connectionID
-	s.prompt.beforeUpdate()
+	s.prompt.commitIfConfirmed()
 	if confirmed {
 		s.engine.FlushSpans()
 		if s.connectionID != connectionID {
@@ -334,11 +337,11 @@ func (s *Session) handlePromptObservation(payload string, confirmed bool) {
 	s.prompt.replace(modified, confirmed)
 }
 
-// finishCurrentLine discards the raw server tail and commits its already
+// finishPartialLine discards the raw partial line and commits its already
 // processed prompt overlay before local output or an accepted game send.
 // Without an active overlay it leaves unrelated spans unchanged.
-func (s *Session) finishCurrentLine() {
-	s.serverLine.discard()
+func (s *Session) finishPartialLine() {
+	s.partialLine.discard()
 	if s.prompt.commit() {
 		s.engine.FlushSpans()
 	}
@@ -347,15 +350,15 @@ func (s *Session) finishCurrentLine() {
 // handleUIEvent applies one accepted UI action or state observation.
 func (s *Session) handleUIEvent(event ui.UIEvent) {
 	switch event := event.(type) {
-	case ui.SubmissionMsg:
-		// The UI has accepted this immutable snapshot and cleared its editor.
+	case ui.InputSubmittedMsg:
+		// The UI has accepted this immutable snapshot and cleared its draft.
 		// Mirror that change before input hooks inspect rune.input state.
 		s.currentInput = ""
 		s.currentCursor = 0
-		s.engine.OnInputChanged("")
+		s.engine.NotifyInputChanged("")
 		s.handleSubmission(event.Submission)
 	case ui.ExecuteBindMsg:
-		s.handleKeyBind(string(event))
+		s.engine.HandleKeyBind(string(event))
 	case ui.WindowSizeChangedMsg:
 		s.clientState.Width = event.Width
 		s.clientState.Height = event.Height
@@ -378,7 +381,7 @@ func (s *Session) handleUIEvent(event ui.UIEvent) {
 	case ui.InputChangedMsg:
 		s.currentInput = event.Text
 		s.currentCursor = input.RuneCursorToByte(event.Text, event.Cursor)
-		s.engine.OnInputChanged(event.Text)
+		s.engine.NotifyInputChanged(event.Text)
 	case ui.CursorMovedMsg:
 		s.currentCursor = input.RuneCursorToByte(s.currentInput, event.Cursor)
 	}
@@ -387,7 +390,7 @@ func (s *Session) handleUIEvent(event ui.UIEvent) {
 func (s *Session) handleSubmission(submission input.Submission) {
 	// Submission is a display boundary regardless of local echo, aliases,
 	// slash commands, input-hook consumption, connection state, or send result.
-	s.finishCurrentLine()
+	s.finishPartialLine()
 	s.addHistorySubmission(submission)
 	if s.protocol.LocalEchoEnabled() {
 		for _, line := range submission.PhysicalLines() {
@@ -398,11 +401,6 @@ func (s *Session) handleSubmission(submission input.Submission) {
 	}
 
 	s.engine.OnSubmission(submission)
-}
-
-// handleKeyBind executes a Lua key binding on the Session goroutine.
-func (s *Session) handleKeyBind(key string) {
-	s.engine.HandleKeyBind(key)
 }
 
 // boot loads the VM state.
@@ -422,7 +420,7 @@ func (s *Session) boot() error {
 	// the binds/layout push, leaving a half-dead client. Each failure
 	// is reported individually and the rest of boot proceeds.
 	s.loadUserScript()
-	s.engine.OnReady()
+	s.engine.NotifyReady()
 	s.pushBindsAndLayout()
 	s.pushBarUpdates()
 

@@ -63,12 +63,12 @@ func (b *BubbleTeaUI) Echo(line string) {
 
 // SetPrompt replaces the prompt overlay.
 func (b *BubbleTeaUI) SetPrompt(text string) {
-	b.send(ui.PromptMsg(text))
+	b.send(ui.SetPromptMsg(text))
 }
 
 // CommitPrompt moves the prompt overlay to scrollback in one update.
 func (b *BubbleTeaUI) CommitPrompt(text string) {
-	b.send(ui.PromptCommitMsg(text))
+	b.send(ui.CommitPromptMsg(text))
 }
 
 // Run starts the TUI and blocks until exit.

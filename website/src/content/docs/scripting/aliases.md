@@ -4,7 +4,7 @@ description: Expand what you type before it reaches the server, with literal phr
 ---
 
 An alias rewrites what you type before it goes to the server. Two decisions
-define one: how it matches (a literal command phrase, or a regex over the
+define one: how it matches (a leading command phrase matched literally, or a regex over the
 whole line) and what it does (a string to send, or a Lua function to run).
 
 The simplest form is a word that expands, with anything you typed after it
@@ -28,8 +28,9 @@ end)
 
 Both forms register the same way and are managed the same way.
 
-Literal aliases can contain more than one word. The matched phrase is the
-command head and anything after it remains available as arguments:
+Literal aliases can contain more than one word. The phrase matches the
+leading words of the input, and anything after it remains available as
+arguments:
 
 ```lua
 rune.alias.exact("chat off", "chatlog off")

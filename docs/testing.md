@@ -10,9 +10,9 @@ are guarding against is observable.
 
 | Layer | Location | What belongs here |
 |---|---|---|
-| **Go unit** | in-package: `text/`, `timer/`, `network/`, `session/server_line_test.go`, `ui/tui/widget/`, `ui/tui/` | Pure logic that needs no Lua VM or running session. Parser tests assert framing and batch ownership; Protocol tests assert ordered effects and final negotiation state; identity negotiation asserts exact bytes (`negotiate_test.go` is the model). Session's current-line assembler is pure despite living beside its owner. TUI widgets assert rendered `View()` strings; bubbletea `Update` tests live in `ui/tui`. Real-terminal verification is the manual tmux route, not CI. |
+| **Go unit** | in-package: `text/`, `timer/`, `network/`, `session/partial_line_test.go`, `ui/tui/widget/`, `ui/tui/` | Pure logic that needs no Lua VM or running session. Parser tests assert framing and batch ownership; Protocol tests assert ordered effects and final negotiation state; identity negotiation asserts exact bytes (`negotiate_test.go` is the model). Session's partial-line assembler is pure despite living beside its owner. TUI widgets assert rendered `View()` strings; bubbletea `Update` tests live in `ui/tui`. Real-terminal verification is the manual tmux route, not CI. |
 | **Lua layer** | `lua/` | Anything the embedded Lua core + MockHost can express: features, hooks, registries, quarantine, watchdog. Most feature work lands here. |
-| **Session synchronous** | `session/*_test.go` | Narrow charter: exact ordering/state assertions impossible at e2e (it is async) and below the session (no session exists) — cumulative prompt updates, whole-batch callback and send ordering, current-line commit ordering, reload deferral through the event queue, and boot robustness with broken files on disk. If a lower layer can express the contract, test it there instead. |
+| **Session synchronous** | `session/*_test.go` | Narrow charter: exact ordering/state assertions impossible at e2e (it is async) and below the session (no session exists). Examples: cumulative prompt updates; whole-batch callback and send ordering; partial-line commit ordering; reload deferral through the event queue; boot robustness with broken files on disk. If a lower layer can express the contract, test it there instead. |
 | **E2E scenarios** | `test/e2e/scenarios/*.json` | User-visible behavior contracts through the live client (real event loop, real TCP, mocked terminal): one representative per feature, plus every regression from a reported bug. |
 | **E2E imperative Go** | `test/e2e/*_test.go` | Escape hatch when the step vocabulary can't express the case: exact byte frames beyond `expect_sent_bytes`, concurrency-only behavior, bespoke server scripting. |
 
@@ -50,7 +50,7 @@ language.
   arrive unsplit, at every split point, and one byte at a time. Keep the
   Session-facing events from each `Parser.Receive` call together as one batch;
   transport-local MCCP activation events do not enter that batch.
-- Assert transport ownership directly: an inbound batch must not alias the
+- Assert transport ownership directly: a published event batch must not alias the
   parser's reusable storage or the caller's read buffer.
 
 ## Bug workflow
@@ -69,8 +69,8 @@ specific bug — reported by a user or discovered while working. If the
 reproduction turns out to be a general behavior contract, it belongs
 in the feature file instead. A bug the step vocabulary cannot express
 at all — a data race or exact protocol-event sequence — is pinned at the
-lowest layer that can express it. Current-line fragmentation and delimiter
-pairing belong in `session/server_line_test.go`; parser batch preservation,
+lowest layer that can express it. Partial-line fragmentation and delimiter
+pairing belong in `session/partial_line_test.go`; event batch preservation,
 MCCP transitions, and connection-scoped writes belong in
 `network/client_test.go`; ordered Telnet negotiation belongs in Protocol unit
 tests; semantic ordering across batches, prompts, submissions, sends, Lua, and

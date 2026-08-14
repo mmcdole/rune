@@ -315,9 +315,9 @@ func (e *Engine) OnOutput(line text.Line) (string, bool) {
 	return modified.String(), true
 }
 
-// OnPrompt dispatches a current-line observation. Session closes multiline
-// spans before confirmed observations so it can stop if that action changes
-// the connection.
+// OnPrompt dispatches a prompt observation of the partial line through the
+// "prompt" hook chain and returns the display text: the final rewrite, or ""
+// when a handler gagged it. Dispatch failures fall back to the raw line.
 func (e *Engine) OnPrompt(line text.Line, confirmed bool) string {
 	results, found, err := e.callHooks(2, "prompt",
 		script.Obj{Type: "line", Payload: &line}, confirmed)
@@ -326,7 +326,7 @@ func (e *Engine) OnPrompt(line text.Line, confirmed bool) string {
 		return line.Raw
 	}
 	if err != nil {
-		e.reportError("prompt update dispatch", err)
+		e.reportError("prompt dispatch", err)
 		return line.Raw
 	}
 
@@ -337,7 +337,8 @@ func (e *Engine) OnPrompt(line text.Line, confirmed bool) string {
 	return modified.String()
 }
 
-// FlushSpans fires and closes every open multiline trigger.
+// FlushSpans fires and closes every open multi-line trigger span; the
+// triggers themselves survive.
 func (e *Engine) FlushSpans() {
 	if err := e.guard(func() error {
 		_, _, err := e.vm.CallModule("rune.trigger", "_flush_spans", 0)
@@ -347,7 +348,7 @@ func (e *Engine) FlushSpans() {
 	}
 }
 
-// DiscardSpans drops every open multiline trigger without firing it.
+// DiscardSpans drops every open multi-line trigger span without firing it.
 func (e *Engine) DiscardSpans() {
 	if err := e.guard(func() error {
 		_, _, err := e.vm.CallModule("rune.trigger", "_discard_spans", 0)
@@ -519,7 +520,7 @@ func (e *Engine) reportError(source string, err error) {
 	}
 	e.reportingError = true
 	defer func() { e.reportingError = false }()
-	e.OnError(msg)
+	e.NotifyError(msg)
 }
 
 // reportHooksBroken warns the user, once per VM generation, that the

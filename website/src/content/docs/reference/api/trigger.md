@@ -19,8 +19,8 @@ All constructors return a [handle](/reference/api/#handles) and accept
 the [common options](/reference/api/#options) plus `gag`, `raw`, `on`, and
 [`span`](#multi-line-triggers).
 
-Triggers match complete lines by default. Set `on = "prompt"` to match the
-current prompt text instead.
+Triggers match complete lines by default. Set `on = "prompt"` to match
+partial lines and GA/EOR prompts instead.
 
 ## Matching
 
@@ -79,42 +79,46 @@ Beyond the [common options](/reference/api/#options):
 |---|---|---|---|
 | `gag` | bool | false | Hide the matching line (equivalent to returning `false`) |
 | `raw` | bool | false | Match against the raw line, ANSI codes included |
-| `on` | string | `"output"` | `"output"` for complete lines or `"prompt"` for unfinished text and GA/EOR prompts |
+| `on` | string | `"output"` | `"output"` for complete lines or `"prompt"` for partial lines and GA/EOR prompts |
 | `span` | table | — | Collect a multi-line output message; cannot be combined with `on = "prompt"` |
 
 ## Prompt triggers
 
 Most triggers use `on = "output"` and run only after a complete line arrives.
-Some MUDs send prompts without a newline, so Rune also exposes the current
-unfinished line through `on = "prompt"`:
+Some MUDs send prompts without a newline, so Rune also exposes the partial
+line through `on = "prompt"`:
 
 ```lua
-rune.trigger.exact("Username: ", "example-user",
+rune.trigger.contains("Username:", "example-user",
     { on = "prompt", once = true })
 ```
 
-The channels are exclusive:
+Each trigger observes exactly one of the two streams:
 
-| Channel | Text it observes |
+| Setting | Text it observes |
 |---|---|
 | `on = "output"` | Complete server lines. This is the default. |
-| `on = "prompt"` | The unfinished current line and prompts ended by Telnet GA/EOR. |
+| `on = "prompt"` | Partial lines and prompts confirmed by Telnet GA/EOR. |
 
-Rune does not wait on a timer or use a pattern to decide whether unfinished
-text is a prompt. Prompt observations can repeat as the current line grows. If
-CR/LF later completes it, the complete line runs through output triggers. If
-GA/EOR ends it as a prompt, it remains on the prompt channel. Actions should be
-safe to repeat; use `once` for one-shot work such as login.
+The same text can pass through both streams over its lifetime. Rune does not
+wait on a timer or use a pattern to decide whether a partial line is a
+prompt: prompt triggers observe it as it grows (observations can repeat), and
+if CR/LF later completes it, the completed line runs through output triggers.
+A prompt confirmed by GA/EOR stays with the prompt triggers, as does a
+partial line finished by a submission or an accepted send: its latest
+observation is committed without ever reaching output triggers. Actions
+should be safe to repeat; use `once` for one-shot work such as login.
 
-Prompt triggers can rewrite or gag the displayed prompt. They cannot use
-`span`, and unfinished prompt observations never alter an open span. Function
-actions receive `ctx.confirmed`, which is `true` when GA/EOR ended the prompt.
+Prompt triggers can rewrite or gag the displayed prompt; rewrites chain, so
+later prompt triggers match the rewritten text. They cannot use `span`, and
+partial-line observations never alter an open span. Function actions receive
+`ctx.confirmed`, which is `true` when GA/EOR confirmed the prompt.
 
-Rune finishes the visible prompt before processing user-submitted input. A
-game command sent by Lua finishes it only when the connection accepts the
-send. Failed sends and protocol traffic such as GMCP leave it open. If the
-unfinished text was part of an ordinary fragmented line, finishing it commits
-the visible prefix and later data starts a new line.
+Rune finishes the partial line before processing user-submitted input. A game
+command sent by Lua finishes it only when the connection accepts the send.
+Failed sends and protocol traffic such as GMCP leave it open. If the partial
+text was part of an ordinary fragmented line, finishing it commits the visible
+prefix and later data starts a new line.
 
 ## Multi-line triggers
 
@@ -154,14 +158,17 @@ Behavior:
 - Collected lines still run through other triggers and hooks. A span
   sees each line as this trigger would have — including rewrites from
   higher-priority triggers.
-- Unfinished prompt observations leave spans open. A GA/EOR-ended prompt closes
-  them before prompt hooks and triggers run.
-- Finishing the current line through submission or an accepted game send also
-  closes spans, without running prompt triggers again. Empty GA/EOR markers,
-  failed sends, protocol traffic, and sends without an active prompt do not.
-- Connect and disconnect discard spans without firing. `/reload` first follows
-  the normal submission rule, then discards any spans still owned by the old
-  Lua VM.
+- Partial-line prompt observations leave spans open. A confirmed prompt
+  closes them before prompt hooks and triggers run.
+- Finishing the partial line through submission or an accepted game send also
+  closes spans, without running prompt triggers again. Empty prompt
+  boundaries, failed sends, protocol traffic, and sends with no active prompt
+  overlay do not close spans. A prompt a handler gagged to empty text still
+  counts as active, so a later send closes spans even though nothing is
+  visible.
+- Connect and disconnect discard spans without firing. `/reload` is itself a
+  submission, so it first finishes the partial line like any other
+  submission, then discards any spans still owned by the old Lua VM.
 - One open span per trigger: if the pattern matches again mid-span,
   the previous message fires and a new span starts.
 - If the first line also matches `to`, the message is complete

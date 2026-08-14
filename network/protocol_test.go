@@ -167,26 +167,26 @@ func TestProtocolRecordMarksDoNotDependOnReadSplits(t *testing.T) {
 		wire := append([]byte("Username:"), CmdIAC, tt.command)
 		for _, partition := range readPartitions(wire) {
 			t.Run(tt.name+"/"+partition.name, func(t *testing.T) {
-				parser := NewParser(NewCompatibilityTable())
+				parser := newParser(newCompatibilityTable())
 				protocol := NewProtocol(80, 24)
 				var text bytes.Buffer
-				marks := 0
+				boundaries := 0
 
 				for _, chunk := range partition.chunks {
 					ok := protocol.Process(EventBatch{Events: parser.Receive(chunk)}, func(effect Effect) bool {
 						switch effect.Kind {
 						case EffectServerData:
-							if marks != 0 {
-								t.Fatalf("server data %q arrived after record mark", effect.Data)
+							if boundaries != 0 {
+								t.Fatalf("server data %q arrived after prompt boundary", effect.Data)
 							}
 							text.Write(effect.Data)
 						case tt.effect:
-							marks++
+							boundaries++
 							if got := text.String(); got != "Username:" {
 								t.Fatalf("text before mark = %q, want Username:", got)
 							}
 						case EffectGA, EffectEOR:
-							t.Fatalf("wrong record-mark effect %v", effect.Kind)
+							t.Fatalf("wrong prompt-boundary effect %v", effect.Kind)
 						default:
 							t.Fatalf("unexpected effect %+v", effect)
 						}
@@ -200,8 +200,8 @@ func TestProtocolRecordMarksDoNotDependOnReadSplits(t *testing.T) {
 				if got := text.String(); got != "Username:" {
 					t.Fatalf("server text = %q, want Username:", got)
 				}
-				if marks != 1 {
-					t.Fatalf("record marks = %d, want one", marks)
+				if boundaries != 1 {
+					t.Fatalf("prompt boundaries = %d, want one", boundaries)
 				}
 			})
 		}
@@ -223,7 +223,7 @@ func TestProtocolGMCPWireOrderDoesNotDependOnReadSplits(t *testing.T) {
 	}
 	run := func(t *testing.T, chunks ...[]byte) {
 		t.Helper()
-		parser := NewParser(defaultCompatibility())
+		parser := NewParser()
 		protocol := NewProtocol(80, 24)
 		var got []Effect
 		for _, chunk := range chunks {

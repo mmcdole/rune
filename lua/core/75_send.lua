@@ -92,11 +92,6 @@ local function send_impl(input, depth)
     end
 end
 
--- Send verbatim input without interpreting aliases or commands.
-local function send_verbatim(input)
-    rune.send_raw(input)
-end
-
 -- PUBLIC: Send commands to the MUD
 function rune.send(input)
     send_impl(input, 0)
@@ -108,7 +103,7 @@ rune.hooks.on("input", function(input, context)
     -- input hooks still observe it and may consume it, but none of Rune's
     -- command syntax is applied once it reaches this core handler.
     if context.mode == "verbatim" then
-        send_verbatim(input)
+        rune.send_raw(input) -- no alias or command interpretation
         return false
     end
 

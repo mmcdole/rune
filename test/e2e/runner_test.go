@@ -249,7 +249,7 @@ func runStep(t *testing.T, c *client, st step, desc string) {
 		c.mud.conn.Close()
 
 	case st.Type != nil:
-		c.ui.events <- ui.SubmissionMsg{Submission: input.Command(*st.Type)}
+		c.ui.events <- ui.InputSubmittedMsg{Submission: input.Command(*st.Type)}
 	case st.Input != nil:
 		cursor := len(st.Input.Text)
 		if st.Input.Cursor != nil {

@@ -19,7 +19,7 @@ func ttypeIS(answer string) []byte {
 // TestTTYPECycle verifies the MTTS terminal-type cycle: client name,
 // then terminal, then "MTTS <bits>" repeated on further SENDs.
 func TestTTYPECycle(t *testing.T) {
-	h := newHandshake(false, 80, 24)
+	h := newHandshake(80, 24)
 	send := []byte{CmdSEND}
 
 	want := [][]byte{
@@ -39,7 +39,7 @@ func TestTTYPECycle(t *testing.T) {
 // TestTTYPEReportsTLSBit verifies the MTTS SSL bit is set only on TLS
 // connections - the bits must reflect real capabilities.
 func TestTTYPEReportsTLSBit(t *testing.T) {
-	h := newHandshake(true, 80, 24)
+	h := (func() *handshake { h := newHandshake(80, 24); h.setSecure(true); return h })()
 	send := []byte{CmdSEND}
 
 	h.onSubnegotiation(OptTTYPE, send) // name
@@ -54,7 +54,7 @@ func TestTTYPEReportsTLSBit(t *testing.T) {
 
 // TestTTYPEIgnoresNonSend verifies garbage subnegotiations produce no reply.
 func TestTTYPEIgnoresNonSend(t *testing.T) {
-	h := newHandshake(false, 80, 24)
+	h := newHandshake(80, 24)
 	if frames := h.onSubnegotiation(OptTTYPE, []byte{CmdIS, 'x'}); frames != nil {
 		t.Fatalf("expected no reply to TTYPE IS, got %v", frames)
 	}
@@ -66,7 +66,7 @@ func TestTTYPEIgnoresNonSend(t *testing.T) {
 // TestNAWSReportsSizeOnDO verifies DO NAWS gets an immediate
 // big-endian size report and resizes re-send while active.
 func TestNAWSReportsSizeOnDO(t *testing.T) {
-	h := newHandshake(false, 120, 40)
+	h := newHandshake(120, 40)
 
 	frames := h.onNegotiation(CmdDO, OptNAWS)
 	want := subnegFrame(OptNAWS, []byte{0, 120, 0, 40})
@@ -91,7 +91,7 @@ func TestNAWSReportsSizeOnDO(t *testing.T) {
 // TestNAWSEscapesIACWidth verifies a size byte of 255 is IAC-escaped
 // inside the subnegotiation (RFC 1073 + telnet framing).
 func TestNAWSEscapesIACWidth(t *testing.T) {
-	h := newHandshake(false, 255, 24)
+	h := newHandshake(255, 24)
 	frames := h.onNegotiation(CmdDO, OptNAWS)
 
 	// Payload [0, 255, 0, 24] -> 255 doubled on the wire
@@ -104,7 +104,7 @@ func TestNAWSEscapesIACWidth(t *testing.T) {
 // TestNAWSDefaultsWhenSizeUnknown verifies a connection that has never
 // seen a resize reports 80x24 instead of 0x0.
 func TestNAWSDefaultsWhenSizeUnknown(t *testing.T) {
-	h := newHandshake(false, 0, 0)
+	h := newHandshake(0, 0)
 	frames := h.onNegotiation(CmdDO, OptNAWS)
 	want := subnegFrame(OptNAWS, []byte{0, 80, 0, 24})
 	if len(frames) != 1 || !bytes.Equal(frames[0], want) {
@@ -115,7 +115,7 @@ func TestNAWSDefaultsWhenSizeUnknown(t *testing.T) {
 // TestCharsetAcceptsUTF8 verifies REQUEST handling: UTF-8 accepted
 // (case-insensitively), otherwise rejected, TTABLE prefix skipped.
 func TestCharsetAcceptsUTF8(t *testing.T) {
-	h := newHandshake(false, 80, 24)
+	h := newHandshake(80, 24)
 	accepted := subnegFrame(OptCharset, append([]byte{charsetAccepted}, []byte("UTF-8")...))
 	rejected := subnegFrame(OptCharset, []byte{charsetRejected})
 
@@ -146,7 +146,7 @@ func TestCharsetAcceptsUTF8(t *testing.T) {
 // TestEnvironSendAllVariables verifies an empty SEND returns every
 // MNES variable with values.
 func TestEnvironSendAllVariables(t *testing.T) {
-	h := newHandshake(false, 80, 24)
+	h := newHandshake(80, 24)
 	frames := h.onSubnegotiation(OptNewEnviron, []byte{environSEND})
 	if len(frames) != 1 {
 		t.Fatalf("expected one IS reply, got %v", frames)
@@ -176,7 +176,7 @@ func TestEnvironSendAllVariables(t *testing.T) {
 // echoed with the type they were requested as, and unknown variables
 // come back without a VALUE.
 func TestEnvironSendSpecificVariables(t *testing.T) {
-	h := newHandshake(false, 80, 24)
+	h := newHandshake(80, 24)
 
 	request := []byte{environSEND, environVAR}
 	request = append(request, []byte("CLIENT_NAME")...)
@@ -253,8 +253,8 @@ func TestEnvironEscapeQuoting(t *testing.T) {
 // dissolves entirely into quoted garbage is treated as an empty SEND:
 // the reply is the full identity set, which is public by design.
 func TestEnvironGarbageRequestGetsSendAll(t *testing.T) {
-	all := newHandshake(false, 80, 24).onSubnegotiation(OptNewEnviron, []byte{environSEND})
-	got := newHandshake(false, 80, 24).onSubnegotiation(OptNewEnviron,
+	all := newHandshake(80, 24).onSubnegotiation(OptNewEnviron, []byte{environSEND})
+	got := newHandshake(80, 24).onSubnegotiation(OptNewEnviron,
 		[]byte{environSEND, environESC, environVAR, 'X'})
 	if len(all) != 1 || len(got) != 1 || !bytes.Equal(got[0], all[0]) {
 		t.Fatalf("garbage SEND reply:\n got %v\nwant the send-all reply %v", got, all)
@@ -265,7 +265,7 @@ func TestEnvironGarbageRequestGetsSendAll(t *testing.T) {
 // name carrying a quoted marker byte is echoed with the byte re-quoted,
 // so the reply stays inside the RFC 1572 grammar.
 func TestEnvironReplyRequotesEchoedNames(t *testing.T) {
-	h := newHandshake(false, 80, 24)
+	h := newHandshake(80, 24)
 	request := []byte{environSEND, environVAR, 'B', environESC, environVAR, 'G'}
 
 	frames := h.onSubnegotiation(OptNewEnviron, request)

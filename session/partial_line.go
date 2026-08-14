@@ -4,11 +4,11 @@ import (
 	"bytes"
 )
 
-// serverLineBuffer owns the current logical server line. It joins application
-// data across network event batches and extracts lines terminated by LF, CRLF,
-// LFCR, or bare CR. A delimiter's optional partner may arrive in a later event
-// and is swallowed without delaying the completed line.
-type serverLineBuffer struct {
+// partialLineBuffer owns the partial server line. It joins application data
+// across event batches and extracts lines terminated by LF, CRLF, LFCR, or
+// bare CR. A delimiter's optional partner may arrive in a later event and is
+// swallowed without delaying the completed line.
+type partialLineBuffer struct {
 	buffer bytes.Buffer
 
 	// pendingPartner is the second byte of a delimiter pair whose first byte
@@ -17,7 +17,7 @@ type serverLineBuffer struct {
 	pendingPartner byte
 }
 
-func (b *serverLineBuffer) appendData(data []byte) []string {
+func (b *partialLineBuffer) appendData(data []byte) []string {
 	if b.pendingPartner != 0 {
 		if len(data) == 0 {
 			return nil
@@ -68,16 +68,17 @@ func (b *serverLineBuffer) appendData(data []byte) []string {
 	return lines
 }
 
-// peekPartial returns the current incomplete line without consuming it.
-func (b *serverLineBuffer) peekPartial() string {
+// peek returns the partial line without consuming it.
+func (b *partialLineBuffer) peek() string {
 	if b.buffer.Len() == 0 {
 		return ""
 	}
 	return b.buffer.String()
 }
 
-// consumeAtRecordMark clears and returns the text terminated by GA/EOR.
-func (b *serverLineBuffer) consumeAtRecordMark() string {
+// consumeAtPromptBoundary clears and returns the text a GA/EOR prompt
+// boundary terminated.
+func (b *partialLineBuffer) consumeAtPromptBoundary() string {
 	if b.buffer.Len() == 0 {
 		return ""
 	}
@@ -86,12 +87,14 @@ func (b *serverLineBuffer) consumeAtRecordMark() string {
 	return text
 }
 
-// discard drops the current incomplete line at a local boundary.
-func (b *serverLineBuffer) discard() {
+// discard drops the partial line at a local boundary. pendingPartner
+// survives: a swallowed delimiter partner belongs to the previous completed
+// line, which a local boundary does not affect.
+func (b *partialLineBuffer) discard() {
 	b.buffer.Reset()
 }
 
-func (b *serverLineBuffer) reset() {
+func (b *partialLineBuffer) reset() {
 	b.buffer.Reset()
 	b.pendingPartner = 0
 }

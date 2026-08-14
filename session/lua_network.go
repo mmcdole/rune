@@ -7,20 +7,36 @@ import (
 	"github.com/mmcdole/rune/network"
 )
 
-// Connect starts a dial without blocking the Session loop.
-func (s *Session) Connect(addr string) {
-	s.connectionID++
-	connectionID := s.connectionID
-	s.serverLine.reset()
-	s.activeNetworkBatch = nil
+// resetConnectionState drops everything scoped to the previous connection:
+// the partial line, batch state, Telnet state, open spans, and the prompt
+// overlay.
+func (s *Session) resetConnectionState() {
+	s.partialLine.reset()
+	s.activeBatch = nil
 	s.protocol = network.NewProtocol(s.clientState.Width, s.clientState.Height)
 	s.engine.DiscardSpans()
 	s.prompt.discard()
-	s.engine.OnConnecting(addr)
+}
+
+// Connect starts a dial without blocking the Session loop.
+func (s *Session) Connect(addr string) {
+	// The connecting hook runs against the existing connection, so it may
+	// still send on it before the socket is retired.
+	connectionID := s.connectionID
+	s.engine.NotifyConnecting(addr)
 	if s.connectionID != connectionID {
-		return // the hook changed the connection again
+		return // the hook replaced the connection
 	}
+
+	s.connectionID++
+	connectionID = s.connectionID
+	s.resetConnectionState()
 	s.net.BeginConnect(connectionID)
+	// The old socket is retired now, not when the dial resolves.
+	s.clientState.Connected = false
+	s.clientState.Address = ""
+	s.engine.UpdateState(s.clientState)
+	s.pushBarUpdates()
 	backgroundCtx := s.backgroundCtx
 	go func() {
 		ctx, cancel := context.WithTimeout(backgroundCtx, 10*time.Second)
@@ -43,34 +59,33 @@ func (s *Session) handleConnectFinished(event connectFinished) {
 		s.clientState.Connected = false
 		s.clientState.Address = ""
 		s.engine.UpdateState(s.clientState)
-		s.engine.OnError(event.err.Error())
+		s.engine.NotifyError(event.err.Error())
 	} else {
 		s.clientState.Connected = true
 		s.clientState.Address = event.address
 		s.engine.UpdateState(s.clientState)
-		s.engine.OnConnected(event.address)
+		s.engine.NotifyConnected(event.address)
 	}
 	s.pushBarUpdates()
 }
 
 // Disconnect implements lua.Host.
 func (s *Session) Disconnect() {
-	s.connectionID++
+	// The disconnecting hook runs against the live connection, so it may
+	// still send farewells on it.
 	connectionID := s.connectionID
-	s.engine.OnDisconnecting()
+	s.engine.NotifyDisconnecting()
 	if s.connectionID != connectionID {
-		return // the hook changed the connection again
+		return // the hook replaced the connection
 	}
+
+	s.connectionID++
+	s.resetConnectionState()
 	s.net.Disconnect()
-	s.serverLine.reset()
-	s.activeNetworkBatch = nil
-	s.protocol = network.NewProtocol(s.clientState.Width, s.clientState.Height)
-	s.engine.DiscardSpans()
 	s.clientState.Connected = false
 	s.clientState.Address = ""
-	s.prompt.discard()
 	s.engine.UpdateState(s.clientState)
-	s.engine.OnDisconnected()
+	s.engine.NotifyDisconnected()
 	s.pushBarUpdates()
 }
 
@@ -80,10 +95,10 @@ func (s *Session) Send(data string) error {
 	if err != nil {
 		return err
 	}
-	if state := s.activeNetworkBatch; state != nil && state.connectionID == s.connectionID {
-		state.lineFinishPending = true
+	if state := s.activeBatch; state != nil && state.connectionID == s.connectionID {
+		state.partialFinishPending = true
 	} else {
-		s.finishCurrentLine()
+		s.finishPartialLine()
 	}
 	return nil
 }

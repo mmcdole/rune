@@ -100,7 +100,7 @@ func TestAcceptedSubmissionFollowsDraftChangeOnOneUIEventLane(t *testing.T) {
 	if !ok || changed.Text != "look" {
 		t.Fatalf("first event = %#v, want draft change to look", changed)
 	}
-	submitted, ok := (<-events).(ui.SubmissionMsg)
+	submitted, ok := (<-events).(ui.InputSubmittedMsg)
 	if !ok || submitted.Submission != input.Command("look") {
 		t.Fatalf("second event = %#v, want command submission", submitted)
 	}
@@ -254,9 +254,9 @@ func TestPromptCommitPrecedesFollowingRows(t *testing.T) {
 	m = next.(*Model)
 	next, _ = m.Update(ui.PrintLineMsg("line 2")) // batched
 	m = next.(*Model)
-	next, _ = m.Update(ui.PromptMsg("Username:"))
+	next, _ = m.Update(ui.SetPromptMsg("Username:"))
 	m = next.(*Model)
-	next, _ = m.Update(ui.PromptCommitMsg("Username:"))
+	next, _ = m.Update(ui.CommitPromptMsg("Username:"))
 	m = next.(*Model)
 	next, _ = m.Update(ui.EchoLineMsg("> player"))
 	m = next.(*Model)
@@ -275,9 +275,9 @@ func TestPromptCommitPrecedesFollowingRows(t *testing.T) {
 func TestOrderedPromptCommitThenLocalSubmissionOutput(t *testing.T) {
 	m := newBareModel(t)
 
-	next, _ := m.Update(ui.PromptMsg("HP>"))
+	next, _ := m.Update(ui.SetPromptMsg("HP>"))
 	m = next.(*Model)
-	next, _ = m.Update(ui.PromptCommitMsg("HP>"))
+	next, _ = m.Update(ui.CommitPromptMsg("HP>"))
 	m = next.(*Model)
 	next, _ = m.Update(ui.EchoLineMsg("> /help"))
 	m = next.(*Model)
@@ -293,9 +293,9 @@ func TestOrderedPromptCommitThenLocalSubmissionOutput(t *testing.T) {
 func TestPromptClearClearsOverlay(t *testing.T) {
 	m := newBareModel(t)
 
-	next, _ := m.Update(ui.PromptMsg("User"))
+	next, _ := m.Update(ui.SetPromptMsg("User"))
 	m = next.(*Model)
-	next, _ = m.Update(ui.PromptMsg("Username:"))
+	next, _ = m.Update(ui.SetPromptMsg("Username:"))
 	m = next.(*Model)
 
 	wantScrollback(t, m)
@@ -303,7 +303,7 @@ func TestPromptClearClearsOverlay(t *testing.T) {
 		t.Fatalf("prompt overlay = %q, want %q", got, "Username:")
 	}
 
-	next, _ = m.Update(ui.PromptMsg(""))
+	next, _ = m.Update(ui.SetPromptMsg(""))
 	m = next.(*Model)
 
 	wantScrollback(t, m)
@@ -443,7 +443,7 @@ func TestVerbatimSubmissionAtLimitsIsAccepted(t *testing.T) {
 	if !m.submit(submission) {
 		t.Fatal("at-limit verbatim submission was rejected")
 	}
-	got, ok := (<-events).(ui.SubmissionMsg)
+	got, ok := (<-events).(ui.InputSubmittedMsg)
 	if !ok || got.Submission != submission {
 		t.Fatalf("queued event = %#v, want submission %+v", got, submission)
 	}
@@ -667,7 +667,7 @@ func TestPrintedTabsAreExpanded(t *testing.T) {
 	if !found {
 		t.Errorf("expanded row not found in scrollback")
 	}
-	next, _ = m.Update(ui.PromptMsg("HP\t> "))
+	next, _ = m.Update(ui.SetPromptMsg("HP\t> "))
 	m = next.(*Model)
 	if got := m.promptText; got != "HP      > " {
 		t.Errorf("prompt = %q, want tab expanded", got)

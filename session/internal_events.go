@@ -46,12 +46,12 @@ func (s *Session) handleInternalEvent(event internalEvent) {
 }
 
 // postInternalEvent returns false instead of stranding a producer after its
-// Session lifetime has ended.
+// Session lifetime has ended. The up-front Err check makes cancellation
+// deterministic: without it, a cancelled context racing a writable queue may
+// still enqueue the event.
 func (s *Session) postInternalEvent(ctx context.Context, event internalEvent) bool {
-	select {
-	case <-ctx.Done():
+	if ctx.Err() != nil {
 		return false
-	default:
 	}
 	select {
 	case <-ctx.Done():
@@ -59,8 +59,4 @@ func (s *Session) postInternalEvent(ctx context.Context, event internalEvent) bo
 	case s.internalEvents <- event:
 		return true
 	}
-}
-
-func (s *Session) stopBackgroundWork() {
-	s.cancelBackgroundWork()
 }

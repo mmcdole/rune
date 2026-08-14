@@ -2,8 +2,9 @@ package ui
 
 import "github.com/mmcdole/rune/input"
 
-// UIEvent is implemented by all messages sent from UI to Session.
-// One event channel preserves their order.
+// UIEvent is implemented by all messages sent from UI to Session. They travel
+// one ordered channel (UI.Events()), so accepted events cannot overtake each
+// other.
 type UIEvent interface {
 	uiEvent() // unexported marker method - only this package can implement
 }
@@ -17,11 +18,11 @@ type PrintLineMsg string
 // text may contain newlines.
 type EchoLineMsg string
 
-// PromptMsg replaces the prompt overlay with a partial line or confirmed prompt.
-type PromptMsg string
+// SetPromptMsg replaces the prompt overlay with a partial line or confirmed prompt.
+type SetPromptMsg string
 
-// PromptCommitMsg moves the prompt overlay to scrollback in one update.
-type PromptCommitMsg string
+// CommitPromptMsg moves the prompt overlay to scrollback in one update.
+type CommitPromptMsg string
 
 // PaneWriteMsg appends a line to a named pane.
 type PaneWriteMsg struct {
@@ -68,13 +69,13 @@ type UpdateLayoutMsg struct {
 
 // --- Push-based UI Messages (UI -> Session) ---
 
-// SubmissionMsg transfers an accepted input snapshot to Session. Once this
+// InputSubmittedMsg transfers an accepted input snapshot to Session. Once this
 // event is queued, the UI may clear its draft.
-type SubmissionMsg struct {
+type InputSubmittedMsg struct {
 	Submission input.Submission
 }
 
-func (SubmissionMsg) uiEvent() {}
+func (InputSubmittedMsg) uiEvent() {}
 
 // ExecuteBindMsg requests Session to execute a Lua key binding.
 // Sent when UI detects a key that's in the boundKeys map.

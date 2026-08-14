@@ -38,7 +38,7 @@ const (
 
 // subnegFrame builds IAC SB <option> <escaped payload> IAC SE.
 func subnegFrame(option byte, payload []byte) []byte {
-	escaped := EscapeIAC(payload)
+	escaped := escapeIAC(payload)
 	buf := make([]byte, 0, len(escaped)+5)
 	buf = append(buf, CmdIAC, CmdSB, option)
 	buf = append(buf, escaped...)
@@ -50,26 +50,30 @@ func subnegFrame(option byte, payload []byte) []byte {
 // and NEW-ENVIRON/MNES. It is owned by Protocol and called only from Session's
 // event loop.
 type handshake struct {
-	tls        bool
+	secure     bool
 	width      int
 	height     int
 	ttypeIndex int
 	nawsActive bool
 }
 
-func newHandshake(tls bool, width, height int) *handshake {
-	return &handshake{tls: tls, width: width, height: height}
+// newHandshake starts insecure; setSecure supplies the real transport
+// security before identity replies are built.
+func newHandshake(width, height int) *handshake {
+	return &handshake{width: width, height: height}
 }
 
+// setSecure records whether the transport is TLS, which sets the MTTS TLS
+// bit in TTYPE/MNES replies.
 func (h *handshake) setSecure(secure bool) {
-	h.tls = secure
+	h.secure = secure
 }
 
 // mtts computes the MTTS bitvector. Honesty rule: every bit here must
 // reflect a real client capability.
 func (h *handshake) mtts() int {
 	bits := mttsANSI | mttsVT100 | mttsUTF8 | mtts256Colors | mttsTruecolor | mttsMNES
-	if h.tls {
+	if h.secure {
 		bits |= mttsTLS
 	}
 	return bits

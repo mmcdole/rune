@@ -19,7 +19,7 @@
 --   priority = 50         -- Execution order (lower = first)
 --   gag      = true       -- Hide matching line (spans: every collected line)
 --   raw      = true       -- Match against raw line (with ANSI codes)
---   on       = "output"   -- "output" (default) or prompt overlay updates
+--   on       = "output"   -- "output" (default) or "prompt"
 --   span     = {          -- Collect a multi-line message; action fires once
 --     to  = "regex",      --   line that ends the span, inclusive (optional)
 --     raw = true,         --   match `to` against the raw line
@@ -43,23 +43,23 @@ local MODE_STARTS = "starts"
 local MODE_CONTAINS = "contains"
 local MODE_REGEX = "regex"
 
-local CHANNEL_OUTPUT = "output"
-local CHANNEL_PROMPT = "prompt"
+local ON_OUTPUT = "output"
+local ON_PROMPT = "prompt"
 
 -- Create a trigger (internal)
 local function create_trigger(pattern, action, opts, mode)
     opts = opts or {}
 
-    local channel = opts.on
-    if channel == nil then
-        channel = CHANNEL_OUTPUT
+    local on = opts.on
+    if on == nil then
+        on = ON_OUTPUT
     end
-    if type(channel) ~= "string" or
-            (channel ~= CHANNEL_OUTPUT and channel ~= CHANNEL_PROMPT) then
+    if type(on) ~= "string" or
+            (on ~= ON_OUTPUT and on ~= ON_PROMPT) then
         error('trigger on must be "output" or "prompt"', 3)
     end
 
-    if opts.span ~= nil and channel ~= CHANNEL_OUTPUT then
+    if opts.span ~= nil and on ~= ON_OUTPUT then
         error('trigger span requires on = "output"', 3)
     end
 
@@ -95,7 +95,7 @@ local function create_trigger(pattern, action, opts, mode)
         mode = mode,
         gag = opts.gag or false,
         raw = opts.raw or false,
-        channel = channel,
+        on = on,
         span = span,
         source = rune.caller_source(2),
     }, opts)
@@ -157,7 +157,7 @@ function rune.trigger.list()
             gag = data.gag,
             once = data.once,
             raw = data.raw,
-            on = data.channel,
+            on = data.on,
             span = data.span and { to = data.span.to, raw = data.span.raw, max = data.span.max } or nil,
             source = data.source,
         })
@@ -209,7 +209,7 @@ local function trigger_label(data)
         (data.source and (" @" .. data.source) or "")
 end
 
-local function clean_open_spans()
+local function drop_inactive_spans()
     for data in pairs(open) do
         if not registry:active(data) then
             open[data] = nil
@@ -219,47 +219,50 @@ end
 
 -- Fire a complete or explicitly closed span. Its lines have already passed
 -- through the display pipeline, so return values are ignored.
-local function fire_span(data, st, to_remove)
+local function fire_span(data, span_state, to_remove)
     local ctx = {
-        line = st.lines[1],
-        lines = st.lines,
-        text = table.concat(st.pieces, " "),
+        line = span_state.lines[1],
+        lines = span_state.lines,
+        text = table.concat(span_state.pieces, " "),
         name = data.name,
         group = data.group,
         type = "trigger",
-        matches = st.matches,
+        matches = span_state.matches,
     }
     if type(data.action) == "function" then
-        rune.guarded_call(trigger_label(data), data, data.action, st.matches, ctx)
+        rune.guarded_call(trigger_label(data), data, data.action, span_state.matches, ctx)
     elseif type(data.action) == "string" and data.action ~= "" then
-        rune.send(rune.substitute_captures(data.action, st.matches))
+        rune.send(rune.substitute_captures(data.action, span_state.matches))
     end
     if data.once then
         to_remove[#to_remove + 1] = data._handle
     end
 end
 
--- Close every open span at a confirmed prompt or current-line finish.
-function rune.trigger._flush_spans()
-    if next(open) == nil then return end
-    clean_open_spans()
-    if next(open) == nil then return end
-    local to_remove = {}
-    for _, data in ipairs(registry:snapshot()) do
-        local st = open[data]
-        if st then
-            open[data] = nil
-            -- An earlier span action may have removed, disabled, or muted a
-            -- later trigger from this snapshot. Honor that mutation just as
-            -- normal trigger dispatch does.
-            if registry:active(data) then
-                fire_span(data, st, to_remove)
-            end
-        end
-    end
+local function remove_once_triggers(to_remove)
     for _, handle in ipairs(to_remove) do
         handle:remove()
     end
+end
+
+-- Fire and close every open span.
+function rune.trigger._flush_spans()
+    if next(open) == nil then return end
+    drop_inactive_spans()
+    if next(open) == nil then return end
+    local to_remove = {}
+    for _, data in ipairs(registry:snapshot()) do
+        local span_state = open[data]
+        if span_state then
+            open[data] = nil
+            -- An earlier span action may have removed, disabled, or muted a
+            -- later trigger from this snapshot.
+            if registry:active(data) then
+                fire_span(data, span_state, to_remove)
+            end
+        end
+    end
+    remove_once_triggers(to_remove)
 end
 
 -- Drop open spans without firing actions or removing once-triggers.
@@ -270,20 +273,20 @@ end
 local function new_span(data, matches, line, clean_line)
     local piece = (data.mode == MODE_REGEX and #matches > 0)
         and matches[#matches] or clean_line
-    local st = { lines = { line }, pieces = {}, matches = matches }
+    local span_state = { lines = { line }, pieces = {}, matches = matches }
     piece = trim(piece)
     if piece ~= "" then
-        st.pieces[1] = piece
+        span_state.pieces[1] = piece
     end
-    return st
+    return span_state
 end
 
-local function span_ends(data, st, raw_line, clean_line)
+local function span_ends(data, span_state, raw_line, clean_line)
     local sp = data.span
     if sp.to and rune.regex.match(sp.to, sp.raw and raw_line or clean_line) then
         return true
     end
-    return #st.lines >= sp.max
+    return #span_state.lines >= sp.max
 end
 
 local function trigger_context(data, matches, line)
@@ -323,15 +326,9 @@ local function fire_trigger(data, matches, ctx, to_remove)
     return gagged, replacement
 end
 
-local function remove_once_triggers(to_remove)
-    for _, handle in ipairs(to_remove) do
-        handle:remove()
-    end
-end
-
 -- Process one complete line, including output triggers and spans.
 function rune.trigger._process_output(line)
-    clean_open_spans()
+    drop_inactive_spans()
 
     local gagged = false
     local raw_line = line:raw()
@@ -341,7 +338,7 @@ function rune.trigger._process_output(line)
     -- Snapshot: a trigger action that adds/removes triggers must not perturb
     -- this dispatch pass (removals are still honored via active()).
     for _, data in ipairs(registry:snapshot()) do
-        if registry:active(data) and data.channel == CHANNEL_OUTPUT then
+        if registry:active(data) and data.on == ON_OUTPUT then
             local match_line = data.raw and raw_line or clean_line
 
             if open[data] then
@@ -383,11 +380,11 @@ function rune.trigger._process_output(line)
                         if data.gag then
                             gagged = true
                         end
-                        local st = new_span(data, matches, line, clean_line)
-                        if span_ends(data, st, raw_line, clean_line) then
-                            fire_span(data, st, to_remove) -- complete on one line
+                        local span_state = new_span(data, matches, line, clean_line)
+                        if span_ends(data, span_state, raw_line, clean_line) then
+                            fire_span(data, span_state, to_remove)
                         else
-                            open[data] = st
+                            open[data] = span_state
                         end
                     else
                         local action_gagged, replacement = fire_trigger(
@@ -424,7 +421,7 @@ function rune.trigger._process_prompt(line, confirmed)
     local gagged = false
 
     for _, data in ipairs(snapshot) do
-        if registry:active(data) and data.channel == CHANNEL_PROMPT then
+        if registry:active(data) and data.on == ON_PROMPT then
             local match_line = data.raw and raw_line or clean_line
             local matches = match_trigger(data, match_line)
             if matches then

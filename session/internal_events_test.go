@@ -46,6 +46,18 @@ func TestReloadReportsWhenInternalEventQueueIsFull(t *testing.T) {
 	}
 }
 
+func TestPostAfterSessionEndsIsRejectedEvenWithQueueSpace(t *testing.T) {
+	s, _, _ := newTestSession(t)
+	s.cancelBackgroundWork()
+
+	if s.postInternalEvent(s.backgroundCtx, httpFinished{}) {
+		t.Fatal("posted an event on a cancelled context")
+	}
+	if len(s.internalEvents) != 0 {
+		t.Fatalf("cancelled post enqueued %d events", len(s.internalEvents))
+	}
+}
+
 func TestInternalEventProducerStopsWhenSessionEnds(t *testing.T) {
 	s, _, _ := newTestSession(t)
 	for len(s.internalEvents) < cap(s.internalEvents) {
@@ -61,7 +73,7 @@ func TestInternalEventProducerStopsWhenSessionEnds(t *testing.T) {
 	}()
 	<-started
 
-	s.stopBackgroundWork()
+	s.cancelBackgroundWork()
 	select {
 	case ok := <-posted:
 		if ok {

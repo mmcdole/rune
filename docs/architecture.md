@@ -28,7 +28,7 @@ graph TD
 
     subgraph "Core Domain (Session Loop)"
         Session[Session Orchestrator]
-        ServerLine[Current Server Line]
+        PartialLine[Partial Server Line]
         Protocol[network.Protocol<br/>Session-confined]
         Lua[Lua VM]
         Timer[Timer Service]
@@ -48,7 +48,7 @@ graph TD
 
     Session -->|Process batch| Protocol
     Protocol -->|Ordered effects| Session
-    Session --> ServerLine
+    Session --> PartialLine
     Session -->|Update: Layout/Content| Model
     Session -->|Connection-scoped write| NetWrite
     Session -->|Exec| Lua
@@ -64,15 +64,15 @@ The `Session` struct is the heart of the application. It owns the main event loo
   this loop, Lua scripts do not need locks. Network I/O and UI rendering keep
   their own goroutines without sharing that mutable state.
 - **State:** Owns the Lua Engine, Network Client, Timer Service, and the one
-  mutable current server line.
+  mutable partial server line.
 
 ### The Inner Loop
 
-`Session.processEvents` (`session/session.go`) is the single dispatch point. Its `select` is the complete inventory of what can happen in the client - each channel is a typed lane with one handler:
+`Session.processEvents` (`session/session.go`) is the single dispatch point. Its `select` is the complete inventory of application work in the client - each channel is a typed lane with one handler, plus context cancellation for shutdown:
 
 | Lane | Carries | Handler |
 |---|---|---|
-| `ui.Events()` | One ordered stream of `ui.UIEvent`: draft changes, `SubmissionMsg`, binds, picker results, and view state | `handleUIEvent` |
+| `ui.Events()` | One ordered stream of `ui.UIEvent`: draft changes, `InputSubmittedMsg`, binds, picker results, and view state | `handleUIEvent` |
 | `net.Inbound()` | One owned `network.EventBatch` or disconnect, tagged with its connection ID (`network.Inbound`) | `handleInbound` |
 | `timerEvents` | Due Lua timers | `engine.OnTimer` |
 | `barTicker` | 250ms bar repaint tick | `pushBarUpdates` |
@@ -97,12 +97,12 @@ application policy.
   commands exist. The UI never calls Lua directly.
 - **Push Architecture:** It renders based entirely on state snapshots pushed to it by the Session.
 - **Ordered events:** It sends typed actions and state changes (for example
-  `ExecuteBindMsg`, `InputChangedMsg`, `PickerSelectMsg`, and `SubmissionMsg`)
+  `ExecuteBindMsg`, `InputChangedMsg`, `PickerSelectMsg`, and `InputSubmittedMsg`)
   through one bounded `Events()` channel.
 
 Bubble Tea's update/render goroutine never blocks waiting for Session to drain
-that channel. Every event uses the same non-blocking admission check. Once a
-`SubmissionMsg` is admitted, the UI may clear its local draft because Session
+that channel; every event is offered with the same non-blocking send. Once an
+`InputSubmittedMsg` is accepted, the UI may clear its local draft because Session
 owns the immutable snapshot; Session clears its tracked draft and calls the
 `input_changed` hook before processing the submission. If the queue is full,
 the UI leaves a submission in the editor and shows a warning. Other rejected
@@ -165,16 +165,16 @@ Rune implements a bespoke Telnet parser (`network/telnet.go`) ported from
 - **Transport:** `TCPClient` owns TCP/TLS, the read and write goroutines, Telnet
   framing, and MCCP read-source changes. It consumes transport-local MCCP
   activation events, then publishes any remaining Session-facing events from
-  one `Parser.Receive` result as one deep-owned `EventBatch`; an
+  one `Parser.Receive` result as one `EventBatch` of owned copies; an
   MCCP-only result publishes no batch. Events are never expanded into
   independently scheduled channel messages. An `Inbound` value attaches a
   batch, or a disconnect, to the connection that produced it. The batch also
   carries the transport's TLS status for identity negotiation.
 - **Protocol:** Session creates one `network.Protocol` per connection and is
-  the only goroutine that calls it. The reducer owns application-visible Telnet
-  state such as local echo, GMCP, identity negotiation, and NAWS. Its
-  `Process` method walks a complete batch synchronously in wire order and emits
-  effects back while Session is handling that batch.
+  the only goroutine that calls it. It owns application-visible Telnet state
+  such as local echo, GMCP, identity negotiation, and NAWS. Its `Process`
+  method walks a complete batch synchronously in wire order and emits effects
+  back while Session is handling that batch.
 
 MCCP activation remains a transport concern because decompression must begin
 before the next socket read. The transport consumes the activation marker and
@@ -187,8 +187,8 @@ the write is one operation.
 
 TCP read boundaries do not delimit lines or confirm prompts. `Username:` may be
 a complete login prompt or the first part of a longer line. A batch boundary
-only gives Rune a safe point to display its current provisional view; Rune does
-not use a timer or prompt pattern to guess the final classification.
+only gives Rune a safe point to display the partial line as it stands; Rune
+does not use a timer or prompt pattern to guess the final classification.
 
 The parser records ordered Telnet facts: application data, commands,
 negotiation transitions, subnegotiations, and required reply frames. It does
@@ -198,8 +198,8 @@ outbound Telnet frames. Session consumes each effect before `Process` advances
 to the next one, so protocol state changes, Lua callbacks, and writes all see
 one coherent wire order.
 
-Session owns `serverLine`, a `serverLineBuffer` and the sole mutable server-line
-assembler. Its event-loop goroutine joins data across batches and recognizes
+Session owns `partialLine`, a `partialLineBuffer`: the sole assembler of
+server lines. Its event-loop goroutine joins data across batches and recognizes
 CRLF, LFCR, LF, and bare CR. CR terminates the line immediately, including at
 the end of an event or batch; an optional following LF is swallowed even when
 it arrives in a later event or batch. Because the buffer and Protocol are
@@ -209,39 +209,41 @@ Session turns those facts into Rune events:
 
 | Observation | Session behavior |
 |---|---|
-| A batch ends with changed, unterminated text | Replace the prompt overlay and call `prompt(line, false)`. This cumulative observation may repeat across batches. |
-| A line delimiter arrives | Consume the current line through `output` exactly once. Ordinary and multi-line triggers see it. |
-| GA/EOR arrives in the same batch as changed, unterminated text | Consume non-empty current text through `prompt(line, true)` without first exposing it as `confirmed = false`. |
-| GA/EOR arrives in a later batch | Consume the previously observed line through `prompt(line, true)`. Empty markers do nothing. |
-| The user submits anything | Finish the current line before history, local echo, input hooks, aliases, or slash commands. |
-| A programmatic game send is accepted | Queue the write immediately. Finish the current line after the active `network.EventBatch` has installed its final rewrite or gag. |
+| A batch delivers server data and ends with a non-empty partial line | Replace the prompt overlay and call `prompt(line, false)`. This cumulative observation may repeat across batches. |
+| A line delimiter arrives | Consume the completed line through `output` exactly once. Output and multi-line triggers see it. |
+| A GA/EOR prompt boundary follows server data in the same batch | Consume the non-empty partial line through `prompt(line, true)` without first exposing it as `confirmed = false`. |
+| A prompt boundary arrives in a later batch | Consume the previously observed partial line through `prompt(line, true)`. Empty boundaries do nothing. |
+| The user submits anything | Finish the partial line before history, local echo, input hooks, aliases, or slash commands. |
+| A programmatic game send is accepted | Queue the write immediately. Finish the partial line after the active `network.EventBatch` has installed its final rewrite or gag. |
 
-Prompt and output trigger channels are exclusive. A partial observation never
-runs ordinary triggers or changes span state. A GA/EOR-confirmed prompt closes
-open spans before prompt hooks run. Finishing a current line on submission or
+Each trigger selects one stream: text may first reach prompt triggers while
+partial and later reach output triggers if CR/LF completes it. A partial
+observation never runs output triggers or changes span state. A GA/EOR-confirmed prompt closes
+open spans before prompt hooks run. Finishing a partial line on submission or
 an accepted game send commits its already processed overlay and closes spans;
-it does not run the prompt hook again. Without an active current line,
-unrelated span state is unchanged.
+it does not run the prompt hook again. A send with no partial line leaves open
+spans alone.
 
 Every submission is a display boundary regardless of local echo, whether an
 input hook consumes it, whether it is a slash command, connection state, or a
 later send failure. Separately, Lua actions from aliases, triggers, timers, and
-other callbacks finish the current line only when their game send is accepted
-by Network. During inbound processing, `activeNetworkBatch` points to the
-temporary `networkBatchState` for one `network.EventBatch`. That state
-records whether the server tail changed and whether an accepted send owes a
-visual line finish. Only after the complete batch has run does Session publish
-any remaining provisional prompt and perform the owed finish. Multiple
-accepted sends still finish the line once. This keeps the wire write immediate
-while allowing the callback that sent it to rewrite or gag the visible line
-before it is committed. A failed game send and protocol traffic such as GMCP,
-NAWS, and Telnet negotiation do not finish server text.
+other callbacks finish the partial line only when the connection accepts their
+game send. Deferring that finish to the end of the active batch keeps the wire
+write immediate while letting the callback that sent it rewrite or gag the
+visible line before it is committed. During inbound processing, `activeBatch`
+points to the `eventBatchState` for one `network.EventBatch`; it records
+whether server data arrived since the last prompt boundary and whether an
+accepted send owes a partial-line finish. Only after the complete batch has run
+does Session publish any remaining partial observation and perform the owed
+finish; multiple accepted sends still finish the line once. A failed game send
+and protocol traffic such as GMCP, NAWS, and Telnet negotiation do not finish
+server text.
 
-If the current text was really the beginning of a fragmented ordinary line,
+If the partial text was really the beginning of a fragmented ordinary line,
 submitting input or accepting a game send commits that visible prefix; later
 server text begins a new line. This is the explicit trade-off for immediate
 partial-line display without a timer or per-MUD prompt pattern. Connect and
-disconnect discard the current line and open spans without firing them.
+disconnect discard the partial line and open spans without firing them.
 
 ### 4.2 Ordered negotiation and GMCP
 
@@ -249,11 +251,12 @@ Protocol effects are handled as they are produced; Session does not prequeue
 all replies or collapse a batch to its final negotiation state. For example,
 if one batch contains `WILL GMCP`, a GMCP payload, and `WONT GMCP`, Rune queues
 `DO GMCP`, marks GMCP active, runs `gmcp_enabled` (whose Lua policy queues
-`Core.Hello` and `Core.Supports.Set`), dispatches the payload and any handler
+`Core.Hello`, plus `Core.Supports.Set` when the configured support set is
+non-empty), dispatches the payload and any handler
 writes, then queues `DONT GMCP` and marks GMCP inactive. Splitting those bytes
 across arbitrary TCP reads has the same ordered result.
 
-The Protocol reducer is the authoritative source for whether GMCP and local
+`network.Protocol` is the authoritative source for whether GMCP and local
 echo are active. Session asks it to build an outbound GMCP frame and rejects
 the request when that connection has not negotiated GMCP. Parser compatibility
 state remains private framing bookkeeping; application code does not query it

@@ -12,15 +12,18 @@ import (
 	"github.com/mmcdole/rune/ui"
 )
 
-// mockNetwork implements Network without sockets.
+// mockNetwork implements Network without sockets. Like TCPClient, it
+// validates the connection ID on every send, so ordering bugs between hook
+// dispatch and connection turnover fail here too.
 type mockNetwork struct {
-	mu          sync.Mutex
-	sent        []string
-	gmcpSent    []struct{ Package, Data string }
-	connected   bool
-	connectedTo []string // every Connect address, in order
-	inbound     chan network.Inbound
-	frames      [][]byte
+	mu           sync.Mutex
+	sent         []string
+	gmcpSent     []struct{ Package, Data string }
+	connected    bool
+	connectionID uint64   // ID BeginConnect reserved; sends must carry it
+	connectedTo  []string // every Connect address, in order
+	inbound      chan network.Inbound
+	frames       [][]byte
 }
 
 var _ Network = (*mockNetwork)(nil)
@@ -31,11 +34,19 @@ func newMockNetwork() *mockNetwork {
 	}
 }
 
-func (m *mockNetwork) BeginConnect(connectionID uint64) {}
+func (m *mockNetwork) BeginConnect(connectionID uint64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.connectionID = connectionID
+	m.connected = false // the old socket is retired, like TCPClient
+}
 
 func (m *mockNetwork) Connect(ctx context.Context, address string, connectionID uint64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if connectionID != m.connectionID {
+		return context.Canceled // superseded dial
+	}
 	m.connected = true
 	m.connectedTo = append(m.connectedTo, address)
 	return nil
@@ -56,7 +67,7 @@ func (m *mockNetwork) Disconnect() {
 func (m *mockNetwork) SendLine(connectionID uint64, data string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if !m.connected {
+	if !m.connected || connectionID != m.connectionID {
 		return errors.New("not connected")
 	}
 	m.sent = append(m.sent, data)
@@ -66,7 +77,7 @@ func (m *mockNetwork) SendLine(connectionID uint64, data string) error {
 func (m *mockNetwork) SendFrame(connectionID uint64, frame []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if !m.connected {
+	if !m.connected || connectionID != m.connectionID {
 		return errors.New("not connected")
 	}
 	m.frames = append(m.frames, append([]byte(nil), frame...))
@@ -114,7 +125,7 @@ type mockUI struct {
 	echoed        []string
 	displayEvents []string
 	prompts       []string // every SetPrompt call, including clears
-	inputModes    []input.Submission
+	submissions   []input.Submission
 	inputCursor   []int
 	bindsPushed   map[string]bool // last UpdateBinds payload
 	events        chan ui.UIEvent
@@ -132,7 +143,7 @@ func newMockUI() *mockUI {
 
 func cleanupTestSession(t testing.TB, s *Session) {
 	t.Cleanup(func() {
-		s.stopBackgroundWork()
+		s.cancelBackgroundWork()
 		s.engine.Close()
 		s.timer.Stop()
 		s.LogStop()
@@ -186,7 +197,7 @@ func (m *mockUI) SetInput(text string) {
 func (m *mockUI) SetInputSubmission(submission input.Submission) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.inputModes = append(m.inputModes, submission)
+	m.submissions = append(m.submissions, submission)
 }
 
 func (m *mockUI) UpdateBars(content map[string]ui.BarContent) {}

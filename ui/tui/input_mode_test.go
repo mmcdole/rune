@@ -201,7 +201,7 @@ func TestPickerCallbackSettledOnEveryExit(t *testing.T) {
 }
 
 // TestAcceptedSubmissionClearsLocalDraftOnce verifies the controller clears
-// only its own draft. SubmissionMsg carries the same transition to Session,
+// only its own draft. InputSubmittedMsg carries the same transition to Session,
 // so a second InputChangedMsg would duplicate it.
 func TestAcceptedSubmissionClearsLocalDraftOnce(t *testing.T) {
 	h := newControllerHarness()

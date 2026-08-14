@@ -91,7 +91,7 @@ Triggers take the [common options](/scripting/model/#options) — `name`,
 |---|---|
 | `gag` | Hides matching lines (no action required). |
 | `raw` | Matches against the raw line, ANSI codes included. |
-| `on` | `"output"` (default) for complete lines, or `"prompt"` for unfinished text and GA/EOR prompts. |
+| `on` | `"output"` (default) for complete lines, or `"prompt"` for partial lines and GA/EOR prompts. |
 | `span` | Collects a multi-line output message before firing. See [Multi-line triggers](#multi-line-triggers). |
 
 ## Examples
@@ -123,32 +123,33 @@ end)
 
 Most triggers run after a complete line arrives. Some MUDs send login and
 command prompts without a newline, so waiting for a complete line would miss
-them. Rune displays the unfinished current line immediately; use
+them. Rune shows the partial line at the end of each network batch; use
 `on = "prompt"` to match it:
 
 ```lua
-rune.trigger.exact("Username: ", "Ragnar",
+rune.trigger.contains("Username:", "Ragnar",
     { on = "prompt", once = true })
 ```
 
-A trigger observes one channel:
+A trigger observes one of two streams:
 
-| Channel | Text it observes |
+| Setting | Text it observes |
 |---|---|
 | `on = "output"` | Complete server lines. This is the default. |
-| `on = "prompt"` | The unfinished current line and prompts ended by Telnet GA/EOR. |
+| `on = "prompt"` | Partial lines and prompts confirmed by Telnet GA/EOR. |
 
 Before the server finishes the text, Rune cannot know whether it is a prompt
 or the beginning of an ordinary line. A prompt trigger may therefore run again
-as the text grows. If CR/LF eventually completes the line, that complete line
-runs through output triggers; if GA/EOR ends it as a prompt, it stays on the
-prompt channel. Make repeated prompt actions harmless, or use `once = true`
+as the partial line grows. If CR/LF eventually completes the line, that
+complete line runs through output triggers; if a GA/EOR prompt boundary
+confirms it as a prompt, it stays with the prompt triggers. Make repeated
+prompt actions harmless, or use `once = true`
 for one-shot work such as login automation.
 
 Prompt triggers can rewrite or gag the displayed prompt just like output
 triggers. They cannot use `span`, because spans collect complete output lines.
 
-Submitting input finishes the visible prompt before the input is processed. A
+Submitting input finishes the partial line before the input is processed. A
 command sent by Lua finishes it only after the connection accepts the send;
 failed sends and protocol traffic such as GMCP leave it open.
 
@@ -200,7 +201,7 @@ Full semantics: [rune.trigger reference](/reference/api/trigger/#multi-line-trig
 ## Testing
 
 Test output triggers without a server with `/test <line>`. It runs one
-complete line through the output channel and shows the result. Multi-line spans
+complete line through the output triggers and shows the result. Multi-line spans
 collect across `/test` calls, one line per call. `/test` does not run prompt
 triggers.
 
@@ -223,9 +224,9 @@ suite is in the [API reference](/reference/api/#managing). In the client,
 - Patterns are Go regexp (RE2), not Lua patterns: `\\d`, `\\w`, and `\\s`
   work, backreferences and lookaround do not — see
   [rune.regex](/reference/api/regex/) for the syntax notes.
-- `span` requires `on = "output"`. Prompt updates leave a span open; a
-  GA/EOR-ended prompt or a finished current line closes it. See the
-  [full span semantics](/reference/api/trigger/#multi-line-triggers).
+- `span` requires `on = "output"`. Partial-line observations leave a span
+  open; a GA/EOR-confirmed prompt or a finished partial line closes it. See
+  the [full span semantics](/reference/api/trigger/#multi-line-triggers).
 - A trigger that errors three times in a row is
   [quarantined](/scripting/model/#quarantine).
 

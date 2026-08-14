@@ -514,7 +514,7 @@ func TestGMCPLoopback(t *testing.T) {
 	}
 }
 
-// --- Game lines and Telnet record marks ---
+// --- Game lines and Telnet prompt boundaries ---
 
 // TestSendEscapesIAC verifies outgoing line data doubles IAC bytes so
 // the server reads them as data. Protocol frames stay untouched - the
@@ -540,7 +540,7 @@ func TestSendEscapesIAC(t *testing.T) {
 
 func TestSendRejectsLineSeparators(t *testing.T) {
 	c := NewTCPClient()
-	c.current = &connection{connectionID: 9, sendQueue: make(chan outMsg, 2), done: make(chan struct{})}
+	c.current = &connection{connectionID: 9, sendQueue: make(chan []byte, 2), done: make(chan struct{})}
 	for _, data := range []string{"north\nlook", "north\rlook"} {
 		if err := c.SendLine(9, data); err == nil {
 			t.Fatalf("SendLine(%q) succeeded", data)
@@ -553,7 +553,7 @@ func TestSendRejectsLineSeparators(t *testing.T) {
 
 func TestSendsStayOnTheIdentifiedConnectionAndOwnFrameBytes(t *testing.T) {
 	c := NewTCPClient()
-	c.current = &connection{connectionID: 2, sendQueue: make(chan outMsg, 2), done: make(chan struct{})}
+	c.current = &connection{connectionID: 2, sendQueue: make(chan []byte, 2), done: make(chan struct{})}
 
 	if err := c.SendLine(1, "look"); err == nil {
 		t.Fatal("stale connection ID sent a game line")
@@ -565,12 +565,12 @@ func TestSendsStayOnTheIdentifiedConnectionAndOwnFrameBytes(t *testing.T) {
 	frame[2] = OptEcho
 
 	queued := <-c.current.sendQueue
-	if want := []byte{CmdIAC, CmdDO, OptEOR}; !bytes.Equal(queued.data, want) {
-		t.Fatalf("queued frame = %v, want owned bytes %v", queued.data, want)
+	if want := []byte{CmdIAC, CmdDO, OptEOR}; !bytes.Equal(queued, want) {
+		t.Fatalf("queued frame = %v, want owned bytes %v", queued, want)
 	}
 }
 
-func TestPromptMarksStayInTheirParserBatch(t *testing.T) {
+func TestPromptBoundariesStayInTheirEventBatch(t *testing.T) {
 	for _, tt := range []struct {
 		name    string
 		command byte
@@ -582,7 +582,7 @@ func TestPromptMarksStayInTheirParserBatch(t *testing.T) {
 			c := &TCPClient{inboundChan: make(chan Inbound, 1)}
 			cx := &connection{
 				connectionID: 7,
-				parser:       NewParser(defaultCompatibility()),
+				parser:       NewParser(),
 				done:         make(chan struct{}),
 			}
 
@@ -591,7 +591,7 @@ func TestPromptMarksStayInTheirParserBatch(t *testing.T) {
 				t.Fatal("processIncoming stopped")
 			}
 			got := <-c.Inbound()
-			if got.Kind != InboundEvents || got.ConnectionID != 7 {
+			if got.Kind != InboundBatch || got.ConnectionID != 7 {
 				t.Fatalf("inbound envelope = %+v", got)
 			}
 			if len(got.Batch.Events) != 2 {
@@ -643,7 +643,7 @@ func TestIncompleteTelnetCommandDoesNotPublishAnEmptyBatch(t *testing.T) {
 	c := &TCPClient{inboundChan: make(chan Inbound, 1)}
 	cx := &connection{
 		connectionID: 4,
-		parser:       NewParser(defaultCompatibility()),
+		parser:       NewParser(),
 		done:         make(chan struct{}),
 	}
 
@@ -706,13 +706,13 @@ func TestBlockedLineWriteDoesNotStopIncomingParsing(t *testing.T) {
 	c := &TCPClient{inboundChan: make(chan Inbound, 4)}
 	cx := &connection{
 		conn:      conn,
-		parser:    NewParser(defaultCompatibility()),
-		sendQueue: make(chan outMsg, 1),
+		parser:    NewParser(),
+		sendQueue: make(chan []byte, 1),
 		done:      make(chan struct{}),
 	}
 
 	writeDone := make(chan bool, 1)
-	go func() { writeDone <- c.writeLine(cx, []byte("look")) }()
+	go func() { writeDone <- cx.write([]byte("look\r\n")) }()
 	<-conn.writeStarted
 
 	parseStarted := make(chan struct{})
@@ -725,7 +725,7 @@ func TestBlockedLineWriteDoesNotStopIncomingParsing(t *testing.T) {
 
 	select {
 	case inbound := <-c.inboundChan:
-		if inbound.Kind != InboundEvents || len(inbound.Batch.Events) != 1 ||
+		if inbound.Kind != InboundBatch || len(inbound.Batch.Events) != 1 ||
 			inbound.Batch.Events[0].Kind != TelnetEventDataReceive ||
 			string(inbound.Batch.Events[0].Data) != "write-block-marker\r\n" {
 			t.Fatalf("incoming batch during blocked write = %+v", inbound)
@@ -736,7 +736,7 @@ func TestBlockedLineWriteDoesNotStopIncomingParsing(t *testing.T) {
 
 	conn.release()
 	if ok := <-writeDone; !ok {
-		t.Fatal("writeLine failed after releasing the socket")
+		t.Fatal("write failed after releasing the socket")
 	}
 	if ok := <-parseDone; !ok {
 		t.Fatal("processIncoming stopped during blocked write test")

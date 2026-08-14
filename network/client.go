@@ -15,20 +15,19 @@ import (
 	"time"
 )
 
-// TCPClient owns the active TCP connection and exposes owned parser batches.
+// TCPClient owns the active TCP connection and publishes deep-copied event
+// batches that the receiver may retain.
 type TCPClient struct {
 	// Stable across connections; blocking publication applies TCP backpressure.
 	inboundChan chan Inbound
 
-	mu                  sync.Mutex
-	current             *connection
-	desiredConnectionID uint64 // Latest connection ID requested by Session
-}
-
-// outMsg is either a game line or raw Telnet protocol data.
-type outMsg struct {
-	data []byte
-	line bool
+	mu      sync.Mutex
+	current *connection
+	// desiredConnectionID gates dials and sends: only work carrying this ID
+	// is accepted. BeginConnect sets it to the ID Session issued; Disconnect
+	// bumps it past that ID to invalidate pending dials. Session bumps its
+	// own counter on disconnect too, keeping the two in lockstep.
+	desiredConnectionID uint64
 }
 
 // connection owns the state and workers for one TCP connection.
@@ -50,7 +49,7 @@ type connection struct {
 	secure     bool
 
 	// writeLoop is the sole socket writer; other goroutines enqueue here.
-	sendQueue chan outMsg
+	sendQueue chan []byte
 
 	// Signal to stop internal goroutines
 	done      chan struct{}
@@ -145,8 +144,8 @@ func (c *TCPClient) Connect(ctx context.Context, address string, connectionID ui
 		connectionID: connectionID,
 		reader:       conn,
 		raw:          conn,
-		parser:       NewParser(defaultCompatibility()),
-		sendQueue:    make(chan outMsg, 4096),
+		parser:       NewParser(),
+		sendQueue:    make(chan []byte, 4096),
 		done:         make(chan struct{}),
 		secure:       useTLS,
 	}
@@ -195,33 +194,31 @@ func (c *TCPClient) Disconnect() {
 	}
 }
 
-// SendLine queues one game line for the identified connection. Validation and
-// enqueue happen under the same lock, so a reconnect cannot redirect stale
-// Session work to the new socket.
+// SendLine queues one game line for the identified connection. Line data is
+// text: IAC bytes are doubled so the server reads them as data, and the CRLF
+// terminator is appended here, so the write loop handles one uniform byte
+// slice.
 func (c *TCPClient) SendLine(connectionID uint64, line string) error {
 	if strings.ContainsAny(line, "\r\n") {
 		return fmt.Errorf("game line cannot contain CR or LF")
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	cx := c.current
-	if cx == nil || cx.connectionID != connectionID {
-		return fmt.Errorf("not connected")
+	data := []byte(line)
+	if bytes.IndexByte(data, CmdIAC) >= 0 {
+		data = escapeIAC(data)
 	}
-
-	select {
-	case cx.sendQueue <- outMsg{data: []byte(line), line: true}:
-		return nil
-	case <-cx.done:
-		return fmt.Errorf("not connected")
-	default:
-		return fmt.Errorf("send buffer full (network stalled?)")
-	}
+	data = append(data, '\r', '\n')
+	return c.enqueue(connectionID, data)
 }
 
 // SendFrame queues raw Telnet protocol bytes for the identified connection.
 func (c *TCPClient) SendFrame(connectionID uint64, frame []byte) error {
-	owned := bytes.Clone(frame)
+	return c.enqueue(connectionID, bytes.Clone(frame))
+}
+
+// enqueue hands owned bytes to the identified connection's write loop.
+// Validation and enqueue share the lock, so a reconnect cannot redirect stale
+// Session work to the new socket.
+func (c *TCPClient) enqueue(connectionID uint64, data []byte) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	cx := c.current
@@ -229,7 +226,7 @@ func (c *TCPClient) SendFrame(connectionID uint64, frame []byte) error {
 		return fmt.Errorf("not connected")
 	}
 	select {
-	case cx.sendQueue <- outMsg{data: owned}:
+	case cx.sendQueue <- data:
 		return nil
 	case <-cx.done:
 		return fmt.Errorf("not connected")
@@ -238,23 +235,25 @@ func (c *TCPClient) SendFrame(connectionID uint64, frame []byte) error {
 	}
 }
 
-// Inbound returns parser batches and disconnects from all connections. Each
-// message carries its connection ID so Session can reject stale work.
+// Inbound returns event batches and disconnect notifications from every
+// connection. Each message carries its connection ID so Session can reject
+// stale work.
 func (c *TCPClient) Inbound() <-chan Inbound {
 	return c.inboundChan
 }
 
-func (c *TCPClient) publish(cx *connection, inbound Inbound) bool {
-	inbound.ConnectionID = cx.connectionID
+// publish sends one message tagged with cx's connection ID. It reports
+// whether the connection is still alive to keep reading.
+func (c *TCPClient) publish(cx *connection, kind InboundKind, batch EventBatch) bool {
 	select {
-	case c.inboundChan <- inbound:
+	case c.inboundChan <- Inbound{Kind: kind, ConnectionID: cx.connectionID, Batch: batch}:
 		return true
 	case <-cx.done:
 		return false
 	}
 }
 
-// readLoop reads cx and blocks on inbound publication to apply TCP backpressure.
+// readLoop reads from cx; blocking on publication is the TCP backpressure.
 func (c *TCPClient) readLoop(cx *connection) {
 	buf := make([]byte, 4096)
 
@@ -285,7 +284,7 @@ func (c *TCPClient) readLoop(cx *connection) {
 			c.mu.Unlock()
 
 			if isCurrent {
-				c.publish(cx, Inbound{Kind: InboundDisconnect})
+				c.publish(cx, InboundDisconnect, EventBatch{})
 				cx.shutdown()
 			}
 			return
@@ -293,10 +292,9 @@ func (c *TCPClient) readLoop(cx *connection) {
 	}
 }
 
-// processIncoming consumes transport-local MCCP activation, then publishes any
-// remaining events from this parser call as one owned batch. MCCP activation
-// changes how the next socket bytes must be read; all Session-facing events
-// cross the boundary in their original order.
+// processIncoming consumes transport-local MCCP activation (which changes how
+// the next socket bytes must be read), then publishes any remaining events
+// from this parser call as one owned batch.
 func (c *TCPClient) processIncoming(cx *connection, data []byte) bool {
 	events := cx.parser.Receive(data)
 	if len(events) == 0 {
@@ -308,7 +306,7 @@ func (c *TCPClient) processIncoming(cx *connection, data []byte) bool {
 	var mccpRest []byte
 	for _, event := range events {
 		switch {
-		case event.Kind == TelnetEventSubnegotiation && (event.Option == OptMCCP2 || event.Option == OptMCCP3):
+		case event.Kind == TelnetEventSubnegotiation && event.Option == OptMCCP2:
 			startMCCP = true
 		case event.Kind == TelnetEventDecompressImmediate:
 			startMCCP = true
@@ -318,12 +316,9 @@ func (c *TCPClient) processIncoming(cx *connection, data []byte) bool {
 		}
 	}
 
-	if len(forwarded) > 0 && !c.publish(cx, Inbound{
-		Kind: InboundEvents,
-		Batch: EventBatch{
-			Secure: cx.secure,
-			Events: cloneEvents(forwarded),
-		},
+	if len(forwarded) > 0 && !c.publish(cx, InboundBatch, EventBatch{
+		Secure: cx.secure,
+		Events: cloneEvents(forwarded),
 	}) {
 		return false
 	}
@@ -389,37 +384,17 @@ func (c *TCPClient) writeLoop(cx *connection) {
 		select {
 		case <-cx.done:
 			return
-		case msg := <-cx.sendQueue:
-			if msg.line {
-				if !c.writeLine(cx, msg.data) {
-					return
-				}
-				continue
-			}
-
-			data := msg.data
-			cx.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-			_, err := cx.conn.Write(data)
-			cx.conn.SetWriteDeadline(time.Time{})
-
-			if err != nil {
-				// Write failed - close the connection to trigger readLoop cleanup
-				cx.conn.Close()
+		case data := <-cx.sendQueue:
+			if !cx.write(data) {
 				return
 			}
 		}
 	}
 }
 
-// writeLine writes one application line to the socket.
-func (c *TCPClient) writeLine(cx *connection, data []byte) bool {
-	// Line data is text: double IAC bytes so the server reads them as data,
-	// not commands. Raw messages are protocol frames and bypass this path.
-	if bytes.IndexByte(data, CmdIAC) >= 0 {
-		data = EscapeIAC(data)
-	}
-	data = append(data, '\r', '\n')
-
+// write sends one queued message. On failure it closes the socket so readLoop
+// observes the error and reports the disconnect.
+func (cx *connection) write(data []byte) bool {
 	cx.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 	_, err := cx.conn.Write(data)
 	cx.conn.SetWriteDeadline(time.Time{})
@@ -436,7 +411,6 @@ func (cx *connection) close() {
 	cx.shutdown()
 }
 
-// shutdown closes the done channel exactly once to stop workers.
 func (cx *connection) shutdown() {
 	cx.closeOnce.Do(func() {
 		close(cx.done)

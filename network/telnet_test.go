@@ -8,7 +8,7 @@ import (
 // TestParserHandlesSplitDoNegotiation verifies that an incomplete command is
 // retained until its option byte arrives in a later parser call.
 func TestParserHandlesSplitDoNegotiation(t *testing.T) {
-	parser := NewParser(DefaultCompatibility())
+	parser := NewParser()
 
 	// First chunk ends mid-command: IAC DO (missing option) - should emit nothing.
 	events := parser.Receive([]byte{CmdIAC, CmdDO})
@@ -82,7 +82,7 @@ func TestDefaultCompatibilityNegotiationPolicy(t *testing.T) {
 	for _, group := range groups {
 		t.Run(group.name, func(t *testing.T) {
 			for _, option := range group.options {
-				parser := NewParser(DefaultCompatibility())
+				parser := NewParser()
 				events := parser.Receive([]byte{CmdIAC, group.command, option})
 				if len(events) != group.eventCount {
 					t.Fatalf("option %d produced %d events, want %d: %+v", option, len(events), group.eventCount, events)
@@ -108,9 +108,9 @@ func assertReply(t *testing.T, events []TelnetEvent, want []byte, cmd string, op
 }
 
 func TestParserStopsAtMCCPActivation(t *testing.T) {
-	table := NewCompatibilityTable()
-	table.Set(OptMCCP2, CompatibilityEntry{Remote: true, RemoteState: true})
-	parser := NewParser(table)
+	table := newCompatibilityTable()
+	table.set(OptMCCP2, compatibilityEntry{Remote: true, RemoteState: true})
+	parser := newParser(table)
 	remainder := []byte("compressed bytes")
 	wire := append(subnegFrame(OptMCCP2, nil), remainder...)
 
@@ -126,10 +126,26 @@ func TestParserStopsAtMCCPActivation(t *testing.T) {
 	}
 }
 
+// An unsolicited compression subnegotiation must not switch the read path or
+// swallow the plaintext that follows it: MCCP3 (client->server compression)
+// stays refused outright, and MCCP2 splits the stream only once negotiated.
+func TestUnsolicitedMCCPSubnegotiationDoesNotSwallowFollowingText(t *testing.T) {
+	for _, opt := range []byte{OptMCCP2, OptMCCP3} {
+		parser := NewParser()
+		wire := append(subnegFrame(opt, nil), []byte("plain text")...)
+
+		events := parser.Receive(wire)
+		if len(events) != 1 || events[0].Kind != TelnetEventDataReceive ||
+			string(events[0].Data) != "plain text" {
+			t.Fatalf("option %d: events = %+v, want only the plaintext data", opt, events)
+		}
+	}
+}
+
 func TestSubnegSeparateReceives(t *testing.T) {
-	table := NewCompatibilityTable()
-	table.Set(OptGMCP, CompatibilityEntry{Local: true, LocalState: true})
-	parser := NewParser(table)
+	table := newCompatibilityTable()
+	table.set(OptGMCP, compatibilityEntry{Local: true, LocalState: true})
+	parser := newParser(table)
 
 	// Receive start of subnegotiation
 	events := parser.Receive(append(
@@ -166,9 +182,9 @@ func TestSubnegSeparateReceives(t *testing.T) {
 }
 
 func TestSubnegotiationTreatsBareSEAsPayload(t *testing.T) {
-	table := NewCompatibilityTable()
-	table.Set(OptGMCP, CompatibilityEntry{Local: true, LocalState: true})
-	parser := NewParser(table)
+	table := newCompatibilityTable()
+	table.set(OptGMCP, compatibilityEntry{Local: true, LocalState: true})
+	parser := newParser(table)
 
 	// A bare SE byte is data; only the two-byte IAC SE sequence ends the frame.
 	waveEmoji := []byte{0xF0, 0x9F, 0x91, 0x8B}
@@ -219,12 +235,12 @@ func TestIACEscaping(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			escaped := EscapeIAC(tt.data)
+			escaped := escapeIAC(tt.data)
 			if !bytes.Equal(escaped, tt.escaped) {
-				t.Fatalf("EscapeIAC(%v) = %v, want %v", tt.data, escaped, tt.escaped)
+				t.Fatalf("escapeIAC(%v) = %v, want %v", tt.data, escaped, tt.escaped)
 			}
-			if got := UnescapeIAC(escaped); !bytes.Equal(got, tt.data) {
-				t.Fatalf("UnescapeIAC(EscapeIAC(%v)) = %v", tt.data, got)
+			if got := unescapeIAC(escaped); !bytes.Equal(got, tt.data) {
+				t.Fatalf("unescapeIAC(escapeIAC(%v)) = %v", tt.data, got)
 			}
 		})
 	}
@@ -232,14 +248,14 @@ func TestIACEscaping(t *testing.T) {
 
 func TestCompatibilityEntryBitmask(t *testing.T) {
 	tests := []struct {
-		entry CompatibilityEntry
+		entry compatibilityEntry
 		want  byte
 	}{
-		{CompatibilityEntry{Local: true}, bitLocal},
-		{CompatibilityEntry{Remote: true}, bitRemote},
-		{CompatibilityEntry{LocalState: true}, bitLocalState},
-		{CompatibilityEntry{RemoteState: true}, bitRemoteState},
-		{CompatibilityEntry{Local: true, Remote: true, LocalState: true, RemoteState: true},
+		{compatibilityEntry{Local: true}, bitLocal},
+		{compatibilityEntry{Remote: true}, bitRemote},
+		{compatibilityEntry{LocalState: true}, bitLocalState},
+		{compatibilityEntry{RemoteState: true}, bitRemoteState},
+		{compatibilityEntry{Local: true, Remote: true, LocalState: true, RemoteState: true},
 			bitLocal | bitRemote | bitLocalState | bitRemoteState},
 	}
 
@@ -260,19 +276,19 @@ func TestParserHandlesMalformedStreams(t *testing.T) {
 	// incomplete or nonsensical. The contract is that parsing remains safe.
 	tests := []struct {
 		name    string
-		entries map[byte]CompatibilityEntry
+		entries map[byte]compatibilityEntry
 		wire    []byte
 	}{
 		{
 			name: "IAC option in unfinished subnegotiation",
-			entries: map[byte]CompatibilityEntry{
+			entries: map[byte]compatibilityEntry{
 				CmdIAC: {Local: true, LocalState: true},
 			},
 			wire: []byte{CmdIAC, CmdSB, CmdIAC, CmdSE},
 		},
 		{
 			name: "repeated escaped IAC before truncated command",
-			entries: map[byte]CompatibilityEntry{
+			entries: map[byte]compatibilityEntry{
 				CmdIAC: {Remote: true, LocalState: true, RemoteState: true},
 			},
 			wire: []byte{255, 255, 255, 255, 255, 254, 255, 0},
@@ -280,7 +296,7 @@ func TestParserHandlesMalformedStreams(t *testing.T) {
 		{name: "data before unfinished subnegotiation", wire: []byte{45, 255, 250, 255}},
 		{
 			name:    "DO supported NUL option",
-			entries: map[byte]CompatibilityEntry{0: {Local: true}},
+			entries: map[byte]compatibilityEntry{0: {Local: true}},
 			wire:    []byte{255, 253, 0},
 		},
 		{name: "escaped IAC before bare SE", wire: []byte{255, 250, 255, 255, 240, 250}},
@@ -291,7 +307,7 @@ func TestParserHandlesMalformedStreams(t *testing.T) {
 		{name: "data and escaped IAC before DONT", wire: []byte{254, 255, 255, 255, 254, 0}},
 		{
 			name: "DO IAC option",
-			entries: map[byte]CompatibilityEntry{
+			entries: map[byte]compatibilityEntry{
 				CmdIAC: {Remote: true, LocalState: true, RemoteState: true},
 			},
 			wire: []byte{255, 253, 255},
@@ -300,18 +316,18 @@ func TestParserHandlesMalformedStreams(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			table := NewCompatibilityTable()
+			table := newCompatibilityTable()
 			for option, entry := range tt.entries {
-				table.Set(option, entry)
+				table.set(option, entry)
 			}
-			NewParser(table).Receive(tt.wire)
+			newParser(table).Receive(tt.wire)
 		})
 	}
 }
 
 func TestNegotiationWILL(t *testing.T) {
-	parser := NewParser(NewCompatibilityTable())
-	parser.options.SupportRemote(OptEcho)
+	parser := newParser(newCompatibilityTable())
+	parser.options.supportRemote(OptEcho)
 
 	// Receive WILL ECHO - should respond with DO ECHO
 	events := parser.Receive([]byte{CmdIAC, CmdWILL, OptEcho})
@@ -331,15 +347,15 @@ func TestNegotiationWILL(t *testing.T) {
 	}
 
 	// Check state
-	entry := parser.options.Get(OptEcho)
+	entry := parser.options.get(OptEcho)
 	if !entry.RemoteState {
 		t.Error("RemoteState should be true after WILL")
 	}
 }
 
 func TestNegotiationDO(t *testing.T) {
-	parser := NewParser(NewCompatibilityTable())
-	parser.options.SupportLocal(OptNAWS)
+	parser := newParser(newCompatibilityTable())
+	parser.options.supportLocal(OptNAWS)
 
 	// Receive DO NAWS - should respond with WILL NAWS
 	events := parser.Receive([]byte{CmdIAC, CmdDO, OptNAWS})
@@ -352,7 +368,7 @@ func TestNegotiationDO(t *testing.T) {
 	}
 
 	// Check state
-	entry := parser.options.Get(OptNAWS)
+	entry := parser.options.get(OptNAWS)
 	if !entry.LocalState {
 		t.Error("LocalState should be true after accepted DO")
 	}
@@ -381,7 +397,7 @@ func TestDoubleIACInData(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			parser := NewParser(NewCompatibilityTable())
+			parser := newParser(newCompatibilityTable())
 			events := parser.Receive(tt.wire)
 			if len(events) != 1 {
 				t.Fatalf("events = %+v, want one data event", events)
@@ -397,7 +413,7 @@ func TestDoubleIACInData(t *testing.T) {
 }
 
 func TestDoubleIACSplitAcrossReceives(t *testing.T) {
-	parser := NewParser(NewCompatibilityTable())
+	parser := newParser(newCompatibilityTable())
 
 	events := parser.Receive(append([]byte("Hello"), CmdIAC))
 	if len(events) != 1 || events[0].Kind != TelnetEventDataReceive || string(events[0].Data) != "Hello" {
@@ -418,7 +434,7 @@ func TestDoubleIACSplitAcrossReceives(t *testing.T) {
 }
 
 func TestIncompleteIAC(t *testing.T) {
-	parser := NewParser(NewCompatibilityTable())
+	parser := newParser(newCompatibilityTable())
 
 	// Just IAC alone - should buffer and wait for more
 	events := parser.Receive([]byte{CmdIAC})
@@ -440,7 +456,7 @@ func TestIncompleteIAC(t *testing.T) {
 }
 
 func TestNOPCommand(t *testing.T) {
-	parser := NewParser(NewCompatibilityTable())
+	parser := newParser(newCompatibilityTable())
 
 	events := parser.Receive([]byte{CmdIAC, CmdNOP})
 	if len(events) != 1 {

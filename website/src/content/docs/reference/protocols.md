@@ -28,29 +28,26 @@ Refused (not implemented): MCCP3, MSSP, ZMP, MXP, MSP, LINEMODE.
 ## Ordering and prompt boundaries
 
 Rune does not guess prompts from text patterns or timers. Server text ending in
-a newline or bare CR is ordinary output. Unterminated text is exposed through
-the `prompt` hook with `confirmed = false`; a following Telnet GA or EOR
-consumes it through the same hook with `confirmed = true`. When unterminated
-data and its GA/EOR arrive in one parser batch, Rune emits only the confirmed
-observation. When they arrive in separate batches, scripts may first observe
-the growing unterminated text and later its confirmation. CR terminates a line
-immediately, including at the end of an event or batch; an optional following
-LF is swallowed even when it arrives in a later event or batch.
+a newline or bare CR is ordinary output. A partial line is exposed through
+the `prompt` hook with `confirmed = false`; a following Telnet GA or EOR prompt
+boundary consumes it through the same hook with `confirmed = true`. When a
+partial line and its prompt boundary arrive in one event batch, Rune emits only
+the confirmed observation. When they arrive in separate batches, scripts may
+first observe the growing partial line and later its confirmation. CR
+terminates a line immediately, including at the end of an event or batch; an
+optional following LF is swallowed even when it arrives in a later event or
+batch.
 
-The transport consumes MCCP activation events itself, then sends any remaining
-Session-facing events from one parser result as one owned,
-connection-tagged batch. An MCCP-only result sends no batch. The transport owns
-TCP/TLS, parser framing, MCCP decompression, and the single socket writer.
-Session owns the current server line and one connection-specific Telnet
-protocol reducer. It processes a batch synchronously, including Lua callbacks
-and the frames they send, so TCP chunking cannot reorder negotiation effects.
+Rune applies each batch of parsed Telnet events synchronously and in wire
+order, including Lua callbacks and the frames they send, so TCP chunking
+cannot reorder negotiation effects.
 
 GMCP follows that same wire order. A server's `WILL GMCP` queues Rune's `DO`,
 enables GMCP, and runs the `gmcp_enabled` policy that sends `Core.Hello` and
 the configured support set when it is non-empty. Later payloads in the batch
 are then delivered to handlers. A subsequent `WONT GMCP` queues `DONT` and
-disables GMCP; Rune does not discard an earlier payload merely because the
-batch ends disabled. Outbound game lines and protocol frames are checked and
+disables GMCP; a payload that arrived while GMCP was active is still
+delivered even when the batch ends with GMCP disabled. Outbound game lines and protocol frames are checked and
 queued against the connection that produced the callback, preventing a
 reconnect from redirecting an old write to a new server.
 

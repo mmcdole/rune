@@ -9,10 +9,15 @@ const (
 	// EffectSendFrame is a Telnet frame that must be queued before processing
 	// later effects from the batch.
 	EffectSendFrame EffectKind = iota
+	// EffectServerData is received application text.
 	EffectServerData
+	// EffectGA and EffectEOR are the two Telnet prompt boundaries; Session
+	// treats them identically.
 	EffectGA
 	EffectEOR
+	// EffectGMCPEnabled fires once when negotiation first activates GMCP.
 	EffectGMCPEnabled
+	// EffectGMCPMessage is one received GMCP package with its JSON payload.
 	EffectGMCPMessage
 )
 
@@ -27,8 +32,9 @@ type Effect struct {
 
 // Protocol interprets parser events and owns the Telnet state used by Session.
 // A Protocol belongs to one connection and is called only by Session's event
-// loop. Its synchronous emitter keeps Lua callbacks and the sends they produce
-// in wire order with the rest of the batch.
+// loop. Effects are emitted synchronously as each event is applied, so a Lua
+// callback handling one effect observes negotiation state exactly as of that
+// point in wire order - never state from later in the batch.
 type Protocol struct {
 	handshake  *handshake
 	gmcpLocal  bool
@@ -36,16 +42,19 @@ type Protocol struct {
 	localEcho  bool
 }
 
-// NewProtocol creates the protocol state for one connection. Transport
-// security is supplied by each EventBatch before identity replies are built.
+// NewProtocol creates the Telnet state for one connection, seeded with the
+// current window size for NAWS. Transport security rides on each EventBatch
+// instead of this constructor: Session builds the Protocol before the dial
+// resolves TLS, and a batch may reach Session before the dial's completion
+// event does.
 func NewProtocol(width, height int) *Protocol {
 	return &Protocol{
-		handshake: newHandshake(false, width, height),
+		handshake: newHandshake(width, height),
 		localEcho: true,
 	}
 }
 
-// Process interprets a complete parser batch in wire order. emit is invoked
+// Process interprets one event batch in wire order. emit is invoked
 // synchronously for each externally visible effect. Returning false from emit
 // stops the batch, allowing Session to abandon stale or failed connections.
 func (p *Protocol) Process(batch EventBatch, emit func(Effect) bool) bool {
@@ -78,13 +87,13 @@ func (p *Protocol) Process(batch EventBatch, emit func(Effect) bool) bool {
 			}
 
 		case TelnetEventNegotiation:
-			gmcpEnabled := p.applyNegotiation(event.Command, event.Option)
+			gmcpJustEnabled := p.applyNegotiation(event.Command, event.Option)
 			for _, frame := range p.handshake.onNegotiation(event.Command, event.Option) {
 				if !emit(Effect{Kind: EffectSendFrame, Data: frame}) {
 					return false
 				}
 			}
-			if gmcpEnabled {
+			if gmcpJustEnabled {
 				if !emit(Effect{Kind: EffectGMCPEnabled}) {
 					return false
 				}
@@ -101,7 +110,7 @@ func (p *Protocol) Process(batch EventBatch, emit func(Effect) bool) bool {
 				}
 				continue
 			}
-			if event.Option == OptMCCP2 || event.Option == OptMCCP3 {
+			if event.Option == OptMCCP2 {
 				continue
 			}
 			for _, frame := range p.handshake.onSubnegotiation(event.Option, event.Data) {
@@ -142,7 +151,7 @@ func (p *Protocol) SetWindowSize(width, height int) []byte {
 	return p.handshake.setWindowSize(width, height)
 }
 
-func (p *Protocol) applyNegotiation(command, option byte) (gmcpEnabled bool) {
+func (p *Protocol) applyNegotiation(command, option byte) (gmcpJustEnabled bool) {
 	wasGMCPActive := p.GMCPActive()
 	switch option {
 	case OptEcho:
