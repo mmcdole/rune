@@ -6,11 +6,13 @@ import Default from '@astrojs/starlight/components/SocialIcons.astro';
 const raw = import.meta.env.BASE_URL;
 const base = raw.endsWith('/') ? raw : raw + '/';
 
-// Four peer sections, matching the sidebar groups. No umbrella "Docs"
-// item: it read as a sibling of its own children.
+// Peer sections, matching the sidebar groups. Each href is that group's
+// first sidebar entry, so the header and sidebar agree on where a section
+// starts. No umbrella "Docs" item: it read as a sibling of its own children.
 const links = [
   { label: 'Get Started', href: `${base}getting-started/installation/` },
-  { label: 'Scripting', href: `${base}scripting/aliases/` },
+  { label: 'Scripting', href: `${base}scripting/model/` },
+  { label: 'Interface', href: `${base}interface/input/` },
   { label: 'Cookbook', href: `${base}cookbook/quake-console/` },
   { label: 'Reference', href: `${base}reference/slash-commands/` },
 ];

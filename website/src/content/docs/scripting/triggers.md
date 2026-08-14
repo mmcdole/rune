@@ -3,10 +3,9 @@ title: Triggers
 description: React to server text with four match modes and string or function actions that can send commands, run logic, rewrite text, or hide it.
 ---
 
-Triggers react to text received from the server. By default they match complete
-output lines; set `on = "prompt"` to match the current prompt text instead.
-Each trigger then makes two choices: how to match (exact line, prefix,
-substring, or regex), and what to do (send a command or call a Lua function).
+A trigger reacts to a line the server sends. Two decisions define one: how it
+matches (the whole line exactly, a prefix, a substring, or a regex) and what it
+does (a string to send, or a Lua function to run).
 
 A string action is a canned response:
 
@@ -91,7 +90,7 @@ Triggers take the [common options](/scripting/model/#options) — `name`,
 |---|---|
 | `gag` | Hides matching lines (no action required). |
 | `raw` | Matches against the raw line, ANSI codes included. |
-| `on` | `"output"` (default) for complete lines, or `"prompt"` for partial lines and GA/EOR prompts. |
+| `on` | `"output"` (default) for complete lines, or `"prompt"` for prompt text. See [Prompt triggers](#prompt-triggers). |
 | `span` | Collects a multi-line output message before firing. See [Multi-line triggers](#multi-line-triggers). |
 
 ## Examples

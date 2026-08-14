@@ -4,13 +4,16 @@ description: Structured server data such as vitals, rooms, and channels, deliver
 ---
 
 GMCP delivers out-of-band data as `Package.SubPackage {json}` messages.
-Rune decodes the JSON for you: handlers receive real Lua tables.
+Rune decodes the JSON for you: handlers receive real Lua tables. You tell the
+server which packages you want with `subscribe`, then handle what arrives:
 
 ```lua
+local vitals = {}
+
 rune.gmcp.subscribe("Char")
 
 rune.gmcp.on("Char.Vitals", function(data)
-    hp, maxhp = data.hp, data.maxhp
+    vitals = data
     rune.ui.refresh_bars()
 end)
 ```

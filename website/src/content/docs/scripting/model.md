@@ -8,6 +8,11 @@ bindings, bars, GMCP handlers, slash commands — lives in the same kind of
 registry and behaves the same way. Learn the model once and every other
 page gets shorter.
 
+If you haven't written a trigger or an alias yet, skim this and come back to
+it — [Triggers](/scripting/triggers/) is the concrete place to start, and the
+machinery here will read as description rather than abstraction once you've
+registered a few things.
+
 ## Handles
 
 Every creation function returns a handle:

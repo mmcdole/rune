@@ -3,6 +3,11 @@ title: Panes
 description: Named output buffers you can dock in the layout, write to from triggers, and toggle from binds.
 ---
 
+A pane is a named output buffer with its own scrollback, docked beside the main
+output. Nothing routes text into one automatically: a pane shows the lines your
+scripts write to it, which makes it the place to put a category of output you
+want kept separate — chat, tells, combat, auction spam.
+
 ```lua
 rune.pane.create("chat")                    -- optional; write auto-creates
 rune.pane.write("chat", styled_text)

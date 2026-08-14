@@ -3,6 +3,11 @@ title: Key Bindings
 description: Bind keys and chords to Lua callbacks. The default keymap is a script too.
 ---
 
+A bind attaches a Lua callback to a key or chord, so a keypress can do what
+would otherwise take a typed command. The default keymap — history, completion,
+scrolling, `$EDITOR` — is built from the same function, so anything it binds you
+can rebind.
+
 ```lua
 rune.bind("f1", function() rune.send("cast shield") end)
 rune.bind("ctrl+g", function() rune.pane.toggle("map") end, { name = "map-toggle" })
@@ -32,14 +37,6 @@ normally; press `j` on an empty line and it acts as a hotkey.
 Bracketed paste is also intercepted before binds, so pasting one bound
 character cannot trigger it. A plain one-line paste stays in normal input;
 structured text enters the [verbatim composer](/interface/input/#multiline-verbatim-composer).
-
-## Internal input modes
-
-Pickers and the composer own the keys needed to edit or cancel them. In the
-composer that includes text and cursor editing, literal `Tab`, and two-step
-`Escape` discard. Application chords the composer does not use can still run a
-Lua bind — the default `Ctrl+E` editor binding is the important example. When
-the composer or picker closes, normal binding policy resumes.
 
 ## Options
 
@@ -77,6 +74,15 @@ By name: `rune.binds.disable/enable/remove(name)` — the full management
 suite is in the [API reference](/reference/api/#managing). In the client,
 `/binds` lists every binding with its state, group, and the `file:line`
 that registered it.
+
+## When a bind doesn't fire
+
+Pickers and the composer own the keys needed to edit or cancel them, so a bind
+on one of those keys goes quiet while they're open. In the composer that covers
+text and cursor editing, literal `Tab`, and two-step `Escape` discard.
+Application chords the composer does not use still run their Lua bind — the
+default `Ctrl+E` editor binding is the important example. Normal binding policy
+resumes when the composer or picker closes.
 
 ## Gotchas
 

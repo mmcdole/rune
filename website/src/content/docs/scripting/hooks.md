@@ -12,6 +12,11 @@ in `/hooks`.
 rune.hooks.on(event, handler, opts?)
 ```
 
+Reach for a [trigger](/scripting/triggers/) when you want to match particular
+text. Reach for a hook when you want *every* line regardless of content — to
+timestamp it, log it, or mirror it — or when what you care about isn't text at
+all, such as connecting, reloading, or a GMCP message.
+
 Unlike triggers, aliases, and timers, a hook handler is always a Lua
 function; there is no string form. What the function receives and what its
 return value means depend on the event.
@@ -35,32 +40,6 @@ whole draft and may contain line breaks. Existing handlers that accept only
 `text` continue to work because Lua ignores extra arguments. To rewrite normal
 command input, use an [alias](/scripting/aliases/).
 
-The `prompt` hook drives the prompt overlay; its name does not mean every value
-is a prompt. A partial line may be `Username:` or the first half of a longer
-line. It can repeat as it grows and later arrive once through `output` as a
-complete line. If GA/EOR arrives separately, the same text may run again with
-`confirmed` changing from `false` to `true`. An empty prompt boundary does not
-fire `prompt`. Rune does not use a timer or prompt pattern to confirm it.
-
-A complete line replaces its partial line. A confirmed prompt is committed
-before later server text and closes open spans before `prompt` handlers run,
-so span actions have already fired by the time your handler sees the prompt.
-
-Every user submission finishes the partial line before history, echo, and
-input hooks, including local slash commands and submissions that are consumed,
-disconnected, or eventually fail to send. Programmatic game lines from aliases,
-triggers, timers, and other callbacks finish it only after the connection
-accepts the send. Failed programmatic sends and protocol traffic such as GMCP
-do not.
-
-```lua
--- Replace state on each observation; partial lines may repeat.
-local current_prompt = ""
-rune.hooks.on("prompt", function(line)
-    current_prompt = line:clean()
-end)
-```
-
 ```lua
 -- Timestamp every line, after triggers have run
 rune.hooks.on("output", function(line)
@@ -82,6 +61,37 @@ end, { priority = 1 })
 The core handler at priority 100 applies aliases, `;` separators, `#N`
 repeats, and slash commands when `context.mode == "command"`. Verbatim input
 bypasses command processing and recognizes LF, CRLF, and bare CR line breaks.
+
+## Prompt semantics
+
+The `prompt` hook drives the prompt overlay; its name does not mean every value
+is a prompt. A partial line may be `Username:` or the first half of a longer
+line, and rune cannot tell which until the server finishes it. So the same text
+can reach you more than once: the observation repeats as the line grows, and if
+GA/EOR arrives separately it runs again with `confirmed` changing from `false`
+to `true`. Write handlers that replace state rather than accumulate it:
+
+```lua
+-- Replace state on each observation; partial lines may repeat.
+local current_prompt = ""
+rune.hooks.on("prompt", function(line)
+    current_prompt = line:clean()
+end)
+```
+
+If the text turns out to be an ordinary line, it arrives once more through
+`output` as a complete line, and that complete line replaces its partial line.
+An empty prompt boundary does not fire `prompt`. Rune uses no timer or prompt
+pattern to infer one. A confirmed prompt is committed before later server text
+and closes open spans before `prompt` handlers run, so span actions have
+already fired by the time your handler sees the prompt.
+
+Every user submission finishes the partial line before history, echo, and
+input hooks, including local slash commands and submissions that are consumed,
+disconnected, or eventually fail to send. Programmatic game lines from aliases,
+triggers, timers, and other callbacks finish it only after the connection
+accepts the send. Failed programmatic sends and protocol traffic such as GMCP
+do not.
 
 ## Notification events
 

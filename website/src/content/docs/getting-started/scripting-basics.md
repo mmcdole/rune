@@ -76,6 +76,22 @@ rune.trigger.contains("flees in panic", "kill target")
 Since `/reload` rebuilds the whole Lua state, edits to required files are
 picked up on the next `/reload` just like edits to `init.lua`.
 
+## The client itself is Lua
+
+The API isn't a plugin surface bolted onto the side; the client's own
+behavior is built with it. The input pipeline, local echo, the default
+keymap, and the status bar are Lua scripts embedded in the binary,
+registered through the same hooks your `init.lua` uses. For example, the
+`> ` prefix on echoed commands is a hook handler, so you can replace it:
+
+```lua
+rune.hooks.on("echo", function(text)
+    return rune.style.cyan("» " .. text)
+end, { priority = 50 })  -- runs before the default handler
+```
+
+Anything the client does through this API, your scripts can override.
+
 ## A map of the API
 
 Everything lives under the `rune` table. Find the task, follow the link:
@@ -93,7 +109,7 @@ Everything lives under the `rune` table. Find the task, follow the link:
 | Toggle sets of things at once | [Groups](/scripting/groups/) | [`rune.group`](/reference/api/group/) |
 | Lay out panes, bars, and pickers | [Layout & UI](/interface/layout/) | [`rune.ui`](/reference/api/ui/), [`rune.pane`](/reference/api/pane/) |
 | Log the session to a file | [Logging](/scripting/logging/) | [`rune.log`](/reference/api/log/) |
-| Color and style text | [Triggers](/scripting/triggers/) | [`rune.style`](/reference/api/style/) |
+| Color and style text | — | [`rune.style`](/reference/api/style/) |
 
 The registration functions all behave the same way — handles, a shared
 options table, groups, and error quarantine.
@@ -101,24 +117,10 @@ options table, groups, and error quarantine.
 the [API reference](/reference/api/) has full signatures for every
 `rune.*` namespace.
 
-## The client itself is Lua
-
-The API above isn't a plugin surface bolted onto the side; the client's
-own behavior is built with it. The input pipeline, local echo, the default
-keymap, and the status bar are Lua scripts embedded in the binary,
-registered through the same hooks your `init.lua` uses. For example, the
-`> ` prefix on echoed commands is a hook handler, so you can replace it:
-
-```lua
-rune.hooks.on("echo", function(text)
-    return rune.style.cyan("» " .. text)
-end, { priority = 50 })  -- runs before the default handler
-```
-
-Anything the client does through this API, your scripts can override.
-
 ## Next
 
-[The Scripting Model](/scripting/model/) explains the machinery every
-registration shares. Coming from TinTin++ or Mudlet? Start with
+[Triggers](/scripting/triggers/) is where most scripts start. Once the
+shapes are familiar, [The Scripting Model](/scripting/model/) explains the
+machinery every registration shares, so you only learn it once. Coming
+from TinTin++ or Mudlet? Start with
 [Migrating from Other Clients](/getting-started/migrating/).
