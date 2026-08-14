@@ -19,8 +19,8 @@ rune.command.list()                                   -- array of {name, descrip
 
 `add` returns a [handle](/reference/api/#handles); `opts` accepts
 `group` from the [common options](/reference/api/#options). The command
-name is the registry name, so passing `name` in `opts` is an error;
-see [items that name themselves](/reference/api/#items-that-name-themselves).
+is its own [name](/reference/api/#names), so a `name` in `opts` is
+ignored with a notice.
 
 To wrap a built-in, capture its action before replacing it:
 

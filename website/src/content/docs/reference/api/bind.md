@@ -15,11 +15,10 @@ rune.binds.get(key)               -- the binding's handle, or nil
 ```
 
 `rune.bind` returns a [handle](/reference/api/#handles) and accepts the
-[common option](/reference/api/#options) `group`. The key is the registry
-name, so passing `name` is an error; see
-[items that name themselves](/reference/api/#items-that-name-themselves).
-A disabled bind (or one in a disabled group) swallows its key without
-running the callback.
+[common option](/reference/api/#options) `group`. The key is the bind's
+[name](/reference/api/#names), so a `name` in `opts` is ignored with a
+notice. A disabled bind (or one in a disabled group) swallows its key
+without running the callback.
 
 ```lua
 rune.bind("f1", function() rune.send("north") end, {group = "combat"})

@@ -87,32 +87,103 @@ func TestCoreRegistrationsAreAddressable(t *testing.T) {
 	`)
 }
 
-// One entry, one identity: an explicit name would be a second one.
-func TestKeyedRegistriesRejectAnExplicitName(t *testing.T) {
-	engine, _, cleanup := setupTest(t)
-	defer cleanup()
-
+// One entry, one identity: a legacy name is dropped with a notice. It
+// must not raise, because raising would abort the rest of the script
+// that carried it, costing every registration below the stale line.
+func TestKeyedRegistriesDeprecateAnExplicitName(t *testing.T) {
 	cases := []struct {
-		name string
-		code string
+		name    string
+		code    string
+		key     string
+		present string // a management call proving the entry registered
 	}{
-		{"bind", `rune.bind("f1", function() end, { name = "other" })`},
-		{"bar", `rune.ui.bar("clock", function() return "" end, { name = "other" })`},
-		{"exact alias", `rune.alias.exact("gc", "get corpse", { name = "other" })`},
-		{"command", `rune.command.add("greet", function() end, "d", { name = "other" })`},
+		{
+			name:    "bind",
+			code:    `rune.bind("f1", function() end, { name = "other" })`,
+			key:     "f1",
+			present: `assert(rune.binds.get("f1"), "the bind must still register")`,
+		},
+		{
+			name:    "bar",
+			code:    `rune.ui.bar("clock", function() return "" end, { name = "other" })`,
+			key:     "clock",
+			present: `assert(rune.bars.get("clock"), "the bar must still register")`,
+		},
+		{
+			name:    "exact alias",
+			code:    `rune.alias.exact("gc", "get corpse", { name = "other" })`,
+			key:     "gc",
+			present: `assert(rune.alias.get("gc"), "the alias must still register")`,
+		},
+		{
+			name:    "command",
+			code:    `rune.command.add("greet", function() end, "d", { name = "other" })`,
+			key:     "greet",
+			present: `assert(rune.command.get("greet"), "the command must still register")`,
+		},
 	}
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			err := engine.DoString("reject", c.code)
-			if err == nil {
-				t.Fatal("expected an explicit name to be refused")
+			engine, host, cleanup := setupTest(t)
+			defer cleanup()
+			host.DrainPrintCalls()
+
+			if err := engine.DoString("legacy", c.code); err != nil {
+				t.Fatalf("a legacy name must not raise: %v", err)
 			}
-			if !strings.Contains(err.Error(), "the key is the name") {
-				t.Fatalf("error should explain the rule, got: %v", err)
+
+			printed := strings.Join(host.DrainPrintCalls(), "\n")
+			if !strings.Contains(printed, "[Deprecated]") {
+				t.Fatalf("expected a deprecation notice, got: %q", printed)
 			}
+			if !strings.Contains(printed, c.key) {
+				t.Fatalf("the notice must name the key to use, got: %q", printed)
+			}
+
+			assertLua(t, engine, c.present)
 		})
 	}
+}
+
+// A script that never used the option must stay quiet, and a name that
+// simply repeats the key is not a migration problem either.
+func TestNoNoticeWithoutALegacyName(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+	host.DrainPrintCalls()
+
+	if err := engine.DoString("quiet", `
+		rune.bind("f3", function() end)
+		rune.bind("f4", function() end, { group = "combat" })
+		rune.bind("f6", function() end, { name = "f6" })
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	if printed := strings.Join(host.DrainPrintCalls(), "\n"); printed != "" {
+		t.Fatalf("expected no notice, got: %q", printed)
+	}
+}
+
+// The whole point of not raising: everything after the stale line loads.
+func TestALegacyNameDoesNotAbortTheScript(t *testing.T) {
+	engine, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	if err := engine.DoString("init.lua", `
+		rune.alias.exact("before", "loaded first")
+		rune.bind("f5", function() end, { name = "legacy-name" })
+		rune.alias.exact("after", "loaded after the stale option")
+	`); err != nil {
+		t.Fatalf("the script must survive a legacy name: %v", err)
+	}
+
+	assertLua(t, engine, `
+		assert(rune.alias.get("before"), "registrations before the stale line must survive")
+		assert(rune.alias.get("after"), "registrations after the stale line must survive")
+		assert(rune.binds.get("f5"), "the bind itself must register under its key")
+	`)
 }
 
 // Re-registering a natural key replaces rather than accumulates, and the

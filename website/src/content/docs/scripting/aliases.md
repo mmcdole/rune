@@ -97,14 +97,20 @@ condition.
 
 ## Options
 
-Aliases take the [common options](/scripting/model/#options): `name`,
-`group`, `priority` (order among regex aliases), and `once`. No
-alias-specific extras.
+Aliases take the [common options](/scripting/model/#options): `group`,
+`priority` (order among regex aliases), and `once`. No alias-specific
+extras.
 
+The two constructors are [named](/scripting/model/#names) differently.
 An exact alias is named for its phrase, so `rune.alias.disable("gc")`
-works without you naming anything, and passing `name` to
-`rune.alias.exact` is an error. Regex aliases have no such key and take
-`name` as usual.
+works without you naming anything, and a `name` in `opts` is ignored with
+a notice. A regex alias is a matcher rather than a phrase, and several can
+match one line, so it takes `name` like a trigger does.
+
+Note that `rune.alias.exact` and [`rune.trigger.exact`](/scripting/triggers/)
+do not mean the same thing here. An alias phrase is something you type, so
+it names the alias. A trigger's exact line is something you match, and
+several triggers can match it, so a trigger still needs a `name`.
 
 ## Examples
 
@@ -153,8 +159,8 @@ local h = rune.alias.exact("k", "kill")
 h:disable()  h:enable()  h:remove()
 ```
 
-By name: `rune.alias.disable/enable/remove(name)` — the full management
-suite is in the [API reference](/reference/api/#managing). In the client,
+By name: `rune.alias.disable/enable/remove(name)`. The full list is in
+the [API reference](/reference/api/#managing). In the client,
 `/aliases` shows every alias with its state, group, and the `file:line`
 that registered it.
 

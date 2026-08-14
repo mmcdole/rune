@@ -83,8 +83,12 @@ end)
 
 ## Options
 
-Triggers take the [common options](/scripting/model/#options) — `name`,
-`group`, `priority`, `once` — plus:
+Triggers take the [common options](/scripting/model/#options) `group`,
+`priority` and `once`, plus a [`name`](/scripting/model/#names) to manage
+one by. A pattern cannot serve as the name, since several triggers can
+match the same line: that is what makes a highlighter and a tagger compose.
+For the same reason `rune.trigger.exact` does not name a trigger the way
+`rune.alias.exact` names an alias. Trigger-specific options:
 
 | Option | Effect |
 |---|---|
@@ -213,8 +217,8 @@ local h = rune.trigger.contains("hungry", "eat bread", { name = "auto-eat" })
 h:disable()  h:enable()  h:remove()
 ```
 
-By name: `rune.trigger.disable/enable/remove(name)` — the full management
-suite is in the [API reference](/reference/api/#managing). In the client,
+By name: `rune.trigger.disable/enable/remove(name)`. The full list is in
+the [API reference](/reference/api/#managing). In the client,
 `/triggers` shows every trigger with its state, mode, flags, group, and the
 `file:line` that registered it.
 

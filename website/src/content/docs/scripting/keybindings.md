@@ -83,8 +83,8 @@ Rebinding a key in your `init.lua` replaces the default.
 
 ## Managing
 
-By key: `rune.binds.get/disable/enable/remove(key)`. The full management
-suite is in the [API reference](/reference/api/#managing). In the client,
+By key: `rune.binds.get/disable/enable/remove(key)`. The full list is in
+the [API reference](/reference/api/#managing). In the client,
 `/binds` lists every binding with its state, group, and the `file:line`
 that registered it.
 

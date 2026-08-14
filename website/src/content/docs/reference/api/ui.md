@@ -19,8 +19,8 @@ rune.ui.search(opts?)                -- open the scrollback-search overlay
 
 `rune.ui.bar` returns a [handle](/reference/api/#handles) and accepts
 the [common option](/reference/api/#options) `group`. The bar's layout
-name is its registry name, so passing `name` in `opts` is an error; see
-[items that name themselves](/reference/api/#items-that-name-themselves).
+name is its [name](/reference/api/#names), so a `name` in `opts` is
+ignored with a notice.
 
 ### rune.ui.layout
 

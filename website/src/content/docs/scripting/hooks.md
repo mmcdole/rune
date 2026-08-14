@@ -125,8 +125,8 @@ first, default 50).
 ## Managing
 
 Every constructor returns a handle with `:enable()`, `:disable()`, and
-`:remove()`. By name: `rune.hooks.disable/enable/remove(name)` — the full
-management suite is in the [API reference](/reference/api/#managing). In
+`:remove()`. By name: `rune.hooks.disable/enable/remove(name)`. The full
+list is in the [API reference](/reference/api/#managing). In
 the client, `/hooks` lists every handler, including the core's own, since
 the client registers its behavior through the same API.
 

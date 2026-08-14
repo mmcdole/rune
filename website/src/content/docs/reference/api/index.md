@@ -58,39 +58,59 @@ Methods are chainable. See
 neither the enabled and group checks nor the failure quarantine. It is
 for capturing an existing action and wrapping it, not for dispatch.
 
+## Names
+
+Every registration has a name. It is what you pass to
+[`get`, `enable`, `disable` and `remove`](#managing), what a
+re-registration replaces on, and what the listing commands show.
+
+For most registries you supply it:
+
+```lua
+rune.trigger.contains("food", "eat bread", { name = "feeder" })
+```
+
+Four give themselves one:
+
+| Creation function | Name | Because |
+|---|---|---|
+| `rune.bind(key, ...)` | the key, `"ctrl+g"` | one bind per key |
+| `rune.ui.bar(name, ...)` | the layout name, `"status"` | one renderer per slot |
+| `rune.command.add(name, ...)` | the command, `"greet"` | one handler per `/command` |
+| `rune.alias.exact(phrase, ...)` | the normalized phrase, `"chat off"` | one expansion per typed phrase |
+
+Each holds one entry per key, so there is nothing a separate name would
+distinguish. That is why `rune.binds.disable("ctrl+g")` and
+`rune.bars.get("status")` reach the core's own binds and bars, which are
+registered without options.
+
+The test for any registry: can two entries share the same first argument?
+Triggers, timers, hooks, GMCP handlers and regex aliases can, so you name
+them. The four above cannot, so they are named for you.
+
+These four accepted a `name` option before rune 0.9. Passing one now is
+ignored with a `[Deprecated]` notice giving the key to manage it by, so
+older scripts keep loading; only management calls that used the old name
+need changing.
+
 ## Options
 
 Common `opts` fields accepted by every creation function:
 
 | Option | Type | Default | Applies to |
 |---|---|---|---|
-| `name` | string | none | Triggers, timers, hooks, GMCP handlers, regex aliases. Unique ID; same name replaces (upsert) |
 | `group` | string | none | All: membership for batch operations |
 | `priority` | number | 50 | Regex aliases, triggers, hooks. Lower runs first |
 | `once` | bool | false | Aliases, triggers. Remove after first match |
 
-Page-specific extras (e.g. trigger `gag`/`raw`) are listed on each page.
-
-### Items that name themselves
-
-An entry with a natural key is registered under that key, and passing
-`name` for one is an error rather than a second identity:
-
-| Creation function | Its name |
-|---|---|
-| `rune.bind(key, ...)` | the key, `"ctrl+g"` |
-| `rune.ui.bar(name, ...)` | the bar's layout name, `"status"` |
-| `rune.command.add(name, ...)` | the command, `"greet"` |
-| `rune.alias.exact(phrase, ...)` | the normalized phrase, `"chat off"` |
-
-So `rune.binds.disable("ctrl+g")` and `rune.bars.get("status")` address
-these by the same string you registered them with, including the core's
-own binds, bars and commands.
+`name` sets the name where the registry does not set its own; see
+[Names](#names). Page-specific extras (e.g. trigger `gag`/`raw`) are
+listed on each page.
 
 ## Managing
 
-Every registry namespace exposes the same management suite, addressed
-by item name:
+Every registry namespace exposes the same functions, each taking the
+item's name:
 
 | Function | Effect |
 |---|---|

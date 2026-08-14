@@ -16,12 +16,12 @@ rune.alias.get(name)                      -- the alias's handle, or nil
 ```
 
 Both constructors return a [handle](/reference/api/#handles) and accept
-the [common options](/reference/api/#options), except that an exact
-alias is named for its normalized phrase, so passing `name` to
-`rune.alias.exact` is an error. `rune.alias.disable("chat off")` then
-addresses it by that phrase; see
-[items that name themselves](/reference/api/#items-that-name-themselves).
-Regex aliases have no natural key and take `name` as usual.
+the [common options](/reference/api/#options). They differ in how they
+are [named](/reference/api/#names): an exact alias is named for its
+normalized phrase, so `rune.alias.disable("chat off")` addresses it and a
+`name` in `opts` is ignored with a notice. A regex alias is a matcher
+rather than a phrase, and several can match one line, so it takes `name`
+as usual.
 
 ## Matching
 

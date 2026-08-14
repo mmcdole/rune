@@ -12,25 +12,26 @@ If you haven't written a trigger or an alias yet, start with
 [Triggers](/scripting/triggers/) and come back. This page makes more sense
 once you have registered a few things.
 
-## Options
+## Names
 
-Every creation function takes an optional `opts` table as its last argument.
-Four fields work everywhere:
+Every registration has a name. It is what you pass to `get`, `enable`,
+`disable` and `remove`, what a re-registration replaces on, and what
+`/triggers`, `/binds` and the other listings show.
 
-| Option | Type | Default | Description |
-|---|---|---|---|
-| `name` | string | none | Unique ID for management. |
-| `group` | string | none | Group membership for batch enable/disable/remove. |
-| `priority` | number | 50 | Execution order where multiple items can match (regex aliases, triggers, hooks). Lower runs first. |
-| `once` | bool | false | Auto-remove after the first match (aliases, triggers). |
+For most registries you supply it:
 
-Naming an item does more than label it. Registering the same name again
-replaces the old entry instead of adding a second one, which is what keeps
-`/reload` from stacking a duplicate trigger every time you edit a script.
-Name anything you expect to re-register.
+```lua
+rune.trigger.contains("food", "eat bread", { name = "feeder" })
+rune.trigger.disable("feeder")
+```
 
-Some things name themselves. A key binding, a bar, a slash command and an
-exact alias each have an obvious identity already, so that is their name:
+Naming does more than label. Registering the same name again replaces the
+old entry instead of adding a second one, which is what keeps `/reload`
+from stacking a duplicate trigger every time you edit a script. Name
+anything you expect to re-register.
+
+Four registries give themselves a name, because the thing you pass first
+already identifies one entry:
 
 ```lua
 rune.bind("ctrl+g", toggle_map)          -- named "ctrl+g"
@@ -42,13 +43,31 @@ rune.binds.disable("ctrl+g")
 rune.bars.disable("status")
 ```
 
-Those four take `group` but not `name`, since a second identity is what
-the single name is there to prevent. Everything else, including regex
-aliases, takes `name` as an ordinary option.
+There is one bind per key, one renderer per bar slot, one handler per
+`/command`, and one expansion per typed phrase, so a separate name would
+have nothing to distinguish. It is also why you can reach the core's own
+binds and bars, which are registered without options at all.
+
+The test for any registry: can two entries share the same first argument?
+Triggers, timers, hooks, GMCP handlers and regex aliases can, so you name
+them. The four above cannot, so they are named for you. Passing `name` to
+one of them is ignored, with a notice telling you the key to manage it by.
+
+## Options
+
+Every creation function takes an optional `opts` table as its last argument.
+Three fields work everywhere:
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `group` | string | none | Group membership for batch enable/disable/remove. |
+| `priority` | number | 50 | Execution order where multiple items can match (regex aliases, triggers, hooks). Lower runs first. |
+| `once` | bool | false | Auto-remove after the first match (aliases, triggers). |
+
+`name` sets the name where the registry does not set its own, as above.
 
 Individual registries add their own options. Triggers take `gag` and `raw`,
-for example. Each [API reference page](/reference/api/) lists its extras; the
-four above work everywhere.
+for example. Each [API reference page](/reference/api/) lists its extras.
 
 ## String and function actions
 

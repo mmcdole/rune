@@ -34,7 +34,7 @@ registry name.
 
 Commands take the [common option](/scripting/model/#options) `group`.
 The command name is the registry `name`, so re-adding a name replaces
-it, and passing `name` yourself is an error.
+it. Passing `name` yourself is ignored with a deprecation notice.
 
 ## Examples
 

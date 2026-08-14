@@ -74,20 +74,28 @@ local Registry = {}
 Registry.__index = Registry
 
 -- Build the opts table for a registry whose entries have a natural key,
--- making that key the name. An explicit name is refused rather than
--- silently ignored: two identities for one entry is the bug this avoids.
+-- making that key the name.
+--
+-- A name used to be a second identity for the same entry, which is the
+-- bug this avoids. It is now dropped with a notice rather than raised:
+-- raising aborts the rest of the user's script, so one stale option in
+-- an old init.lua would cost every registration below it. The notice
+-- names the key to use instead.
 function rune.registry.keyed_opts(key, opts, label)
     if opts ~= nil and type(opts) ~= "table" then
         error(label .. ": opts must be a table", 3)
-    end
-    if opts and opts.name ~= nil then
-        error(label .. ": name is not accepted here, the key is the name", 3)
     end
     local merged = {}
     if opts then
         for k, v in pairs(opts) do
             merged[k] = v
         end
+    end
+    if merged.name ~= nil and merged.name ~= key then
+        local source = rune.caller_source(2)
+        rune.echo(rune.style.yellow("[Deprecated]") .. " " .. label ..
+            ": name '" .. tostring(merged.name) .. "' ignored, manage it as '" ..
+            key .. "'" .. (source and (" @" .. source) or ""))
     end
     merged.name = key
     return merged
