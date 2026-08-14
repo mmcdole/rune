@@ -1,6 +1,8 @@
 package session
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -1138,6 +1140,79 @@ func TestReloadIsDeferredAndRebuildsVM(t *testing.T) {
 	if err := s.engine.DoString("check", `assert(rune.hooks ~= nil)`); err != nil {
 		t.Errorf("scripting broken after reload: %v", err)
 	}
+}
+
+func TestWindowSizeChangeDispatchesHookWithStateInSync(t *testing.T) {
+	s, _, _ := newTestSession(t)
+
+	assertSessionLua(t, s.engine, `
+		captured = nil
+		rune.hooks.on("window_size_changed", function(w, h)
+			captured = {
+				w = w, h = h,
+				w_type = type(w), h_type = type(h),
+				state_w = rune.state.width, state_h = rune.state.height,
+			}
+		end)
+	`)
+
+	// The first reported size and later resizes share this path.
+	s.handleUIEvent(ui.WindowSizeChangedMsg{Width: 120, Height: 40})
+
+	assertSessionLua(t, s.engine, `
+		assert(captured, "window_size_changed did not fire")
+		assert(captured.w_type == "number" and captured.h_type == "number",
+			"args must be numbers")
+		assert(captured.w == 120 and captured.h == 40,
+			"args " .. tostring(captured.w) .. "x" .. tostring(captured.h))
+		assert(captured.state_w == 120 and captured.state_h == 40,
+			"rune.state must already hold the new size during the callback")
+	`)
+}
+
+func TestResizeHookLayoutChangeAppliesInSameCycle(t *testing.T) {
+	s, _, uiMock := newTestSession(t)
+
+	assertSessionLua(t, s.engine, `
+		rune.hooks.on("window_size_changed", function(w)
+			if w < 80 then
+				rune.ui.layout({ bottom = { "input" } })
+			end
+		end)
+	`)
+	uiMock.drainLayoutPushes()
+
+	s.handleUIEvent(ui.WindowSizeChangedMsg{Width: 60, Height: 40})
+
+	if uiMock.drainLayoutPushes() == 0 {
+		t.Error("layout change from a resize handler was not pushed during the resize cycle")
+	}
+}
+
+func TestReloadRestoresDimensionsWithoutSyntheticResize(t *testing.T) {
+	s, _, _ := newTestSession(t)
+	s.handleUIEvent(ui.WindowSizeChangedMsg{Width: 100, Height: 30})
+
+	initLua := `
+		width_at_load = rune.state.width
+		height_at_load = rune.state.height
+		resize_fired = false
+		rune.hooks.on("window_size_changed", function() resize_fired = true end)
+	`
+	initPath := filepath.Join(s.config.ConfigDir, "init.lua")
+	if err := os.WriteFile(initPath, []byte(initLua), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s.handleReloadRequested()
+
+	assertSessionLua(t, s.engine, `
+		assert(width_at_load == 100 and height_at_load == 30,
+			"init.lua must see the restored size, got " ..
+			tostring(width_at_load) .. "x" .. tostring(height_at_load))
+		assert(rune.state.width == 100 and rune.state.height == 30)
+		assert(resize_fired == false, "reload must not fire a synthetic resize")
+	`)
 }
 
 func TestHistoryDedupAndTrim(t *testing.T) {
