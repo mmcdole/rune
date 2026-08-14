@@ -33,8 +33,8 @@ func (r *recordingSearchEffects) PreviewSearch(_ widget.SearchMatch, ok bool) {
 func (r *recordingSearchEffects) CommitSearch() { r.commits++ }
 func (r *recordingSearchEffects) CancelSearch() { r.cancels++ }
 
-// controllerHarness drives an inputController directly, recording
-// outbound events and submitted lines.
+// controllerHarness drives an inputController directly, recording UI events
+// and submitted lines.
 type controllerHarness struct {
 	ctl       *inputController
 	events    []ui.UIEvent
@@ -103,11 +103,9 @@ var pickerTestItems = []ui.PickerItem{
 	{Text: "/disconnect", Value: "/disconnect"},
 }
 
-// TestPickerCallbackSettledOnEveryExit verifies the controller's core
-// invariant: every path out of a picker mode sends exactly one
-// PickerSelectMsg (accepted or cancelled) and resets the mode - even
-// the paths that used to strand the callback, like closing a picker
-// with nothing selected.
+// TestPickerCallbackSettledOnEveryExit verifies that every path out of picker
+// mode sends exactly one accepted or cancelled PickerSelectMsg and resets the
+// mode, including exits with no selected item.
 func TestPickerCallbackSettledOnEveryExit(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -202,10 +200,10 @@ func TestPickerCallbackSettledOnEveryExit(t *testing.T) {
 	}
 }
 
-// TestSubmitReportsClearedInput verifies Enter delivers the line and
-// reports the cleared input, so the session's tracked input
-// (rune.input.get) cannot go stale after a submit.
-func TestSubmitReportsClearedInput(t *testing.T) {
+// TestAcceptedSubmissionClearsLocalDraftOnce verifies the controller clears
+// only its own draft. InputSubmittedMsg carries the same transition to Session,
+// so a second InputChangedMsg would duplicate it.
+func TestAcceptedSubmissionClearsLocalDraftOnce(t *testing.T) {
 	h := newControllerHarness()
 	h.ctl.SetText("look north")
 	h.events = nil
@@ -218,12 +216,8 @@ func TestSubmitReportsClearedInput(t *testing.T) {
 	if got := h.ctl.input.Value(); got != "" {
 		t.Fatalf("expected input cleared after submit, got %q", got)
 	}
-	if len(h.events) != 1 {
-		t.Fatalf("expected one event after submit, got %v", h.events)
-	}
-	ic, ok := h.events[0].(ui.InputChangedMsg)
-	if !ok || ic.Text != "" || ic.Cursor != 0 {
-		t.Fatalf("expected InputChangedMsg{Text: \"\", Cursor: 0}, got %+v", h.events[0])
+	if len(h.events) != 0 {
+		t.Fatalf("accepted submission emitted redundant input event: %v", h.events)
 	}
 }
 
@@ -379,9 +373,8 @@ func TestComposerEnterSubmitsVerbatimExactAndClears(t *testing.T) {
 	if h.ctl.input.IsComposing() {
 		t.Fatal("accepted draft left composer active")
 	}
-	changes := h.inputChanges()
-	if len(changes) != 1 || changes[0].Text != "" || changes[0].Cursor != 0 {
-		t.Fatalf("input changes = %+v, want one cleared-state notification", changes)
+	if changes := h.inputChanges(); len(changes) != 0 {
+		t.Fatalf("accepted submission emitted redundant input changes: %+v", changes)
 	}
 }
 

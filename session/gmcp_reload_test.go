@@ -5,17 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/mmcdole/rune/network"
 )
 
-// TestGMCPStateSurvivesReloadMidConnection reproduces the /reload
-// regression: negotiation is a connection-lifetime fact, but it used
-// to be cached in the VM, so a reload mid-connection left the fresh
-// Lua state believing GMCP was down - is_enabled() lied and
-// subscription changes in the edited init.lua never reached the
-// server until reconnect. State must instead be queried from the
-// connection, making reload transparent.
+// TestGMCPStateSurvivesReloadMidConnection verifies that connection-scoped
+// protocol state remains authoritative while /reload replaces the Lua VM.
 func TestGMCPStateSurvivesReloadMidConnection(t *testing.T) {
 	dir := t.TempDir()
 	writeInit := func(body string) {
@@ -31,8 +24,7 @@ func TestGMCPStateSurvivesReloadMidConnection(t *testing.T) {
 
 	// Server negotiates GMCP on the live connection.
 	net.connected = true
-	net.gmcpActive = true
-	s.handleNetworkOutput(network.Output{Kind: network.OutputGMCPEnabled})
+	serverNegotiatesGMCP(s)
 
 	sent := net.drainGMCPSent()
 	if len(sent) < 2 || sent[0].Package != "Core.Hello" {
@@ -49,8 +41,7 @@ func TestGMCPStateSurvivesReloadMidConnection(t *testing.T) {
 		`rune.echo("RELOAD-GMCP-UP=" .. tostring(rune.gmcp.is_enabled()))`,
 	}, "\n"))
 	s.Reload()
-	cb := <-s.asyncResults // reload is deferred
-	cb()
+	awaitInternalEvent(t, s)
 
 	// is_enabled() must stay truthful in the reloaded VM.
 	if printed := uiMock.drainPrinted(); !contains(printed, "RELOAD-GMCP-UP=true") {

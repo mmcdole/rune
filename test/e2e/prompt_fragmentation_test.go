@@ -2,17 +2,10 @@ package e2e
 
 import "testing"
 
-// TestFragmentedLineDoesNotCommitPromptSnapshots reproduces issue #25: the
-// VikingMUD inventory corruption reported by Moreldir on 2026-07-12. Viking's
-// wizard
-// "I" command builds one logical row with several write() calls. When those
-// writes arrive in separate socket reads, Rune exposes the growing tail as
-// prompt snapshots before the terminating CRLF arrives.
-//
-// Each wait is a causal barrier: the next fragment is not written until the
-// live client has displayed the preceding snapshot. This makes the read
-// fragmentation deterministic without timing assumptions.
-func TestFragmentedLineDoesNotCommitPromptSnapshots(t *testing.T) {
+// Regression for #25: partial lines stay in the prompt overlay, and only the
+// complete line reaches scrollback. Each wait makes the socket split
+// deterministic.
+func TestFragmentedLineAddsOnlyCompleteLineToScrollback(t *testing.T) {
 	c := newClient(t, "")
 	c.connect()
 
@@ -20,12 +13,12 @@ func TestFragmentedLineDoesNotCommitPromptSnapshots(t *testing.T) {
 	complete := partial + " /players/test/item#1 <-> a test item."
 
 	c.mud.write([]byte(partial))
-	c.waitFor("first fragmented-line prompt snapshot", func() bool {
+	c.waitFor("first partial line", func() bool {
 		return c.ui.promptContains(partial)
 	})
 
 	c.mud.write([]byte(complete[len(partial):]))
-	c.waitFor("completed fragmented-line prompt snapshot", func() bool {
+	c.waitFor("updated partial line", func() bool {
 		return c.ui.promptContains(complete)
 	})
 

@@ -1,0 +1,55 @@
+{
+  "description": "Regression: socket reads do not split multiline triggers. If a game line is sent while a partial line is displayed, Rune commits that partial line instead of dropping it.",
+  "scenarios": [
+    {
+      "name": "socket fragmentation does not split a multiline trigger",
+      "issue": "https://github.com/mmcdole/rune/issues/103",
+      "init_lua": [
+        "rune.trigger.regex('^You tell ([A-Za-z]+): (.+)$', function(matches, ctx)",
+        "  rune.echo('E2E-TELL=[' .. ctx.text .. ']')",
+        "end, { span = { to = 'FINAL', max = 8 } })"
+      ],
+      "steps": [
+        { "connect": true },
+        { "server_line": "You tell Player: A long example starts" },
+        {
+          "server_bytes": [97, 110, 100, 32, 99, 111, 110, 116, 105, 110, 117, 101, 115],
+          "note": "the next physical line is split across socket reads"
+        },
+        { "expect_prompt": "and continues", "note": "the partial line is visible in the prompt overlay" },
+        { "server_line": " onto the final physical line FINAL" },
+        {
+          "expect_printed": "E2E-TELL=[A long example starts and continues onto the final physical line FINAL]"
+        }
+      ]
+    },
+    {
+      "name": "a game send commits a partial line",
+      "issue": "https://github.com/mmcdole/rune/issues/103",
+      "init_lua": [
+        "local save_scheduled = false",
+        "rune.hooks.on('prompt', function(line, confirmed)",
+        "  if not confirmed and not save_scheduled and line:clean() == 'E2E-FIRST-FRAGMENT' then",
+        "    save_scheduled = true",
+        "    rune.timer.after(0.01, 'save')",
+        "  end",
+        "end)"
+      ],
+      "steps": [
+        { "connect": true },
+        {
+          "server_bytes": [69, 50, 69, 45, 70, 73, 82, 83, 84, 45, 70, 82, 65, 71, 77, 69, 78, 84],
+          "note": "an ordinary line happens to stop at a socket-read boundary"
+        },
+        { "expect_prompt": "E2E-FIRST-FRAGMENT" },
+        { "expect_sent": "save", "note": "the game send commits the partial line" },
+        {
+          "expect_printed": "E2E-FIRST-FRAGMENT",
+          "note": "the first fragment remains visible in scrollback"
+        },
+        { "server_line": "-E2E-SECOND-FRAGMENT" },
+        { "expect_printed": "-E2E-SECOND-FRAGMENT" }
+      ]
+    }
+  ]
+}

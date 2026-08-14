@@ -232,10 +232,7 @@ func (e *Engine) callHooks(nret int, args ...any) ([]script.Result, bool, error)
 	return results, found, err
 }
 
-// OnSubmission dispatches one immutable input snapshot through Lua. Every
-// input hook receives the same context shape; mode is always either "command"
-// or "verbatim". Verbatim submissions still traverse user input hooks, but
-// the core sender bypasses slash commands, aliases, repeats, and delimiters.
+// OnSubmission runs input hooks and command or verbatim routing.
 func (e *Engine) OnSubmission(submission input.Submission) {
 	ctx := script.Tree{V: map[string]any{"mode": submission.Mode.String()}}
 
@@ -266,19 +263,15 @@ func (e *Engine) OnSubmission(submission input.Submission) {
 	}
 }
 
-// sendVerbatimFallback is the no-Lua escape hatch. strings.Split preserves
-// leading, adjacent, and trailing empty lines and treats only LF as a boundary.
-func (e *Engine) sendVerbatimFallback(input string) {
-	for _, line := range strings.Split(input, "\n") {
+// sendVerbatimFallback sends verbatim input when the Lua input hook is missing.
+func (e *Engine) sendVerbatimFallback(text string) {
+	for _, line := range input.Verbatim(text).PhysicalLines() {
 		_ = e.host.Send(line)
 	}
 }
 
-// OnEcho styles the local echo of typed input by dispatching the
-// "echo" hook: presentation belongs to Lua, so the "> " prefix and
-// color live in the core echo handler, and user handlers may rewrite
-// or hide the echo. Degraded mode falls back to Go-side styling so
-// input stays visible.
+// OnEcho runs the echo hook. The core adds styling; user hooks may rewrite or
+// hide the result.
 func (e *Engine) OnEcho(in string) (string, bool) {
 	// Echo is a presentation boundary. Preserve canonical submission bytes
 	// elsewhere, but never let pasted terminal controls reach either Lua
@@ -322,9 +315,12 @@ func (e *Engine) OnOutput(line text.Line) (string, bool) {
 	return modified.String(), true
 }
 
-// OnPrompt handles server prompts.
-func (e *Engine) OnPrompt(line text.Line) string {
-	results, found, err := e.callHooks(2, "prompt", script.Obj{Type: "line", Payload: &line})
+// OnPrompt dispatches a prompt observation of the partial line through the
+// "prompt" hook chain and returns the display text: the final rewrite, or ""
+// when a handler gagged it. Dispatch failures fall back to the raw line.
+func (e *Engine) OnPrompt(line text.Line, confirmed bool) string {
+	results, found, err := e.callHooks(2, "prompt",
+		script.Obj{Type: "line", Payload: &line}, confirmed)
 	if !found {
 		e.reportHooksBroken()
 		return line.Raw
@@ -339,6 +335,27 @@ func (e *Engine) OnPrompt(line text.Line) string {
 		return ""
 	}
 	return modified.String()
+}
+
+// FlushSpans fires and closes every open multi-line trigger span; the
+// triggers themselves survive.
+func (e *Engine) FlushSpans() {
+	if err := e.guard(func() error {
+		_, _, err := e.vm.CallModule("rune.trigger", "_flush_spans", 0)
+		return err
+	}); err != nil {
+		e.reportError("span flush", err)
+	}
+}
+
+// DiscardSpans drops every open multi-line trigger span without firing it.
+func (e *Engine) DiscardSpans() {
+	if err := e.guard(func() error {
+		_, _, err := e.vm.CallModule("rune.trigger", "_discard_spans", 0)
+		return err
+	}); err != nil {
+		e.reportError("span discard", err)
+	}
 }
 
 // OnGMCP dispatches a GMCP message to Lua: the raw JSON is decoded
@@ -444,8 +461,8 @@ func escapeRawJSONControlsInStrings(raw string) string {
 	return repaired.String()
 }
 
-// CallHook calls a hook event with string arguments.
-func (e *Engine) CallHook(event string, args ...string) {
+// notify dispatches a fire-and-forget event through the Lua hook registry.
+func (e *Engine) notify(event string, args ...string) {
 	callArgs := make([]any, len(args)+1)
 	callArgs[0] = event
 	for i, arg := range args {
@@ -503,7 +520,7 @@ func (e *Engine) reportError(source string, err error) {
 	}
 	e.reportingError = true
 	defer func() { e.reportingError = false }()
-	e.CallHook("error", msg)
+	e.NotifyError(msg)
 }
 
 // reportHooksBroken warns the user, once per VM generation, that the

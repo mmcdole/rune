@@ -1,26 +1,82 @@
 {
-  "description": "GA-terminated prompt lifecycle: overlay display, commit-on-input, replacement by server lines. The second scenario also guards the duplicate-prompt-emission bug fixed in network/client.go (2026-07).",
+  "description": "Prompt overlay behavior for partial lines, GA/EOR prompts, submissions, accepted game sends, and no-GA login.",
   "scenarios": [
     {
-      "name": "GA prompt shows in the overlay and commits on input",
+      "name": "an accepted game send commits a GA/EOR prompt",
       "steps": [
         { "connect": true },
         { "server_prompt": "HP:100> " },
         { "expect_prompt": "HP:100>" },
         { "type": "look" },
-        { "expect_printed": "HP:100>", "note": "prompt commits to scrollback when the user acts" },
+        { "expect_printed": "HP:100>", "note": "the accepted game send commits the prompt to scrollback" },
         { "expect_sent": "look" }
       ]
     },
     {
-      "name": "a server line replaces the prompt without committing it",
+      "name": "a local submission commits a partial prompt before echo and output",
+      "steps": [
+        { "connect": true },
+        {
+          "server_bytes": [87, 104, 97, 116, 32, 105, 115, 32, 121, 111, 117, 114, 32, 110, 97, 109, 101, 58],
+          "note": "What is your name: has no CR/LF, GA, or EOR"
+        },
+        { "expect_prompt": "What is your name:" },
+        { "type": "/help" },
+        { "expect_printed": "What is your name:", "note": "submission commits the partial prompt before local processing" },
+        { "expect_echoed": "/help", "note": "local echo follows the committed prompt" },
+        { "expect_printed": "/aliases", "note": "unique /help output follows the submission" }
+      ]
+    },
+    {
+      "name": "a server line follows a committed GA/EOR prompt",
       "steps": [
         { "connect": true },
         { "server_prompt": "HP:90> " },
         { "expect_prompt": "HP:90>" },
         { "server_line": "the sun rises" },
-        { "expect_printed": "the sun rises" },
-        { "expect_not_printed": "HP:90>" }
+        { "expect_printed": "HP:90>", "note": "GA confirmed the prompt before the next line" },
+        { "expect_printed": "the sun rises" }
+      ]
+    },
+    {
+      "name": "EOR confirms a prompt through the live client",
+      "init_lua": [
+        "rune.hooks.on('prompt', function(line, confirmed)",
+        "  if confirmed and line:clean() == 'E2E-EOR> ' then rune.echo('E2E-EOR-CONFIRMED') end",
+        "end)"
+      ],
+      "steps": [
+        { "connect": true },
+        {
+          "server_bytes": [69, 50, 69, 45, 69, 79, 82, 62, 32, 255, 239],
+          "note": "E2E-EOR> followed by IAC EOR in one server write"
+        },
+        { "expect_prompt": "E2E-EOR>" },
+        { "expect_printed": "E2E-EOR-CONFIRMED" }
+      ]
+    },
+    {
+      "name": "partial-line login prompts can trigger immediately",
+      "init_lua": [
+        "rune.trigger.exact('Username: ', 'example-user', { on = 'prompt', once = true })",
+        "rune.trigger.exact('Password: ', 'example-password', { on = 'prompt', once = true })"
+      ],
+      "steps": [
+        { "connect": true },
+        {
+          "server_bytes": [85, 115, 101, 114, 110, 97, 109, 101, 58, 32],
+          "note": "Username prompt has no CR/LF, GA, or EOR"
+        },
+        { "expect_prompt": "Username:" },
+        { "expect_sent": "example-user" },
+        { "expect_printed": "Username:", "note": "the accepted trigger send commits the no-GA prompt to scrollback" },
+        {
+          "server_bytes": [80, 97, 115, 115, 119, 111, 114, 100, 58, 32],
+          "note": "the accepted username send commits the first prompt before Password arrives"
+        },
+        { "expect_prompt": "Password:" },
+        { "expect_sent": "example-password" },
+        { "expect_printed": "Password:", "note": "the accepted password send also commits its prompt" }
       ]
     }
   ]

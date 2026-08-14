@@ -23,17 +23,43 @@ Handlers run in priority order:
 | Event | Handler receives | Notes |
 |---|---|---|
 | `input` | submitted text, context | Return `false` to consume; other returns are ignored. `context.mode` is read-only and always `"command"` or `"verbatim"`. |
-| `output` | a line object | `false` gags, a string rewrites. The core handler runs triggers at priority 100. |
-| `prompt` | a line object | Same, for prompt fragments. |
+| `output` | a line object | Once per complete line. `false` gags, a string rewrites. The core handler runs output triggers at priority 100. |
+| `prompt` | a line object, `confirmed` | Cumulative partial-line observation (`false`) or GA/EOR-confirmed prompt (`true`). The core runs prompt triggers at priority 100. |
 | `echo` | one physical line of typed text | Like `output` but a plain string. The `> ` prefix is the core handler; replace it if you like. |
 
 For `output`, `prompt`, and `echo`, rewrites chain: a handler returning a
 string replaces the text for every subsequent handler, and `false` stops the
 chain (gags the line or hides the echo). For `input`, only `false` means
 anything. The hook fires once per submission: in verbatim mode `text` is the
-whole draft and may contain LF characters. Existing handlers that accept only
+whole draft and may contain line breaks. Existing handlers that accept only
 `text` continue to work because Lua ignores extra arguments. To rewrite normal
 command input, use an [alias](/scripting/aliases/).
+
+The `prompt` hook drives the prompt overlay; its name does not mean every value
+is a prompt. A partial line may be `Username:` or the first half of a longer
+line. It can repeat as it grows and later arrive once through `output` as a
+complete line. If GA/EOR arrives separately, the same text may run again with
+`confirmed` changing from `false` to `true`. An empty prompt boundary does not
+fire `prompt`. Rune does not use a timer or prompt pattern to confirm it.
+
+A complete line replaces its partial line. A confirmed prompt is committed
+before later server text and closes open spans before `prompt` handlers run,
+so span actions have already fired by the time your handler sees the prompt.
+
+Every user submission finishes the partial line before history, echo, and
+input hooks, including local slash commands and submissions that are consumed,
+disconnected, or eventually fail to send. Programmatic game lines from aliases,
+triggers, timers, and other callbacks finish it only after the connection
+accepts the send. Failed programmatic sends and protocol traffic such as GMCP
+do not.
+
+```lua
+-- Replace state on each observation; partial lines may repeat.
+local current_prompt = ""
+rune.hooks.on("prompt", function(line)
+    current_prompt = line:clean()
+end)
+```
 
 ```lua
 -- Timestamp every line, after triggers have run
@@ -54,8 +80,8 @@ end, { priority = 1 })
 ```
 
 The core handler at priority 100 applies aliases, `;` separators, `#N`
-repeats, and slash commands when `context.mode == "command"`. For
-`"verbatim"`, it splits only on LF and sends every physical line as data.
+repeats, and slash commands when `context.mode == "command"`. Verbatim input
+bypasses command processing and recognizes LF, CRLF, and bare CR line breaks.
 
 ## Notification events
 

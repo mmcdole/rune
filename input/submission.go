@@ -2,8 +2,10 @@
 // interactive composer into the session.
 package input
 
-// SubmissionMode controls whether Rune interprets submitted text as commands
-// or sends its physical lines exactly as written.
+import "strings"
+
+// SubmissionMode controls whether Rune interprets text as a command or sends
+// each physical line without command processing.
 type SubmissionMode uint8
 
 const (
@@ -11,7 +13,7 @@ const (
 	ModeVerbatim
 )
 
-// String returns the stable name exposed to Lua and other policy layers.
+// String returns "command" or "verbatim".
 func (m SubmissionMode) String() string {
 	if m == ModeVerbatim {
 		return "verbatim"
@@ -19,11 +21,21 @@ func (m SubmissionMode) String() string {
 	return "command"
 }
 
-// Submission is an immutable snapshot of the input buffer at the moment the
-// user presses Enter.
+// Submission holds submitted text and its interpretation mode.
 type Submission struct {
 	Text string
 	Mode SubmissionMode
+}
+
+// PhysicalLines splits verbatim input on LF, CRLF, and bare CR. Command input
+// remains one logical command.
+func (s Submission) PhysicalLines() []string {
+	if s.Mode != ModeVerbatim || !strings.ContainsAny(s.Text, "\r\n") {
+		return []string{s.Text}
+	}
+	text := strings.ReplaceAll(s.Text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	return strings.Split(text, "\n")
 }
 
 // Command creates a normal Rune command submission.
@@ -31,7 +43,7 @@ func Command(text string) Submission {
 	return Submission{Text: text, Mode: ModeCommand}
 }
 
-// Verbatim creates a lossless multi-line submission.
+// Verbatim creates a submission that bypasses command processing.
 func Verbatim(text string) Submission {
 	return Submission{Text: text, Mode: ModeVerbatim}
 }

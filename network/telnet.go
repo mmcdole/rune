@@ -2,12 +2,6 @@
 // stream parsing, option negotiation, and connection management.
 package network
 
-import (
-	"bytes"
-	"strings"
-	"sync"
-)
-
 // Telnet command codes.
 const (
 	CmdIAC  byte = 255 // Interpret As Command
@@ -95,7 +89,7 @@ type TelnetEvent struct {
 	Data    []byte // For DataReceive, DataSend, Subnegotiation, DecompressImmediate
 }
 
-// Bitmask constants for CompatibilityTable
+// Bitmask constants for compatibilityTable
 const (
 	bitLocal       byte = 1      // 0x01 - Option is locally supported
 	bitRemote      byte = 1 << 1 // 0x02 - Option is remotely supported
@@ -103,16 +97,16 @@ const (
 	bitRemoteState byte = 1 << 3 // 0x08 - Option is currently enabled remotely
 )
 
-// CompatibilityEntry represents the negotiation state for a single telnet option.
-type CompatibilityEntry struct {
+// compatibilityEntry represents the negotiation state for a single telnet option.
+type compatibilityEntry struct {
 	Local       bool // We support this option locally (us -> them)
 	Remote      bool // We support this option remotely (them -> us)
 	LocalState  bool // Option currently enabled locally
 	RemoteState bool // Option currently enabled remotely
 }
 
-// toU8 converts a CompatibilityEntry to a bitmask.
-func (e CompatibilityEntry) toU8() byte {
+// toU8 converts a compatibilityEntry to a bitmask.
+func (e compatibilityEntry) toU8() byte {
 	var res byte
 	if e.Local {
 		res |= bitLocal
@@ -129,9 +123,9 @@ func (e CompatibilityEntry) toU8() byte {
 	return res
 }
 
-// entryFromU8 creates a CompatibilityEntry from a bitmask.
-func entryFromU8(value byte) CompatibilityEntry {
-	return CompatibilityEntry{
+// entryFromU8 creates a compatibilityEntry from a bitmask.
+func entryFromU8(value byte) compatibilityEntry {
+	return compatibilityEntry{
 		Local:       value&bitLocal == bitLocal,
 		Remote:      value&bitRemote == bitRemote,
 		LocalState:  value&bitLocalState == bitLocalState,
@@ -139,83 +133,61 @@ func entryFromU8(value byte) CompatibilityEntry {
 	}
 }
 
-// CompatibilityTable tracks negotiation state for all 256 telnet options.
+// compatibilityTable tracks negotiation state for all 256 telnet options.
 // Uses compact bitmask representation (4 bits per option).
-type CompatibilityTable struct {
+type compatibilityTable struct {
 	options [256]byte
 }
 
-func NewCompatibilityTable() CompatibilityTable {
-	return CompatibilityTable{}
+func newCompatibilityTable() compatibilityTable {
+	return compatibilityTable{}
 }
 
-// DefaultCompatibility returns the default compatibility table for MUD clients.
-func DefaultCompatibility() CompatibilityTable {
-	return defaultCompatibility()
-}
-
-// fromOptions creates a table from (option, bitmask) tuples.
-// Test scaffolding for constructing arbitrary negotiation states.
-func fromOptions(values [][2]byte) CompatibilityTable {
-	table := CompatibilityTable{}
-	for _, v := range values {
-		table.options[v[0]] = v[1]
-	}
-	return table
-}
-
-func (t *CompatibilityTable) SupportLocal(option byte) {
-	entry := t.Get(option)
+func (t *compatibilityTable) supportLocal(option byte) {
+	entry := t.get(option)
 	entry.Local = true
-	t.Set(option, entry)
+	t.set(option, entry)
 }
 
-func (t *CompatibilityTable) SupportRemote(option byte) {
-	entry := t.Get(option)
+func (t *compatibilityTable) supportRemote(option byte) {
+	entry := t.get(option)
 	entry.Remote = true
-	t.Set(option, entry)
+	t.set(option, entry)
 }
 
-func (t *CompatibilityTable) Support(option byte) {
-	entry := t.Get(option)
+func (t *compatibilityTable) support(option byte) {
+	entry := t.get(option)
 	entry.Local = true
 	entry.Remote = true
-	t.Set(option, entry)
+	t.set(option, entry)
 }
 
-func (t *CompatibilityTable) Get(option byte) CompatibilityEntry {
+func (t *compatibilityTable) get(option byte) compatibilityEntry {
 	return entryFromU8(t.options[option])
 }
 
-func (t *CompatibilityTable) Set(option byte, entry CompatibilityEntry) {
+func (t *compatibilityTable) set(option byte, entry compatibilityEntry) {
 	t.options[option] = entry.toU8()
-}
-
-// ResetStates clears negotiated states while preserving support flags.
-func (t *CompatibilityTable) ResetStates() {
-	for i := range t.options {
-		entry := entryFromU8(t.options[i])
-		entry.LocalState = false
-		entry.RemoteState = false
-		t.options[i] = entry.toU8()
-	}
 }
 
 // Parser is a telnet protocol parser.
 type Parser struct {
-	Options CompatibilityTable
+	options compatibilityTable
 	buffer  []byte
 }
 
-func NewParser(table CompatibilityTable) *Parser {
-	return &Parser{
-		Options: table,
-		buffer:  make([]byte, 0, 128),
-	}
+// NewParser creates a parser with the default client compatibility table.
+func NewParser() *Parser {
+	return newParser(defaultCompatibility())
 }
 
-func NewParserDefault() *Parser {
-	return NewParser(NewCompatibilityTable())
+// newParser creates a parser over an explicit compatibility table; tests use
+// it to exercise non-default negotiation states.
+func newParser(table compatibilityTable) *Parser {
+	return &Parser{
+		options: table,
+		buffer:  make([]byte, 0, 128),
+	}
 }
 
 func (p *Parser) Receive(data []byte) []TelnetEvent {
@@ -223,9 +195,9 @@ func (p *Parser) Receive(data []byte) []TelnetEvent {
 	return p.process()
 }
 
-// EscapeIAC doubles IAC bytes for outbound data.
+// escapeIAC doubles IAC bytes for outbound data.
 // Example: [255, 1, 6, 2] -> [255, 255, 1, 6, 2]
-func EscapeIAC(data []byte) []byte {
+func escapeIAC(data []byte) []byte {
 	out := make([]byte, 0, len(data))
 	for _, b := range data {
 		out = append(out, b)
@@ -236,9 +208,9 @@ func EscapeIAC(data []byte) []byte {
 	return out
 }
 
-// UnescapeIAC collapses doubled IAC bytes in received data.
+// unescapeIAC collapses doubled IAC bytes in received data.
 // Example: [255, 255, 1, 6, 2] -> [255, 1, 6, 2]
-func UnescapeIAC(data []byte) []byte {
+func unescapeIAC(data []byte) []byte {
 	const (
 		stNormal = iota
 		stIAC
@@ -268,75 +240,6 @@ func UnescapeIAC(data []byte) []byte {
 	}
 
 	return out
-}
-
-func (p *Parser) Negotiate(command, option byte) TelnetEvent {
-	return TelnetEvent{
-		Kind: TelnetEventDataSend,
-		Data: []byte{CmdIAC, command, option},
-	}
-}
-
-// Will indicates we want to use an option locally.
-func (p *Parser) Will(option byte) *TelnetEvent {
-	entry := p.Options.Get(option)
-	if entry.Local && !entry.LocalState {
-		entry.LocalState = true
-		p.Options.Set(option, entry)
-		ev := p.Negotiate(CmdWILL, option)
-		return &ev
-	}
-	return nil
-}
-
-// Wont indicates we don't want to use an option locally.
-func (p *Parser) Wont(option byte) *TelnetEvent {
-	entry := p.Options.Get(option)
-	if entry.LocalState {
-		entry.LocalState = false
-		p.Options.Set(option, entry)
-		ev := p.Negotiate(CmdWONT, option)
-		return &ev
-	}
-	return nil
-}
-
-// Do requests the remote end to use an option.
-func (p *Parser) Do(option byte) *TelnetEvent {
-	entry := p.Options.Get(option)
-	if entry.Remote && !entry.RemoteState {
-		ev := p.Negotiate(CmdDO, option)
-		return &ev
-	}
-	return nil
-}
-
-// Dont requests the remote end to stop using an option.
-func (p *Parser) Dont(option byte) *TelnetEvent {
-	entry := p.Options.Get(option)
-	if entry.RemoteState {
-		ev := p.Negotiate(CmdDONT, option)
-		return &ev
-	}
-	return nil
-}
-
-// Subnegotiation sends a subnegotiation for a locally supported and enabled option.
-func (p *Parser) Subnegotiation(option byte, data []byte) *TelnetEvent {
-	entry := p.Options.Get(option)
-	if entry.Local && entry.LocalState {
-		escaped := EscapeIAC(data)
-		buf := make([]byte, 0, 3+len(escaped)+2)
-		buf = append(buf, CmdIAC, CmdSB, option)
-		buf = append(buf, escaped...)
-		buf = append(buf, CmdIAC, CmdSE)
-		return &TelnetEvent{
-			Kind:   TelnetEventDataSend,
-			Option: option,
-			Data:   buf,
-		}
-	}
-	return nil
 }
 
 type eventType int
@@ -454,8 +357,13 @@ func (p *Parser) extract() []parsedSlice {
 
 		case stateSubIAC:
 			if val == CmdSE {
-				// Check for MCCP2/3: remaining data after SE must be decompressed
-				if (subOpt == OptMCCP2 || subOpt == OptMCCP3) && i+1 < len(buf) {
+				// Negotiated MCCP2: remaining data after SE must be
+				// decompressed. An unsolicited MCCP2 subnegotiation is
+				// dropped without discarding the plaintext behind it, and
+				// MCCP3 (client->server compression, always refused) never
+				// changes the read path.
+				mccp2 := p.options.get(OptMCCP2)
+				if subOpt == OptMCCP2 && mccp2.Remote && mccp2.RemoteState && i+1 < len(buf) {
 					res = append(res, parsedSlice{
 						kind:      evSub,
 						buf:       buf[cmdBegin : i+1],
@@ -519,14 +427,14 @@ func (p *Parser) processSub(buf, remaining []byte) []TelnetEvent {
 	// (TTYPE, NAWS) are enabled locally (DO from the server, WILL
 	// from us). Both directions legitimately carry subnegotiations.
 	opt := buf[2]
-	entry := p.Options.Get(opt)
+	entry := p.options.get(opt)
 	localOn := entry.Local && entry.LocalState
 	remoteOn := entry.Remote && entry.RemoteState
 	if !localOn && !remoteOn {
 		return nil
 	}
 
-	payload := UnescapeIAC(buf[3 : len(buf)-2])
+	payload := unescapeIAC(buf[3 : len(buf)-2])
 
 	events := []TelnetEvent{{
 		Kind:   TelnetEventSubnegotiation,
@@ -534,7 +442,7 @@ func (p *Parser) processSub(buf, remaining []byte) []TelnetEvent {
 		Data:   payload,
 	}}
 
-	if (opt == OptMCCP2 || opt == OptMCCP3) && len(remaining) > 0 {
+	if opt == OptMCCP2 && len(remaining) > 0 {
 		events = append(events, TelnetEvent{
 			Kind: TelnetEventDecompressImmediate,
 			Data: remaining,
@@ -545,14 +453,14 @@ func (p *Parser) processSub(buf, remaining []byte) []TelnetEvent {
 }
 
 func (p *Parser) processNegotiation(command, opt byte) []TelnetEvent {
-	entry := p.Options.Get(opt)
+	entry := p.options.get(opt)
 	var responses []TelnetEvent
 
 	switch command {
 	case CmdWILL:
 		if entry.Remote && !entry.RemoteState {
 			entry.RemoteState = true
-			p.Options.Set(opt, entry)
+			p.options.set(opt, entry)
 			responses = append(responses, TelnetEvent{
 				Kind: TelnetEventDataSend,
 				Data: []byte{CmdIAC, CmdDO, opt},
@@ -572,7 +480,7 @@ func (p *Parser) processNegotiation(command, opt byte) []TelnetEvent {
 	case CmdWONT:
 		if entry.RemoteState {
 			entry.RemoteState = false
-			p.Options.Set(opt, entry)
+			p.options.set(opt, entry)
 			responses = append(responses, TelnetEvent{
 				Kind: TelnetEventDataSend,
 				Data: []byte{CmdIAC, CmdDONT, opt},
@@ -589,7 +497,7 @@ func (p *Parser) processNegotiation(command, opt byte) []TelnetEvent {
 			// DO enables our side only; the remote side needs the
 			// server's own WILL.
 			entry.LocalState = true
-			p.Options.Set(opt, entry)
+			p.options.set(opt, entry)
 			responses = append(responses, TelnetEvent{
 				Kind: TelnetEventDataSend,
 				Data: []byte{CmdIAC, CmdWILL, opt},
@@ -609,7 +517,7 @@ func (p *Parser) processNegotiation(command, opt byte) []TelnetEvent {
 	case CmdDONT:
 		if entry.LocalState {
 			entry.LocalState = false
-			p.Options.Set(opt, entry)
+			p.options.set(opt, entry)
 			responses = append(responses, TelnetEvent{
 				Kind: TelnetEventDataSend,
 				Data: []byte{CmdIAC, CmdWONT, opt},
@@ -625,174 +533,22 @@ func (p *Parser) processNegotiation(command, opt byte) []TelnetEvent {
 	return responses
 }
 
-// TelnetMode represents how prompt/line boundaries are detected.
-type TelnetMode int
-
-const (
-	TelnetModeUnterminated     TelnetMode = iota // Split on \n, prompts are unterminated
-	TelnetModeTerminatedPrompt                   // Prompts terminated by GA/EOR
-)
-
-// OutputBuffer buffers incoming data and splits it into lines.
-// Lines are delimited by \r\n, \n\r, \n, or a bare \r — the contract of the
-// original ExtractLines. Bare \r matters: muds return the carriage to
-// overwrite their pending prompt line, and an embedded \r that reaches the
-// UI renders the rest of the line over stale cells (ghost columns).
-// Fragmentation-safe: a \r that ends a read is held in the buffer until the
-// next read decides whether it pairs with a following \n, and a delimiter
-// pair split across reads is completed via pendingPartner instead of
-// emitting a spurious empty line.
-// The mutex is required: the read loop parses into the buffer while
-// the write loop calls InputSent to drop a pending prompt.
-type OutputBuffer struct {
-	mu      sync.Mutex
-	buffer  bytes.Buffer
-	mode    TelnetMode
-	newData bool
-	// pendingPartner is the second byte of a delimiter pair whose first
-	// byte was already consumed at the end of a previous read ('\r' after
-	// an emitted \n, or '\n' after a held \r dropped by Prompt/InputSent).
-	// If the next read starts with it, it is swallowed.
-	pendingPartner byte
-}
-
-func NewOutputBuffer(mode TelnetMode) *OutputBuffer {
-	return &OutputBuffer{mode: mode}
-}
-
-func (o *OutputBuffer) SetMode(mode TelnetMode) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	o.mode = mode
-}
-
-func (o *OutputBuffer) Receive(data []byte) []string {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	if o.pendingPartner != 0 {
-		if len(data) > 0 && data[0] == o.pendingPartner {
-			data = data[1:]
-		}
-		o.pendingPartner = 0
-	}
-	if len(data) == 0 {
-		return nil
-	}
-	o.buffer.Write(data)
-	o.newData = true
-	buf := o.buffer.Bytes()
-	var lines []string
-	last := 0
-
-	for i := 0; i < len(buf); i++ {
-		switch buf[i] {
-		case '\n':
-			lines = append(lines, string(buf[last:i]))
-			if i+1 < len(buf) && buf[i+1] == '\r' {
-				i++ // \n\r pair
-			} else if i+1 == len(buf) {
-				// the \r of an \n\r pair may arrive in the next read
-				o.pendingPartner = '\r'
-			}
-			last = i + 1
-		case '\r':
-			if i+1 == len(buf) {
-				// may be half of \r\n: hold it in the buffer until the
-				// next read shows its neighbor
-				break
-			}
-			lines = append(lines, string(buf[last:i]))
-			if buf[i+1] == '\n' {
-				i++ // \r\n pair
-			}
-			last = i + 1
-		}
-	}
-
-	if last > 0 {
-		remaining := buf[last:]
-		o.buffer.Reset()
-		o.buffer.Write(remaining)
-	}
-
-	return lines
-}
-
-// Prompt returns any pending (unterminated) text. Clears buffer if consume is true.
-// A held trailing \r (a possible half of \r\n) is never part of the prompt
-// text; on consume its \n partner, if it arrives next, is still swallowed.
-func (o *OutputBuffer) Prompt(consume bool) string {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	if o.buffer.Len() == 0 {
-		return ""
-	}
-	text := o.buffer.String()
-	heldCR := strings.HasSuffix(text, "\r")
-	if heldCR {
-		text = text[:len(text)-1]
-	}
-	if consume {
-		o.buffer.Reset()
-		o.newData = false
-		if heldCR {
-			o.pendingPartner = '\n'
-		}
-	}
-	return text
-}
-
-func (o *OutputBuffer) HasNewData() bool {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	return o.newData
-}
-
-// InputSent clears the buffer in unterminated mode since the server
-// will reprint the prompt after echoing the input.
-func (o *OutputBuffer) InputSent() {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	if o.mode == TelnetModeUnterminated {
-		if bytes.HasSuffix(o.buffer.Bytes(), []byte{'\r'}) {
-			o.pendingPartner = '\n' // dropped a held \r; swallow its pair
-		}
-		o.buffer.Reset()
-		o.newData = false
-	}
-}
-
-func (o *OutputBuffer) Len() int {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	return o.buffer.Len()
-}
-
-func (o *OutputBuffer) Clear() {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	o.buffer.Reset()
-	o.mode = TelnetModeUnterminated
-	o.newData = false
-	o.pendingPartner = 0
-}
-
 // defaultCompatibility advertises ONLY options the client actually
 // implements. Advertising an option we cannot honor is worse than
 // refusing it: agreeing to MCCP means the server starts sending
 // compressed data we cannot decompress, agreeing to TTYPE/NAWS means
 // the server waits for subnegotiation replies that never come. Add
 // options here only together with their implementation.
-func defaultCompatibility() CompatibilityTable {
-	t := NewCompatibilityTable()
-	t.SupportRemote(OptEcho)      // WILL/WONT ECHO toggles local echo (client.go); we never echo to the server
-	t.Support(OptSGA)             // Suppress Go Ahead: full-duplex handshake
-	t.SupportRemote(OptEOR)       // End of Record: servers mark prompts; we never send them
-	t.SupportLocal(OptTTYPE)      // Terminal type + MTTS cycle (negotiate.go)
-	t.SupportLocal(OptNAWS)       // Window size reports (negotiate.go, client.go)
-	t.Support(OptCharset)         // UTF-8 charset negotiation (negotiate.go)
-	t.SupportLocal(OptNewEnviron) // MNES client identification (negotiate.go)
-	t.SupportRemote(OptMCCP2)     // Server->client zlib compression (client.go)
-	t.Support(OptGMCP)            // Out-of-band JSON messages (client.go, Lua rune.gmcp)
+func defaultCompatibility() compatibilityTable {
+	t := newCompatibilityTable()
+	t.supportRemote(OptEcho)      // WILL/WONT ECHO controls local echo (protocol.go); we never echo to the server
+	t.support(OptSGA)             // Suppress Go Ahead: full-duplex handshake
+	t.supportRemote(OptEOR)       // End of Record: servers mark prompts; we never send them
+	t.supportLocal(OptTTYPE)      // Terminal type + MTTS cycle (negotiate.go)
+	t.supportLocal(OptNAWS)       // Window size reports (negotiate.go, protocol.go)
+	t.support(OptCharset)         // UTF-8 charset negotiation (negotiate.go)
+	t.supportLocal(OptNewEnviron) // MNES client identification (negotiate.go)
+	t.supportRemote(OptMCCP2)     // Server->client zlib compression (client.go)
+	t.support(OptGMCP)            // Out-of-band JSON messages (protocol.go, Lua rune.gmcp)
 	return t
 }

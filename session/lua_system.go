@@ -15,19 +15,21 @@ func (s *Session) Quit() {
 // Must be deferred because it destroys the currently executing Lua state.
 // The send is non-blocking by necessity: Reload runs ON the session
 // goroutine (called from inside a Lua dispatch), so blocking on the
-// async-result channel here would deadlock the loop that drains it.
+// internal-event channel here would deadlock the loop that drains it.
 func (s *Session) Reload() {
-	s.engine.CallHook("reloading")
+	s.engine.NotifyReloading()
 	select {
-	case s.asyncResults <- func() {
-		if err := s.boot(); err != nil {
-			s.ui.Print(text.Red(fmt.Sprintf("Reload Failed: %v", err)))
-		} else {
-			s.engine.CallHook("reloaded")
-		}
-	}:
+	case s.internalEvents <- reloadRequested{}:
 	default:
 		s.ui.Print(text.Red("Reload Failed: event queue full"))
+	}
+}
+
+func (s *Session) handleReloadRequested() {
+	if err := s.boot(); err != nil {
+		s.ui.Print(text.Red(fmt.Sprintf("Reload Failed: %v", err)))
+	} else {
+		s.engine.NotifyReloaded()
 	}
 }
 

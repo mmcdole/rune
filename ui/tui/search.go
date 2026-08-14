@@ -24,7 +24,7 @@ type searchViewState struct {
 func (m *Model) OpenSearch() widget.SearchScope {
 	m.searchView.snapshot = m.viewport.SaveScroll()
 	m.searchView.priorFocus = m.searchView.focus
-	m.sendOutbound(ui.SearchStateChangedMsg(true))
+	m.notifySession(ui.SearchStateChangedMsg(true))
 
 	scope := widget.SearchScope{}
 	if m.scrollback.Count() > 0 {
@@ -79,7 +79,7 @@ func (m *Model) CommitSearch() {
 		m.viewport.ClearHighlight()
 	}
 	m.searchView.priorFocus = nil
-	m.sendOutbound(ui.SearchStateChangedMsg(false))
+	m.notifySession(ui.SearchStateChangedMsg(false))
 	m.updateScrollState()
 }
 
@@ -96,7 +96,7 @@ func (m *Model) CancelSearch() {
 		m.viewport.ClearHighlight()
 	}
 	m.searchView.priorFocus = nil
-	m.sendOutbound(ui.SearchStateChangedMsg(false))
+	m.notifySession(ui.SearchStateChangedMsg(false))
 	m.updateScrollState()
 }
 

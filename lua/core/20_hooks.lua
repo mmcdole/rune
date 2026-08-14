@@ -16,7 +16,9 @@
 -- Events (data-flow):
 --   "input"        -- User input: (text, context); return false to consume
 --   "output"       -- Server output line object (false gags, string rewrites)
---   "prompt"       -- Server prompt line object (false gags, string rewrites)
+--   "prompt"       -- Prompt observation: (line, confirmed); confirmed is
+--                     false for a partial line, true for a GA/EOR-confirmed
+--                     prompt (false gags, string rewrites)
 --   "echo"         -- Local echo of typed input, plain string (false hides,
 --                     string rewrites; core handler adds the "> " styling)
 -- Events (notifications):
@@ -115,9 +117,7 @@ local function run_handler(entry, ...)
     return nil
 end
 
--- Input contexts describe an immutable submission snapshot. Each handler gets
--- a fresh read-only proxy so even raw mutation cannot change the canonical
--- mode observed by later handlers or by the core router.
+-- Give each input handler its own read-only context.
 local function reject_input_context_write()
     error("input context is read-only", 2)
 end
@@ -180,10 +180,19 @@ function rune.hooks.call(event, ...)
         -- for every subsequent handler, so rewrites compose in priority
         -- order instead of last-writer-wins on the original text.
         local line = select(1, ...)
+        local confirmed = select(2, ...)
+        if event == "prompt" and type(confirmed) ~= "boolean" then
+            error("prompt requires an explicit confirmed boolean", 2)
+        end
 
         for _, entry in ipairs(handlers) do
             if registry:active(entry) then
-                local result = run_handler(entry, line)
+                local result
+                if event == "prompt" then
+                    result = run_handler(entry, line, confirmed)
+                else
+                    result = run_handler(entry, line)
+                end
                 if result == false then
                     return "", false  -- gagged
                 elseif type(result) == "string" then

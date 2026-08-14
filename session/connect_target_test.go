@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/mmcdole/rune/lua"
 )
@@ -23,29 +22,15 @@ func bootWithTarget(t *testing.T, dir, target string) (*Session, *mockNetwork, *
 	if err := s.boot(); err != nil {
 		t.Fatalf("boot failed: %v", err)
 	}
-	t.Cleanup(func() {
-		s.timer.Stop()
-	})
+	cleanupTestSession(t, s)
 	return s, net, uiMock
-}
-
-// drainConnect waits for the async dial result and executes it, as
-// the event loop would.
-func drainConnect(t *testing.T, s *Session) {
-	t.Helper()
-	select {
-	case cb := <-s.asyncResults:
-		cb()
-	case <-time.After(5 * time.Second):
-		t.Fatal("connect never completed")
-	}
 }
 
 // TestCLITargetConnectsOnStartup verifies "rune host port" dials on
 // first boot, with the scheme-preserving address form.
 func TestCLITargetConnectsOnStartup(t *testing.T) {
 	s, net, uiMock := bootWithTarget(t, t.TempDir(), "mud.example.com 4000")
-	drainConnect(t, s)
+	awaitInternalEvent(t, s)
 
 	if dialed := net.dialed(); len(dialed) != 1 || dialed[0] != "mud.example.com:4000" {
 		t.Fatalf("dialed %v, want [mud.example.com:4000]", dialed)
@@ -65,7 +50,7 @@ func TestCLITargetResolvesWorldNames(t *testing.T) {
 	}
 
 	s, net, _ := bootWithTarget(t, dir, "arctic")
-	drainConnect(t, s)
+	awaitInternalEvent(t, s)
 
 	if dialed := net.dialed(); len(dialed) != 1 || dialed[0] != "tls://mud.arcticmud.org:2701" {
 		t.Fatalf("dialed %v, want the saved world address", dialed)
@@ -76,11 +61,10 @@ func TestCLITargetResolvesWorldNames(t *testing.T) {
 // the first boot: /reload must not redial.
 func TestCLITargetNotRepeatedOnReload(t *testing.T) {
 	s, net, _ := bootWithTarget(t, t.TempDir(), "mud.example.com:4000")
-	drainConnect(t, s)
+	awaitInternalEvent(t, s)
 
 	s.Reload()
-	cb := <-s.asyncResults
-	cb()
+	awaitInternalEvent(t, s)
 
 	if dialed := net.dialed(); len(dialed) != 1 {
 		t.Fatalf("reload redialed: %v", dialed)

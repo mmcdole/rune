@@ -270,6 +270,7 @@ rune.command.add("triggers", function(args)
         if t.once then flags[#flags + 1] = "once" end
         if t.raw then flags[#flags + 1] = "raw" end
         if t.span then flags[#flags + 1] = "span" end
+        if t.on == "prompt" then flags[#flags + 1] = "on:prompt" end
         local name_str = t.name and (" " .. dim("name:") .. t.name) or ""
         local flags_str = #flags > 0 and ("  " .. dim("(" .. table.concat(flags, ", ") .. ")")) or ""
         local src_str = t.source and ("  " .. dim("@" .. t.source)) or ""
@@ -287,7 +288,7 @@ rune.command.add("test", function(args)
 
     rune.echo("[Test Input] " .. args)
 
-    local modified, show = rune.trigger.process(rune.line.new(args))
+    local modified, show = rune.trigger._process_output(rune.line.new(args))
     if show and modified ~= "" then
         rune.echo("[Test Output] " .. modified)
     else

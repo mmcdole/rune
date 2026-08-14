@@ -25,9 +25,7 @@ func newTestSessionInDir(t *testing.T, dir string) (*Session, *mockNetwork, *moc
 		t.Fatalf("boot failed: %v", err)
 	}
 	uiMock.drainPrinted()
-	t.Cleanup(func() {
-		s.timer.Stop()
-	})
+	cleanupTestSession(t, s)
 	return s, net, uiMock
 }
 
@@ -72,7 +70,7 @@ func TestCorruptStoreBackedUpNotDiscarded(t *testing.T) {
 	if err := s.boot(); err != nil {
 		t.Fatalf("boot failed: %v", err)
 	}
-	t.Cleanup(func() { s.timer.Stop() })
+	cleanupTestSession(t, s)
 
 	if !contains(uiMock.drainPrinted(), "corrupt") {
 		t.Error("corrupt store not reported at boot")

@@ -125,10 +125,22 @@ end
 
 -- Core function wrappers around Go primitives (rune._*)
 
--- Send raw text to the server, bypassing alias processing.
+-- Send game text without alias processing. LF, CRLF, and bare CR separate
+-- physical lines.
 -- Echoes send failures (e.g. not connected) rather than raising.
 -- Returns true, or nil + error message.
 function rune.send_raw(text)
+    if type(text) == "string" and text:find("[\r\n]") then
+        text = text:gsub("\r\n", "\n"):gsub("\r", "\n")
+        local ok, err
+        for line in (text .. "\n"):gmatch("(.-)\n") do
+            ok, err = rune.send_raw(line)
+            if not ok then
+                return ok, err
+            end
+        end
+        return ok, err
+    end
     local ok, err = rune._send_raw(text)
     if not ok then
         rune.echo(rune.style.red("[Error]") .. " " .. tostring(err))

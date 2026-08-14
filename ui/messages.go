@@ -2,15 +2,15 @@ package ui
 
 import "github.com/mmcdole/rune/input"
 
-// UIEvent is implemented by all messages sent from UI to Session.
-// This provides compile-time type safety for the outbound channel.
+// UIEvent is implemented by all messages sent from UI to Session. They travel
+// one ordered channel (UI.Events()), so accepted events cannot overtake each
+// other.
 type UIEvent interface {
 	uiEvent() // unexported marker method - only this package can implement
 }
 
-// PrintLineMsg carries output text to append to scrollback. The text
-// may contain newlines; the TUI splits and wraps it into rows.
-// Used for all output: server lines, Lua prints, etc.
+// PrintLineMsg carries text to append to scrollback. It may contain newlines;
+// the TUI splits and wraps it into rows.
 type PrintLineMsg string
 
 // EchoLineMsg carries a local echo (user input, already styled by the
@@ -18,8 +18,11 @@ type PrintLineMsg string
 // text may contain newlines.
 type EchoLineMsg string
 
-// PromptMsg represents a server prompt (partial line without newline).
-type PromptMsg string
+// SetPromptMsg replaces the prompt overlay with a partial line or confirmed prompt.
+type SetPromptMsg string
+
+// CommitPromptMsg moves the prompt overlay to scrollback in one update.
+type CommitPromptMsg string
 
 // PaneWriteMsg appends a line to a named pane.
 type PaneWriteMsg struct {
@@ -66,13 +69,21 @@ type UpdateLayoutMsg struct {
 
 // --- Push-based UI Messages (UI -> Session) ---
 
+// InputSubmittedMsg transfers an accepted input snapshot to Session. Once this
+// event is queued, the UI may clear its draft.
+type InputSubmittedMsg struct {
+	Submission input.Submission
+}
+
+func (InputSubmittedMsg) uiEvent() {}
+
 // ExecuteBindMsg requests Session to execute a Lua key binding.
 // Sent when UI detects a key that's in the boundKeys map.
 type ExecuteBindMsg string
 
 func (ExecuteBindMsg) uiEvent() {}
 
-// WindowSizeMsg notifies Session of window size changes.
+// WindowSizeChangedMsg notifies Session of window size changes.
 // Session uses this to update rune.state.width/height.
 type WindowSizeChangedMsg struct {
 	Width  int

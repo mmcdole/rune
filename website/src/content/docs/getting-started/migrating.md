@@ -1,6 +1,6 @@
 ---
 title: Migrating from Other Clients
-description: A translation map from TinTin++ and Mudlet syntax to rune's Lua API.
+description: Translation notes for bringing TinTin++, Mudlet, MUSHclient, zMUD, CMUD, and Blightmud scripts to Rune's Lua API.
 ---
 
 Rune has no in-client command language: scripting is Lua. Aliases, triggers,
@@ -53,13 +53,14 @@ The scripting language is the same; the API names differ:
 | `matches[2]` (first capture) | `matches[1]`; there is no whole-match slot |
 | `tempTimer(5, code)` | `rune.timer.after(5, action)` |
 | `tempRegexTrigger(pattern, code)` | `rune.trigger.regex(pattern, action)` |
+| prompt trigger | `rune.trigger.regex(pattern, action, { on = "prompt" })` |
 | script editor window | your `$EDITOR`; `Ctrl+E` edits the input line in it too |
 
 ## From MUSHclient
 
 The scripting language is the same; the API names differ. If you're using
 MUSHclient's XML syntax for creating triggers, aliases, and timers, you'll
-need to covert those to Lua first.
+need to convert those to Lua first.
 
 | MUSHclient                        | Rune equivalent                       |
 |-----------------------------------|---------------------------------------|
@@ -71,9 +72,27 @@ need to covert those to Lua first.
 | `tempRegexTrigger(pattern, code)` | `rune.trigger.regex(pattern, action)` |
 | `EnableTrigger("tname",false)`    | `rune.trigger.disable("tname")`       |
 | `SetVariable("varname","value")`  | `rune.store.set("varname","value")`   |
+| `OnPluginPartialLine`             | See [Prompt triggers](#prompt-triggers) |
 
-Some functions such as ColourNote have no direct equivalent, but a simple
-wrapper function could replace it with Lua. (using `rune.style.*`)
+Some functions, such as `ColourNote`, have no direct equivalent. A small Lua
+wrapper around `rune.style.*` can replace them.
+
+## Prompt triggers
+
+Clients expose prompt handling under different names. Rune uses
+`on = "prompt"` as an option on an ordinary trigger:
+
+| Client concept | Rune equivalent |
+|---|---|
+| TinTin++ `#prompt` / `RECEIVED PROMPT` event | trigger with `{ on = "prompt" }` |
+| zMUD/CMUD **Trigger on Prompt** | trigger with `{ on = "prompt" }` |
+| Blightmud trigger with `prompt = true` | trigger with `{ on = "prompt" }` |
+| Mudlet prompt trigger | trigger with `{ on = "prompt" }` |
+| MUSHclient `OnPluginPartialLine` | prompt trigger to match text, or the `prompt` hook to observe every update |
+
+Prompt triggers see the partial line and prompts confirmed by Telnet GA/EOR.
+Complete lines go through output triggers. See the
+[Triggers guide](/scripting/triggers/#prompt-triggers) for the full model.
 
 ## Capture references
 

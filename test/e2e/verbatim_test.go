@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/mmcdole/rune/input"
+	"github.com/mmcdole/rune/ui"
 )
 
 // TestVerbatimSubmissionReachesWireExactly is the live-client contract for
@@ -15,7 +16,7 @@ func TestVerbatimSubmissionReachesWireExactly(t *testing.T) {
 	c.connect()
 
 	draft := "  say one;look  \n\n/quit\n\tlast  "
-	c.ui.input <- input.Verbatim(draft)
+	c.ui.events <- ui.InputSubmittedMsg{Submission: input.Verbatim(draft)}
 
 	// Semicolons and /quit are data in verbatim mode. Each LF becomes one
 	// telnet line ending; indentation, the empty line, tab, and trailing spaces

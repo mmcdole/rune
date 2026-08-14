@@ -2,32 +2,13 @@ package network
 
 import (
 	"bytes"
-	"sync"
 	"testing"
 )
 
-// Helper to build a subnegotiation sequence
-func buildSubneg(opt byte, payload []byte) []byte {
-	escaped := EscapeIAC(payload)
-	out := make([]byte, 0, 5+len(escaped))
-	out = append(out, CmdIAC, CmdSB, opt)
-	out = append(out, escaped...)
-	out = append(out, CmdIAC, CmdSE)
-	return out
-}
-
-// eventKinds extracts just the event kinds for comparison
-func eventKinds(events []TelnetEvent) []TelnetEventKind {
-	kinds := make([]TelnetEventKind, len(events))
-	for i, ev := range events {
-		kinds[i] = ev.Kind
-	}
-	return kinds
-}
-
-// Ensure DO negotiations split across TCP reads are handled and replied to.
+// TestParserHandlesSplitDoNegotiation verifies that an incomplete command is
+// retained until its option byte arrives in a later parser call.
 func TestParserHandlesSplitDoNegotiation(t *testing.T) {
-	parser := NewParser(DefaultCompatibility())
+	parser := NewParser()
 
 	// First chunk ends mid-command: IAC DO (missing option) - should emit nothing.
 	events := parser.Receive([]byte{CmdIAC, CmdDO})
@@ -53,37 +34,63 @@ func TestParserHandlesSplitDoNegotiation(t *testing.T) {
 	}
 }
 
-// Ensure the default table refuses options the client does not
-// implement. Accepting MCCP3 without a compressor corrupts the
-// stream; accepting an option we cannot subnegotiate leaves the
-// server waiting for replies that never come.
-func TestDefaultCompatibilityRefusesUnimplementedOptions(t *testing.T) {
-	for _, opt := range []byte{OptMCCP3, OptMSSP, OptZMP, OptLinemode} {
-		parser := NewParser(DefaultCompatibility())
-
-		events := parser.Receive([]byte{CmdIAC, CmdWILL, opt})
-		assertReply(t, events, []byte{CmdIAC, CmdDONT, opt}, "WILL", opt)
-
-		events = parser.Receive([]byte{CmdIAC, CmdDO, opt})
-		assertReply(t, events, []byte{CmdIAC, CmdWONT, opt}, "DO", opt)
+func TestDefaultCompatibilityNegotiationPolicy(t *testing.T) {
+	groups := []struct {
+		name       string
+		command    byte
+		options    []byte
+		reply      byte
+		eventCount int
+	}{
+		{
+			name:       "accept server options",
+			command:    CmdWILL,
+			options:    []byte{OptMCCP2, OptGMCP, OptEcho, OptSGA, OptEOR},
+			reply:      CmdDO,
+			eventCount: 2,
+		},
+		{
+			name:       "accept client options",
+			command:    CmdDO,
+			options:    []byte{OptTTYPE, OptNAWS, OptCharset, OptNewEnviron},
+			reply:      CmdWILL,
+			eventCount: 2,
+		},
+		{
+			name:       "refuse unimplemented server options",
+			command:    CmdWILL,
+			options:    []byte{OptMCCP3, OptMSSP, OptZMP, OptLinemode},
+			reply:      CmdDONT,
+			eventCount: 1,
+		},
+		{
+			name:       "refuse unimplemented client options",
+			command:    CmdDO,
+			options:    []byte{OptMCCP3, OptMSSP, OptZMP, OptLinemode},
+			reply:      CmdWONT,
+			eventCount: 1,
+		},
+		{
+			name:       "refuse unsupported direction",
+			command:    CmdDO,
+			options:    []byte{OptEcho, OptEOR},
+			reply:      CmdWONT,
+			eventCount: 1,
+		},
 	}
-}
 
-// Ensure the default table accepts the options the client implements,
-// in the direction each is actually used.
-func TestDefaultCompatibilityAcceptsImplementedOptions(t *testing.T) {
-	// Server-offered options: server sends WILL, we must DO.
-	for _, opt := range []byte{OptMCCP2, OptGMCP, OptEcho, OptSGA, OptEOR} {
-		parser := NewParser(DefaultCompatibility())
-		events := parser.Receive([]byte{CmdIAC, CmdWILL, opt})
-		assertReply(t, events, []byte{CmdIAC, CmdDO, opt}, "WILL", opt)
-	}
-
-	// Client-answered options: server sends DO, we must WILL.
-	for _, opt := range []byte{OptTTYPE, OptNAWS, OptCharset, OptNewEnviron} {
-		parser := NewParser(DefaultCompatibility())
-		events := parser.Receive([]byte{CmdIAC, CmdDO, opt})
-		assertReply(t, events, []byte{CmdIAC, CmdWILL, opt}, "DO", opt)
+	for _, group := range groups {
+		t.Run(group.name, func(t *testing.T) {
+			for _, option := range group.options {
+				parser := NewParser()
+				events := parser.Receive([]byte{CmdIAC, group.command, option})
+				if len(events) != group.eventCount {
+					t.Fatalf("option %d produced %d events, want %d: %+v", option, len(events), group.eventCount, events)
+				}
+				want := []byte{CmdIAC, group.reply, option}
+				assertReply(t, events, want, group.name, option)
+			}
+		})
 	}
 }
 
@@ -97,107 +104,48 @@ func assertReply(t *testing.T, events []TelnetEvent, want []byte, cmd string, op
 			return
 		}
 	}
-	t.Errorf("%s %d: expected a refusal reply, got none", cmd, opt)
+	t.Errorf("%s %d: expected a negotiation reply, got none", cmd, opt)
 }
 
-func TestParser(t *testing.T) {
-	parser := NewParserDefault()
-	parser.Options.SupportLocal(OptGMCP)
-	parser.Options.SupportLocal(OptMCCP2)
+func TestParserStopsAtMCCPActivation(t *testing.T) {
+	table := newCompatibilityTable()
+	table.set(OptMCCP2, compatibilityEntry{Remote: true, RemoteState: true})
+	parser := newParser(table)
+	remainder := []byte("compressed bytes")
+	wire := append(subnegFrame(OptMCCP2, nil), remainder...)
 
-	// Test Will() returns send event when locally supported
-	ev := parser.Will(OptGMCP)
-	if ev == nil {
-		t.Fatal("Will(GMCP) should return event")
+	events := parser.Receive(wire)
+	if len(events) != 2 {
+		t.Fatalf("events = %+v, want activation and compressed remainder", events)
 	}
-	if ev.Kind != TelnetEventDataSend {
-		t.Errorf("Will should return DataSend, got %v", ev.Kind)
+	if event := events[0]; event.Kind != TelnetEventSubnegotiation || event.Option != OptMCCP2 {
+		t.Fatalf("activation event = %+v", event)
 	}
+	if event := events[1]; event.Kind != TelnetEventDecompressImmediate || !bytes.Equal(event.Data, remainder) {
+		t.Fatalf("remainder event = %+v, want %q", event, remainder)
+	}
+}
 
-	ev = parser.Will(OptMCCP2)
-	if ev == nil {
-		t.Fatal("Will(MCCP2) should return event")
-	}
+// An unsolicited compression subnegotiation must not switch the read path or
+// swallow the plaintext that follows it: MCCP3 (client->server compression)
+// stays refused outright, and MCCP2 splits the stream only once negotiated.
+func TestUnsolicitedMCCPSubnegotiationDoesNotSwallowFollowingText(t *testing.T) {
+	for _, opt := range []byte{OptMCCP2, OptMCCP3} {
+		parser := NewParser()
+		wire := append(subnegFrame(opt, nil), []byte("plain text")...)
 
-	// Test receiving data with IAC GA
-	events := parser.Receive(append([]byte("Hello, world!"), CmdIAC, CmdGA))
-	kinds := eventKinds(events)
-	expected := []TelnetEventKind{TelnetEventDataReceive, TelnetEventIAC}
-	if len(kinds) != len(expected) {
-		t.Fatalf("Expected %d events, got %d", len(expected), len(kinds))
-	}
-	for i := range expected {
-		if kinds[i] != expected[i] {
-			t.Errorf("Event %d: expected %v, got %v", i, expected[i], kinds[i])
+		events := parser.Receive(wire)
+		if len(events) != 1 || events[0].Kind != TelnetEventDataReceive ||
+			string(events[0].Data) != "plain text" {
+			t.Fatalf("option %d: events = %+v, want only the plaintext data", opt, events)
 		}
-	}
-
-	// Test IAC DO GMCP - since we already called Will(GMCP), LocalState is true,
-	// so receiving DO should produce no events (already enabled)
-	events = parser.Receive([]byte{CmdIAC, CmdDO, OptGMCP})
-	if len(events) != 0 {
-		t.Errorf("Expected 0 events for DO GMCP (already enabled), got %d", len(events))
-	}
-
-	// Test IAC DO for unsupported option (200) + data
-	events = parser.Receive(append([]byte{CmdIAC, CmdDO, 200}, []byte("Some random data")...))
-	// Should get: DataSend (WONT) + DataReceive
-	kinds = eventKinds(events)
-	expectedKinds := []TelnetEventKind{TelnetEventDataSend, TelnetEventDataReceive}
-	if len(kinds) != len(expectedKinds) {
-		t.Fatalf("Expected %d events, got %d: %+v", len(expectedKinds), len(kinds), events)
-	}
-
-	// Test subnegotiation for GMCP
-	gmcpData := buildSubneg(OptGMCP, []byte("Core.Hello {}"))
-	events = parser.Receive(gmcpData)
-	if len(events) != 1 || events[0].Kind != TelnetEventSubnegotiation {
-		t.Errorf("Expected 1 Subnegotiation event, got %d events", len(events))
-	}
-	if events[0].Option != OptGMCP {
-		t.Errorf("Expected option GMCP, got %d", events[0].Option)
-	}
-	if string(events[0].Data) != "Core.Hello {}" {
-		t.Errorf("Expected payload 'Core.Hello {}', got '%s'", events[0].Data)
-	}
-
-	// Test subnegotiation + data + GA
-	combined := append(append(gmcpData, []byte("Random text")...), CmdIAC, CmdGA)
-	events = parser.Receive(combined)
-	kinds = eventKinds(events)
-	expectedKinds = []TelnetEventKind{TelnetEventSubnegotiation, TelnetEventDataReceive, TelnetEventIAC}
-	if len(kinds) != len(expectedKinds) {
-		t.Fatalf("Expected %d events, got %d", len(expectedKinds), len(kinds))
-	}
-
-	// Test MCCP2 subnegotiation with remaining data
-	mccp2Data := append(buildSubneg(OptMCCP2, []byte(" ")), []byte("This is compressed data")...)
-	mccp2Data = append(mccp2Data, CmdIAC, CmdGA)
-	events = parser.Receive(mccp2Data)
-	kinds = eventKinds(events)
-	expectedKinds = []TelnetEventKind{TelnetEventSubnegotiation, TelnetEventDecompressImmediate}
-	if len(kinds) != len(expectedKinds) {
-		t.Fatalf("Expected %d events, got %d: %+v", len(expectedKinds), len(kinds), events)
-	}
-
-	// Test realistic data with EOR and WILL
-	// "What is your password? " + IAC EOR + IAC WILL ECHO
-	realData := []byte{
-		87, 104, 97, 116, 32, 105, 115, 32, 121, 111, 117, 114, 32, 112, 97, 115, 115, 119, 111, 114,
-		100, 63, 32, CmdIAC, CmdEOR, CmdIAC, CmdWILL, 1,
-	}
-	events = parser.Receive(realData)
-	kinds = eventKinds(events)
-	// DataReceive + IAC (EOR) + DataSend (response to WILL)
-	if len(kinds) < 2 {
-		t.Fatalf("Expected at least 2 events, got %d: %+v", len(kinds), events)
 	}
 }
 
 func TestSubnegSeparateReceives(t *testing.T) {
-	parser := NewParser(NewCompatibilityTable())
-	parser.Options.SupportLocal(OptGMCP)
-	parser.Will(OptGMCP)
+	table := newCompatibilityTable()
+	table.set(OptGMCP, compatibilityEntry{Local: true, LocalState: true})
+	parser := newParser(table)
 
 	// Receive start of subnegotiation
 	events := parser.Receive(append(
@@ -233,14 +181,12 @@ func TestSubnegSeparateReceives(t *testing.T) {
 	}
 }
 
-func TestSubnegUTF8Content(t *testing.T) {
-	// Test that receiving a subnegotiation with embedded UTF-8 content works correctly,
-	// even when the content includes a SE byte (0xF0 in wave emoji).
-	parser := NewParserDefault()
-	parser.Options.SupportLocal(OptGMCP)
-	parser.Will(OptGMCP)
+func TestSubnegotiationTreatsBareSEAsPayload(t *testing.T) {
+	table := newCompatibilityTable()
+	table.set(OptGMCP, compatibilityEntry{Local: true, LocalState: true})
+	parser := newParser(table)
 
-	// Wave emoji: 0xF0, 0x9F, 0x91, 0x8B - where 0xF0 matches SE
+	// A bare SE byte is data; only the two-byte IAC SE sequence ends the frame.
 	waveEmoji := []byte{0xF0, 0x9F, 0x91, 0x8B}
 	gmcpMsg := append(append(
 		[]byte{CmdIAC, CmdSB, OptGMCP},
@@ -262,98 +208,54 @@ func TestSubnegUTF8Content(t *testing.T) {
 	}
 }
 
-func TestEscape(t *testing.T) {
-	initial := []byte{CmdIAC, CmdSB, 201, CmdIAC, 205, 202, CmdIAC, CmdSE}
-	expected := []byte{
-		CmdIAC, CmdIAC, CmdSB, 201, CmdIAC, CmdIAC, 205, 202, CmdIAC, CmdIAC, CmdSE,
+func TestIACEscaping(t *testing.T) {
+	tests := []struct {
+		name    string
+		data    []byte
+		escaped []byte
+	}{
+		{
+			name: "telnet-shaped data",
+			data: []byte{CmdIAC, CmdSB, OptGMCP, CmdIAC, 205, 202, CmdIAC, CmdSE},
+			escaped: []byte{
+				CmdIAC, CmdIAC, CmdSB, OptGMCP, CmdIAC, CmdIAC, 205, 202, CmdIAC, CmdIAC, CmdSE,
+			},
+		},
+		{
+			name:    "adjacent IAC before data",
+			data:    []byte{CmdIAC, CmdIAC, 228},
+			escaped: []byte{CmdIAC, CmdIAC, CmdIAC, CmdIAC, 228},
+		},
+		{
+			name:    "adjacent IAC after data",
+			data:    []byte{228, CmdIAC, CmdIAC},
+			escaped: []byte{228, CmdIAC, CmdIAC, CmdIAC, CmdIAC},
+		},
 	}
 
-	escaped := EscapeIAC(initial)
-	if !bytes.Equal(escaped, expected) {
-		t.Errorf("EscapeIAC failed: expected %v, got %v", expected, escaped)
-	}
-
-	unescaped := UnescapeIAC(expected)
-	if !bytes.Equal(unescaped, initial) {
-		t.Errorf("UnescapeIAC failed: expected %v, got %v", initial, unescaped)
-	}
-}
-
-func TestUnescape(t *testing.T) {
-	initial := []byte{
-		CmdIAC, CmdIAC, CmdSB, 201, CmdIAC, CmdIAC, 205, 202, CmdIAC, CmdIAC, CmdSE,
-	}
-	expected := []byte{CmdIAC, CmdSB, 201, CmdIAC, 205, 202, CmdIAC, CmdSE}
-
-	unescaped := UnescapeIAC(initial)
-	if !bytes.Equal(unescaped, expected) {
-		t.Errorf("UnescapeIAC failed: expected %v, got %v", expected, unescaped)
-	}
-
-	escaped := EscapeIAC(expected)
-	if !bytes.Equal(escaped, initial) {
-		t.Errorf("EscapeIAC failed: expected %v, got %v", initial, escaped)
-	}
-}
-
-// A doubled IAC followed by a data byte must round-trip through
-// escape/unescape unchanged.
-func TestEscapeRoundtripBugOne(t *testing.T) {
-	data := []byte{CmdIAC, CmdIAC, 228}
-	escaped := EscapeIAC(data)
-	unescaped := UnescapeIAC(escaped)
-	if !bytes.Equal(unescaped, data) {
-		t.Errorf("Roundtrip failed: expected %v, got %v", data, unescaped)
-	}
-}
-
-// A data byte followed by a doubled IAC must round-trip through
-// escape/unescape unchanged.
-func TestEscapeRoundtripBugTwo(t *testing.T) {
-	data := []byte{228, CmdIAC, CmdIAC}
-	escaped := EscapeIAC(data)
-	unescaped := UnescapeIAC(escaped)
-	if !bytes.Equal(unescaped, data) {
-		t.Errorf("Roundtrip failed: expected %v, got %v", data, unescaped)
-	}
-}
-
-func TestBadSubnegBuffer(t *testing.T) {
-	// Configure opt 0xFF (IAC) as local supported, and local state enabled.
-	entry := CompatibilityEntry{Local: true, Remote: false, LocalState: true, RemoteState: false}
-	table := fromOptions([][2]byte{{CmdIAC, entry.toU8()}})
-	parser := NewParser(table)
-
-	// Receive a malformed subnegotiation - this should not panic
-	parser.Receive([]byte{CmdIAC, CmdSB, CmdIAC, CmdSE})
-}
-
-func TestCompatibilityTableReset(t *testing.T) {
-	table := NewCompatibilityTable()
-	entry := CompatibilityEntry{Local: true, Remote: true, LocalState: true, RemoteState: true}
-	table.Set(OptGMCP, entry)
-
-	table.ResetStates()
-	result := table.Get(OptGMCP)
-
-	if !result.Local || !result.Remote {
-		t.Error("ResetStates should preserve support flags")
-	}
-	if result.LocalState || result.RemoteState {
-		t.Error("ResetStates should clear state flags")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			escaped := escapeIAC(tt.data)
+			if !bytes.Equal(escaped, tt.escaped) {
+				t.Fatalf("escapeIAC(%v) = %v, want %v", tt.data, escaped, tt.escaped)
+			}
+			if got := unescapeIAC(escaped); !bytes.Equal(got, tt.data) {
+				t.Fatalf("unescapeIAC(escapeIAC(%v)) = %v", tt.data, got)
+			}
+		})
 	}
 }
 
 func TestCompatibilityEntryBitmask(t *testing.T) {
 	tests := []struct {
-		entry CompatibilityEntry
+		entry compatibilityEntry
 		want  byte
 	}{
-		{CompatibilityEntry{Local: true}, bitLocal},
-		{CompatibilityEntry{Remote: true}, bitRemote},
-		{CompatibilityEntry{LocalState: true}, bitLocalState},
-		{CompatibilityEntry{RemoteState: true}, bitRemoteState},
-		{CompatibilityEntry{Local: true, Remote: true, LocalState: true, RemoteState: true},
+		{compatibilityEntry{Local: true}, bitLocal},
+		{compatibilityEntry{Remote: true}, bitRemote},
+		{compatibilityEntry{LocalState: true}, bitLocalState},
+		{compatibilityEntry{RemoteState: true}, bitRemoteState},
+		{compatibilityEntry{Local: true, Remote: true, LocalState: true, RemoteState: true},
 			bitLocal | bitRemote | bitLocalState | bitRemoteState},
 	}
 
@@ -369,189 +271,63 @@ func TestCompatibilityEntryBitmask(t *testing.T) {
 	}
 }
 
-// Malformed-stream regression inputs: each must parse without
-// panicking, whatever it decodes to.
-
-func TestParserDiff1(t *testing.T) {
-	// options: [(255, 254)]
-	// received_data: [[255, 255, 255, 255, 255, 254, 255, 0]]
-	table := fromOptions([][2]byte{{255, 254}})
-	parser := NewParser(table)
-	parser.Receive([]byte{255, 255, 255, 255, 255, 254, 255, 0})
-	// Should not panic
-}
-
-func TestParserDiff2(t *testing.T) {
-	parser := NewParserDefault()
-	parser.Receive([]byte{45, 255, 250, 255})
-}
-
-func TestParserDiff3(t *testing.T) {
-	table := fromOptions([][2]byte{{0, 1}})
-	parser := NewParser(table)
-	parser.Receive([]byte{255, 253, 0})
-}
-
-func TestParserDiff4(t *testing.T) {
-	parser := NewParserDefault()
-	parser.Receive([]byte{255, 250, 255, 255, 240, 250})
-}
-
-func TestParserDiff5(t *testing.T) {
-	parser := NewParserDefault()
-	parser.Receive([]byte{255, 250, 255, 240, 0})
-}
-
-func TestParserDiff6(t *testing.T) {
-	parser := NewParserDefault()
-	parser.Receive([]byte{240, 255, 250, 255, 240, 0})
-}
-
-func TestParserDiff7(t *testing.T) {
-	parser := NewParserDefault()
-	parser.Receive([]byte{255})
-}
-
-func TestParserDiff8(t *testing.T) {
-	parser := NewParserDefault()
-	parser.Receive([]byte{255, 252, 0})
-}
-
-func TestParserDiff9(t *testing.T) {
-	parser := NewParserDefault()
-	parser.Receive([]byte{254, 255, 255, 255, 254, 0})
-}
-
-func TestParserDiff10(t *testing.T) {
-	table := fromOptions([][2]byte{{255, 254}, {1, 0}})
-	parser := NewParser(table)
-	parser.Receive([]byte{255, 253, 255})
-}
-
-func TestOutputBuffer(t *testing.T) {
-	ob := NewOutputBuffer(TelnetModeUnterminated)
-
-	// Test basic line splitting
-	lines := ob.Receive([]byte("line1\r\nline2\nline3"))
-	if len(lines) != 2 {
-		t.Errorf("Expected 2 lines, got %d: %v", len(lines), lines)
-	}
-	if lines[0] != "line1" || lines[1] != "line2" {
-		t.Errorf("Unexpected lines: %v", lines)
-	}
-
-	// Prompt should have remaining data
-	prompt := ob.Prompt(false)
-	if prompt != "line3" {
-		t.Errorf("Expected 'line3', got '%s'", prompt)
-	}
-
-	// Consume prompt
-	prompt = ob.Prompt(true)
-	if prompt != "line3" {
-		t.Errorf("Expected 'line3', got '%s'", prompt)
-	}
-
-	// Should be empty now
-	prompt = ob.Prompt(false)
-	if prompt != "" {
-		t.Errorf("Expected empty prompt, got '%s'", prompt)
-	}
-}
-
-func TestOutputBufferNewlineVariants(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected []string
-	}{
-		{"CRLF", "a\r\nb\r\n", []string{"a", "b"}},
-		{"LF", "a\nb\n", []string{"a", "b"}},
-		{"LFCR", "a\n\rb\n\r", []string{"a", "b"}},
-		{"Mixed", "a\r\nb\nc\n\r", []string{"a", "b", "c"}},
-		// Bare \r is a line boundary (prompt overwrite), never embedded.
-		// Regression: dropped in 29cd00a; ghost-column rendering on muds
-		// that overwrite the prompt line (issue #14, regressions/14-bare-cr-ghost-columns.json).
-		{"BareCR", "prompt> \rline\r\n", []string{"prompt> ", "line"}},
-		{"BareCRRun", "a\r\rb\n", []string{"a", "", "b"}},
-		{"BlankLines", "a\r\n\r\nb\r\n", []string{"a", "", "b"}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ob := NewOutputBuffer(TelnetModeUnterminated)
-			lines := ob.Receive([]byte(tt.input))
-			if len(lines) != len(tt.expected) {
-				t.Errorf("Expected %d lines, got %d: %v", len(tt.expected), len(lines), lines)
-				return
-			}
-			for i := range tt.expected {
-				if lines[i] != tt.expected[i] {
-					t.Errorf("Line %d: expected '%s', got '%s'", i, tt.expected[i], lines[i])
-				}
-			}
-		})
-	}
-}
-
-// Delimiter pairs split across reads must neither delay lines nor emit
-// spurious empty ones, whatever the TCP fragmentation.
-func TestOutputBufferFragmentation(t *testing.T) {
+func TestParserHandlesMalformedStreams(t *testing.T) {
+	// Each case is a valid incremental parser state even when the byte stream is
+	// incomplete or nonsensical. The contract is that parsing remains safe.
 	tests := []struct {
 		name    string
-		packets []string
-		lines   []string // flattened across all Receive calls
-		prompt  string   // pending text afterwards
+		entries map[byte]compatibilityEntry
+		wire    []byte
 	}{
-		{"CRLFSplit", []string{"abc\r", "\ndef\r\n"}, []string{"abc", "def"}, ""},
-		{"LFCRSplit", []string{"abc\n", "\rdef\n"}, []string{"abc", "def"}, ""},
-		{"BareCRThenText", []string{"abc\r", "def\r\n"}, []string{"abc", "def"}, ""},
-		{"HeldCRIsNotPrompt", []string{"abc\r"}, nil, "abc"},
-		{"CRLFBytewise", []string{"a", "\r", "\n", "b", "\r", "\n"}, []string{"a", "b"}, ""},
-		{"LFCRBytewise", []string{"a", "\n", "\r", "b", "\n"}, []string{"a", "b"}, ""},
+		{
+			name: "IAC option in unfinished subnegotiation",
+			entries: map[byte]compatibilityEntry{
+				CmdIAC: {Local: true, LocalState: true},
+			},
+			wire: []byte{CmdIAC, CmdSB, CmdIAC, CmdSE},
+		},
+		{
+			name: "repeated escaped IAC before truncated command",
+			entries: map[byte]compatibilityEntry{
+				CmdIAC: {Remote: true, LocalState: true, RemoteState: true},
+			},
+			wire: []byte{255, 255, 255, 255, 255, 254, 255, 0},
+		},
+		{name: "data before unfinished subnegotiation", wire: []byte{45, 255, 250, 255}},
+		{
+			name:    "DO supported NUL option",
+			entries: map[byte]compatibilityEntry{0: {Local: true}},
+			wire:    []byte{255, 253, 0},
+		},
+		{name: "escaped IAC before bare SE", wire: []byte{255, 250, 255, 255, 240, 250}},
+		{name: "SE after IAC option with trailing data", wire: []byte{255, 250, 255, 240, 0}},
+		{name: "bare SE before malformed subnegotiation", wire: []byte{240, 255, 250, 255, 240, 0}},
+		{name: "lone IAC", wire: []byte{255}},
+		{name: "WONT NUL option", wire: []byte{255, 252, 0}},
+		{name: "data and escaped IAC before DONT", wire: []byte{254, 255, 255, 255, 254, 0}},
+		{
+			name: "DO IAC option",
+			entries: map[byte]compatibilityEntry{
+				CmdIAC: {Remote: true, LocalState: true, RemoteState: true},
+			},
+			wire: []byte{255, 253, 255},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ob := NewOutputBuffer(TelnetModeUnterminated)
-			var lines []string
-			for _, p := range tt.packets {
-				lines = append(lines, ob.Receive([]byte(p))...)
+			table := newCompatibilityTable()
+			for option, entry := range tt.entries {
+				table.set(option, entry)
 			}
-			if len(lines) != len(tt.lines) {
-				t.Fatalf("Expected lines %q, got %q", tt.lines, lines)
-			}
-			for i := range tt.lines {
-				if lines[i] != tt.lines[i] {
-					t.Errorf("Line %d: expected %q, got %q", i, tt.lines[i], lines[i])
-				}
-			}
-			if got := ob.Prompt(false); got != tt.prompt {
-				t.Errorf("Prompt: expected %q, got %q", tt.prompt, got)
-			}
+			newParser(table).Receive(tt.wire)
 		})
-	}
-}
-
-// Consuming a prompt that ends in a held \r must still swallow the \n
-// half of the pair when it arrives in the next read.
-func TestOutputBufferPromptConsumeHeldCR(t *testing.T) {
-	ob := NewOutputBuffer(TelnetModeUnterminated)
-	if lines := ob.Receive([]byte("HP:10> \r")); len(lines) != 0 {
-		t.Fatalf("Expected no lines, got %q", lines)
-	}
-	if got := ob.Prompt(true); got != "HP:10> " {
-		t.Fatalf("Prompt: expected %q, got %q", "HP:10> ", got)
-	}
-	lines := ob.Receive([]byte("\nnext line\r\n"))
-	if len(lines) != 1 || lines[0] != "next line" {
-		t.Fatalf("Expected [next line], got %q", lines)
 	}
 }
 
 func TestNegotiationWILL(t *testing.T) {
-	parser := NewParserDefault()
-	parser.Options.SupportRemote(OptEcho)
+	parser := newParser(newCompatibilityTable())
+	parser.options.supportRemote(OptEcho)
 
 	// Receive WILL ECHO - should respond with DO ECHO
 	events := parser.Receive([]byte{CmdIAC, CmdWILL, OptEcho})
@@ -571,33 +347,15 @@ func TestNegotiationWILL(t *testing.T) {
 	}
 
 	// Check state
-	entry := parser.Options.Get(OptEcho)
+	entry := parser.options.get(OptEcho)
 	if !entry.RemoteState {
 		t.Error("RemoteState should be true after WILL")
 	}
 }
 
-func TestNegotiationWILLUnsupported(t *testing.T) {
-	parser := NewParserDefault()
-	// OptEcho is NOT supported
-
-	// Receive WILL ECHO - should respond with DONT ECHO
-	events := parser.Receive([]byte{CmdIAC, CmdWILL, OptEcho})
-
-	if len(events) != 1 {
-		t.Fatalf("Expected 1 event, got %d: %+v", len(events), events)
-	}
-	if events[0].Kind != TelnetEventDataSend {
-		t.Errorf("Expected DataSend, got %v", events[0].Kind)
-	}
-	if !bytes.Equal(events[0].Data, []byte{CmdIAC, CmdDONT, OptEcho}) {
-		t.Errorf("Expected IAC DONT ECHO, got %v", events[0].Data)
-	}
-}
-
 func TestNegotiationDO(t *testing.T) {
-	parser := NewParserDefault()
-	parser.Options.SupportLocal(OptNAWS)
+	parser := newParser(newCompatibilityTable())
+	parser.options.supportLocal(OptNAWS)
 
 	// Receive DO NAWS - should respond with WILL NAWS
 	events := parser.Receive([]byte{CmdIAC, CmdDO, OptNAWS})
@@ -610,38 +368,12 @@ func TestNegotiationDO(t *testing.T) {
 	}
 
 	// Check state
-	entry := parser.Options.Get(OptNAWS)
+	entry := parser.options.get(OptNAWS)
 	if !entry.LocalState {
 		t.Error("LocalState should be true after accepted DO")
 	}
 	if entry.RemoteState {
 		t.Error("RemoteState must stay false: the server never sent WILL")
-	}
-}
-
-// TestDefaultCompatibilityRefusesUnimplementedDirections verifies the
-// remote-only options: the server's WILL is accepted, but its DO is
-// refused - the client never echoes to the server or sends EOR marks.
-func TestDefaultCompatibilityRefusesUnimplementedDirections(t *testing.T) {
-	for _, opt := range []byte{OptEcho, OptEOR} {
-		parser := NewParser(DefaultCompatibility())
-		events := parser.Receive([]byte{CmdIAC, CmdDO, opt})
-		assertReply(t, events, []byte{CmdIAC, CmdWONT, opt}, "DO", opt)
-	}
-}
-
-func TestNegotiationDOUnsupported(t *testing.T) {
-	parser := NewParserDefault()
-	// OptNAWS is NOT supported
-
-	// Receive DO NAWS - should respond with WONT NAWS
-	events := parser.Receive([]byte{CmdIAC, CmdDO, OptNAWS})
-
-	if len(events) != 1 {
-		t.Fatalf("Expected 1 event, got %d: %+v", len(events), events)
-	}
-	if !bytes.Equal(events[0].Data, []byte{CmdIAC, CmdWONT, OptNAWS}) {
-		t.Errorf("Expected IAC WONT NAWS, got %v", events[0].Data)
 	}
 }
 
@@ -665,7 +397,7 @@ func TestDoubleIACInData(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			parser := NewParserDefault()
+			parser := newParser(newCompatibilityTable())
 			events := parser.Receive(tt.wire)
 			if len(events) != 1 {
 				t.Fatalf("events = %+v, want one data event", events)
@@ -681,7 +413,7 @@ func TestDoubleIACInData(t *testing.T) {
 }
 
 func TestDoubleIACSplitAcrossReceives(t *testing.T) {
-	parser := NewParserDefault()
+	parser := newParser(newCompatibilityTable())
 
 	events := parser.Receive(append([]byte("Hello"), CmdIAC))
 	if len(events) != 1 || events[0].Kind != TelnetEventDataReceive || string(events[0].Data) != "Hello" {
@@ -702,7 +434,7 @@ func TestDoubleIACSplitAcrossReceives(t *testing.T) {
 }
 
 func TestIncompleteIAC(t *testing.T) {
-	parser := NewParserDefault()
+	parser := newParser(newCompatibilityTable())
 
 	// Just IAC alone - should buffer and wait for more
 	events := parser.Receive([]byte{CmdIAC})
@@ -724,7 +456,7 @@ func TestIncompleteIAC(t *testing.T) {
 }
 
 func TestNOPCommand(t *testing.T) {
-	parser := NewParserDefault()
+	parser := newParser(newCompatibilityTable())
 
 	events := parser.Receive([]byte{CmdIAC, CmdNOP})
 	if len(events) != 1 {
@@ -736,151 +468,4 @@ func TestNOPCommand(t *testing.T) {
 	if events[0].Command != CmdNOP {
 		t.Errorf("Expected NOP command, got %d", events[0].Command)
 	}
-}
-
-func TestSubnegotiationMethod(t *testing.T) {
-	parser := NewParserDefault()
-	parser.Options.SupportLocal(OptGMCP)
-
-	// Should return nil when option not enabled
-	ev := parser.Subnegotiation(OptGMCP, []byte("test"))
-	if ev != nil {
-		t.Error("Subnegotiation should return nil when option not enabled")
-	}
-
-	// Enable the option
-	parser.Will(OptGMCP)
-
-	// Now it should work
-	ev = parser.Subnegotiation(OptGMCP, []byte("Core.Hello {}"))
-	if ev == nil {
-		t.Fatal("Subnegotiation should return event when option enabled")
-	}
-	if ev.Kind != TelnetEventDataSend {
-		t.Errorf("Expected DataSend, got %v", ev.Kind)
-	}
-
-	// Verify structure: IAC SB OptGMCP [data] IAC SE
-	data := ev.Data
-	if len(data) < 5 {
-		t.Fatalf("Data too short: %v", data)
-	}
-	if data[0] != CmdIAC || data[1] != CmdSB || data[2] != OptGMCP {
-		t.Errorf("Wrong header: %v", data[:3])
-	}
-	if data[len(data)-2] != CmdIAC || data[len(data)-1] != CmdSE {
-		t.Errorf("Wrong footer: %v", data[len(data)-2:])
-	}
-}
-
-func TestOutputBufferHasNewData(t *testing.T) {
-	ob := NewOutputBuffer(TelnetModeUnterminated)
-
-	// Initially no new data
-	if ob.HasNewData() {
-		t.Error("Expected no new data initially")
-	}
-
-	// After receive, should have new data
-	ob.Receive([]byte("some text"))
-	if !ob.HasNewData() {
-		t.Error("Expected new data after Receive")
-	}
-
-	// After consuming prompt, should have no new data
-	ob.Prompt(true)
-	if ob.HasNewData() {
-		t.Error("Expected no new data after consuming prompt")
-	}
-
-	// Receive more data
-	ob.Receive([]byte("more text"))
-	if !ob.HasNewData() {
-		t.Error("Expected new data after second Receive")
-	}
-
-	// Non-consuming Prompt should keep new data flag
-	ob.Prompt(false)
-	if !ob.HasNewData() {
-		t.Error("Expected new data to persist after non-consuming Prompt")
-	}
-}
-
-func TestOutputBufferInputSent(t *testing.T) {
-	// In unterminated mode, InputSent should clear the buffer
-	ob := NewOutputBuffer(TelnetModeUnterminated)
-	ob.Receive([]byte("prompt> "))
-
-	if ob.Len() == 0 {
-		t.Error("Buffer should have data")
-	}
-
-	ob.InputSent()
-
-	if ob.Len() != 0 {
-		t.Error("Buffer should be empty after InputSent in unterminated mode")
-	}
-	if ob.HasNewData() {
-		t.Error("Should have no new data after InputSent")
-	}
-
-	// In terminated mode, InputSent should NOT clear the buffer
-	ob2 := NewOutputBuffer(TelnetModeTerminatedPrompt)
-	ob2.Receive([]byte("prompt> "))
-
-	if ob2.Len() == 0 {
-		t.Error("Buffer should have data")
-	}
-
-	ob2.InputSent()
-
-	if ob2.Len() == 0 {
-		t.Error("Buffer should NOT be cleared in terminated mode")
-	}
-}
-
-func TestOutputBufferClearResetsNewData(t *testing.T) {
-	ob := NewOutputBuffer(TelnetModeTerminatedPrompt)
-	ob.Receive([]byte("data"))
-
-	if !ob.HasNewData() {
-		t.Error("Should have new data")
-	}
-
-	ob.Clear()
-
-	if ob.HasNewData() {
-		t.Error("Clear should reset new data flag")
-	}
-	if ob.Len() != 0 {
-		t.Error("Clear should empty buffer")
-	}
-}
-
-// TestOutputBufferConcurrentAccess pins the OutputBuffer data race:
-// the read loop parses into the buffer while the write loop calls
-// InputSent to drop a pending prompt. The suite runs under -race, so
-// unsynchronized access here fails deterministically.
-func TestOutputBufferConcurrentAccess(t *testing.T) {
-	buf := NewOutputBuffer(TelnetModeUnterminated)
-
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() { // read loop
-		defer wg.Done()
-		for i := 0; i < 1000; i++ {
-			buf.Receive([]byte("HP:100"))
-			buf.Prompt(false)
-			buf.Receive([]byte("> a line arrives\r\n"))
-		}
-	}()
-	go func() { // write loop
-		defer wg.Done()
-		for i := 0; i < 1000; i++ {
-			buf.InputSent()
-			buf.HasNewData()
-			buf.Len()
-		}
-	}()
-	wg.Wait()
 }

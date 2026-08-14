@@ -47,8 +47,8 @@ rune.ui.layout({ bottom = { "vitals", "input", "status" } })
 ## Variations
 
 - Without GMCP, feed `vitals` from a prompt trigger instead:
-  `rune.trigger.regex("^HP:(\\d+)/(\\d+)", ...)`. The bar code doesn't
-  change.
+  `rune.trigger.regex("^HP:(\\d+)/(\\d+)", ..., { on = "prompt" })`.
+  The bar code doesn't change.
 - Field names (`sp`/`maxsp` here) vary by game; `/gmcp` and the catch-all
   `"gmcp"` hook show what yours sends.
 

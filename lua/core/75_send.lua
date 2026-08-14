@@ -92,23 +92,6 @@ local function send_impl(input, depth)
     end
 end
 
--- Send an entire submission without interpreting any of it as a Rune command.
--- Only LF separates outbound lines; whitespace, CR bytes, delimiters, repeats,
--- slash commands, and empty lines remain data. This is private core policy,
--- closed over by the input hook rather than exposed on a Go-owned rune._ table.
-local function send_verbatim(input)
-    local start = 1
-    while true do
-        local pos = input:find("\n", start, true)
-        if not pos then
-            rune.send_raw(input:sub(start))
-            return
-        end
-        rune.send_raw(input:sub(start, pos - 1))
-        start = pos + 1
-    end
-end
-
 -- PUBLIC: Send commands to the MUD
 function rune.send(input)
     send_impl(input, 0)
@@ -120,7 +103,7 @@ rune.hooks.on("input", function(input, context)
     -- input hooks still observe it and may consume it, but none of Rune's
     -- command syntax is applied once it reaches this core handler.
     if context.mode == "verbatim" then
-        send_verbatim(input)
+        rune.send_raw(input) -- no alias or command interpretation
         return false
     end
 
@@ -142,17 +125,16 @@ end, { priority = 100 })
 
 -- Register output handler
 rune.hooks.on("output", function(line)
-    local modified, show = rune.trigger.process(line)
+    local modified, show = rune.trigger._process_output(line)
     if not show then
         return false
     end
     return modified
 end, { priority = 100 })
 
--- Register prompt handler. is_prompt = true: a prompt is never part
--- of a multi-line span, so any open span flushes first.
-rune.hooks.on("prompt", function(line)
-    local modified, show = rune.trigger.process(line, true)
+-- Prompt triggers opt into partial lines, which may repeat as they grow.
+rune.hooks.on("prompt", function(line, confirmed)
+    local modified, show = rune.trigger._process_prompt(line, confirmed)
     if not show then
         return false
     end

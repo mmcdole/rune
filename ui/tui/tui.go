@@ -13,20 +13,17 @@ import (
 	"github.com/mmcdole/rune/ui"
 )
 
-// BubbleTeaUI implements interfaces.UI using Bubble Tea.
-// It bridges the existing channel-based architecture with Bubble Tea's
-// model/update/view event loop.
+// BubbleTeaUI implements ui.UI with Bubble Tea.
 type BubbleTeaUI struct {
-	program   *tea.Program
-	inputChan chan input.Submission
+	program *tea.Program
 
 	// Message queue - buffered channel drained by a single goroutine.
 	// This decouples callers from tea.Program.Send() which can block.
 	msgQueue chan tea.Msg
 
-	// Outbound messages from UI to Session (e.g., ExecuteBindMsg, WindowSizeChangedMsg)
-	// Session reads from this channel in its event loop.
-	outbound chan ui.UIEvent
+	// Events from UI to Session. One bounded queue preserves the order of
+	// draft changes, submissions, binds, picker results, and window changes.
+	events chan ui.UIEvent
 
 	// Shutdown coordination
 	done     chan struct{}
@@ -36,10 +33,9 @@ type BubbleTeaUI struct {
 // NewBubbleTeaUI creates a new Bubble Tea-based UI.
 func NewBubbleTeaUI() *BubbleTeaUI {
 	return &BubbleTeaUI{
-		inputChan: make(chan input.Submission, 2048),
-		msgQueue:  make(chan tea.Msg, 4096),
-		outbound:  make(chan ui.UIEvent, 256),
-		done:      make(chan struct{}),
+		msgQueue: make(chan tea.Msg, 4096),
+		events:   make(chan ui.UIEvent, 2048),
+		done:     make(chan struct{}),
 	}
 }
 
@@ -54,31 +50,30 @@ func (b *BubbleTeaUI) send(msg tea.Msg) {
 	}
 }
 
-// Print appends text to the main scrollback buffer.
-// All output (server lines, Lua prints) goes through this single method.
+// Print appends server lines and Lua output to scrollback.
 func (b *BubbleTeaUI) Print(text string) {
 	b.send(ui.PrintLineMsg(text))
 }
 
-// Echo appends an already-styled local echo to scrollback. Styling is
-// Lua policy (the "echo" hook); this method is transport only.
+// Echo appends an already-styled local echo to scrollback. Styling is Lua
+// policy (the "echo" hook); this adapter only delivers it for presentation.
 func (b *BubbleTeaUI) Echo(line string) {
 	b.send(ui.EchoLineMsg(line))
 }
 
-// SetPrompt updates the active server prompt (overlay at bottom).
+// SetPrompt replaces the prompt overlay.
 func (b *BubbleTeaUI) SetPrompt(text string) {
-	b.send(ui.PromptMsg(text))
+	b.send(ui.SetPromptMsg(text))
 }
 
-// Input returns channel for user input.
-func (b *BubbleTeaUI) Input() <-chan input.Submission {
-	return b.inputChan
+// CommitPrompt moves the prompt overlay to scrollback in one update.
+func (b *BubbleTeaUI) CommitPrompt(text string) {
+	b.send(ui.CommitPromptMsg(text))
 }
 
 // Run starts the TUI and blocks until exit.
 func (b *BubbleTeaUI) Run() error {
-	model := NewModel(b.inputChan, b.outbound)
+	model := NewModel(b.events)
 
 	opts := []tea.ProgramOption{
 		tea.WithAltScreen(),
@@ -300,10 +295,7 @@ func (b *BubbleTeaUI) PaneScrollToBottom(name string) {
 	b.send(ui.PaneScrollToBottomMsg{Name: name})
 }
 
-// --- Outbound messages from UI to Session ---
-
-// Outbound returns a channel of messages from UI to Session.
-// Session should read from this channel in its event loop.
-func (b *BubbleTeaUI) Outbound() <-chan ui.UIEvent {
-	return b.outbound
+// Events returns the ordered stream of user actions and UI state changes.
+func (b *BubbleTeaUI) Events() <-chan ui.UIEvent {
+	return b.events
 }

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/mmcdole/rune/version"
 )
@@ -39,7 +38,7 @@ const (
 
 // subnegFrame builds IAC SB <option> <escaped payload> IAC SE.
 func subnegFrame(option byte, payload []byte) []byte {
-	escaped := EscapeIAC(payload)
+	escaped := escapeIAC(payload)
 	buf := make([]byte, 0, len(escaped)+5)
 	buf = append(buf, CmdIAC, CmdSB, option)
 	buf = append(buf, escaped...)
@@ -47,30 +46,34 @@ func subnegFrame(option byte, payload []byte) []byte {
 	return buf
 }
 
-// handshake answers the telnet identity options: TTYPE/MTTS, NAWS,
-// CHARSET, and NEW-ENVIRON/MNES. It is a pure responder - methods
-// take parser events and return raw frames to write - so it is fully
-// testable without sockets. A mutex guards the NAWS/TTYPE state:
-// readLoop drives negotiation while SetWindowSize arrives from the
-// session goroutine.
+// handshake answers the Telnet identity options TTYPE/MTTS, NAWS, CHARSET,
+// and NEW-ENVIRON/MNES. It is owned by Protocol and called only from Session's
+// event loop.
 type handshake struct {
-	mu         sync.Mutex
-	tls        bool
+	secure     bool
 	width      int
 	height     int
 	ttypeIndex int
 	nawsActive bool
 }
 
-func newHandshake(tls bool, width, height int) *handshake {
-	return &handshake{tls: tls, width: width, height: height}
+// newHandshake starts insecure; setSecure supplies the real transport
+// security before identity replies are built.
+func newHandshake(width, height int) *handshake {
+	return &handshake{width: width, height: height}
+}
+
+// setSecure records whether the transport is TLS, which sets the MTTS TLS
+// bit in TTYPE/MNES replies.
+func (h *handshake) setSecure(secure bool) {
+	h.secure = secure
 }
 
 // mtts computes the MTTS bitvector. Honesty rule: every bit here must
 // reflect a real client capability.
 func (h *handshake) mtts() int {
 	bits := mttsANSI | mttsVT100 | mttsUTF8 | mtts256Colors | mttsTruecolor | mttsMNES
-	if h.tls {
+	if h.secure {
 		bits |= mttsTLS
 	}
 	return bits
@@ -84,14 +87,11 @@ func clientName() string {
 // onNegotiation reacts to option state changes that require an
 // immediate client subnegotiation. Returns frames to write.
 func (h *handshake) onNegotiation(cmd, opt byte) [][]byte {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
 	if opt == OptNAWS {
 		switch cmd {
 		case CmdDO:
 			h.nawsActive = true
-			return [][]byte{h.nawsFrameLocked()}
+			return [][]byte{h.nawsFrame()}
 		case CmdDONT:
 			h.nawsActive = false
 		}
@@ -102,16 +102,13 @@ func (h *handshake) onNegotiation(cmd, opt byte) [][]byte {
 // onSubnegotiation answers a server subnegotiation request.
 // Returns frames to write (nil when the option is not ours to answer).
 func (h *handshake) onSubnegotiation(opt byte, data []byte) [][]byte {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
 	switch opt {
 	case OptTTYPE:
-		return h.ttypeReplyLocked(data)
+		return h.ttypeReply(data)
 	case OptCharset:
 		return charsetReply(data)
 	case OptNewEnviron:
-		return h.environReplyLocked(data)
+		return h.environReply(data)
 	}
 	return nil
 }
@@ -119,19 +116,15 @@ func (h *handshake) onSubnegotiation(opt byte, data []byte) [][]byte {
 // setWindowSize records the new size and returns a NAWS frame to send
 // if the option is currently active, nil otherwise.
 func (h *handshake) setWindowSize(width, height int) []byte {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
 	h.width, h.height = width, height
 	if !h.nawsActive {
 		return nil
 	}
-	return h.nawsFrameLocked()
+	return h.nawsFrame()
 }
 
-// nawsFrameLocked builds the RFC 1073 window-size report.
-// Caller holds h.mu.
-func (h *handshake) nawsFrameLocked() []byte {
+// nawsFrame builds the RFC 1073 window-size report.
+func (h *handshake) nawsFrame() []byte {
 	w, ht := h.width, h.height
 	if w <= 0 {
 		w = 80
@@ -143,10 +136,9 @@ func (h *handshake) nawsFrameLocked() []byte {
 	return subnegFrame(OptNAWS, payload)
 }
 
-// ttypeReplyLocked answers TTYPE SEND per the MTTS cycle:
+// ttypeReply answers TTYPE SEND per the MTTS cycle:
 // client name, then terminal type, then "MTTS <bits>" (repeated).
-// Caller holds h.mu.
-func (h *handshake) ttypeReplyLocked(data []byte) [][]byte {
+func (h *handshake) ttypeReply(data []byte) [][]byte {
 	if len(data) < 1 || data[0] != CmdSEND {
 		return nil
 	}
@@ -200,9 +192,9 @@ func charsetReply(data []byte) [][]byte {
 	return [][]byte{subnegFrame(OptCharset, []byte{charsetRejected})}
 }
 
-// environValueLocked returns the MNES value for a variable, or
-// ok=false for variables we do not define. Caller holds h.mu.
-func (h *handshake) environValueLocked(name string) (string, bool) {
+// environValue returns the MNES value for a variable, or ok=false for
+// variables we do not define.
+func (h *handshake) environValue(name string) (string, bool) {
 	switch strings.ToUpper(name) {
 	case "CLIENT_NAME":
 		return clientName(), true
@@ -222,11 +214,11 @@ func (h *handshake) environValueLocked(name string) (string, bool) {
 // server sends an empty SEND, meaning "everything you have".
 var mnesVars = []string{"CLIENT_NAME", "CLIENT_VERSION", "CHARSET", "MTTS", "TERMINAL_TYPE"}
 
-// environReplyLocked answers NEW-ENVIRON SEND per RFC 1572 / MNES:
+// environReply answers NEW-ENVIRON SEND per RFC 1572 / MNES:
 // requested variables get VALUE entries (echoing the VAR/USERVAR type
 // they were requested with); unknown ones are echoed without a VALUE;
-// an empty SEND gets every variable we define. Caller holds h.mu.
-func (h *handshake) environReplyLocked(data []byte) [][]byte {
+// an empty SEND gets every variable we define.
+func (h *handshake) environReply(data []byte) [][]byte {
 	if len(data) < 1 || data[0] != environSEND {
 		return nil
 	}
@@ -236,7 +228,7 @@ func (h *handshake) environReplyLocked(data []byte) [][]byte {
 	appendVar := func(kind byte, name string) {
 		payload = append(payload, kind)
 		payload = append(payload, environEscape(name)...)
-		if value, ok := h.environValueLocked(name); ok {
+		if value, ok := h.environValue(name); ok {
 			payload = append(payload, environVALUE)
 			payload = append(payload, environEscape(value)...)
 		}

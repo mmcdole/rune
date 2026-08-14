@@ -10,7 +10,7 @@ introduction, see [Scripting Basics](/getting-started/scripting-basics/).
 
 ```lua
 rune.send(text)        -- process aliases and expansion, then send
-rune.send_raw(text)    -- straight to the socket, no processing
+rune.send_raw(text)    -- game lines, bypassing command processing
 rune.echo(text)        -- print to the local display only
 rune.connect(address)  -- "host:port", optional tls:// scheme
 rune.disconnect()      -- close the connection
@@ -55,12 +55,28 @@ rune.send("#2 {get bread bag;eat bread}")  -- get/eat, twice
 rune.send_raw(text) -> true | nil, err
 ```
 
-- `text` (string) — sent to the server as-is: no aliases, no `;`
-  splitting, no `#N` repeats.
+- `text` (string) — sent as game lines: no aliases, no `;`
+  splitting, and no `#N` repeats. Text containing newlines is split and
+  sent one physical line at a time. LF, CRLF, and bare CR are line breaks;
+  empty lines are preserved.
 
-Returns `true`, or `nil` plus an error message (which is also echoed)
+Despite its name, `send_raw` sends MUD text, not Telnet or GMCP protocol
+data. Returns `true`, or `nil` plus an error message (which is also echoed)
 when the send fails — typically because you're disconnected. This is
 what alias and trigger string actions ultimately call.
+
+Before processing any user submission, Rune finishes an active partial line:
+it commits the prompt overlay and closes open multiline spans before history,
+local echo, input hooks, aliases, or slash commands. This is independent of
+local echo, connection state, whether a hook consumes the submission, and
+whether it eventually sends anything.
+
+A game line sent programmatically by an alias, trigger, timer, or other Lua
+callback also finishes the partial line, once the connection accepts it for
+writing. A failed programmatic send leaves the line open. GMCP and other
+Telnet protocol traffic never finish it. If the partial line was really part
+of an ordinary line, Rune commits the visible prefix and treats later bytes
+as a new line.
 
 ### rune.connect
 

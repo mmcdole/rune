@@ -36,6 +36,28 @@
         { "server_gmcp": "Char.Name {\"name\":\"Ada\"}", "note": "the next well-formed message still dispatches" },
         { "expect_printed": "E2E-NAME=Ada" }
       ]
+    },
+    {
+      "name": "a coalesced GMCP enable message disable burst preserves wire order",
+      "init_lua": [
+        "rune.gmcp.on('Char.Vitals', function(data) rune.echo('E2E-BURST-HP=' .. data.hp) end)",
+        "rune.hooks.on('output', function(line)",
+        "  if line:clean() == 'E2E-CHECK-GMCP' then rune.echo('E2E-BURST-UP=' .. tostring(rune.gmcp.is_enabled())) end",
+        "end)"
+      ],
+      "steps": [
+        { "connect": true },
+        {
+          "server_bytes": [255, 251, 201, 255, 250, 201, 67, 104, 97, 114, 46, 86, 105, 116, 97, 108, 115, 32, 123, 34, 104, 112, 34, 58, 49, 48, 48, 125, 255, 240, 255, 252, 201],
+          "note": "WILL GMCP, Char.Vitals payload, and WONT GMCP in one server write"
+        },
+        { "expect_sent_bytes": [255, 253, 201], "note": "DO precedes application GMCP sends" },
+        { "expect_sent": "Core.Hello", "note": "the synchronous enabled hook runs while GMCP is active" },
+        { "expect_printed": "E2E-BURST-HP=100", "note": "the valid payload is not lost to the later WONT" },
+        { "expect_sent_bytes": [255, 254, 201], "note": "the final WONT is answered" },
+        { "server_line": "E2E-CHECK-GMCP" },
+        { "expect_printed": "E2E-BURST-UP=false", "note": "the final protocol state is inactive" }
+      ]
     }
   ]
 }

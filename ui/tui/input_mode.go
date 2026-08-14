@@ -49,7 +49,7 @@ type inputController struct {
 	pickerDismiss bool   // close inline picker once input contains a space
 	historyRecall bool   // unmodified verbatim entry restored from history
 
-	notify  func(ui.UIEvent)            // outbound events to the session
+	notify  func(ui.UIEvent)            // state and actions sent to the session
 	submit  func(input.Submission) bool // transfer an immutable draft to the session
 	isBound func(key string) bool       // key has a Lua bind
 	scroll  func(tea.KeyType) bool      // Go scroll-key fallback; true if handled
@@ -568,8 +568,8 @@ func (c *inputController) closePicker(accepted bool, value string) {
 	c.pickerDismiss = false
 }
 
-// submitInput delivers the current input line and clears it, reporting
-// the cleared state so the session's tracked input cannot go stale.
+// submitInput transfers the current input snapshot and clears the local draft
+// only after Session accepts ownership.
 func (c *inputController) submitInput() {
 	submission := input.Command(c.input.Value())
 	if c.input.IsComposing() {
@@ -581,5 +581,4 @@ func (c *inputController) submitInput() {
 	c.input.Reset()
 	c.mode = ModeNormal
 	c.historyRecall = false
-	c.notify(ui.InputChangedMsg{Text: "", Cursor: 0})
 }

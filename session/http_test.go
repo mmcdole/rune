@@ -1,23 +1,13 @@
 package session
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
-)
 
-// awaitAsyncResult reads the callback the HTTP goroutine pushes and
-// runs it, exactly as the session loop would.
-func awaitAsyncResult(t *testing.T, s *Session) {
-	t.Helper()
-	select {
-	case cb := <-s.asyncResults:
-		cb()
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for HTTP result")
-	}
-}
+	"github.com/mmcdole/rune/lua"
+)
 
 func TestHTTPRoundTrip(t *testing.T) {
 	s, _, _ := newTestSession(t)
@@ -27,8 +17,11 @@ func TestHTTPRoundTrip(t *testing.T) {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		body := make([]byte, r.ContentLength)
-		r.Body.Read(body)
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		w.Header().Set("Content-Type", "text/plain")
 		w.Write([]byte("pong:" + string(body)))
 	}))
@@ -47,7 +40,7 @@ func TestHTTPRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	awaitAsyncResult(t, s)
+	awaitInternalEvent(t, s)
 
 	if v, _ := s.SessionGet("status"); v != "200" {
 		t.Errorf("status = %q, want 200", v)
@@ -72,7 +65,7 @@ func TestHTTPRequestFailureReachesCallback(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	awaitAsyncResult(t, s)
+	awaitInternalEvent(t, s)
 
 	if v, _ := s.SessionGet("err"); v == "nil" || v == "" {
 		t.Errorf("expected an error message, got %q", v)
@@ -97,12 +90,53 @@ func TestHTTPStatusCodesAreNotErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	awaitAsyncResult(t, s)
+	awaitInternalEvent(t, s)
 
 	if v, _ := s.SessionGet("status"); v != "404" {
 		t.Errorf("status = %q, want 404 (non-2xx is a response, not an error)", v)
 	}
 	if v, _ := s.SessionGet("err"); v != "nil" {
 		t.Errorf("err = %q, want nil", v)
+	}
+}
+
+func TestHTTPResultFromPreviousLuaGenerationCannotClaimReusedCallbackID(t *testing.T) {
+	s, _, _ := newTestSession(t)
+	oldGeneration := s.luaGeneration
+	s.handleReloadRequested()
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-release
+		_, _ = w.Write([]byte("new response"))
+	}))
+	defer srv.Close()
+
+	if err := s.engine.DoString("new generation request", `
+		rune.http.get("`+srv.URL+`", function(resp)
+			rune.session.set("http_result", resp.body)
+		end)
+	`); err != nil {
+		t.Fatal(err)
+	}
+	<-started
+
+	// HTTP callback IDs restart when Lua reloads. A late completion from the
+	// old VM must not claim the new VM's callback with the same numeric ID.
+	s.handleInternalEvent(httpFinished{
+		luaGeneration: oldGeneration,
+		callbackID:    1,
+		response:      &lua.HTTPResponse{Status: 200, Body: "stale response"},
+	})
+	if value, ok := s.SessionGet("http_result"); ok {
+		t.Fatalf("stale HTTP result invoked new callback: %q", value)
+	}
+
+	close(release)
+	awaitInternalEvent(t, s)
+	if value, _ := s.SessionGet("http_result"); value != "new response" {
+		t.Fatalf("current HTTP result = %q, want new response", value)
 	}
 }

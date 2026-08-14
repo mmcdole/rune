@@ -12,41 +12,29 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
-// TCPClient manages the lifecycle of TCP connections.
-// It provides a stable interface for the Session while handling the
-// chaotic reality of network sockets underneath.
+// TCPClient owns the active TCP connection and publishes deep-copied event
+// batches that the receiver may retain.
 type TCPClient struct {
-	// Stable channel that Session reads from. Never closes.
-	// Small buffer allows TCP backpressure to work naturally.
-	outputChan chan Output
+	// Stable across connections; blocking publication applies TCP backpressure.
+	inboundChan chan Inbound
 
-	// State protection
 	mu      sync.Mutex
-	current *connection // The currently active connection, or nil
-
-	// Last known window size, retained across connections so NAWS
-	// can answer immediately on the next connect.
-	width, height int
+	current *connection
+	// desiredConnectionID gates dials and sends: only work carrying this ID
+	// is accepted. BeginConnect sets it to the ID Session issued; Disconnect
+	// bumps it past that ID to invalidate pending dials. Session bumps its
+	// own counter on disconnect too, keeping the two in lockstep.
+	desiredConnectionID uint64
 }
 
-// outMsg is a queued write. line messages are user commands (CRLF
-// appended, prompt buffer cleared); raw messages are protocol bytes
-// such as telnet negotiation replies, written verbatim.
-type outMsg struct {
-	data []byte
-	line bool
-}
-
-// connection represents a single, ephemeral TCP session.
-// It is created on Connect() and discarded on Disconnect().
+// connection owns the state and workers for one TCP connection.
 type connection struct {
-	conn   net.Conn
-	parser *Parser
-	output *OutputBuffer
+	conn         net.Conn
+	connectionID uint64
+	parser       *Parser
 
 	// Read source indirection for MCCP2. reader is what readLoop
 	// consumes: the socket normally, a zlib stream while compression
@@ -58,23 +46,10 @@ type connection struct {
 	raw        io.Reader
 	zr         io.ReadCloser
 	compressed bool
+	secure     bool
 
-	// Identity negotiation responder (TTYPE/MTTS, NAWS, CHARSET, MNES)
-	hs *handshake
-
-	// Prompt-mode evidence: set once the first IAC GA or EOR arrives.
-	// Mode keys on received terminators, not negotiation state -
-	// options promise behavior, marks demonstrate it.
-	promptTerminated atomic.Bool
-
-	gmcpActive atomic.Bool // GMCP negotiated on this connection
-
-	localEcho atomic.Bool
-
-	// Buffered queue for outgoing data specific to this connection.
-	// writeLoop is the ONLY goroutine that writes to conn (and the only
-	// one that touches write deadlines); everything else enqueues here.
-	sendQueue chan outMsg
+	// writeLoop is the sole socket writer; other goroutines enqueue here.
+	sendQueue chan []byte
 
 	// Signal to stop internal goroutines
 	done      chan struct{}
@@ -84,8 +59,7 @@ type connection struct {
 // NewTCPClient creates a new client.
 func NewTCPClient() *TCPClient {
 	return &TCPClient{
-		// Small buffer - let TCP backpressure handle flow control
-		outputChan: make(chan Output, 256),
+		inboundChan: make(chan Inbound, 256),
 	}
 }
 
@@ -132,30 +106,19 @@ func dialOverride(hostport string) string {
 	return hostport
 }
 
-// Connect establishes a new connection.
-// If a connection already exists, it is cleanly closed and replaced.
-func (c *TCPClient) Connect(ctx context.Context, address string) error {
+// Connect dials address and installs it unless connectionID was superseded.
+func (c *TCPClient) Connect(ctx context.Context, address string, connectionID uint64) error {
 	hostport, useTLS, insecure, err := splitAddress(address)
 	if err != nil {
 		return err
 	}
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	// Clean up existing connection if present
-	if c.current != nil {
-		c.current.close()
-	}
-
-	// Dial with context to respect app shutdown during connection attempts
 	var d net.Dialer
 	conn, err := d.DialContext(ctx, "tcp", dialOverride(hostport))
 	if err != nil {
 		return err
 	}
 
-	// Configure TCP KeepAlive (for detecting dropped connections)
 	if tcpConn, ok := conn.(*net.TCPConn); ok {
 		tcpConn.SetKeepAlive(true)
 		tcpConn.SetKeepAlivePeriod(30 * time.Second)
@@ -176,143 +139,121 @@ func (c *TCPClient) Connect(ctx context.Context, address string) error {
 		}
 		conn = tlsConn
 	}
-
-	// Create the new connection object
 	cx := &connection{
-		conn:      conn,
-		reader:    conn,
-		raw:       conn,
-		hs:        newHandshake(useTLS, c.width, c.height),
-		parser:    NewParser(defaultCompatibility()),
-		output:    NewOutputBuffer(TelnetModeUnterminated),
-		sendQueue: make(chan outMsg, 4096),
-		done:      make(chan struct{}),
+		conn:         conn,
+		connectionID: connectionID,
+		reader:       conn,
+		raw:          conn,
+		parser:       NewParser(),
+		sendQueue:    make(chan []byte, 4096),
+		done:         make(chan struct{}),
+		secure:       useTLS,
 	}
-	cx.localEcho.Store(true)
 
-	// Set as current and start workers
+	// Ignore a dial superseded by BeginConnect or Disconnect.
+	c.mu.Lock()
+	if c.desiredConnectionID != connectionID {
+		c.mu.Unlock()
+		conn.Close()
+		return context.Canceled
+	}
+	old := c.current
 	c.current = cx
+	c.mu.Unlock()
+	if old != nil {
+		old.close()
+	}
 	go c.readLoop(cx)
 	go c.writeLoop(cx)
 
 	return nil
 }
 
-// Disconnect manually closes the connection.
+// BeginConnect records the next connection ID before its asynchronous dial,
+// so older dials cannot replace it.
+func (c *TCPClient) BeginConnect(connectionID uint64) {
+	c.mu.Lock()
+	c.desiredConnectionID = connectionID
+	old := c.current
+	c.current = nil
+	c.mu.Unlock()
+	if old != nil {
+		old.close()
+	}
+}
+
+// Disconnect rejects pending dials and closes the active connection.
 func (c *TCPClient) Disconnect() {
 	c.mu.Lock()
+	c.desiredConnectionID++ // invalidate pending dials
+	old := c.current
+	c.current = nil
+	c.mu.Unlock()
+	if old != nil {
+		old.close()
+	}
+}
+
+// SendLine queues one game line for the identified connection. Line data is
+// text: IAC bytes are doubled so the server reads them as data, and the CRLF
+// terminator is appended here, so the write loop handles one uniform byte
+// slice.
+func (c *TCPClient) SendLine(connectionID uint64, line string) error {
+	if strings.ContainsAny(line, "\r\n") {
+		return fmt.Errorf("game line cannot contain CR or LF")
+	}
+	data := []byte(line)
+	if bytes.IndexByte(data, CmdIAC) >= 0 {
+		data = escapeIAC(data)
+	}
+	data = append(data, '\r', '\n')
+	return c.enqueue(connectionID, data)
+}
+
+// SendFrame queues raw Telnet protocol bytes for the identified connection.
+func (c *TCPClient) SendFrame(connectionID uint64, frame []byte) error {
+	return c.enqueue(connectionID, bytes.Clone(frame))
+}
+
+// enqueue hands owned bytes to the identified connection's write loop.
+// Validation and enqueue share the lock, so a reconnect cannot redirect stale
+// Session work to the new socket.
+func (c *TCPClient) enqueue(connectionID uint64, data []byte) error {
+	c.mu.Lock()
 	defer c.mu.Unlock()
-
-	if c.current != nil {
-		c.current.close()
-		c.current = nil
-	}
-}
-
-// Send queues data for the current connection.
-// Returns error immediately if not connected or buffer is full.
-func (c *TCPClient) Send(data string) error {
-	c.mu.Lock()
 	cx := c.current
-	c.mu.Unlock()
-
-	if cx == nil {
+	if cx == nil || cx.connectionID != connectionID {
 		return fmt.Errorf("not connected")
 	}
-
 	select {
-	case cx.sendQueue <- outMsg{data: []byte(data), line: true}:
+	case cx.sendQueue <- data:
 		return nil
+	case <-cx.done:
+		return fmt.Errorf("not connected")
 	default:
 		return fmt.Errorf("send buffer full (network stalled?)")
 	}
 }
 
-// SetWindowSize records the terminal size and, when NAWS is active on
-// the current connection, reports it to the server immediately.
-// The size is retained across connections so the next connect can
-// answer DO NAWS with real numbers.
-func (c *TCPClient) SetWindowSize(width, height int) {
-	c.mu.Lock()
-	c.width, c.height = width, height
-	cx := c.current
-	c.mu.Unlock()
+// Inbound returns event batches and disconnect notifications from every
+// connection. Each message carries its connection ID so Session can reject
+// stale work.
+func (c *TCPClient) Inbound() <-chan Inbound {
+	return c.inboundChan
+}
 
-	if cx == nil {
-		return
-	}
-	frame := cx.hs.setWindowSize(width, height)
-	if frame == nil {
-		return
-	}
+// publish sends one message tagged with cx's connection ID. It reports
+// whether the connection is still alive to keep reading.
+func (c *TCPClient) publish(cx *connection, kind InboundKind, batch EventBatch) bool {
 	select {
-	case cx.sendQueue <- outMsg{data: frame}:
-	default:
-		// Send queue full - drop the resize report; the next resize
-		// (or reconnect) will correct it. Never block the UI path.
-	}
-}
-
-// GMCPActive reports whether GMCP is negotiated on the current
-// connection. False when disconnected.
-func (c *TCPClient) GMCPActive() bool {
-	c.mu.Lock()
-	cx := c.current
-	c.mu.Unlock()
-	return cx != nil && cx.gmcpActive.Load()
-}
-
-// SendGMCP sends a GMCP message: "Package.SubPackage" plus optional
-// raw JSON. Returns an error when disconnected or when the server has
-// not negotiated GMCP.
-func (c *TCPClient) SendGMCP(pkg, data string) error {
-	c.mu.Lock()
-	cx := c.current
-	c.mu.Unlock()
-
-	if cx == nil {
-		return fmt.Errorf("not connected")
-	}
-	if !cx.gmcpActive.Load() {
-		return fmt.Errorf("GMCP not negotiated on this connection")
-	}
-
-	payload := pkg
-	if data != "" {
-		payload += " " + data
-	}
-	frame := subnegFrame(OptGMCP, []byte(payload))
-
-	select {
-	case cx.sendQueue <- outMsg{data: frame}:
-		return nil
-	default:
-		return fmt.Errorf("send buffer full (network stalled?)")
-	}
-}
-
-// Output returns the stable output channel.
-func (c *TCPClient) Output() <-chan Output {
-	return c.outputChan
-}
-
-// LocalEchoEnabled reports whether the current connection prefers local echo.
-// Defaults to true if no active connection.
-func (c *TCPClient) LocalEchoEnabled() bool {
-	c.mu.Lock()
-	cx := c.current
-	c.mu.Unlock()
-	if cx == nil {
+	case c.inboundChan <- Inbound{Kind: kind, ConnectionID: cx.connectionID, Batch: batch}:
 		return true
+	case <-cx.done:
+		return false
 	}
-	return cx.localEcho.Load()
 }
 
-// --- Worker Routines ---
-
-// readLoop reads from a specific connection instance.
-// It sends directly to outputChan, blocking if the session is slow.
-// This allows TCP backpressure to naturally throttle the server.
+// readLoop reads from cx; blocking on publication is the TCP backpressure.
 func (c *TCPClient) readLoop(cx *connection) {
 	buf := make([]byte, 4096)
 
@@ -335,7 +276,6 @@ func (c *TCPClient) readLoop(cx *connection) {
 				continue
 			}
 
-			// Check if we're still the active connection
 			c.mu.Lock()
 			isCurrent := (c.current == cx)
 			if isCurrent {
@@ -344,11 +284,7 @@ func (c *TCPClient) readLoop(cx *connection) {
 			c.mu.Unlock()
 
 			if isCurrent {
-				// Send disconnect notification - this may block briefly, that's OK
-				select {
-				case c.outputChan <- Output{Kind: OutputDisconnect}:
-				case <-cx.done:
-				}
+				c.publish(cx, InboundDisconnect, EventBatch{})
 				cx.shutdown()
 			}
 			return
@@ -356,124 +292,35 @@ func (c *TCPClient) readLoop(cx *connection) {
 	}
 }
 
-// processIncoming feeds bytes to the parser and dispatches the
-// resulting events. Returns false when the connection is done and the
-// read loop should exit.
+// processIncoming consumes transport-local MCCP activation (which changes how
+// the next socket bytes must be read), then publishes any remaining events
+// from this parser call as one owned batch.
 func (c *TCPClient) processIncoming(cx *connection, data []byte) bool {
-	// MCCP2 activation is deferred to the end of the batch: the parser
-	// stops parsing at IAC SB 86 IAC SE and hands back the remaining
-	// raw (compressed) bytes, so nothing after the marker is parsed.
+	events := cx.parser.Receive(data)
+	if len(events) == 0 {
+		return true
+	}
+
+	forwarded := make([]TelnetEvent, 0, len(events))
 	startMCCP := false
 	var mccpRest []byte
-	sawText := false
-
-	for _, ev := range cx.parser.Receive(data) {
-		switch ev.Kind {
-		case TelnetEventDataSend:
-			// Negotiation replies go through the send queue so a
-			// single goroutine owns the socket writes and their
-			// deadlines. Blocking here is fine: writeLoop drains
-			// continuously, and done unblocks us on teardown.
-			if !cx.enqueueRaw(ev.Data) {
-				return false
-			}
-
-		case TelnetEventDataReceive:
-			sawText = true
-			lines := cx.output.Receive(ev.Data)
-			for _, line := range lines {
-				select {
-				case c.outputChan <- Output{Kind: OutputLine, Payload: string(line)}:
-				case <-cx.done:
-					return false
-				}
-			}
-
-		case TelnetEventIAC:
-			if ev.Command == CmdGA || ev.Command == CmdEOR {
-				// A received mark is evidence the server terminates its
-				// prompts; the first one switches modes for good.
-				cx.markPromptTerminated()
-				if cx.output.HasNewData() {
-					prompt := cx.output.Prompt(true)
-					if prompt != "" {
-						select {
-						case c.outputChan <- Output{Kind: OutputPrompt, Payload: prompt}:
-						case <-cx.done:
-							return false
-						}
-					}
-				} else {
-					// Just flush even if no new data
-					cx.output.Prompt(true)
-				}
-			}
-
-		case TelnetEventNegotiation:
-			cx.applyNegotiation(ev.Command, ev.Option)
-			for _, frame := range cx.hs.onNegotiation(ev.Command, ev.Option) {
-				if !cx.enqueueRaw(frame) {
-					return false
-				}
-			}
-			if ev.Option == OptGMCP {
-				switch ev.Command {
-				case CmdWILL, CmdDO:
-					if !cx.gmcpActive.Swap(true) {
-						select {
-						case c.outputChan <- Output{Kind: OutputGMCPEnabled}:
-						case <-cx.done:
-							return false
-						}
-					}
-				case CmdWONT, CmdDONT:
-					cx.gmcpActive.Store(false)
-				}
-			}
-
-		case TelnetEventSubnegotiation:
-			switch ev.Option {
-			case OptMCCP2:
-				startMCCP = true
-			case OptGMCP:
-				pkg, payload := splitGMCP(ev.Data)
-				if pkg != "" {
-					select {
-					case c.outputChan <- Output{Kind: OutputGMCP, Package: pkg, Payload: payload}:
-					case <-cx.done:
-						return false
-					}
-				}
-			default:
-				for _, frame := range cx.hs.onSubnegotiation(ev.Option, ev.Data) {
-					if !cx.enqueueRaw(frame) {
-						return false
-					}
-				}
-			}
-
-		case TelnetEventDecompressImmediate:
-			// Raw compressed bytes that followed IAC SB 86 IAC SE in
-			// the same read. Always the final event of a batch.
+	for _, event := range events {
+		switch {
+		case event.Kind == TelnetEventSubnegotiation && event.Option == OptMCCP2:
 			startMCCP = true
-			mccpRest = ev.Data
+		case event.Kind == TelnetEventDecompressImmediate:
+			startMCCP = true
+			mccpRest = event.Data
+		default:
+			forwarded = append(forwarded, event)
 		}
 	}
 
-	// Unterminated-prompt peek runs once per batch, AFTER any GA/EOR in
-	// the same batch has consumed the buffer. Peeking inside the
-	// DataReceive case emitted "HP:100> " twice for a single
-	// "HP:100> " + IAC GA read - once from the peek, once from the GA
-	// flush - and the session committed the duplicate to scrollback.
-	if sawText && cx.telnetMode() == TelnetModeUnterminated {
-		prompt := cx.output.Prompt(false)
-		if prompt != "" {
-			select {
-			case c.outputChan <- Output{Kind: OutputPrompt, Payload: prompt}:
-			case <-cx.done:
-				return false
-			}
-		}
+	if len(forwarded) > 0 && !c.publish(cx, InboundBatch, EventBatch{
+		Secure: cx.secure,
+		Events: cloneEvents(forwarded),
+	}) {
+		return false
 	}
 
 	if startMCCP {
@@ -488,15 +335,13 @@ func (c *TCPClient) processIncoming(cx *connection, data []byte) bool {
 	return true
 }
 
-// enqueueRaw queues protocol bytes for writeLoop. Returns false if the
-// connection is shutting down.
-func (cx *connection) enqueueRaw(data []byte) bool {
-	select {
-	case cx.sendQueue <- outMsg{data: data}:
-		return true
-	case <-cx.done:
-		return false
+func cloneEvents(events []TelnetEvent) []TelnetEvent {
+	owned := make([]TelnetEvent, len(events))
+	copy(owned, events)
+	for i := range owned {
+		owned[i].Data = bytes.Clone(owned[i].Data)
 	}
+	return owned
 }
 
 // startDecompression switches the read path to a zlib stream, seeded
@@ -539,32 +384,25 @@ func (c *TCPClient) writeLoop(cx *connection) {
 		select {
 		case <-cx.done:
 			return
-		case msg := <-cx.sendQueue:
-			data := msg.data
-			if msg.line {
-				// Clear prompt buffer before sending - in unterminated mode,
-				// the server will reprint the prompt after echoing our input
-				cx.output.InputSent()
-				// Line data is text: double IAC bytes so the server
-				// reads them as data, not commands. Raw messages are
-				// protocol frames and pass through untouched.
-				if bytes.IndexByte(data, CmdIAC) >= 0 {
-					data = EscapeIAC(data)
-				}
-				data = append(data, '\r', '\n')
-			}
-
-			cx.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-			_, err := cx.conn.Write(data)
-			cx.conn.SetWriteDeadline(time.Time{})
-
-			if err != nil {
-				// Write failed - close the connection to trigger readLoop cleanup
-				cx.conn.Close()
+		case data := <-cx.sendQueue:
+			if !cx.write(data) {
 				return
 			}
 		}
 	}
+}
+
+// write sends one queued message. On failure it closes the socket so readLoop
+// observes the error and reports the disconnect.
+func (cx *connection) write(data []byte) bool {
+	cx.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	_, err := cx.conn.Write(data)
+	cx.conn.SetWriteDeadline(time.Time{})
+	if err != nil {
+		cx.conn.Close()
+		return false
+	}
+	return true
 }
 
 // close cleanly shuts down the connection resources
@@ -573,46 +411,8 @@ func (cx *connection) close() {
 	cx.shutdown()
 }
 
-// shutdown closes the done channel exactly once to stop workers.
 func (cx *connection) shutdown() {
 	cx.closeOnce.Do(func() {
 		close(cx.done)
 	})
-}
-
-// applyNegotiation updates local echo state from telnet negotiation.
-// EOR/SGA negotiation deliberately does not drive prompt mode: WILL is
-// a promise about future marks and DO concerns our own output, so a
-// server could negotiate either and still send unterminated prompts.
-// Only received GA/EOR marks switch modes (markPromptTerminated), the
-// way other MUD clients detect prompts.
-func (cx *connection) applyNegotiation(cmd, opt byte) {
-	switch opt {
-	case OptEcho:
-		switch cmd {
-		case CmdWILL:
-			// Server will echo - disable local echo
-			cx.localEcho.Store(false)
-		case CmdWONT, CmdDONT, CmdDO:
-			// Server won't echo or wants us to echo - enable local echo
-			cx.localEcho.Store(true)
-		}
-	}
-}
-
-// markPromptTerminated records received GA/EOR evidence. From the
-// first mark on, the unterminated-prompt peek turns off and the output
-// buffer stops clearing on input; sticky for the connection.
-func (cx *connection) markPromptTerminated() {
-	if !cx.promptTerminated.Swap(true) {
-		cx.output.SetMode(TelnetModeTerminatedPrompt)
-	}
-}
-
-// telnetMode returns the current prompt-detection mode.
-func (cx *connection) telnetMode() TelnetMode {
-	if cx.promptTerminated.Load() {
-		return TelnetModeTerminatedPrompt
-	}
-	return TelnetModeUnterminated
 }

@@ -41,8 +41,9 @@ current connection.
 ## Subscriptions and the handshake
 
 `rune.gmcp.subscribe("Char")` declares interest and `unsubscribe` retracts
-it. Rune maintains `Core.Supports.Set` for you, re-sending the full set on
-every change. When a server negotiates GMCP, the `gmcp_enabled` event fires
+it. Rune maintains `Core.Supports.Set` for you, re-sending the full set
+whenever it changes (an empty set is never sent). When a server negotiates
+GMCP, the `gmcp_enabled` event fires
 and a core handler (named `gmcp-hello`) sends `Core.Hello` plus your
 subscriptions. Subscribe at load time and the handshake picks it up on
 connect. Replace the handler if your server needs a different hello.

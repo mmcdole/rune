@@ -47,7 +47,7 @@ local function index_exact(data)
         end
         node = child
     end
-    node.data = data
+    node.alias = data
     data._exact_words = words
 end
 
@@ -68,12 +68,12 @@ local function unindex_exact(data)
         path[#path + 1] = node
     end
 
-    if node.data == data then
-        node.data = nil
+    if node.alias == data then
+        node.alias = nil
     end
     for i = #words, 1, -1 do
         local child = path[i + 1]
-        if child.data == nil and next(child.children) == nil then
+        if child.alias == nil and next(child.children) == nil then
             path[i].children[words[i]] = nil
         else
             break
@@ -252,7 +252,7 @@ function rune.alias.process(input)
 
     -- Then walk the exact-alias trie. Retaining the last active candidate
     -- makes the most specific (longest) phrase win.
-    local data, matched_end = nil, nil
+    local winner, winner_end = nil, nil
     local node = exact_root
     local token_start, token_end = input:find("%S+")
     if token_start == 1 then
@@ -262,40 +262,38 @@ function rune.alias.process(input)
             if not node then
                 break
             end
-            local candidate = node.data
+            local candidate = node.alias
             if candidate and registry:active(candidate) then
-                data = candidate
-                matched_end = token_end
+                winner = candidate
+                winner_end = token_end
             end
             token_start, token_end = input:find("%S+", token_end + 1)
         end
     end
-    if data then
-        local args_start = input:find("%S", matched_end + 1)
+    if winner then
+        local args_start = input:find("%S", winner_end + 1)
         local args = args_start and input:sub(args_start) or ""
         local result = nil
 
-        if type(data.action) == "function" then
-            -- For exact aliases, pass args string (not matches array)
+        if type(winner.action) == "function" then
             local ctx = {
                 line = input,
-                name = data.name,
-                group = data.group,
+                name = winner.name,
+                group = winner.group,
                 type = "alias",
                 args = args,
             }
-            result = run_action(data, args, ctx)
-        elseif type(data.action) == "string" then
-            -- Exact alias expansion: append args
+            result = run_action(winner, args, ctx)
+        elseif type(winner.action) == "string" then
             if args and args ~= "" then
-                result = data.action .. " " .. args
+                result = winner.action .. " " .. args
             else
-                result = data.action
+                result = winner.action
             end
         end
 
-        if data.once then
-            data._handle:remove()
+        if winner.once then
+            winner._handle:remove()
         end
 
         return true, result

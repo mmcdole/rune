@@ -249,17 +249,17 @@ func runStep(t *testing.T, c *client, st step, desc string) {
 		c.mud.conn.Close()
 
 	case st.Type != nil:
-		c.ui.input <- input.Command(*st.Type)
+		c.ui.events <- ui.InputSubmittedMsg{Submission: input.Command(*st.Type)}
 	case st.Input != nil:
 		cursor := len(st.Input.Text)
 		if st.Input.Cursor != nil {
 			cursor = *st.Input.Cursor
 		}
-		c.ui.outbound <- ui.InputChangedMsg{Text: st.Input.Text, Cursor: cursor}
+		c.ui.events <- ui.InputChangedMsg{Text: st.Input.Text, Cursor: cursor}
 	case st.Press != nil:
-		c.ui.outbound <- ui.ExecuteBindMsg(*st.Press)
+		c.ui.events <- ui.ExecuteBindMsg(*st.Press)
 	case st.Resize != nil:
-		c.ui.outbound <- ui.WindowSizeChangedMsg{Width: st.Resize.Width, Height: st.Resize.Height}
+		c.ui.events <- ui.WindowSizeChangedMsg{Width: st.Resize.Width, Height: st.Resize.Height}
 
 	case st.ExpectSent != nil:
 		c.mud.expect([]byte(*st.ExpectSent), desc+": expect_sent")

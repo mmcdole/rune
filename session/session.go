@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/mmcdole/rune/input"
@@ -20,96 +19,111 @@ import (
 	"github.com/mmcdole/rune/ui"
 )
 
-// Compile-time interface check - Session implements lua.Host
 var _ lua.Host = (*Session)(nil)
 
 // Network is the connection layer Session drives. In production this
 // is *network.TCPClient; tests substitute a mock so the event loop
 // can be exercised without sockets.
 type Network interface {
-	Connect(ctx context.Context, address string) error
+	BeginConnect(connectionID uint64)
+	Connect(ctx context.Context, address string, connectionID uint64) error
 	Disconnect()
-	Send(data string) error
-	SendGMCP(pkg, data string) error
-	GMCPActive() bool
-	SetWindowSize(width, height int)
-	Output() <-chan network.Output
-	LocalEchoEnabled() bool
+	SendLine(connectionID uint64, line string) error
+	SendFrame(connectionID uint64, frame []byte) error
+	Inbound() <-chan network.Inbound
 }
 
 var _ Network = (*network.TCPClient)(nil)
 
-// Config holds session configuration
+// Config holds startup settings for a Session.
 type Config struct {
 	CoreScripts   embed.FS // Embedded core Lua scripts
 	ConfigDir     string   // Directory for all of Rune's files (init.lua, store.json, worlds, logs)
 	ConnectTarget string   // CLI connect target (world, host port, or address)
 }
 
-// Session is the central actor/orchestrator that owns the Lua state and
-// processes all events sequentially via a single goroutine. It implements
-// lua.Host to provide Lua scripts access to network, UI, timers, and system
-// operations.
+// Session owns application and Lua state. Its event loop serializes all access
+// to that state, while network, UI, timer, and background I/O remain adapters.
+// Session implements lua.Host so scripts can request those adapter operations.
 type Session struct {
-	// Infrastructure
-	net   Network
-	ui    ui.UI
-	timer *timer.Service
+	// Dependencies and configuration
+	net           Network
+	ui            ui.UI
+	timer         *timer.Service
+	config        Config
+	connectTarget string // CLI connect target; consumed on first boot only
 
-	// Scripting
-	engine *lua.Engine
+	// Lua runtime
+	engine        *lua.Engine
+	luaGeneration uint64
+	sessionStore  map[string]string // Reload-surviving state; see lua_session.go
 
-	// History
+	// Event sources and background-work lifetime
+	// internalEvents carries typed outcomes from Session-owned asynchronous
+	// work back to the event loop. Only the event loop applies them to Session
+	// or Lua state.
+	internalEvents       chan internalEvent
+	timerEvents          chan timer.Event
+	barTicker            *time.Ticker
+	backgroundCtx        context.Context
+	cancelBackgroundWork context.CancelFunc
+
+	// Client and connection state
+	clientState  lua.ClientState
+	connectionID uint64            // Rejects work from previous connections
+	protocol     *network.Protocol // Session-confined Telnet state
+
+	// Input and history
+	currentInput   string // Tracked so Lua can query via rune.input.get()
+	currentCursor  int    // Zero-based UTF-8 byte offset exposed to Lua
 	historyEntries []input.Submission
 	historyLimit   int
 
-	// Reload-surviving Lua state (see lua_session.go)
-	sessionStore map[string]string
+	// Inbound text and its display lifecycle.
+	// activeBatch is set only while one event batch is being applied, so a
+	// re-entrant Send can defer its partial-line finish until the batch's
+	// prompt callbacks have installed their final rewrite or gag.
+	partialLine partialLineBuffer
+	prompt      promptOverlay
+	activeBatch *eventBatchState
 
-	// Durable store backed by <config>/store.json (see lua_store.go)
+	// Durable state and active log
 	store        map[string]json.RawMessage
 	storePath    string
 	storeLoadErr error // corrupt/unreadable store.json, reported at boot
+	logFile      *os.File
+	logPath      string
+}
 
-	// Active session log (see lua_log.go); survives /reload
-	logFile *os.File
-	logPath string
-
-	// Channels
-	// asyncResults marshals work from producer goroutines (dial, HTTP,
-	// deferred reload) back onto the session goroutine, which runs each
-	// callback with exclusive access to the Lua state. Senders are
-	// Session's own methods only: this lane carries continuations, not
-	// messages. Data crossing a domain boundary (network, UI, timers)
-	// gets a typed channel instead, never a closure.
-	asyncResults chan func()
-	timerEvents  chan timer.Event
-	barTicker    *time.Ticker
-
-	// State
-	lastPrompt    string
-	connectTarget string // CLI connect target; consumed on first boot only
-	config        Config
-	clientState   lua.ClientState
-	currentInput  string // Tracked so Lua can query via rune.input.get()
-	currentCursor int    // Zero-based UTF-8 byte offset exposed to Lua
+// eventBatchState holds the decisions scoped to one network.EventBatch.
+type eventBatchState struct {
+	connectionID                  uint64
+	serverDataSincePromptBoundary bool // a batch ending with it observes the partial line
+	partialFinishPending          bool // an accepted send finishes the partial line at batch end
 }
 
 // New creates a new Session. It is passive - no goroutines start here.
 func New(net Network, uiInstance ui.UI, cfg Config) *Session {
 	timerEvents := make(chan timer.Event, 256)
+	// Run replaces this context with one scoped to its caller; it exists so
+	// the fields are usable in tests that never call Run.
+	backgroundCtx, cancelBackgroundWork := context.WithCancel(context.Background())
 
 	s := &Session{
-		net:            net,
-		ui:             uiInstance,
-		timer:          timer.NewService(timerEvents),
-		timerEvents:    timerEvents,
-		asyncResults:   make(chan func(), 256),
-		config:         cfg,
-		historyEntries: make([]input.Submission, 0, 10000),
-		historyLimit:   10000,
-		sessionStore:   make(map[string]string),
+		net:                  net,
+		ui:                   uiInstance,
+		timer:                timer.NewService(timerEvents),
+		timerEvents:          timerEvents,
+		internalEvents:       make(chan internalEvent, 256),
+		backgroundCtx:        backgroundCtx,
+		cancelBackgroundWork: cancelBackgroundWork,
+		config:               cfg,
+		historyEntries:       make([]input.Submission, 0, 10000),
+		historyLimit:         10000,
+		sessionStore:         make(map[string]string),
+		prompt:               newPromptOverlay(uiInstance),
 	}
+	s.protocol = network.NewProtocol(0, 0)
 
 	s.engine = lua.NewEngine(s)
 	s.clientState.ScrollMode = "live"
@@ -121,9 +135,11 @@ func New(net Network, uiInstance ui.UI, cfg Config) *Session {
 
 // Run starts the session and blocks until exit.
 func (s *Session) Run(ctx context.Context) error {
-	// Derive a cancellable context so Run can stop the event loop
-	// before tearing down the engine.
+	// The event loop and its asynchronous producers share the caller's lifetime.
+	s.cancelBackgroundWork()
 	ctx, cancel := context.WithCancel(ctx)
+	s.backgroundCtx = ctx
+	s.cancelBackgroundWork = cancel
 
 	defer func() {
 		cancel()
@@ -161,122 +177,223 @@ func (s *Session) Run(ctx context.Context) error {
 	return err
 }
 
-// processEvents is the session's inner loop. The select below is the
-// complete inventory of everything that can happen in the client - a
-// new capability means a new lane here, not a new entry in a hidden
-// dispatch table:
-//
-//	ui.Outbound()  UI intents (keys, resize, picker, edits) -> handleUIMessage
-//	ui.Input()     submitted input, command or verbatim     -> handleSubmission
-//	net.Output()   server lines/prompts/GMCP/disconnect     -> handleNetworkOutput
-//	timerEvents    due Lua timers                           -> engine.OnTimer
-//	barTicker      250ms bar repaint tick                   -> pushBarUpdates
-//	asyncResults   continuations of Session's own async work -> run the closure
-//
-// Every lane is drained on this one goroutine, so handlers - and the
-// Lua they call - touch session state without locks. Each lane is
-// FIFO; ordering ACROSS lanes is undefined (select picks among ready
-// cases at random).
+// processEvents is the complete inventory of work that may mutate Session or
+// call Lua. UI events share one FIFO lane; ordering between independent lanes
+// is intentionally unspecified.
 func (s *Session) processEvents(ctx context.Context) {
 	for {
-		// Priority: drain UI input messages first (for responsive completion)
-		select {
-		case msg := <-s.ui.Outbound():
-			s.handleUIMessage(msg)
-			continue
-		default:
-		}
-
 		select {
 		case <-ctx.Done():
 			return
-		case cb := <-s.asyncResults:
-			cb()
-		case netOut := <-s.net.Output():
-			s.handleNetworkOutput(netOut)
-		case submission := <-s.ui.Input():
-			s.handleSubmission(submission)
+		case event := <-s.internalEvents:
+			s.handleInternalEvent(event)
+		case inbound := <-s.net.Inbound():
+			s.handleInbound(inbound)
 		case evt := <-s.timerEvents:
 			s.engine.OnTimer(evt.ID)
 		case <-s.barTicker.C:
 			s.pushBarUpdates()
-		case msg := <-s.ui.Outbound():
-			s.handleUIMessage(msg)
+		case event := <-s.ui.Events():
+			s.handleUIEvent(event)
 		}
 	}
 }
 
-// handleNetworkOutput dispatches network layer output on the session loop.
-func (s *Session) handleNetworkOutput(out network.Output) {
-	switch out.Kind {
-	case network.OutputLine:
-		s.handleServerLine(out.Payload)
-	case network.OutputPrompt:
-		s.handleServerPrompt(out.Payload)
-	case network.OutputDisconnect:
+// handleInbound rejects stale network work and routes the current connection's
+// messages.
+func (s *Session) handleInbound(inbound network.Inbound) {
+	if inbound.ConnectionID != s.connectionID {
+		return
+	}
+
+	switch inbound.Kind {
+	case network.InboundDisconnect:
 		s.Disconnect()
-	case network.OutputGMCP:
-		s.engine.OnGMCP(out.Package, out.Payload)
-	case network.OutputGMCPEnabled:
-		s.engine.CallHook("gmcp_enabled")
+	case network.InboundBatch:
+		s.handleEventBatch(inbound.ConnectionID, inbound.Batch)
+	}
+}
+
+// handleEventBatch synchronously applies one event batch, including any Lua
+// callbacks caused by its Protocol effects.
+func (s *Session) handleEventBatch(connectionID uint64, batch network.EventBatch) {
+	state := &eventBatchState{connectionID: connectionID}
+	s.activeBatch = state
+	defer s.endEventBatch(state)
+
+	applyEffect := func(effect network.Effect) bool {
+		s.applyProtocolEffect(state, effect)
+		return s.connectionID == state.connectionID
+	}
+	processedAll := s.protocol.Process(batch, applyEffect)
+	if !processedAll || !state.serverDataSincePromptBoundary {
+		return
+	}
+
+	if partial := s.partialLine.peek(); partial != "" {
+		s.handlePromptObservation(partial, false)
+	}
+}
+
+// endEventBatch closes the scope visible to re-entrant Send calls and
+// performs an accepted send's deferred partial-line finish on the same
+// connection.
+func (s *Session) endEventBatch(state *eventBatchState) {
+	if s.activeBatch == state {
+		s.activeBatch = nil
+	}
+	if s.connectionID == state.connectionID && state.partialFinishPending {
+		s.finishPartialLine()
+	}
+}
+
+// applyProtocolEffect performs one synchronous consequence of a Telnet event.
+// The Process callback decides separately whether the connection is still
+// current and the batch may continue.
+func (s *Session) applyProtocolEffect(state *eventBatchState, effect network.Effect) {
+	switch effect.Kind {
+	case network.EffectSendFrame:
+		if err := s.net.SendFrame(state.connectionID, effect.Data); err != nil {
+			s.Disconnect()
+		}
+	case network.EffectServerData:
+		state.serverDataSincePromptBoundary = true
+		s.handleServerData(effect.Data, state.connectionID)
+	case network.EffectGA, network.EffectEOR:
+		state.serverDataSincePromptBoundary = false
+		s.handlePromptBoundary()
+	case network.EffectGMCPEnabled:
+		s.engine.NotifyGMCPEnabled()
+	case network.EffectGMCPMessage:
+		s.engine.OnGMCP(effect.Package, effect.Payload)
+	}
+}
+
+// handleServerData extends the partial line. It processes complete lines
+// immediately and leaves any partial remainder for a prompt observation at
+// batch end.
+func (s *Session) handleServerData(payload []byte, connectionID uint64) {
+	lines := s.partialLine.appendData(payload)
+	for _, line := range lines {
+		s.handleServerLine(line)
+		if s.connectionID != connectionID {
+			return
+		}
+	}
+}
+
+// handlePromptBoundary interprets a Telnet GA/EOR prompt boundary by
+// confirming and consuming the partial line.
+func (s *Session) handlePromptBoundary() {
+	payload := s.partialLine.consumeAtPromptBoundary()
+	if payload != "" {
+		s.handlePromptObservation(payload, true)
 	}
 }
 
 // handleServerLine processes a complete server line.
 func (s *Session) handleServerLine(payload string) {
+	// A complete line replaces a partial line, but follows a confirmed prompt.
+	s.prompt.commitOrDiscard()
+
+	connectionID := s.connectionID
 	line := text.NewLine(payload)
-	if modified, show := s.engine.OnOutput(line); show {
+	modified, show := s.engine.OnOutput(line)
+	if s.connectionID != connectionID {
+		// A later trigger in the same dispatch may have opened span state after
+		// the connection-changing hook discarded it. Nothing from the old line
+		// may survive into the replacement connection.
+		s.engine.DiscardSpans()
+		return
+	}
+	if show {
 		// Display egress owns terminal safety: strip everything but
 		// SGR so server clear/cursor sequences cannot wipe UI chrome
 		// (issue #69). Lua hooks above saw the raw line.
 		s.ui.Print(text.SanitizeDisplay(modified))
 	}
-	// Server line ends the prompt overlay
-	s.lastPrompt = ""
-	s.ui.SetPrompt("")
 }
 
-// handleServerPrompt processes a prompt snapshot. It replaces the overlay
-// and is never committed to scrollback here. In unterminated mode snapshots
-// are cumulative peeks of the growing line, so committing a superseded one
-// would turn socket read boundaries into visible lines (issue #25); a
-// GA/EOR prompt superseding another is a repaint and gets the same
-// treatment. Only input submission commits the active prompt
-// (handleSubmission).
-func (s *Session) handleServerPrompt(payload string) {
-	line := text.NewLine(payload)
-	// Sanitized before storing so the overlay and the later
-	// scrollback commit (handleSubmission) both stay chrome-safe.
-	modified := text.SanitizeDisplay(s.engine.OnPrompt(line))
-	s.lastPrompt = modified
-	s.ui.SetPrompt(modified)
-}
-
-// handleSubmission processes an immutable input snapshot. Command submissions
-// retain Rune's normal aliases, delimiters, repeats, and slash commands;
-// verbatim submissions bypass that interpretation and send physical lines as
-// written.
-func (s *Session) handleSubmission(submission input.Submission) {
-	// Commit prompt to scrollback before processing input.
-	if s.lastPrompt != "" {
-		s.ui.Print(s.lastPrompt)
-		s.lastPrompt = ""
-		s.ui.SetPrompt("")
-	}
-	s.addHistorySubmission(submission)
-	if s.net.LocalEchoEnabled() {
-		lines := []string{submission.Text}
-		if submission.Mode == input.ModeVerbatim {
-			// Scrollback entries must be physical lines. An embedded LF in
-			// one entry would render extra terminal rows without the viewport
-			// accounting for them.
-			lines = strings.Split(submission.Text, "\n")
+// handlePromptObservation runs prompt hooks and replaces the prompt overlay.
+// Partial lines replace each other; confirmed prompts are committed before
+// later server text.
+func (s *Session) handlePromptObservation(payload string, confirmed bool) {
+	connectionID := s.connectionID
+	s.prompt.commitIfConfirmed()
+	if confirmed {
+		s.engine.FlushSpans()
+		if s.connectionID != connectionID {
+			return
 		}
-		for _, line := range lines {
-			// Styling (and the choice to show the echo at all) is Lua
-			// policy, dispatched through the "echo" hook. Engine.OnEcho owns
-			// the safe display projection; canonical bytes remain untouched
-			// here for history and the wire.
+	}
+
+	line := text.NewLine(payload)
+	modified := s.engine.OnPrompt(line, confirmed)
+	// A prompt hook may replace the connection before it returns.
+	if s.connectionID != connectionID {
+		return
+	}
+	modified = text.SanitizeDisplay(modified)
+	s.prompt.replace(modified, confirmed)
+}
+
+// finishPartialLine discards the raw partial line and commits its already
+// processed prompt overlay before local output or an accepted game send.
+// Without an active overlay it leaves unrelated spans unchanged.
+func (s *Session) finishPartialLine() {
+	s.partialLine.discard()
+	if s.prompt.commit() {
+		s.engine.FlushSpans()
+	}
+}
+
+// handleUIEvent applies one accepted UI action or state observation.
+func (s *Session) handleUIEvent(event ui.UIEvent) {
+	switch event := event.(type) {
+	case ui.InputSubmittedMsg:
+		// The UI has accepted this immutable snapshot and cleared its draft.
+		// Mirror that change before input hooks inspect rune.input state.
+		s.currentInput = ""
+		s.currentCursor = 0
+		s.engine.NotifyInputChanged("")
+		s.handleSubmission(event.Submission)
+	case ui.ExecuteBindMsg:
+		s.engine.HandleKeyBind(string(event))
+	case ui.WindowSizeChangedMsg:
+		s.clientState.Width = event.Width
+		s.clientState.Height = event.Height
+		if frame := s.protocol.SetWindowSize(event.Width, event.Height); len(frame) > 0 {
+			_ = s.net.SendFrame(s.connectionID, frame)
+		}
+		s.engine.UpdateState(s.clientState)
+		s.pushBarUpdates()
+	case ui.ScrollStateChangedMsg:
+		s.clientState.ScrollMode = event.Mode
+		s.clientState.ScrollLines = event.NewLines
+		s.engine.UpdateState(s.clientState)
+		s.pushBarUpdates()
+	case ui.SearchStateChangedMsg:
+		s.clientState.SearchActive = bool(event)
+		s.engine.UpdateState(s.clientState)
+		s.pushBarUpdates()
+	case ui.PickerSelectMsg:
+		s.handlePickerResult(event.CallbackID, event.Value, event.Accepted)
+	case ui.InputChangedMsg:
+		s.currentInput = event.Text
+		s.currentCursor = input.RuneCursorToByte(event.Text, event.Cursor)
+		s.engine.NotifyInputChanged(event.Text)
+	case ui.CursorMovedMsg:
+		s.currentCursor = input.RuneCursorToByte(s.currentInput, event.Cursor)
+	}
+}
+
+func (s *Session) handleSubmission(submission input.Submission) {
+	// Submission is a display boundary regardless of local echo, aliases,
+	// slash commands, input-hook consumption, connection state, or send result.
+	s.finishPartialLine()
+	s.addHistorySubmission(submission)
+	if s.protocol.LocalEchoEnabled() {
+		for _, line := range submission.PhysicalLines() {
 			if styled, show := s.engine.OnEcho(line); show {
 				s.ui.Echo(styled)
 			}
@@ -303,7 +420,7 @@ func (s *Session) boot() error {
 	// the binds/layout push, leaving a half-dead client. Each failure
 	// is reported individually and the rest of boot proceeds.
 	s.loadUserScript()
-	s.engine.CallHook("ready")
+	s.engine.NotifyReady()
 	s.pushBindsAndLayout()
 	s.pushBarUpdates()
 
@@ -320,6 +437,7 @@ func (s *Session) boot() error {
 
 // initLua initializes the Lua VM and sets up config.
 func (s *Session) initLua() error {
+	s.luaGeneration++
 	if err := s.engine.Init(); err != nil {
 		return err
 	}
@@ -374,12 +492,6 @@ func (s *Session) reportScriptError(name string, err error) {
 	s.ui.Print(text.Red("  the rest of the client loaded normally - fix the script and /reload"))
 }
 
-// handleKeyBind executes a Lua key binding.
-// Must be called from Session goroutine (thread-safe Lua access).
-func (s *Session) handleKeyBind(key string) {
-	s.engine.HandleKeyBind(key)
-}
-
 // pushBarUpdates renders all Lua bars and pushes to UI.
 func (s *Session) pushBarUpdates() {
 	width := s.clientState.Width
@@ -405,37 +517,5 @@ func (s *Session) pushBindsAndLayout() {
 	luaLayout := s.engine.GetLayout()
 	if len(luaLayout.Top) > 0 || len(luaLayout.Bottom) > 0 {
 		s.ui.UpdateLayout(luaLayout.Top, luaLayout.Bottom)
-	}
-}
-
-// handleUIMessage processes messages from the UI.
-func (s *Session) handleUIMessage(msg ui.UIEvent) {
-	switch m := msg.(type) {
-	case ui.ExecuteBindMsg:
-		s.handleKeyBind(string(m))
-	case ui.WindowSizeChangedMsg:
-		s.clientState.Width = m.Width
-		s.clientState.Height = m.Height
-		s.net.SetWindowSize(m.Width, m.Height)
-		s.engine.UpdateState(s.clientState)
-		s.pushBarUpdates()
-	case ui.ScrollStateChangedMsg:
-		s.clientState.ScrollMode = m.Mode
-		s.clientState.ScrollLines = m.NewLines
-		s.engine.UpdateState(s.clientState)
-		s.pushBarUpdates()
-	case ui.SearchStateChangedMsg:
-		s.clientState.SearchActive = bool(m)
-		s.engine.UpdateState(s.clientState)
-		s.pushBarUpdates()
-	case ui.PickerSelectMsg:
-		s.handlePickerResult(m.CallbackID, m.Value, m.Accepted)
-	case ui.InputChangedMsg:
-		s.currentInput = m.Text
-		s.currentCursor = input.RuneCursorToByte(m.Text, m.Cursor)
-		s.engine.CallHook("input_changed", m.Text)
-	case ui.CursorMovedMsg:
-		s.currentCursor = input.RuneCursorToByte(s.currentInput, m.Cursor)
-		// No Lua hook - cursor-only changes don't need Lua processing
 	}
 }

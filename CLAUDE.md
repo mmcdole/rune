@@ -18,13 +18,25 @@ Rune is a MUD client: Go is the kernel (I/O, memory, concurrency), Lua is user s
 ### Event Flow
 
 ```
-User Submission -> UI input chan -> Session -> rune.hooks.call("input", text, {mode}) -> network
-Server Line -> net output   -> Session -> rune.hooks.call("output") -> UI print
-Server Prompt -> net output -> Session -> rune.hooks.call("prompt") -> UI prompt overlay
+UI action / state / submission -> one bounded ui.Events() FIFO -> Session
+Accepted InputSubmittedMsg -> Session clears its tracked draft -> finishes the partial line -> input/echo processing
+Network Read -> Parser.Receive -> transport filters MCCP activation -> optional net.Inbound event batch -> Session-owned network.Protocol
+Protocol Effects -> Session partial-line buffer -> output hook or prompt(line, confirmed)
+Accepted Game Line -> Session queues connection-scoped write -> finishes the partial line / flushes spans
 Timer fire -> timer events  -> Session -> rune.timer._fire(id)
-Key bind -> UI outbound     -> Session -> rune.binds._dispatch(key)
+Dial / HTTP completion / deferred reload -> typed internalEvents -> Session
 Bar tick (250ms)            -> Session -> rune.bars._render_all(width) -> UI bars
 ```
+
+UI-to-Session traffic uses one ordered `ui.Events()` channel; accepted draft
+changes, submissions, binds, picker results, and view-state changes cannot
+overtake each other. Bubble Tea never blocks its update/render goroutine to
+publish an event. A full queue leaves a rejected submission intact and shows a
+warning; other rejected UI events are dropped with a warning. Session-owned
+background work returns typed data through `internalEvents`, never closures,
+and only the Session loop applies it to application or Lua state. Its work and
+result publication share the Session lifetime; HTTP results are also tagged
+with the Lua generation that registered their callback.
 
 ### Go/Lua Boundary Conventions
 
@@ -47,7 +59,12 @@ These rules keep the boundary consistent; follow them when adding APIs:
 
 ### Hook Event Semantics
 
-Data-flow: `"output"`, `"prompt"`, `"echo"` support returning `false` to gag or a string to rewrite (rewrites CHAIN to subsequent handlers; the core `"echo"` handler adds the `"> "` styling). Every `"input"` handler receives `(text, context)` exactly once per submission, with read-only `context.mode` always `"command"` or `"verbatim"`; verbatim `text` may contain LF. Input supports only `false` (consume) - string returns are ignored, and the core input handler at priority 100 always consumes, so custom input handlers must register below 100.
+- Every user submission finishes an open partial line before history, echo, and input hooks - even a local, consumed, or disconnected submission, or one whose send ultimately fails. A programmatic game line finishes it only after its connection-scoped network write is accepted; failed sends, GMCP, NAWS, and Telnet negotiation never finish server text.
+- `"output"`, `"prompt"`, and `"echo"` support returning `false` to gag or a string to rewrite (rewrites CHAIN to subsequent handlers; the core `"echo"` handler adds the `"> "` styling).
+- `prompt` always receives `(line, confirmed)`: false is a repeatable observation of the partial line at the end of a `network.EventBatch`; true means a GA/EOR prompt boundary consumed it as a prompt. A partial line followed by GA/EOR in the same batch produces only the confirmed observation. Rune uses no timer or prompt-pattern inference.
+- A newline or bare CR instead consumes the line through `output` immediately; an optional LF following CR is swallowed, even when it arrives in a later event or batch.
+- If Lua sends while an event batch is being processed, the write is queued immediately, but the visual line finish waits for that batch's callbacks to install their final rewrite or gag.
+- Every `"input"` handler receives `(text, context)` exactly once per submission, with read-only `context.mode` always `"command"` or `"verbatim"`; verbatim `text` may contain line breaks. Input supports only `false` (consume) - string returns are ignored, and the core input handler at priority 100 always consumes, so custom input handlers must register below 100.
 
 ## Lua API
 
@@ -63,7 +80,7 @@ the platform default.
 
 ## Telnet Notes
 
-The default compatibility table advertises ONLY implemented options: Echo, SGA, EOR, TTYPE/MTTS, NAWS, CHARSET, NEW-ENVIRON/MNES (identity responders in `network/negotiate.go` - pure functions, byte-exact tests), MCCP2 (zlib read path in client.go; the source is a byte-exact `bufio.Reader`, so a clean stream end resumes plain telnet), and GMCP (option 201; framing in Go, policy in `70_gmcp.lua`). Never `Support()` an option without implementing its behavior - agreeing to an option without honoring its subnegotiations breaks real servers (MCCP3, MSSP, ZMP, Linemode stay refused). All socket writes go through the connection's single writeLoop. The parser accepts subnegotiations for options enabled on either side (server-offered GMCP/MCCP are remote; client-answered TTYPE/NAWS are local).
+The default compatibility table advertises ONLY implemented options: Echo, SGA, EOR, TTYPE/MTTS, NAWS, CHARSET, NEW-ENVIRON/MNES (identity responders in `network/negotiate.go` - pure functions, byte-exact tests), MCCP2 (zlib read path in `client.go`; the source is a byte-exact `bufio.Reader`, so a clean stream end resumes plain telnet), and GMCP (option 201; framing and JSON conversion in Go, policy in `70_gmcp.lua`). Never `support()` an option without implementing its behavior - agreeing to an option without honoring its subnegotiations breaks real servers (MCCP3, MSSP, ZMP, Linemode stay refused). `TCPClient` owns sockets, parser framing, MCCP read-source changes, and the single write loop. After consuming transport-local MCCP activation events, it publishes the remaining Session-facing events from one `Parser.Receive` as one `network.EventBatch` of owned copies; an MCCP-only result publishes no batch. Session owns one `network.Protocol` per connection and is the only goroutine that mutates its application-visible negotiation, local-echo, GMCP, and handshake state. `Protocol.Process` emits effects synchronously in wire order; required reply frames are queued before later effects and Lua callbacks. Writes include the expected connection ID so validation and enqueue are atomic. The parser accepts subnegotiations for options enabled on either side (server-offered GMCP/MCCP are remote; client-answered TTYPE/NAWS are local).
 
 ## Releasing
 

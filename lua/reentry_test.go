@@ -186,10 +186,10 @@ func TestReentryFailureUsesActiveFrame(t *testing.T) {
 	}
 
 	sent := host.DrainNetworkCalls()
-	if len(sent) != 2 ||
-		!strings.Contains(sent[0], "reported:bar render:") ||
-		!strings.Contains(sent[0], "nested render failure") ||
-		sent[1] != "outer resumed" {
+	if len(sent) < 2 ||
+		!strings.HasPrefix(sent[0], "reported:bar render:") ||
+		!strings.Contains(strings.Join(sent[:len(sent)-1], "\n"), "nested render failure") ||
+		sent[len(sent)-1] != "outer resumed" {
 		t.Fatalf("nested failure routing = %q", sent)
 	}
 	for _, printed := range host.DrainPrintCalls() {

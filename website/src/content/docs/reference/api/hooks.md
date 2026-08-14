@@ -57,9 +57,45 @@ call `rune.send`/`rune.send_raw` yourself and return `false`.
 | Event | Handler receives | Fired |
 |---|---|---|
 | `input` | submitted text, context | Once per submission, before command or verbatim routing |
-| `output` | line object (`:raw()`, `:clean()`) | On every complete server line |
-| `prompt` | line object | On prompt fragments (no newline, or GA/EOR terminated) |
+| `output` | line object (`:raw()`, `:clean()`) | Once for every complete server line |
+| `prompt` | line object, `confirmed` boolean | On cumulative partial-line observations and GA/EOR-confirmed prompts |
 | `echo` | typed text | On each physical line of local echo; skipped while the server has echo suppressed (passwords) |
+
+`prompt` drives the prompt overlay. With `confirmed = false`, the value is a
+partial line. It may be `Username:` or only the start of an ordinary line, and
+it may repeat as it grows. A line delimiter later sends the complete line
+through `output`. With `confirmed = true`, a GA/EOR prompt boundary confirmed
+the text as a prompt. If the boundary arrives in a later batch, the hook may
+receive the same text first as partial and then as confirmed. An empty prompt
+boundary does not fire the hook. Rune never uses a timer or prompt pattern to
+confirm a partial line.
+
+Finishing a partial line means one thing throughout Rune: the prompt overlay
+is committed to scrollback and open trigger spans close. Every user submission
+finishes the partial line before history, echo, and input hooks run, even for
+a local slash command, a consumed submission, a disconnected submission, or
+one whose eventual send fails. Separately, a programmatic game line from an
+alias, trigger, timer, or other callback finishes it only after the connection
+accepts the send. A failed programmatic send and protocol traffic such as GMCP
+do not.
+
+If the partial text was really the start of a fragmented ordinary line,
+sending commits the visible prefix; the rest arrives through `output` as a new
+line. This is the trade-off for immediate partial-line display without a timer
+or prompt pattern.
+
+```lua
+rune.hooks.on("prompt", function(line, confirmed)
+    if confirmed then
+        rune.echo("Server-confirmed prompt: " .. line:clean())
+    end
+end)
+```
+
+Handlers for partial lines should be safe to repeat. A confirmed prompt closes
+open spans before `prompt` handlers run. Finishing a partial line on submission
+or accepted send commits its latest processed overlay without calling the
+`prompt` hook again.
 
 Every `input` handler receives `(text, context)`. The context is read-only, and
 `context.mode` is always `"command"` or `"verbatim"`:
@@ -67,18 +103,17 @@ Every `input` handler receives `(text, context)`. The context is read-only, and
 ```lua
 rune.hooks.on("input", function(text, context)
     if context.mode == "verbatim" then
-        -- text is the whole submission and may contain LF characters
-        local _, breaks = text:gsub("\n", "")
-        rune.echo("Sending " .. tostring(breaks + 1) .. " lines")
+        -- The handler sees the whole submission once, line breaks included.
+        rune.echo("Sending verbatim block (" .. #text .. " bytes)")
     end
 end, { priority = 10 })
 ```
 
-Command mode applies Rune aliases, separators, repeats, and slash commands in
-the core handler. Verbatim mode still passes through custom `input` handlers
-once, but the core treats only LF as a physical-line boundary and bypasses all
-command interpretation. Existing one-argument handlers remain valid because
-Lua ignores extra arguments.
+Command mode applies Rune aliases, separators, repeats, and slash commands.
+Verbatim mode bypasses command processing and splits LF, CRLF, and bare CR into
+physical lines. Custom `input` handlers still receive the whole submission
+once. Existing one-argument handlers remain valid because Lua ignores extra
+arguments.
 
 The core registers its own handlers at priority 100: command or verbatim
 routing on `input`, trigger processing on `output`/`prompt`,

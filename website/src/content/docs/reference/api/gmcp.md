@@ -79,9 +79,11 @@ a debugging tool (`/gmcp send` uses it).
 
 `subscribe(package, version?)` declares interest in a server package
 (`"Char"`, `"Room"`, …); `version` defaults to 1. Subscriptions
-maintain `Core.Supports.Set` — the full set is re-sent on every
-change, per the spec — taking effect immediately when GMCP is up,
-otherwise at the next handshake. This holds across `/reload` too:
+maintain `Core.Supports.Set` — the full set is re-sent whenever a
+non-empty set changes, per the spec — taking effect immediately when
+GMCP is up, otherwise at the next handshake. An empty set is never
+sent: unsubscribing the last package leaves the server's set
+unchanged. This holds across `/reload` too:
 `is_enabled()` reflects the live connection, so a subscription added
 to `init.lua` reaches the server as soon as the reloaded script
 declares it.

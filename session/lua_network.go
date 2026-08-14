@@ -3,61 +3,116 @@ package session
 import (
 	"context"
 	"time"
+
+	"github.com/mmcdole/rune/network"
 )
 
-// Connect implements lua.Host.
-// The dial runs in its own goroutine; unlike Reload, that goroutine
-// may block on the async-result channel (lossless delivery) because
-// the session loop keeps draining while the dial is in flight.
+// resetConnectionState drops everything scoped to the previous connection:
+// the partial line, batch state, Telnet state, open spans, and the prompt
+// overlay.
+func (s *Session) resetConnectionState() {
+	s.partialLine.reset()
+	s.activeBatch = nil
+	s.protocol = network.NewProtocol(s.clientState.Width, s.clientState.Height)
+	s.engine.DiscardSpans()
+	s.prompt.discard()
+}
+
+// Connect starts a dial without blocking the Session loop.
 func (s *Session) Connect(addr string) {
-	s.engine.CallHook("connecting", addr)
+	// The connecting hook runs against the existing connection, so it may
+	// still send on it before the socket is retired.
+	connectionID := s.connectionID
+	s.engine.NotifyConnecting(addr)
+	if s.connectionID != connectionID {
+		return // the hook replaced the connection
+	}
+
+	s.connectionID++
+	connectionID = s.connectionID
+	s.resetConnectionState()
+	s.net.BeginConnect(connectionID)
+	// The old socket is retired now, not when the dial resolves.
+	s.clientState.Connected = false
+	s.clientState.Address = ""
+	s.engine.UpdateState(s.clientState)
+	s.pushBarUpdates()
+	backgroundCtx := s.backgroundCtx
 	go func() {
-		// Create a timeout context for the dial attempt.
-		// We use a separate context because if the Session cancels,
-		// s.net.Disconnect() is called anyway in Run's defer.
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(backgroundCtx, 10*time.Second)
 		defer cancel()
 
-		err := s.net.Connect(ctx, addr)
-		s.asyncResults <- func() {
-			if err != nil {
-				s.clientState.Connected = false
-				s.clientState.Address = ""
-				s.engine.UpdateState(s.clientState)
-				s.engine.CallHook("error", err.Error())
-			} else {
-				s.clientState.Connected = true
-				s.clientState.Address = addr
-				s.engine.UpdateState(s.clientState)
-				s.engine.CallHook("connected", addr)
-			}
-			s.pushBarUpdates()
-		}
+		err := s.net.Connect(ctx, addr, connectionID)
+		s.postInternalEvent(backgroundCtx, connectFinished{
+			connectionID: connectionID,
+			address:      addr,
+			err:          err,
+		})
 	}()
+}
+
+func (s *Session) handleConnectFinished(event connectFinished) {
+	if s.connectionID != event.connectionID {
+		return
+	}
+	if event.err != nil {
+		s.clientState.Connected = false
+		s.clientState.Address = ""
+		s.engine.UpdateState(s.clientState)
+		s.engine.NotifyError(event.err.Error())
+	} else {
+		s.clientState.Connected = true
+		s.clientState.Address = event.address
+		s.engine.UpdateState(s.clientState)
+		s.engine.NotifyConnected(event.address)
+	}
+	s.pushBarUpdates()
 }
 
 // Disconnect implements lua.Host.
 func (s *Session) Disconnect() {
-	s.engine.CallHook("disconnecting")
+	// The disconnecting hook runs against the live connection, so it may
+	// still send farewells on it.
+	connectionID := s.connectionID
+	s.engine.NotifyDisconnecting()
+	if s.connectionID != connectionID {
+		return // the hook replaced the connection
+	}
+
+	s.connectionID++
+	s.resetConnectionState()
 	s.net.Disconnect()
 	s.clientState.Connected = false
 	s.clientState.Address = ""
 	s.engine.UpdateState(s.clientState)
-	s.engine.CallHook("disconnected")
+	s.engine.NotifyDisconnected()
 	s.pushBarUpdates()
 }
 
 // Send implements lua.Host.
 func (s *Session) Send(data string) error {
-	return s.net.Send(data)
+	err := s.net.SendLine(s.connectionID, data)
+	if err != nil {
+		return err
+	}
+	if state := s.activeBatch; state != nil && state.connectionID == s.connectionID {
+		state.partialFinishPending = true
+	} else {
+		s.finishPartialLine()
+	}
+	return nil
 }
 
 // GMCPSend implements lua.Host.
 func (s *Session) GMCPSend(pkg, data string) error {
-	return s.net.SendGMCP(pkg, data)
+	frame, err := s.protocol.GMCPFrame(pkg, data)
+	if err != nil {
+		return err
+	}
+	return s.net.SendFrame(s.connectionID, frame)
 }
 
 // GMCPActive implements lua.Host.
 func (s *Session) GMCPActive() bool {
-	return s.net.GMCPActive()
+	return s.protocol.GMCPActive()
 }

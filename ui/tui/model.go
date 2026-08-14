@@ -58,11 +58,10 @@ type Model struct {
 	}
 
 	// State
-	lastPrompt  string
+	promptText  string
 	width       int
 	height      int
-	inputChan   chan<- input.Submission
-	outbound    chan<- ui.UIEvent
+	events      chan<- ui.UIEvent
 	initialized bool
 	pendingRows []string
 	// flushScheduled is true while a batch-window tick is outstanding.
@@ -73,7 +72,7 @@ type Model struct {
 }
 
 // NewModel creates a new TUI model.
-func NewModel(inputChan chan<- input.Submission, outbound chan<- ui.UIEvent) *Model {
+func NewModel(events chan<- ui.UIEvent) *Model {
 	styles := style.DefaultStyles()
 	scrollback := widget.NewScrollbackBuffer(100000)
 	viewport := widget.NewViewport(scrollback, styles)
@@ -86,11 +85,10 @@ func NewModel(inputChan chan<- input.Submission, outbound chan<- ui.UIEvent) *Mo
 		viewport:   viewport,
 		input:      input,
 		panes:      panes,
-		inputChan:  inputChan,
-		outbound:   outbound,
+		events:     events,
 		widgets:    make(map[string]widget.Widget),
 	}
-	m.inputCtl = newInputController(input, m.sendOutbound, m.sendLine, m.isBound, m.handleScrollKey, m)
+	m.inputCtl = newInputController(input, m.notifySession, m.submit, m.isBound, m.handleScrollKey, m)
 
 	// Register static widgets
 	m.widgets["input"] = input
@@ -123,9 +121,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ui.UpdateBindsMsg, ui.UpdateBarsMsg, ui.UpdateLayoutMsg:
 		return m.handleConfigUpdate(msg)
 
-	// Server output
-	case ui.PrintLineMsg, ui.EchoLineMsg, ui.PromptMsg:
-		return m.handleServerOutput(msg)
+	// Scrollback appends and the prompt overlay
+	case ui.PrintLineMsg, ui.EchoLineMsg, ui.SetPromptMsg, ui.CommitPromptMsg:
+		return m.handleDisplayOutput(msg)
 
 	// Pane operations
 	case ui.PaneCreateMsg, ui.PaneWriteMsg, ui.PaneToggleMsg, ui.PaneSetVisibleMsg, ui.PaneClearMsg:
@@ -203,7 +201,7 @@ func (m *Model) handleWindowSize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	m.initialized = true
 	m.syncViewportSize()
 	scrollStateChanged := m.recenterSearchFocus()
-	m.sendOutbound(ui.WindowSizeChangedMsg{Width: msg.Width, Height: msg.Height})
+	m.notifySession(ui.WindowSizeChangedMsg{Width: msg.Width, Height: msg.Height})
 	if scrollStateChanged {
 		m.updateScrollState()
 	}
@@ -284,7 +282,7 @@ func (m *Model) syncBars(content map[string]ui.BarContent) {
 	m.barContent = content
 }
 
-func (m *Model) handleServerOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *Model) handleDisplayOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case ui.PrintLineMsg:
 		rows := splitRows(string(msg), m.width)
@@ -303,12 +301,19 @@ func (m *Model) handleServerOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// ahead of output that arrived before it.
 		m.flushPending()
 		m.appendMessage(string(msg))
-	case ui.PromptMsg:
+	case ui.SetPromptMsg:
 		text := util.ExpandTabs(string(msg))
-		if text != m.lastPrompt {
+		if text != m.promptText {
 			m.viewport.SetPrompt(text)
-			m.lastPrompt = text
+			m.promptText = text
 		}
+	case ui.CommitPromptMsg:
+		m.flushPending()
+		if text := util.ExpandTabs(string(msg)); text != "" {
+			m.appendMessage(text)
+		}
+		m.viewport.SetPrompt("")
+		m.promptText = ""
 	}
 	return m, nil
 }
@@ -387,24 +392,24 @@ func (m *Model) appendMessage(text string) {
 	m.appendRows(splitRows(text, m.width)...)
 }
 
-// sendLine offers a submitted input snapshot to the session. It rejects
+// submit offers a submitted input snapshot to the session. It rejects
 // oversized verbatim drafts or a busy engine with a visible warning rather
 // than blocking the render loop; false tells the controller to retain them.
-func (m *Model) sendLine(submission input.Submission) bool {
+func (m *Model) submit(submission input.Submission) bool {
 	if submission.Mode == input.ModeVerbatim {
-		lineCount := 1 + strings.Count(submission.Text, "\n")
+		lineCount := len(submission.PhysicalLines())
 		if len(submission.Text) > maxVerbatimBytes || lineCount > maxVerbatimLines {
+			// A size rejection is local validation, not queue pressure, so
+			// the normal reporting append keeps scroll state in sync.
 			m.appendMessage(text.Red("[WARNING] Verbatim input not sent - limit is 1000 lines or 256 KiB"))
 			return false
 		}
 	}
-	select {
-	case m.inputChan <- submission:
+	if m.tryPost(ui.InputSubmittedMsg{Submission: submission}) {
 		return true
-	default:
-		m.appendMessage(text.Red("[WARNING] Input not sent - engine lagging"))
-		return false
 	}
+	m.showWarning("Input not sent - engine lagging")
+	return false
 }
 
 const (
@@ -416,20 +421,32 @@ func (m *Model) isBound(key string) bool {
 	return m.boundKeys[key]
 }
 
-func (m *Model) sendOutbound(msg ui.UIEvent) {
-	if m.outbound == nil {
+func (m *Model) tryPost(event ui.UIEvent) bool {
+	select {
+	case m.events <- event:
+		return true
+	default:
+		return false
+	}
+}
+
+func (m *Model) notifySession(event ui.UIEvent) {
+	if m.tryPost(event) {
 		return
 	}
-	select {
-	case m.outbound <- msg:
-	default:
-		// The session is not draining UI events. Dropping is the only
-		// safe option here (blocking would deadlock the render loop),
-		// but it must never be silent: a lost InputChangedMsg desyncs
-		// completion state, a lost PickerSelectMsg strands a picker
-		// callback. Make it visible so it can be reported.
-		m.scrollback.Append(text.Red("[WARNING] UI event dropped - engine lagging"))
+	// Blocking would deadlock the render loop, but a lost event must be
+	// visible: it can desync input state or strand a picker callback.
+	m.showWarning("UI event dropped - engine lagging")
+}
+
+// showWarning appends locally without reporting another scroll-state event:
+// this path is reached only when the Session event queue is already full.
+func (m *Model) showWarning(message string) {
+	rows := splitRows(text.Red("[WARNING] "+message), m.width)
+	for _, row := range rows {
+		m.scrollback.Append(row)
 	}
+	m.viewport.OnNewRows(len(rows))
 }
 
 func (m *Model) updateScrollState() {
@@ -440,7 +457,7 @@ func (m *Model) updateScrollState() {
 	if mode != widget.ModeLive {
 		modeStr = "scrolled"
 	}
-	m.sendOutbound(ui.ScrollStateChangedMsg{Mode: modeStr, NewLines: newLines})
+	m.notifySession(ui.ScrollStateChangedMsg{Mode: modeStr, NewLines: newLines})
 }
 
 // navigateMainViewport is the single path for deliberate user/script
