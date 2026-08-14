@@ -322,19 +322,53 @@ func newClient(t *testing.T, initLua string) *client {
 }
 
 // connect types /connect at the client and waits for the dial.
+//
+// Accepting the TCP connection is not enough to continue: the session
+// installs the socket and publishes the connection only once it handles
+// the dial result, and a step that submits input before that races the
+// install and loses its command. Wait for the client to say it is
+// connected, which is causally after both.
 func (c *client) connect() {
 	c.t.Helper()
 	c.ui.events <- ui.InputSubmittedMsg{Submission: input.Command("/connect " + c.mud.addr())}
 	c.mud.accept()
+	c.waitFor("the client to report the connection", func() bool {
+		return c.ui.printedContains("Connected to")
+	})
 }
 
-// connectRefused closes the fake MUD's listener and then types
-// /connect at the now-dead address, so the dial is refused.
+// deadAddr returns a loopback address that refuses connections, proven
+// by dialing it rather than assumed.
+//
+// Closing a listener and reusing its address is not enough on its own:
+// the kernel can hand that ephemeral port to the next net.Listen in this
+// process, and the "refused" dial then reaches another scenario's server
+// and succeeds, so the client never reports an error and the step waits
+// out its whole deadline.
+func deadAddr(t *testing.T) string {
+	t.Helper()
+	for attempt := 0; attempt < 20; attempt++ {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		addr := ln.Addr().String()
+		ln.Close()
+
+		conn, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
+		if err != nil {
+			return addr // refused, which is what we want
+		}
+		conn.Close()
+	}
+	t.Fatal("could not find a loopback address that refuses connections")
+	return ""
+}
+
+// connectRefused types /connect at an address that refuses the dial.
 func (c *client) connectRefused() {
 	c.t.Helper()
-	addr := c.mud.addr()
-	c.mud.ln.Close()
-	c.ui.events <- ui.InputSubmittedMsg{Submission: input.Command("/connect " + addr)}
+	c.ui.events <- ui.InputSubmittedMsg{Submission: input.Command("/connect " + deadAddr(c.t))}
 }
 
 // waitFor polls cond until it holds or the deadline passes.
