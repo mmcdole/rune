@@ -131,6 +131,10 @@ function rune.trigger.regex(pattern, action, opts)
 end
 
 -- Management by name
+function rune.trigger.get(name)
+    return registry:get(name)
+end
+
 function rune.trigger.disable(name)
     return registry:disable(name)
 end

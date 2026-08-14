@@ -488,7 +488,7 @@ func TestRegistrationsRecordSource(t *testing.T) {
 	script := `
 		rune.hooks.on("output", function() end, {name = "h"})
 		rune.trigger.contains("x", "look", {name = "t"})
-		rune.alias.exact("n", "north", {name = "a"})
+		rune.alias.exact("n", "north")
 		rune.timer.after(60, function() end, {name = "tm"})
 
 		local function source_of(list, name)
@@ -502,7 +502,7 @@ func TestRegistrationsRecordSource(t *testing.T) {
 		for _, entry in ipairs({
 			{"hook", rune.hooks.list(), "h"},
 			{"trigger", rune.trigger.list(), "t"},
-			{"alias", rune.alias.list(), "a"},
+			{"alias", rune.alias.list(), "n"},
 			{"timer", rune.timer.list(), "tm"},
 		}) do
 			local src = source_of(entry[2], entry[3])

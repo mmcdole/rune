@@ -71,7 +71,7 @@ h:disable()  h:enable()  h:cancel()   -- :cancel() is an alias for :remove()
 ```
 
 By name: `rune.timer.disable/enable/remove(name)` (`rune.timer.cancel` is
-the same as `remove`) — the full management suite is in the
+the same as `remove`). The full list is in the
 [API reference](/reference/api/#managing). In the client, `/timers` shows
 every timer with its state, mode and interval, action, group, name, and
 the `file:line` that registered it.

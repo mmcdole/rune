@@ -68,8 +68,8 @@ too.
 
 ## Managing
 
-By name: `rune.bars.disable/enable/remove(name)` — the full management
-suite is in the [API reference](/reference/api/#managing). In the client,
+By name: `rune.bars.disable/enable/remove(name)`. The full list is in
+the [API reference](/reference/api/#managing). In the client,
 `/bars` lists every bar with its state, group, and the `file:line` that
 registered it.
 

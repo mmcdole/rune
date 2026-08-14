@@ -84,13 +84,11 @@ end
 
 local registry = rune.registry.new{
     kind = "alias",
+    action_field = "action",
     on_add = function(data)
         if data.is_exact then
-            -- Upsert by normalized phrase: replace any previous exact alias
-            local old = exact[data.pattern]
-            if old and old ~= data then
-                old._handle:remove()
-            end
+            -- An exact alias is named for its normalized phrase, so any
+            -- previous alias on that phrase is already gone by now.
             exact[data.pattern] = data
             index_exact(data)
         end
@@ -120,6 +118,8 @@ rune.alias = {}
 
 -- Match a literal command phrase. Whitespace separates words rather
 -- than being part of the phrase, matching the input parser's behavior.
+-- The normalized phrase is the alias's name, so rune.alias.get("gc")
+-- and rune.alias.disable("gc") address it by what you typed to make it.
 function rune.alias.exact(phrase, action, opts)
     if type(phrase) ~= "string" then
         error("rune.alias.exact: phrase must be a string", 2)
@@ -129,7 +129,8 @@ function rune.alias.exact(phrase, action, opts)
     if normalized == "" then
         error("rune.alias.exact: phrase must contain at least one word", 2)
     end
-    return create_alias(normalized, action, opts, true)
+    return create_alias(normalized, action,
+        rune.registry.keyed_opts(normalized, opts, "rune.alias.exact"), true)
 end
 
 -- Go regexp match on full input line
@@ -143,7 +144,11 @@ function rune.alias.regex(pattern, action, opts)
     return create_alias(pattern, action, opts, false)
 end
 
--- Management by name
+-- Management by name (an exact alias is named for its phrase)
+function rune.alias.get(name)
+    return registry:get(name)
+end
+
 function rune.alias.disable(name)
     return registry:disable(name)
 end

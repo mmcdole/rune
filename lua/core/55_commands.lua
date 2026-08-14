@@ -9,16 +9,14 @@ local green, red, yellow, cyan, dim =
     rune.style.green, rune.style.red, rune.style.yellow,
     rune.style.cyan, rune.style.gray
 
-local by_cmd = {} -- command name -> data
+local by_cmd = {} -- command name -> data, the dispatch index
 
 local registry = rune.registry.new{
     kind = "command",
+    action_field = "handler",
     on_add = function(data)
-        -- Upsert by command name: re-adding replaces the old handler
-        local old = by_cmd[data.command]
-        if old and old ~= data then
-            old._handle:remove()
-        end
+        -- The command name is the registry name, so re-adding one has
+        -- already removed the old entry through the name upsert.
         by_cmd[data.command] = data
     end,
     on_remove = function(data)
@@ -45,16 +43,12 @@ function rune.command.add(name, handler, description, opts)
     if description ~= nil and type(description) ~= "string" then
         error("rune.command.add: description must be a string", 2)
     end
-    if opts ~= nil and type(opts) ~= "table" then
-        error("rune.command.add: opts must be a table", 2)
-    end
-
     return registry:add({
         command = name,
         handler = handler,
         description = description or "",
         source = rune.caller_source(1),
-    }, { name = name, group = opts and opts.group })
+    }, rune.registry.keyed_opts(name, opts, "rune.command.add"))
 end
 
 -- Remove a slash command by name. Returns true if one existed.
@@ -62,10 +56,10 @@ function rune.command.remove(name)
     return registry:remove(name)
 end
 
--- Get a slash command handler (unwrapped, no quarantine)
+-- The command's handle, or nil. Its :action() is the raw handler,
+-- which is how you wrap a built-in command.
 function rune.command.get(name)
-    local data = by_cmd[name]
-    return data and data.handler or nil
+    return registry:get(name)
 end
 
 -- INTERNAL: run a command protected (called by the core input hook).
@@ -246,7 +240,9 @@ rune.command.add("aliases", function(args)
         local group_str = a.group and ("  " .. cyan("<" .. a.group .. ">")) or ""
         local flags = {}
         if a.once then flags[#flags + 1] = "once" end
-        local name_str = a.name and (" " .. dim("name:") .. a.name) or ""
+        -- An exact alias is named for its phrase, already in the match column.
+        local name_str = (a.name and a.name ~= a.match)
+            and (" " .. dim("name:") .. a.name) or ""
         local flags_str = #flags > 0 and ("  " .. dim("(" .. table.concat(flags, ", ") .. ")")) or ""
         local src_str = a.source and ("  " .. dim("@" .. a.source)) or ""
         rune.echo(string.format("  %s %-8s %s %s %s %s%s%s%s",
@@ -342,13 +338,13 @@ rune.command.add("binds", function(args)
         rune.echo("  " .. dim("(none)"))
         return
     end
+    -- The key is the name, so there is no separate name column to print.
     for _, b in ipairs(binds) do
         local status = b.enabled and green("[on] ") or red("[off]")
         local group_str = b.group and ("  " .. cyan("<" .. b.group .. ">")) or ""
-        local name_str = b.name and ("  " .. dim("name:") .. b.name) or ""
         local src_str = b.source and ("  " .. dim("@" .. b.source)) or ""
-        rune.echo(string.format("  %s %-16s%s%s%s",
-            status, yellow(b.key), group_str, name_str, src_str))
+        rune.echo(string.format("  %s %-16s%s%s",
+            status, yellow(b.key), group_str, src_str))
     end
 end, "List all key bindings")
 

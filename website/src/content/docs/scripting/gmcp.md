@@ -32,8 +32,8 @@ sent it, and `raw` is the JSON text.
 ## Sending
 
 ```lua
-rune.gmcp.send("Char.Skills.Get", { group = "combat" })  -- any JSON-able Lua value
-rune.gmcp.send("Core.Ping")                              -- bare package
+rune.gmcp.send("Core.Hello", { client = "rune", version = rune.version })  -- any JSON-able Lua value
+rune.gmcp.send("Core.Ping")                                                -- bare package
 ```
 
 Returns `true` or `nil, err` (not connected, GMCP not negotiated).

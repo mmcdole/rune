@@ -67,7 +67,7 @@ your script so they come back on reload.
 ## Managing
 
 Standard registry management applies:
-`rune.timer.enable/disable/remove(name)`, `.cancel(name)`, `.list()`,
+`rune.timer.get/enable/disable/remove(name)`, `.cancel(name)`, `.list()`,
 `.count()`, `.clear()`, `.remove_group(group)` — see
 [Registries](/reference/api/#managing). `/timers` lists everything.
 

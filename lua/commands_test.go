@@ -15,11 +15,11 @@ func TestListingCommandsShowRegistrations(t *testing.T) {
 	defer cleanup()
 
 	if err := engine.DoString("setup", `
-		rune.alias.exact("zap", "cast zap", { name = "my-alias" })
+		rune.alias.exact("zap", "cast zap")
 		rune.trigger.contains("dragon", "flee", { name = "my-trigger" })
 		rune.timer.every(60, function() end, { name = "my-timer" })
 		rune.hooks.on("output", function() end, { name = "my-hook" })
-		rune.bind("f12", function() end, { name = "my-bind" })
+		rune.bind("f12", function() end)
 		rune.ui.bar("my-bar", function() return "bar" end)
 		rune.group.disable("my-group")
 	`); err != nil {

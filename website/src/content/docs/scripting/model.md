@@ -12,26 +12,65 @@ If you haven't written a trigger or an alias yet, start with
 [Triggers](/scripting/triggers/) and come back. This page makes more sense
 once you have registered a few things.
 
+## Names
+
+Every registration has a name. It is what you pass to `get`, `enable`,
+`disable` and `remove`, what a re-registration replaces on, and what
+`/triggers`, `/binds` and the other listings show.
+
+Most registries take the name from you. Four take it from what you passed
+first:
+
+| Creation function | Name | Because |
+|---|---|---|
+| `rune.trigger.*` | the `name` you give it | several triggers can match one line |
+| `rune.alias.regex` | the `name` you give it | several can match one line |
+| `rune.timer.*` | the `name` you give it | nothing about a timer is unique |
+| `rune.hooks.on` | the `name` you give it | several handlers per event |
+| `rune.gmcp.on` | the `name` you give it | several handlers per package |
+| `rune.bind` | the key, `"ctrl+g"` | one bind per key |
+| `rune.ui.bar` | the layout name, `"status"` | one renderer per slot |
+| `rune.command.add` | the command, `"greet"` | one handler per `/command` |
+| `rune.alias.exact` | the phrase, `"chat off"` | one expansion per typed phrase |
+
+Read down the last column and the split explains itself: where several
+entries can share a first argument you name them, and where only one can
+exist the first argument is already the name.
+
+Either way you manage it the same way:
+
+```lua
+rune.trigger.contains("food", "eat bread", { name = "feeder" })
+rune.bind("ctrl+g", toggle_map)
+
+rune.trigger.disable("feeder")
+rune.binds.disable("ctrl+g")
+```
+
+Registering the same name again replaces the old entry rather than adding
+a second one. That is what keeps `/reload` from stacking a duplicate
+trigger each time you edit a script, so name anything you expect to
+re-register.
+
+Passing `name` to one of the four is ignored, with a notice telling you
+the key to manage it by. It is also why you can reach the core's own binds
+and bars, which are registered without options at all.
+
 ## Options
 
 Every creation function takes an optional `opts` table as its last argument.
-Four fields work everywhere:
+Three fields work everywhere:
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `name` | string | none | Unique ID for management. |
 | `group` | string | none | Group membership for batch enable/disable/remove. |
 | `priority` | number | 50 | Execution order where multiple items can match (regex aliases, triggers, hooks). Lower runs first. |
 | `once` | bool | false | Auto-remove after the first match (aliases, triggers). |
 
-Naming an item does more than label it. Registering the same name again
-replaces the old entry instead of adding a second one, which is what keeps
-`/reload` from stacking a duplicate trigger every time you edit a script.
-Name anything you expect to re-register.
+`name` sets the name where the registry does not set its own, as above.
 
 Individual registries add their own options. Triggers take `gag` and `raw`,
-for example. Each [API reference page](/reference/api/) lists its extras; the
-four above work everywhere.
+for example. Each [API reference page](/reference/api/) lists its extras.
 
 ## String and function actions
 
@@ -85,10 +124,17 @@ rune.trigger.contains("spam", nil, { gag = true, name = "spam-gag" })
 rune.trigger.disable("spam-gag")
 ```
 
-Every registry exposes the same functions, taking the item name: `enable`,
-`disable`, `remove`, plus `list()`, `count()`, `clear()`, and
+Every registry exposes the same functions, taking the item name: `get`,
+`enable`, `disable`, `remove`, plus `list()`, `count()`, `clear()`, and
 `remove_group(group)`. The full contract is in the
 [API reference](/reference/api/#managing).
+
+`get` returns the handle, which is how you reach something you did not
+register yourself:
+
+```lua
+rune.bars.get("status"):disable()
+```
 
 ## Handles
 
@@ -103,12 +149,25 @@ h:enable()   -- resume
 h:remove()   -- unregister
 h:name()     -- "spam-gag"
 h:group()    -- nil (no group set)
+h:action()   -- the registered action
 ```
 
 Methods chain, which is handy for registering something already switched off:
 
 ```lua
 rune.trigger.contains("Weather:", nil, {gag = true}):disable()
+```
+
+`h:action()` gives back what you registered, which is how you extend
+something instead of replacing it. Calling the result runs it directly,
+skipping the enabled and group checks and the failure quarantine:
+
+```lua
+local scroll = assert(rune.binds.get("pageup")):action()
+rune.bind("pageup", function()
+    scroll()
+    rune.echo("scrolled")
+end)
 ```
 
 ## Groups

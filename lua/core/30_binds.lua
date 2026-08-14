@@ -6,24 +6,25 @@
 -- API:
 --   rune.bind(key, callback, opts?)  -- Bind a key ("ctrl+r", "f1", "j")
 --   rune.unbind(key)                 -- Remove a binding
+--   rune.binds.get(key)              -- The binding's handle, or nil
 --   rune.binds.list()                -- For /binds
 --
--- Options: name, group (see 15_registry.lua). A disabled bind (or one
--- in a disabled group) swallows its key without running the callback.
+-- The key is the registry name, so rune.binds.disable("ctrl+g") and
+-- rune.binds.get("ctrl+g") address a bind by the same string you bound.
+-- Options: group (see 15_registry.lua). A disabled bind (or one in a
+-- disabled group) swallows its key without running the callback.
 --
 -- Go's role is transport only: the UI forwards keys present in
 -- rune.binds._keys(), and rune.binds._dispatch(key) runs the callback.
 
-local by_key = {} -- key -> data
+local by_key = {} -- key -> data, the dispatch index
 
 local registry = rune.registry.new{
     kind = "bind",
+    action_field = "callback",
     on_add = function(data)
-        -- Upsert by key: rebinding a key replaces the old binding
-        local old = by_key[data.key]
-        if old and old ~= data then
-            old._handle:remove()
-        end
+        -- Rebinding a key replaces the old binding through the registry's
+        -- name upsert, which has already removed it by the time we get here.
         by_key[data.key] = data
         rune._ui.config_changed()
     end,
@@ -39,21 +40,22 @@ rune.binds = {}
 
 -- Bind a key to a callback. Returns a handle.
 function rune.bind(key, callback, opts)
+    if type(key) ~= "string" or key == "" then
+        error("rune.bind: key must be a non-empty string", 2)
+    end
+    if type(callback) ~= "function" then
+        error("rune.bind: callback must be a function", 2)
+    end
     return registry:add({
         key = key,
         callback = callback,
         source = rune.caller_source(1),
-    }, opts)
+    }, rune.registry.keyed_opts(key, opts, "rune.bind"))
 end
 
 -- Remove a binding by key. Returns true if one existed.
 function rune.unbind(key)
-    local data = by_key[key]
-    if data then
-        data._handle:remove()
-        return true
-    end
-    return false
+    return registry:remove(key)
 end
 
 -- INTERNAL: called by Go when a bound key is pressed.
@@ -80,7 +82,11 @@ function rune.binds._keys()
     return keys
 end
 
--- Management by name
+-- Management by key (the key is the name)
+function rune.binds.get(name)
+    return registry:get(name)
+end
+
 function rune.binds.disable(name)
     return registry:disable(name)
 end

@@ -33,8 +33,8 @@ registry name.
 ## Options
 
 Commands take the [common option](/scripting/model/#options) `group`.
-The command name doubles as the registry `name`, so re-adding a name
-replaces it.
+The command name is the registry `name`, so re-adding a name replaces
+it. Passing `name` yourself is ignored with a deprecation notice.
 
 ## Examples
 
@@ -53,10 +53,11 @@ rune.command.add("pather", function(args)
 end, "Walk saved paths")
 ```
 
-Overriding a built-in. Re-adding a name replaces it, so you can wrap:
+Overriding a built-in. Re-adding a name replaces it, so you can wrap.
+`get` returns the command's handle; `:action()` is the raw handler:
 
 ```lua
-local quit = rune.command.get("quit")
+local quit = assert(rune.command.get("quit")):action()
 rune.command.add("quit", function(args)
     rune.send("save")
     quit(args)
@@ -66,7 +67,7 @@ end, "Save, then exit")
 ## Managing
 
 By name: `rune.command.enable/disable/remove(name)`, plus
-`rune.command.get(name)` for the raw handler — full signatures in the
+`rune.command.get(name)` for its handle. Full signatures in the
 [rune.command reference](/reference/api/command/). In the client, `/help`
 lists every command, including script-added ones, with descriptions and
 sources.

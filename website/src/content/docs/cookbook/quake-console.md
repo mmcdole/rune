@@ -13,7 +13,7 @@ rune.pane.create("chat")
 
 rune.bind("`", function()
     rune.pane.toggle("chat")
-end, { name = "chat-console" })
+end)
 
 local style = rune.style
 local function mirror(tag, color, name, msg)
