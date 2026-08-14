@@ -3,15 +3,14 @@ title: The Scripting Model
 description: Handles, options, groups, priorities, and quarantine — the machinery every registration shares.
 ---
 
-Everything you register with rune — aliases, triggers, timers, hooks, key
-bindings, bars, GMCP handlers, slash commands — lives in the same kind of
-registry and behaves the same way. Learn the model once and every other
-page gets shorter.
+Everything you register with rune (aliases, triggers, timers, hooks, key
+bindings, bars, GMCP handlers, slash commands) lives in the same kind of
+registry and behaves the same way. This page describes that shared behavior
+in one place, so the guide for each one doesn't repeat it.
 
-If you haven't written a trigger or an alias yet, skim this and come back to
-it — [Triggers](/scripting/triggers/) is the concrete place to start, and the
-machinery here will read as description rather than abstraction once you've
-registered a few things.
+If you haven't written a trigger or an alias yet, start with
+[Triggers](/scripting/triggers/) and come back. This page makes more sense
+once you have registered a few things.
 
 ## Handles
 

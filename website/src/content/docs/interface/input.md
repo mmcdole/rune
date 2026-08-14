@@ -47,7 +47,7 @@ in the status bar, with `Shift+Tab` going backward.
 ## Scrolling and the mouse
 
 `PageUp`/`PageDown` scroll the output viewport; `Ctrl+Home`/`Ctrl+End` jump to
-the top and bottom (`Home`/`End` stay on the input line — rebind them if you
+the top and bottom (`Home`/`End` stay on the input line; rebind them if you
 prefer they scroll). The mouse wheel scrolls too. While you're off the bottom,
 the status bar shows `SCROLL (n new)` so you know what's piling up, and it
 returns to `LIVE` when you catch up.
@@ -92,7 +92,7 @@ the whole submission, leaves the draft open, and warns, rather than silently
 truncating.
 
 Recalling a verbatim entry from history restores the composer, even when that
-entry contains only one physical line — history retains both the text and the
+entry contains only one physical line. History retains both the text and the
 mode it was submitted in, and `Ctrl+R` labels verbatim entries. For an
 unmodified restored entry, `Up` on its first visual row and `Down` on its last
 continue through history instead of trapping navigation inside the composer.

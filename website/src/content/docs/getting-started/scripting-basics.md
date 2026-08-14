@@ -109,7 +109,7 @@ Everything lives under the `rune` table. Find the task, follow the link:
 | Toggle sets of things at once | [Groups](/scripting/groups/) | [`rune.group`](/reference/api/group/) |
 | Lay out panes, bars, and pickers | [Layout & UI](/interface/layout/) | [`rune.ui`](/reference/api/ui/), [`rune.pane`](/reference/api/pane/) |
 | Log the session to a file | [Logging](/scripting/logging/) | [`rune.log`](/reference/api/log/) |
-| Color and style text | — | [`rune.style`](/reference/api/style/) |
+| Color and style text | | [`rune.style`](/reference/api/style/) |
 
 The registration functions all behave the same way — handles, a shared
 options table, groups, and error quarantine.

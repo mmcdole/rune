@@ -4,8 +4,8 @@ description: Bind keys and chords to Lua callbacks. The default keymap is a scri
 ---
 
 A bind attaches a Lua callback to a key or chord, so a keypress can do what
-would otherwise take a typed command. The default keymap — history, completion,
-scrolling, `$EDITOR` — is built from the same function, so anything it binds you
+would otherwise take a typed command. The default keymap (history, completion,
+scrolling, `$EDITOR`) is built from the same function, so anything it binds you
 can rebind.
 
 ```lua
@@ -80,7 +80,7 @@ that registered it.
 Pickers and the composer own the keys needed to edit or cancel them, so a bind
 on one of those keys goes quiet while they're open. In the composer that covers
 text and cursor editing, literal `Tab`, and two-step `Escape` discard.
-Application chords the composer does not use still run their Lua bind — the
+Application chords the composer does not use still run their Lua bind; the
 default `Ctrl+E` editor binding is the important example. Normal binding policy
 resumes when the composer or picker closes.
 

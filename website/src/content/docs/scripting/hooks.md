@@ -13,9 +13,9 @@ rune.hooks.on(event, handler, opts?)
 ```
 
 Reach for a [trigger](/scripting/triggers/) when you want to match particular
-text. Reach for a hook when you want *every* line regardless of content — to
-timestamp it, log it, or mirror it — or when what you care about isn't text at
-all, such as connecting, reloading, or a GMCP message.
+text. Reach for a hook when you want every line regardless of content, to
+timestamp or log or mirror it, or when what you care about isn't text at all,
+such as connecting, reloading, or a GMCP message.
 
 Unlike triggers, aliases, and timers, a hook handler is always a Lua
 function; there is no string form. What the function receives and what its

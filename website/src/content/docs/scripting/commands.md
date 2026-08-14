@@ -4,8 +4,9 @@ description: Add your own /commands. They join /help and the command picker auto
 ---
 
 A slash command is a verb you type at the client rather than send to the game.
-Your own join the built-in ones on equal terms — same registry, same listings,
-same picker — so `/greet` looks and behaves no different from `/connect`.
+Your own join the built-in ones on equal terms, sharing the same registry,
+listings, and picker, so `/greet` looks and behaves no different from
+`/connect`.
 
 ```lua
 rune.command.add("greet", function(args)
