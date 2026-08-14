@@ -10,7 +10,7 @@ can rebind.
 
 ```lua
 rune.bind("f1", function() rune.send("cast shield") end)
-rune.bind("ctrl+g", function() rune.pane.toggle("map") end, { name = "map-toggle" })
+rune.bind("ctrl+g", function() rune.pane.toggle("map") end)
 rune.unbind("f1")
 ```
 

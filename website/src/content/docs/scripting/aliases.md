@@ -149,7 +149,7 @@ rune.alias.exact("s", "sneak south", { group = "sneaky" })
 Every constructor returns a handle:
 
 ```lua
-local h = rune.alias.exact("k", "kill", { name = "quick-kill" })
+local h = rune.alias.exact("k", "kill")
 h:disable()  h:enable()  h:remove()
 ```
 
