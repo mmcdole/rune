@@ -10,7 +10,8 @@ func TestConfigGetReturnsGoDefaults(t *testing.T) {
 	defer cleanup()
 
 	if err := engine.DoString("config defaults", `
-		assert(rune.config.get("delimiter") == ";")
+		assert(rune.config.get("command_separator") == ";")
+		assert(rune.config.get("history_character") == "!")
 		assert(rune.config.get("keep_input") == false)
 	`); err != nil {
 		t.Fatalf("read config defaults: %v", err)
@@ -29,45 +30,111 @@ func TestConfigSetUpdatesRecognizedValue(t *testing.T) {
 	}
 }
 
-func TestConfigDelimiterDrivesCommandSplitting(t *testing.T) {
+func TestConfigCommandSeparatorDrivesCommandSplitting(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 
-	if err := engine.DoString("set delimiter", `
-		rune.config.set("delimiter", "|")
+	if err := engine.DoString("set command separator", `
+		rune.config.set("command_separator", "|")
 		rune.send("north|east")
 	`); err != nil {
-		t.Fatalf("use configured delimiter: %v", err)
+		t.Fatalf("use configured command separator: %v", err)
 	}
 	if got, want := host.DrainNetworkCalls(), []string{"north", "east"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("commands sent with configured delimiter = %q, want %q", got, want)
+		t.Fatalf("commands sent with configured command separator = %q, want %q", got, want)
 	}
 }
 
-func TestConfigRejectsEmptyDelimiterWithoutMutation(t *testing.T) {
+func TestConfigHistoryCharacterAcceptsCharacterOrEmpty(t *testing.T) {
 	engine, _, cleanup := setupTest(t)
 	defer cleanup()
 
-	if err := engine.DoString("reject empty delimiter", `
-		rune.config.set("delimiter", "|")
-		local ok = pcall(rune.config.set, "delimiter", "")
-		assert(not ok)
-		assert(rune.config.get("delimiter") == "|")
+	if err := engine.DoString("set history character", `
+		rune.config.set("history_character", "?")
+		assert(rune.config.get("history_character") == "?")
+		rune.config.set("history_character", "¿")
+		assert(rune.config.get("history_character") == "¿")
+		rune.config.set("history_character", "")
+		assert(rune.config.get("history_character") == "")
 	`); err != nil {
-		t.Fatalf("validate delimiter before mutation: %v", err)
+		t.Fatalf("set history character: %v", err)
 	}
 }
 
-func TestConfigRejectsNonStringDelimiterWithoutCoercion(t *testing.T) {
+func TestConfigRejectsInvalidHistoryCharacterWithoutMutation(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+	engine.CommitConfig()
+	host.DrainConfigChanges()
+
+	if err := engine.DoString("reject invalid history character", `
+		rune.config.set("history_character", "?")
+		local invalid = {
+			"two",
+			" ",
+			"\n",
+			"/",
+			string.char(0),
+			string.char(255),
+			string.char(0xCC, 0x81),       -- combining acute accent
+			string.char(0xEF, 0xB8, 0x8F), -- variation selector-16
+		}
+		for _, value in ipairs(invalid) do
+			assert(not pcall(rune.config.set, "history_character", value))
+			assert(rune.config.get("history_character") == "?")
+		end
+		assert(not pcall(rune.config.set, "history_character", false))
+		assert(rune.config.get("history_character") == "?")
+	`); err != nil {
+		t.Fatalf("validate history character before mutation: %v", err)
+	}
+
+	want := []Config{{CommandSeparator: ";", HistoryCharacter: "?", KeepInput: false}}
+	if got := host.DrainConfigChanges(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("history character publications = %+v, want %+v", got, want)
+	}
+}
+
+func TestConfigUnchangedHistoryCharacterDoesNotPublish(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+	engine.CommitConfig()
+	host.DrainConfigChanges()
+
+	if err := engine.DoString("keep history character", `
+		rune.config.set("history_character", "!")
+	`); err != nil {
+		t.Fatalf("keep history character: %v", err)
+	}
+	if got := host.DrainConfigChanges(); len(got) != 0 {
+		t.Fatalf("unchanged history character published config: %+v", got)
+	}
+}
+
+func TestConfigRejectsEmptyCommandSeparatorWithoutMutation(t *testing.T) {
 	engine, _, cleanup := setupTest(t)
 	defer cleanup()
 
-	if err := engine.DoString("reject numeric delimiter", `
-		local ok = pcall(rune.config.set, "delimiter", 42)
+	if err := engine.DoString("reject empty command separator", `
+		rune.config.set("command_separator", "|")
+		local ok = pcall(rune.config.set, "command_separator", "")
 		assert(not ok)
-		assert(rune.config.get("delimiter") == ";")
+		assert(rune.config.get("command_separator") == "|")
 	`); err != nil {
-		t.Fatalf("validate delimiter type before mutation: %v", err)
+		t.Fatalf("validate command separator before mutation: %v", err)
+	}
+}
+
+func TestConfigRejectsNonStringCommandSeparatorWithoutCoercion(t *testing.T) {
+	engine, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	if err := engine.DoString("reject numeric command separator", `
+		local ok = pcall(rune.config.set, "command_separator", 42)
+		assert(not ok)
+		assert(rune.config.get("command_separator") == ";")
+	`); err != nil {
+		t.Fatalf("validate command separator type before mutation: %v", err)
 	}
 }
 
@@ -76,7 +143,8 @@ func TestConfigBootPublishesOneFinalTypedConfig(t *testing.T) {
 	defer cleanup()
 
 	if err := engine.DoString("staged config", `
-		rune.config.set("delimiter", "|")
+		rune.config.set("command_separator", "|")
+		rune.config.set("history_character", "^")
 		rune.config.set("keep_input", true)
 	`); err != nil {
 		t.Fatalf("stage config during boot: %v", err)
@@ -88,7 +156,7 @@ func TestConfigBootPublishesOneFinalTypedConfig(t *testing.T) {
 	engine.CommitConfig()
 	engine.CommitConfig()
 
-	want := []Config{{Delimiter: "|", KeepInput: true}}
+	want := []Config{{CommandSeparator: "|", HistoryCharacter: "^", KeepInput: true}}
 	if got := host.DrainConfigChanges(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("committed config publications = %+v, want %+v", got, want)
 	}
@@ -111,7 +179,7 @@ func TestReadyHookParticipatesInStagedConfig(t *testing.T) {
 	}
 
 	engine.CommitConfig()
-	want := []Config{{Delimiter: ";", KeepInput: true}}
+	want := []Config{{CommandSeparator: ";", HistoryCharacter: "!", KeepInput: true}}
 	if got := host.DrainConfigChanges(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("ready config publication = %+v, want %+v", got, want)
 	}
@@ -131,7 +199,7 @@ func TestConfigRuntimeChangePublishesTypedConfigImmediately(t *testing.T) {
 		t.Fatalf("change runtime config: %v", err)
 	}
 
-	want := []Config{{Delimiter: ";", KeepInput: true}}
+	want := []Config{{CommandSeparator: ";", HistoryCharacter: "!", KeepInput: true}}
 	if got := host.DrainConfigChanges(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("runtime config publications = %+v, want %+v", got, want)
 	}
@@ -189,7 +257,8 @@ func TestConfigRejectsUnknownKeys(t *testing.T) {
 	if err := engine.DoString("reject unknown config", `
 		assert(not pcall(rune.config.get, "missing"))
 		assert(not pcall(rune.config.set, "missing", true))
-		assert(rune.config.get("delimiter") == ";")
+		assert(rune.config.get("command_separator") == ";")
+		assert(rune.config.get("history_character") == "!")
 		assert(rune.config.get("keep_input") == false)
 	`); err != nil {
 		t.Fatalf("reject unknown config keys: %v", err)

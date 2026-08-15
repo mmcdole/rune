@@ -10,7 +10,7 @@ func (s *Session) GetHistoryEntries() []input.Submission {
 }
 
 // AddToHistory implements lua.Host.
-// The legacy Lua API adds ordinary command entries.
+// The text-only rune.history.add API adds ordinary command entries.
 func (s *Session) AddToHistory(cmd string) {
 	s.addHistorySubmission(input.Command(cmd))
 }

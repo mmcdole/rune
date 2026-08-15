@@ -133,10 +133,23 @@ func (i *Input) View() string {
 	if i.composer != nil {
 		parts = append(parts, i.composerView()...)
 	} else {
-		// Keep the ordinary one-line input byte-for-byte identical to the
-		// original widget. Compose chrome exists only around structured text.
+		// Keep the ordinary one-line input in its compact three-row layout.
+		// Compose chrome exists only around structured text.
 		parts = append(parts, i.borderLine())
-		parts = append(parts, i.textinput.View())
+		inputView := i.textinput.View()
+		if i.selected {
+			// Bubbles renders TextStyle across its width padding. Render the
+			// selected value without that padding, then fill the row normally so
+			// only actual command text receives the selection background.
+			selectedInput := i.textinput
+			selectedInput.Width = 0
+			selectedInput.Blur() // the selection replaces the visual caret
+			inputView = selectedInput.View()
+			if padding := i.width - util.VisibleLen(inputView); padding > 0 {
+				inputView += strings.Repeat(" ", padding)
+			}
+		}
+		parts = append(parts, inputView)
 		parts = append(parts, i.borderLine())
 	}
 
@@ -188,7 +201,7 @@ func (i *Input) SetValue(s string) {
 	if i.composer != nil {
 		// Verbatim interpretation is sticky: replacing a structured draft
 		// with one non-empty physical line (for example through Ctrl+E) must
-		// not silently re-enable delimiter or slash-command processing.
+		// not silently re-enable command-separator or slash-command processing.
 		if s == "" {
 			i.Reset()
 			return

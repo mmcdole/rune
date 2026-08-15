@@ -19,10 +19,10 @@
 --   "prompt"       -- Prompt observation: (line, confirmed); confirmed is
 --                     false for a partial line, true for a GA/EOR-confirmed
 --                     prompt (false gags, string rewrites)
---   "echo"         -- Local echo of typed input, plain string (false hides,
+--   "echo"         -- Local echo of final input after rewrites, plain string (false hides,
 --                     string rewrites; core handler adds the "> " styling)
 -- Events (notifications):
---   "ready"        -- Boot complete
+--   "ready"        -- Core and user scripts loaded; staged settings not yet applied
 --   "connecting"   -- Dial started
 --   "connected"    -- After connection established
 --   "disconnecting"-- Disconnect requested
@@ -31,7 +31,7 @@
 --   "reloaded"     -- After script reload
 --   "loaded"       -- After a script file loads
 --   "error"        -- On system error
---   "input_changed"-- Input line content changed while typing
+--   "input_changed"-- Input buffer content changed
 --   "gmcp"         -- Every GMCP message: (package, data, raw);
 --                     catch-all alongside rune.gmcp.on (70_gmcp.lua)
 --   "gmcp_enabled" -- GMCP negotiated; the core handler sends Core.Hello

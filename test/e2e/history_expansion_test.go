@@ -8,11 +8,10 @@ import (
 	"github.com/mmcdole/rune/ui"
 )
 
-// Regression: repeat expansion used to search history after the active raw
-// submission had been inserted. In a compound submission, the `!` component
-// therefore selected `north;!` itself and recursively sent north until Lua
-// exhausted its stack.
-func TestCompoundHistoryExpansionUsesPriorSnapshot(t *testing.T) {
+// History expansion runs before the submitted line enters history, so every
+// expansion in a compound line searches only earlier commands. Otherwise the
+// `!` in `north;!` could select that same line and recurse.
+func TestCompoundHistoryExpansionSearchesOnlyEarlierHistory(t *testing.T) {
 	c := newClient(t, "")
 	c.connect()
 

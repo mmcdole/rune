@@ -46,21 +46,25 @@ end, {name = "auto-look"})
 
 Handlers run in priority order (lower first, default 50).
 
-For `output`, `prompt`, `echo`, and `input`, a string replaces the text for
-subsequent handlers, so rewrites chain in priority order. `nil` and other
-values pass the current text through. `false` stops the chain: it gags output
-or a prompt, hides an echo, or consumes an input submission.
+For `output`, `prompt`, `echo`, and `input`, a string — including `""` —
+replaces the text for subsequent handlers, so rewrites chain in priority
+order. `nil` and other values pass the current text through. `false` stops the
+chain: it gags output or a prompt, hides an echo, or cancels an input
+submission.
 
-Input is a precommit hook. A consumed submission is not locally echoed, added
-to history, or dispatched. Otherwise its final effective text is recorded,
-echoed, and routed after every input handler has run.
+Input handlers run before Rune echoes, stores, or processes a submission. A
+canceled submission stops there. Otherwise Rune uses the final text for local
+echo and input processing, and adds it to history unless it is empty.
 
 | Event | Handler receives | Fired |
 |---|---|---|
-| `input` | submitted text, context | At precommit, before local echo, history, and command or verbatim routing |
+| `input` | submitted text, context | Before local echo, history, and command or verbatim processing |
 | `output` | line object (`:raw()`, `:clean()`) | Once for every complete server line |
 | `prompt` | line object, `confirmed` boolean | On cumulative partial-line observations and GA/EOR-confirmed prompts |
-| `echo` | effective input text | On each physical line after input rewrites; skipped while the server has echo suppressed (passwords) |
+| `echo` | one display-safe physical line of final input | After input rewrites; skipped while the server has echo suppressed (passwords) |
+
+Before `echo` handlers run, Rune makes terminal-active control characters
+visible so the value is safe to display. Tabs remain tabs.
 
 `prompt` drives the prompt overlay. With `confirmed = false`, the value is a
 partial line. It may be `Username:` or only the start of an ordinary line, and
@@ -73,12 +77,12 @@ confirm a partial line.
 
 Finishing a partial line means one thing throughout Rune: the prompt overlay
 is committed to scrollback and open trigger spans close. Every user submission
-finishes the partial line before input hooks and any echo, history, or routing,
-even for a local slash command, a consumed submission, a disconnected
-submission, or one whose eventual send fails. Separately, a programmatic game
-line from an alias, trigger, timer, or other callback finishes it only after
-the connection accepts the send. A failed programmatic send and protocol
-traffic such as GMCP do not.
+finishes the partial line before input hooks and any echo, history, or
+processing, even for a local slash command, a canceled submission, a
+disconnected submission, or one whose eventual send fails. Separately, a
+programmatic send from an alias, trigger, timer, or other callback finishes it
+only after the connection accepts the send. Failed sends and protocol traffic
+such as GMCP do not.
 
 If the partial text was really the start of a fragmented ordinary line,
 sending commits the visible prefix; the rest arrives through `output` as a new
@@ -114,32 +118,46 @@ end, { priority = 10 })
 
 Input hooks run before the current submission enters history, so a handler
 that calls `rune.history.get()` sees only earlier accepted submissions. A
-string rewrite controls the later local echo, history entry, and dispatch.
+string rewrite controls the later local echo, history entry, and command
+processing.
 Existing one-argument handlers remain valid because Lua ignores the context
-argument. Echo hooks run after the effective submission is recorded and can
-therefore observe its history entry.
+argument. Echo hooks run after non-empty final text is recorded and can
+therefore observe its history entry. An accepted `""` rewrite still continues
+to local echo and input processing, but it is not added to history.
 
-Command mode applies Rune aliases, separators, `#N` repeats, and slash
-commands after the input-hook chain. Verbatim mode instead splits LF, CRLF,
-and bare CR into physical lines without command processing. Routing is an
-internal step, not an input hook, so there is no priority cutoff: handlers at
-any priority run unless an earlier handler returns `false`.
+In command mode, the final replacement must remain valid text on one line
+without tabs or control characters. Rune rejects the submission if the final
+replacement needs the verbatim composer. To deliberately send several physical
+lines from a command handler, call `rune.send_raw` and return `false` so Rune
+does not also process the original command. Verbatim-mode handlers may rewrite
+the complete multiline draft.
 
-The named core input hook `history-expansion` runs at priority 100. On
-interactive command submissions, complete delimiter-separated components
-matching `!`, `!!`, or `!prefix` expand from the prior command history. It
-skips slash-command entries, verbatim entries, and entries that contain an
-unresolved bang designator. If any designator has no match, it warns and
-consumes the entire submission. A submission beginning with `/` bypasses this
-hook, leaving local-command arguments literal. Disable it with:
+All input handlers run in priority order, with lower numbers first. If none
+returns `false`, Rune processes the final text after the last handler finishes.
+Command mode applies slash commands, command separators, `#N` repeats, and
+aliases. Verbatim mode sends each line without any of that command processing.
+Even a handler with a priority above 100 still runs before Rune processes or
+sends the command.
+
+The named core input hook `history-expansion` runs at priority 100. With the
+default history character, `!` and `!!` repeat the last command, while
+`!prefix` repeats the newest command beginning with `prefix`. These forms also
+work as complete commands in a separator-chained line. Rune ignores local
+slash commands, verbatim input, and earlier commands that still contain
+history-expansion syntax for the current history character. If any expansion
+has no match, Rune shows a warning and cancels the whole input line. Disable
+the feature with:
 
 ```lua
-rune.hooks.remove("history-expansion")
+rune.config.set("history_character", "")
 ```
 
-History expansion is not command dispatch: `rune.send("!")` sends a literal
-`!`, and verbatim submissions never expand it. Hooks below priority 100 see
-the text before the core expansion; hooks above 100 see its result.
+Only commands typed in normal input use history expansion. `rune.send` does
+not perform it, and verbatim input bypasses command processing entirely.
+Hooks below priority 100 see the text before expansion; hooks above 100 see the
+expanded command. If you are replacing the feature with your own input hook,
+you can remove the built-in `history-expansion` handler instead of merely
+disabling it.
 
 For `output`, `prompt`, and `echo`, the core handlers remain at priority 100:
 trigger processing on `output`/`prompt` and the `> ` styling on `echo`.
@@ -152,7 +170,7 @@ All handlers run; return values are ignored.
 
 | Event | Args | Fired |
 |---|---|---|
-| `ready` | none | Boot complete, after user scripts load (fires again on `/reload`) |
+| `ready` | none | After core and user scripts load during startup or `/reload`, before Rune applies their settings and UI state |
 | `connecting` | address | Dial started |
 | `connected` | address | Connection established |
 | `disconnecting` | none | Disconnect requested |
@@ -160,7 +178,7 @@ All handlers run; return values are ignored.
 | `reloading` / `reloaded` | none | Around `/reload` (order: `reloading`, `ready`, `reloaded`) |
 | `loaded` | path | After `/load` or `rune.load` loads a file (not for startup auto-load) |
 | `error` | message | On reported errors |
-| `input_changed` | text | As the input line changes while typing |
+| `input_changed` | text | Whenever the input buffer changes, including typing or paste, history or completion, `rune.input.set`, and the post-submit draft |
 | `window_size_changed` | width, height | On the first reported terminal size and every resize; `rune.state.width`/`height` already hold the new values |
 | `gmcp` | package, data, raw JSON | On every GMCP message, before package-specific `rune.gmcp.on` handlers |
 | `gmcp_enabled` | none | GMCP negotiated; the core handler sends `Core.Hello` |
@@ -187,7 +205,7 @@ changes.
 Handlers the core registers under stable names, so you can disable or
 replace them: `log-output`, `log-echo` (logging policy, priority 200),
 `gmcp-hello` (the GMCP handshake), `gmcp-reset`, `first-run-welcome`,
-`history-expansion` (interactive `!` expansion, priority 100), and
+`history-expansion` (interactive history expansion, priority 100), and
 `_completion_cache` / `_completion_input` (tab-completion word harvesting,
 priority 200).
 

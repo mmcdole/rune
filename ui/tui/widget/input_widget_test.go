@@ -4,6 +4,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
+
 	"github.com/mmcdole/rune/ui"
 	"github.com/mmcdole/rune/ui/tui/style"
 )
@@ -64,6 +67,36 @@ func TestInputSetCursorReleasesWholeLineSelection(t *testing.T) {
 	}
 	if got := in.Value(); got != "north" {
 		t.Fatalf("moving the cursor changed input to %q", got)
+	}
+}
+
+func TestInputSelectionStylesTextWithoutFillingRow(t *testing.T) {
+	profile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	t.Cleanup(func() { lipgloss.SetColorProfile(profile) })
+
+	in := newTestInput(40)
+	in.SetValue("north")
+	in.SelectAll()
+
+	rows := strings.Split(in.View(), "\n")
+	if len(rows) != 3 {
+		t.Fatalf("selected input rows = %d, want 3", len(rows))
+	}
+	selectedText := in.styles.InputSelected.Inline(true).Render("north")
+	prefix := in.textinput.PromptStyle.Render(in.textinput.Prompt) + selectedText
+	padding := in.width - lipgloss.Width(prefix)
+	if padding < 0 {
+		t.Fatalf("selected input prefix width = %d, exceeds row width %d",
+			lipgloss.Width(prefix), in.width)
+	}
+	want := prefix + strings.Repeat(" ", padding)
+	if rows[1] != want {
+		t.Fatalf("selected input row = %q, want exact text and plain padding %q",
+			rows[1], want)
+	}
+	if got := lipgloss.Width(rows[1]); got != in.width {
+		t.Fatalf("selected input row width = %d, want %d", got, in.width)
 	}
 }
 

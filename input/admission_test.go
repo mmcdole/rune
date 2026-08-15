@@ -31,3 +31,15 @@ func TestRequiresVerbatim(t *testing.T) {
 		})
 	}
 }
+
+func TestValidCommandTextRejectsInvalidUTF8(t *testing.T) {
+	if !ValidCommandText("look") {
+		t.Fatal("ordinary command text was rejected")
+	}
+	if ValidCommandText("one\ntwo") {
+		t.Fatal("structured command text was accepted")
+	}
+	if ValidCommandText(string([]byte{'l', 0xff, 'k'})) {
+		t.Fatal("invalid UTF-8 command text was accepted")
+	}
+}

@@ -1,46 +1,55 @@
 -- Interactive history expansion.
 --
 -- This is an input transform, not an alias: successful expansion becomes the
--- value committed to history and later dispatched, while programmatic
--- rune.send calls remain independent of interactive submission history.
+-- text stored in history and processed as input. Programmatic rune.send calls
+-- do not use interactive submission history.
 
-local function repeat_spec(piece)
-    local spec = piece:match("^%s*!([^%s]*)%s*$")
-    if spec == "!" then
-        return "" -- `!!` is equivalent to bare `!`.
+local function designator_spec(piece, marker)
+    local token = piece:match("^%s*(.-)%s*$")
+    if token:sub(1, #marker) ~= marker then
+        return nil
+    end
+
+    local spec = token:sub(#marker + 1)
+    if spec:find("%s") then
+        return nil
+    end
+    if spec == marker then
+        return "" -- A doubled marker is equivalent to a bare marker.
     end
     return spec
 end
 
--- History can contain entries created by older versions or explicitly through
--- rune.history.add. Never expand into another designator: a compound entry
--- such as `north;!` would otherwise feed history syntax back into dispatch.
-local function contains_repeat(text, delimiter)
-    if not text:find("!", 1, true) then
+-- History-expansion syntax can enter history through rune.history.add or while
+-- expansion uses a different character. Skip those entries rather than send
+-- unresolved expansion text to the MUD.
+local function contains_designator(text, separator, marker)
+    if not text:find(marker, 1, true) then
         return false
     end
 
     local start = 1
     while true do
-        local pos = text:find(delimiter, start, true)
+        local pos = text:find(separator, start, true)
         local piece = pos and text:sub(start, pos - 1) or text:sub(start)
-        if repeat_spec(piece) ~= nil then
+        if designator_spec(piece, marker) ~= nil then
             return true
         end
         if not pos then
             return false
         end
-        start = pos + #delimiter
+        start = pos + #separator
     end
 end
 
-local function find_previous(spec, history, delimiter)
+local function find_previous(spec, history, separator, marker)
     for i = #history, 1, -1 do
         local entry = history[i]
         if entry.mode == "command" then
             local candidate = entry.text:match("^%s*(.-)%s*$")
-            if candidate:sub(1, 1) ~= "/"
-                and not contains_repeat(entry.text, delimiter)
+            if candidate ~= ""
+                and entry.text:sub(1, 1) ~= "/"
+                and not contains_designator(entry.text, separator, marker)
                 and (spec == "" or candidate:sub(1, #spec) == spec)
             then
                 return entry.text
@@ -53,32 +62,31 @@ local function expand_history(text, context)
     if context.mode ~= "command" then
         return nil
     end
-    -- Dispatch treats a leading slash as one local command before delimiter
-    -- processing. Keep its arguments literal for the same reason slash
-    -- commands are never eligible history candidates.
+    -- A leading slash is a local Rune command; leave its whole line literal.
     if text:sub(1, 1) == "/" then
         return nil
     end
-    if not text:find("!", 1, true) then
+
+    local marker = rune.config.get("history_character")
+    if marker == "" or not text:find(marker, 1, true) then
         return nil
     end
 
-    local delimiter = rune.config.get("delimiter")
-    if not contains_repeat(text, delimiter) then
+    local separator = rune.config.get("command_separator")
+    if not contains_designator(text, separator, marker) then
         return nil
     end
     local history = rune._history.entries()
     local pieces = {}
-    local changed = false
     local start = 1
 
     while true do
-        local pos = text:find(delimiter, start, true)
+        local pos = text:find(separator, start, true)
         local piece = pos and text:sub(start, pos - 1) or text:sub(start)
-        local spec = repeat_spec(piece)
+        local spec = designator_spec(piece, marker)
 
         if spec ~= nil then
-            local replacement = find_previous(spec, history, delimiter)
+            local replacement = find_previous(spec, history, separator, marker)
             if not replacement then
                 local token = piece:match("^%s*(.-)%s*$")
                 rune.echo(rune.style.yellow("[History]") ..
@@ -86,7 +94,6 @@ local function expand_history(text, context)
                 return false
             end
             pieces[#pieces + 1] = replacement
-            changed = true
         else
             pieces[#pieces + 1] = piece
         end
@@ -94,12 +101,10 @@ local function expand_history(text, context)
         if not pos then
             break
         end
-        start = pos + #delimiter
+        start = pos + #separator
     end
 
-    if changed then
-        return table.concat(pieces, delimiter)
-    end
+    return table.concat(pieces, separator)
 end
 
 rune.hooks.on("input", expand_history, {

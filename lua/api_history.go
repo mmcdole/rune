@@ -1,6 +1,9 @@
 package lua
 
-import "github.com/mmcdole/rune/script"
+import (
+	"github.com/mmcdole/rune/input"
+	"github.com/mmcdole/rune/script"
+)
 
 // registerHistoryFuncs registers rune._history.* primitives.
 // The public rune.history API is defined in Lua (00_init.lua).
@@ -24,6 +27,9 @@ func (e *Engine) registerHistoryFuncs() {
 		// rune._history.add(cmd) - Add a command to history
 		"add": func(c *script.Call) error {
 			cmd := c.Str(1)
+			if !input.ValidCommandText(cmd) {
+				return c.Errorf("rune.history.add only accepts valid one-line command text without tabs or control characters")
+			}
 			e.host.AddToHistory(cmd)
 			return nil
 		},

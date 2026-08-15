@@ -1,19 +1,38 @@
 package lua
 
-import "github.com/mmcdole/rune/script"
+import (
+	"unicode"
+	"unicode/utf8"
+
+	"github.com/mattn/go-runewidth"
+	"github.com/mmcdole/rune/script"
+)
 
 // Config is Rune's typed application configuration. Go owns the values,
 // defaults, and validation; Lua exposes the public rune.config facade.
 type Config struct {
-	Delimiter string
-	KeepInput bool
+	CommandSeparator string
+	HistoryCharacter string
+	KeepInput        bool
 }
 
 func defaultConfig() Config {
 	return Config{
-		Delimiter: ";",
-		KeepInput: false,
+		CommandSeparator: ";",
+		HistoryCharacter: "!",
+		KeepInput:        false,
 	}
+}
+
+func validHistoryCharacter(value string) bool {
+	if value == "" {
+		return true
+	}
+	if !utf8.ValidString(value) || utf8.RuneCountInString(value) != 1 {
+		return false
+	}
+	r, _ := utf8.DecodeRuneInString(value)
+	return unicode.IsGraphic(r) && !unicode.IsSpace(r) && runewidth.RuneWidth(r) > 0
 }
 
 // registerConfigFuncs registers the rune._config primitives behind the public
@@ -25,8 +44,10 @@ func (e *Engine) registerConfigFuncs() {
 				return c.Errorf("config key must be a string")
 			}
 			switch key := c.Str(1); key {
-			case "delimiter":
-				c.Return(e.config.Delimiter)
+			case "command_separator":
+				c.Return(e.config.CommandSeparator)
+			case "history_character":
+				c.Return(e.config.HistoryCharacter)
 			case "keep_input":
 				c.Return(e.config.KeepInput)
 			default:
@@ -41,15 +62,27 @@ func (e *Engine) registerConfigFuncs() {
 			}
 			before := e.config
 			switch key := c.Str(1); key {
-			case "delimiter":
+			case "command_separator":
 				if c.Arg(2).Kind() != script.KindString {
 					return c.Errorf("config %q must be a string", key)
 				}
-				delimiter := c.Str(2)
-				if delimiter == "" {
+				separator := c.Str(2)
+				if separator == "" {
 					return c.Errorf("config %q must not be empty", key)
 				}
-				e.config.Delimiter = delimiter
+				e.config.CommandSeparator = separator
+			case "history_character":
+				if c.Arg(2).Kind() != script.KindString {
+					return c.Errorf("config %q must be a string", key)
+				}
+				value := c.Str(2)
+				if value == "/" {
+					return c.Errorf("config %q cannot use reserved character /", key)
+				}
+				if !validHistoryCharacter(value) {
+					return c.Errorf("config %q must be empty or one visible non-whitespace character", key)
+				}
+				e.config.HistoryCharacter = value
 			case "keep_input":
 				e.config.KeepInput = c.Bool(2)
 			default:
@@ -63,9 +96,9 @@ func (e *Engine) registerConfigFuncs() {
 	}, nil)
 }
 
-// CommitConfig finishes the configuration transaction started by Init and
-// publishes its final typed value exactly once. Subsequent changes are
-// published immediately by rune.config.set.
+// CommitConfig publishes the final typed configuration staged during Init
+// exactly once. Subsequent changes are published immediately by
+// rune.config.set.
 func (e *Engine) CommitConfig() {
 	if !e.configStaging {
 		return

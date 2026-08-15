@@ -1,5 +1,5 @@
-// Package input defines typed submissions as they move from the interactive
-// composer through Session and Lua policy.
+// Package input defines command and verbatim submissions shared by the UI,
+// Session, and scripting layers.
 package input
 
 import "strings"

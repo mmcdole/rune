@@ -13,7 +13,7 @@ type UIEvent interface {
 // the TUI splits and wraps it into rows.
 type PrintLineMsg string
 
-// EchoLineMsg carries a local echo (user input, already styled by the
+// EchoLineMsg carries a local echo (submitted input, already styled by the
 // Lua "echo" hook) to append to scrollback. Like PrintLineMsg, the
 // text may contain newlines.
 type EchoLineMsg string

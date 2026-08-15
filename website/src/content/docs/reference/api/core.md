@@ -15,7 +15,7 @@ rune.echo(text)        -- print to the local display only
 rune.connect(address)  -- "host:port", optional tls:// scheme
 rune.disconnect()      -- close the connection
 rune.load(path)        -- run a Lua script; true, or nil + error
-rune.reload()          -- tear down the VM, re-run core + user scripts
+rune.reload()          -- reload core + user scripts
 rune.quit()            -- exit the client
 
 rune.config_dir        -- path to the config directory (data, not a function)
@@ -29,8 +29,8 @@ rune.config.set(key, value)   -- validate and update a configuration value
 
 `rune.echo` prints locally and never touches the server — pair it with
 [rune.style](/reference/api/style/) for colored messages. `rune.reload`
-tears down the Lua VM and re-runs the core plus your scripts;
-[`rune.session`](/reference/api/storage/) state survives it.
+reloads the core plus your scripts; [`rune.session`](/reference/api/storage/)
+state survives it.
 
 ### rune.send
 
@@ -38,19 +38,19 @@ tears down the Lua VM and re-runs the core plus your scripts;
 rune.send(text)
 ```
 
-- `text` (string) — command text to process programmatically.
+- `text` (string) — command text to process and send.
 
-The full command pipeline: the configured delimiter (`;` by default) splits
-the text into separate commands, `#N` repeats expand, and each command runs
-through [aliases](/reference/api/alias/) before going to the server. Repeats
-are anchored at command position — `#3 north` repeats, but
+Before sending the text, Rune processes the configured command separator (`;`
+by default) and `#N` repeats, then checks each resulting command against your
+[aliases](/reference/api/alias/).
+Repeats are anchored at command position — `#3 north` repeats, but
 `say #3 cheers` is chat text and passes through untouched. Alias
 expansions are processed recursively (nested aliases work), with a
 depth limit to catch loops.
 
-`rune.send` does not run interactive input hooks or add history. In particular,
-`rune.send("!")` sends a literal `!`; shell-style history expansion happens
-only for interactive command submissions.
+Unlike text you type into the input line, `rune.send` does not run input hooks,
+save the command in history, or perform history expansion. It still applies
+the command separator, `#N` repeats, and aliases as described above.
 
 ```lua
 rune.send("#2 {get bread bag;eat bread}")  -- get/eat, twice
@@ -62,10 +62,10 @@ rune.send("#2 {get bread bag;eat bread}")  -- get/eat, twice
 rune.send_raw(text) -> true | nil, err
 ```
 
-- `text` (string) — sent as game lines: no aliases, no `;`
-  splitting, and no `#N` repeats. Text containing newlines is split and
-  sent one physical line at a time. LF, CRLF, and bare CR are line breaks;
-  empty lines are preserved.
+- `text` (string) — sent as game lines without aliases, command-separator
+  splitting, or `#N` repeats. Text containing newlines is split and sent one
+  physical line at a time. LF, CRLF, and bare CR are line breaks; empty lines
+  are preserved.
 
 Despite its name, `send_raw` sends MUD text, not Telnet or GMCP protocol
 data. Returns `true`, or `nil` plus an error message (which is also echoed)
@@ -155,9 +155,9 @@ rune.dbg("trigger fired for " .. name)
 
 ## rune.config
 
-Go owns Rune's typed configuration, including its schema, validation, and
-defaults. Read and update values through `get` and `set`; direct property
-assignment is rejected.
+Rune checks every configuration value against the type and rules below. Read
+and change settings through `get` and `set`; direct property assignment is not
+supported.
 
 ```lua
 rune.config.get(key)          -- value
@@ -166,24 +166,34 @@ rune.config.set(key, value)
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `delimiter` | string, non-empty | `";"` | Separator for chaining commands in one input line |
-| `keep_input` | boolean | `false` | Keep an authored command in the input line, selected: `Enter` resends it, typing replaces it |
+| `command_separator` | non-empty string | `";"` | Text that separates multiple commands entered on one line |
+| `history_character` | empty or one visible, non-space character | `"!"` | Character used for history expansion (`!`, `!!`, `!prefix`); empty disables it |
+| `keep_input` | boolean | `false` | After `Enter`, leave the text you typed selected; `Enter` repeats it and typing replaces it |
 
-An unknown key, a value of the wrong type, or an empty `delimiter` raises an
-error and leaves the configuration unchanged.
+An unknown key, a value of the wrong type, an empty `command_separator`, or an
+invalid history character raises an error and leaves the configuration unchanged.
 
 ```lua
 rune.config.set("keep_input", true)
-rune.config.set("delimiter", "|")
+rune.config.set("command_separator", "|")
+rune.config.set("history_character", "^")
 assert(rune.config.get("keep_input") == true)
 ```
 
-At normal runtime, a successful `set` takes effect immediately. Startup and
-`/reload` are transactional: Rune starts a candidate at the defaults, evaluates
-core scripts, user scripts, and ready hooks against it, then publishes one
-complete snapshot. A consumer never observes the intermediate defaults or
-staged updates. If a user script does not set a key again, the published value
-reverts to its default.
+Set `history_character` to `""` to turn history expansion off. Rune recognizes
+command separators before history expansion. For example, if `!!` is your
+command separator and `!` is your history character, the `!!` between two
+commands remains a separator.
+
+There is not yet an escape for putting a command separator literally into
+normal command input. When typing, use verbatim input to send a whole line
+without splitting it into commands. From Lua, call `rune.send_raw`.
+
+A successful `set` takes effect immediately. On `/reload`, settings start from
+their defaults and your `init.lua` applies your choices again. Put settings you
+want to keep in `init.lua`; any key it no longer sets returns to its default.
+Rune applies the finished settings together, so the interface does not briefly
+switch to defaults while reload is running.
 
 **Related:** [Scripting Basics](/getting-started/scripting-basics/) ·
 [State & Lines](/reference/api/state-lines/) ·

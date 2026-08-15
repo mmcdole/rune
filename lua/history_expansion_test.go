@@ -1,8 +1,8 @@
 package lua
 
 // The named `history-expansion` input hook (72_history_expansion.lua) runs
-// before history commit and terminal dispatch. Programmatic rune.send remains
-// command processing, not interactive submission.
+// before history is recorded and the command is processed. Programmatic
+// rune.send remains separate from interactive input history.
 
 import (
 	"strings"
@@ -11,9 +11,9 @@ import (
 	"github.com/mmcdole/rune/input"
 )
 
-// commitAndDispatchTestCommand mirrors the Lua half of Session's transaction:
-// transform once, commit the effective command, then dispatch it. A literal
-// false consumes the submission before both commit and dispatch.
+// commitAndDispatchTestCommand mirrors Session's hook, history, and command
+// processing order for these Lua-focused tests; local echo is omitted. A
+// literal false cancels the submission before history and command processing.
 func commitAndDispatchTestCommand(t *testing.T, engine *Engine, host *MockHost, text string) bool {
 	t.Helper()
 	effective, proceed := engine.ApplyInputHooks(input.Command(text))
@@ -39,6 +39,31 @@ func assertHistory(t *testing.T, host *MockHost, want ...string) {
 		if got[i] != want[i] {
 			t.Fatalf("history: expected %q, got %q", want, got)
 		}
+	}
+}
+
+func TestHistoryExpansionPreservesStoredSurroundingWhitespace(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	host.HistoryEntries = []input.Submission{input.Command("  kill rat  ")}
+	effective, proceed := engine.ApplyInputHooks(input.Command("!ki"))
+	if !proceed || effective.Text != "  kill rat  " {
+		t.Fatalf("submit = (%q, %v), want exact stored command", effective.Text, proceed)
+	}
+}
+
+func TestHistoryExpansionSkipsWhitespaceOnlyHistory(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	host.HistoryEntries = []input.Submission{
+		input.Command("north"),
+		input.Command("   "),
+	}
+	effective, proceed := engine.ApplyInputHooks(input.Command("!"))
+	if !proceed || effective.Text != "north" {
+		t.Fatalf("submit = (%q, %v), want prior non-blank command", effective.Text, proceed)
 	}
 }
 
@@ -148,6 +173,9 @@ func TestBangOnEmptyHistoryWarns(t *testing.T) {
 
 	assertCommands(t, host, nil)
 	assertHistory(t, host)
+	if printed := strings.Join(host.DrainPrintCalls(), "\n"); !strings.Contains(printed, "no matching command: !") {
+		t.Fatalf("empty history warning missing from %q", printed)
+	}
 }
 
 func TestBangInputHookIsRemovable(t *testing.T) {
@@ -165,7 +193,7 @@ func TestBangInputHookIsRemovable(t *testing.T) {
 	assertHistory(t, host, "n", "!")
 }
 
-func TestBangExpandsDelimiterComponentsAtomically(t *testing.T) {
+func TestBangExpandsCommandSeparatorComponentsAtomically(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 
@@ -193,11 +221,11 @@ func TestCompoundBangPrefixUsesPriorHistory(t *testing.T) {
 	assertHistory(t, host, "north", "east;north")
 }
 
-func TestBangUsesConfiguredDelimiter(t *testing.T) {
+func TestBangUsesConfiguredCommandSeparator(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 
-	if err := engine.DoString("delimiter", `rune.config.set("delimiter", "|")`); err != nil {
+	if err := engine.DoString("command separator", `rune.config.set("command_separator", "|")`); err != nil {
 		t.Fatal(err)
 	}
 	commitAndDispatchTestCommand(t, engine, host, "look")
@@ -205,6 +233,129 @@ func TestBangUsesConfiguredDelimiter(t *testing.T) {
 
 	assertCommands(t, host, []string{"look", "north", "look"})
 	assertHistory(t, host, "look", "north|look")
+}
+
+func TestHistoryExpansionUsesConfiguredCharacterLiterally(t *testing.T) {
+	tests := []struct {
+		name   string
+		setup  string
+		marker string
+	}{
+		{name: "pattern metacharacter", setup: `rune.config.set("history_character", "%")`, marker: "%"},
+		{name: "unicode", setup: `rune.config.set("history_character", "↻")`, marker: "↻"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			engine, host, cleanup := setupTest(t)
+			defer cleanup()
+
+			if err := engine.DoString("history character", test.setup); err != nil {
+				t.Fatal(err)
+			}
+			host.HistoryEntries = []input.Submission{
+				input.Command("look"),
+				input.Command("north"),
+			}
+
+			for _, rewrite := range []struct {
+				text string
+				want string
+			}{
+				{text: test.marker, want: "north"},
+				{text: test.marker + test.marker, want: "north"},
+				{text: test.marker + "lo", want: "look"},
+				{text: "east;" + test.marker + "lo", want: "east;look"},
+				{text: "!", want: "!"},
+			} {
+				effective, proceed := engine.ApplyInputHooks(input.Command(rewrite.text))
+				if !proceed || effective.Text != rewrite.want {
+					t.Fatalf("submit %q = (%q, %v), want (%q, true)",
+						rewrite.text, effective.Text, proceed, rewrite.want)
+				}
+			}
+
+			if _, proceed := engine.ApplyInputHooks(input.Command(test.marker + "missing")); proceed {
+				t.Fatal("unmatched configured history designator was accepted")
+			}
+			warning := "no matching command: " + test.marker + "missing"
+			warned := false
+			for _, line := range host.DrainPrintCalls() {
+				if strings.Contains(line, warning) {
+					warned = true
+				}
+			}
+			if !warned {
+				t.Fatalf("missing configured-character warning %q", warning)
+			}
+		})
+	}
+}
+
+func TestEmptyHistoryCharacterDisablesExpansion(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	if err := engine.DoString("disable history expansion",
+		`rune.config.set("history_character", "")`); err != nil {
+		t.Fatal(err)
+	}
+	host.HistoryEntries = []input.Submission{input.Command("north")}
+
+	commitAndDispatchTestCommand(t, engine, host, "!")
+
+	assertCommands(t, host, []string{"!"})
+	assertHistory(t, host, "north", "!")
+	for _, line := range host.DrainPrintCalls() {
+		if strings.Contains(line, "no matching command") {
+			t.Fatalf("disabled expansion warned: %q", line)
+		}
+	}
+}
+
+func TestHistoryExpansionFiltersStoredEntriesByCurrentCharacter(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	host.HistoryEntries = []input.Submission{
+		input.Command("look"),
+		input.Command("!old"),
+		input.Command("^staged"),
+	}
+	if err := engine.DoString("change history character",
+		`rune.config.set("history_character", "^")`); err != nil {
+		t.Fatal(err)
+	}
+
+	effective, proceed := engine.ApplyInputHooks(input.Command("^"))
+	if !proceed || effective.Text != "!old" {
+		t.Fatalf("caret submit = (%q, %v), want old literal bang entry", effective.Text, proceed)
+	}
+
+	if err := engine.DoString("restore history character",
+		`rune.config.set("history_character", "!")`); err != nil {
+		t.Fatal(err)
+	}
+	effective, proceed = engine.ApplyInputHooks(input.Command("!"))
+	if !proceed || effective.Text != "^staged" {
+		t.Fatalf("bang submit = (%q, %v), want old literal caret entry", effective.Text, proceed)
+	}
+}
+
+func TestCommandSeparatorTakesPrecedenceOverDoubledHistoryCharacter(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	if err := engine.DoString("overlapping command separator",
+		`rune.config.set("command_separator", "!!")`); err != nil {
+		t.Fatal(err)
+	}
+	host.HistoryEntries = []input.Submission{input.Command("look")}
+
+	effective, proceed := engine.ApplyInputHooks(input.Command("!!"))
+	if !proceed || effective.Text != "!!" {
+		t.Fatalf("submit = (%q, %v), want separator text unchanged", effective.Text, proceed)
+	}
 }
 
 func TestBangSkipsIneligibleStructuredHistory(t *testing.T) {
@@ -234,6 +385,21 @@ func TestBangNeverReplaysLocalSlashCommands(t *testing.T) {
 	assertHistory(t, host, "look", "/reload", "look")
 	if host.ReloadCalls != 1 {
 		t.Fatalf("reload calls = %d, want one original local command", host.ReloadCalls)
+	}
+}
+
+func TestBangCanReplayGameCommandWithLeadingSpaceBeforeSlash(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	commitAndDispatchTestCommand(t, engine, host, "look")
+	commitAndDispatchTestCommand(t, engine, host, " /reload")
+	commitAndDispatchTestCommand(t, engine, host, "!")
+
+	assertCommands(t, host, []string{"look", "/reload", "/reload"})
+	assertHistory(t, host, "look", " /reload")
+	if host.ReloadCalls != 0 {
+		t.Fatalf("reload calls = %d, want command sent only to game", host.ReloadCalls)
 	}
 }
 

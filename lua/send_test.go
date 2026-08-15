@@ -48,7 +48,7 @@ func TestSendExpansion(t *testing.T) {
 			want:  []string{"north", "north", "north"},
 		},
 		{
-			name:  "repeat after delimiter",
+			name:  "repeat after command separator",
 			input: "open gate;#2 south",
 			want:  []string{"open gate", "south", "south"},
 		},
@@ -70,12 +70,12 @@ func TestSendExpansion(t *testing.T) {
 	})
 }
 
-func TestSendExpansionUsesConfiguredDelimiter(t *testing.T) {
+func TestSendExpansionUsesConfiguredCommandSeparator(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 
-	if err := engine.DoString("configured delimiter repeats", `
-		rune.config.set("delimiter", "|")
+	if err := engine.DoString("configured command separator repeats", `
+		rune.config.set("command_separator", "|")
 		rune.send("look|#2 north|#2 {east|west}|say #3 cheers")
 	`); err != nil {
 		t.Fatal(err)
@@ -298,19 +298,19 @@ func TestInputRewritePreservesVerbatimMode(t *testing.T) {
 
 	if err := engine.DoString("rewrite verbatim", `
 		rune.hooks.on("input", function()
-			return "first;second"
+			return "first;second\nthird"
 		end, { priority = 90 })
 	`); err != nil {
 		t.Fatal(err)
 	}
 
 	effective, proceed := engine.ApplyInputHooks(input.Verbatim("original"))
-	if !proceed || effective != input.Verbatim("first;second") {
+	if !proceed || effective != input.Verbatim("first;second\nthird") {
 		t.Fatalf("effective submission = %+v proceed=%v", effective, proceed)
 	}
 	engine.DispatchSubmission(effective)
 
-	assertCommands(t, host, []string{"first;second"})
+	assertCommands(t, host, []string{"first;second", "third"})
 }
 
 func TestOneArgumentInputHookStillObservesVerbatim(t *testing.T) {

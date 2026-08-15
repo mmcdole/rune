@@ -502,6 +502,34 @@ func TestConsumedInputHasNoEchoHistoryOrDispatch(t *testing.T) {
 	}
 }
 
+func TestStructuredCommandRewriteHasNoEchoHistoryOrDispatch(t *testing.T) {
+	s, net, uiMock := newTestSession(t)
+	net.connected = true
+
+	if err := s.engine.DoString("rewrite command as structured text", `
+		rune.hooks.on("input", function()
+			return "east\nwest"
+		end, { name = "test-structured-rewrite", priority = 90 })
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	s.handleSubmission(input.Command("north"))
+
+	if sent := net.drainSent(); len(sent) != 0 {
+		t.Fatalf("structured command rewrite sent %q", sent)
+	}
+	if history := s.GetHistoryEntries(); len(history) != 0 {
+		t.Fatalf("structured command rewrite entered history: %+v", history)
+	}
+	if echoed := uiMock.drainEchoed(); len(echoed) != 0 {
+		t.Fatalf("structured command rewrite was locally echoed: %q", echoed)
+	}
+	if printed := uiMock.drainPrinted(); !contains(printed, "command rewrite must be valid text on one line") {
+		t.Fatalf("structured command rewrite produced no useful error: %q", printed)
+	}
+}
+
 func TestConfirmedPromptBatchFinishesAfterRewriteOrGag(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -1304,13 +1332,21 @@ func TestConfigSetPublishesRuntimeChangesAndOneFinalReloadSnapshot(t *testing.T)
 		t.Fatalf("runtime config pushes = %+v, want one keep_input=true", pushes)
 	}
 
-	// All settings share one typed API and complete snapshot. Changing the
-	// delimiter must retain keep_input and must not rebuild binds or bars.
-	assertSessionLua(t, s.engine, `rune.config.set("delimiter", "|")`)
-	if !uiMock.pushedConfig().KeepInput {
-		t.Fatal("delimiter change reset keep_input")
+	// Parser settings use the same config publication path. Each update must
+	// retain the current UI-facing keep_input value.
+	assertSessionLua(t, s.engine, `
+		rune.config.set("command_separator", "|")
+		rune.config.set("history_character", "^")
+	`)
+	pushes := uiMock.drainConfigPushes()
+	if len(pushes) != 2 {
+		t.Fatalf("parser config pushes = %+v, want exactly two snapshots", pushes)
 	}
-	uiMock.drainConfigPushes()
+	for i, push := range pushes {
+		if !push.KeepInput {
+			t.Fatalf("parser config push %d reset keep_input: %+v", i, push)
+		}
+	}
 
 	// Reload without an init.lua reverts to defaults.
 	s.handleReloadRequested()
@@ -1320,10 +1356,19 @@ func TestConfigSetPublishesRuntimeChangesAndOneFinalReloadSnapshot(t *testing.T)
 	if pushes := uiMock.drainConfigPushes(); len(pushes) != 1 || pushes[0].KeepInput {
 		t.Fatalf("default reload pushes = %+v, want exactly one final false snapshot", pushes)
 	}
+	assertSessionLua(t, s.engine, `
+		assert(rune.config.get("command_separator") == ";")
+		assert(rune.config.get("history_character") == "!")
+	`)
 
-	// Reload with an init.lua that sets it reapplies the preference.
+	// Reload with an init.lua reapplies one final snapshot of all configured values.
 	initPath := filepath.Join(s.config.ConfigDir, "init.lua")
-	if err := os.WriteFile(initPath, []byte("rune.config.set(\"keep_input\", true)\n"), 0o644); err != nil {
+	initLua := `
+rune.config.set("command_separator", "||")
+rune.config.set("history_character", "?")
+rune.config.set("keep_input", true)
+`
+	if err := os.WriteFile(initPath, []byte(initLua), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	s.handleReloadRequested()
@@ -1333,6 +1378,11 @@ func TestConfigSetPublishesRuntimeChangesAndOneFinalReloadSnapshot(t *testing.T)
 	if pushes := uiMock.drainConfigPushes(); len(pushes) != 1 || !pushes[0].KeepInput {
 		t.Fatalf("configured reload pushes = %+v, want exactly one final true snapshot", pushes)
 	}
+	assertSessionLua(t, s.engine, `
+		assert(rune.config.get("command_separator") == "||")
+		assert(rune.config.get("history_character") == "?")
+		assert(rune.config.get("keep_input") == true)
+	`)
 }
 
 func TestHistoryDedupAndTrim(t *testing.T) {

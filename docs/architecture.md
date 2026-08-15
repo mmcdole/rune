@@ -118,8 +118,8 @@ implements by default and the LuaJIT backend implements under `-tags luajit`.
 
 - **Single Host interface:** The Engine depends on one `lua.Host` interface (`lua/host.go`). Session implements it, with the methods grouped by service area across `session/lua_*.go` (network, ui, timers, system, history, session, store, log, state). Tests substitute a mock Host.
 - **Reactivity:** The Engine updates a global `rune.state` table whenever system state changes (connection, scroll position), allowing scripts to reactively render UI elements.
-- **Precommit input:** The Engine first folds an interactive submission through `input` hooks. Strings rewrite and chain, `nil` or other values pass through, and `false` consumes before history, echo, or routing. Session records and echoes the effective value, then the Engine invokes the separate internal command/verbatim dispatcher.
-- **Transactional config:** Go owns the typed config schema and defaults. Core scripts, user scripts, and ready hooks evaluate `rune.config.set` against a staged candidate during startup or reload; after they finish, Engine publishes one complete snapshot to Session. Later runtime updates publish immediately through a dedicated callback that does not re-enter Lua.
+- **Pre-commit input:** The Engine first folds an interactive submission through `input` hooks. Strings rewrite and chain, `nil` or other values pass through, and `false` consumes before history, echo, or routing. A command-mode result must still satisfy the shared one-line input admission rule; verbatim results may remain structured. Session records and echoes the effective value, then the Engine invokes the separate internal command/verbatim dispatcher.
+- **Staged config publication:** Go owns the typed config schema and defaults. Core scripts, user scripts, and ready hooks evaluate `rune.config.set` against a staged candidate during startup or reload; after they finish, Engine publishes one complete snapshot to Session. Later runtime updates publish immediately through a dedicated callback that does not re-enter Lua.
 
 ## 3. UI Architecture: The "Push" Model
 
@@ -233,16 +233,16 @@ an input hook consumes it, whether it is a slash command, connection state, or
 a later send failure. Input hooks run against the prior history and fold their
 string rewrites in priority order. A `false` result suppresses history, local
 echo, and dispatch; otherwise the final effective text is recorded, echoed,
-and routed. Command/verbatim routing is an internal Lua call after all input
-hooks, so there is no priority cutoff. Separately, Lua actions from aliases,
-triggers, timers, and other callbacks finish the partial line only when the
-connection accepts their game send. Deferring that finish to the end of the
-active batch keeps the wire write immediate while letting the callback that
-sent it rewrite or gag the visible line before it is committed. During inbound
-processing, `activeBatch` points to the `eventBatchState` for one
-`network.EventBatch`; it records
-whether server data arrived since the last prompt boundary and whether an
-accepted send owes a partial-line finish. Only after the complete batch has run
+and routed. All input hooks run before that final command/verbatim processing;
+priority only orders the hooks relative to one another. Separately, Lua actions
+from aliases, triggers, timers, and other callbacks finish the partial line
+only when the connection accepts their game send. Deferring that finish to the
+end of the active batch keeps the wire write immediate while letting the
+callback that sent it rewrite or gag the visible line before it is committed.
+During inbound processing, `activeBatch` points to the `eventBatchState` for
+one `network.EventBatch`; it records whether server data arrived since the
+last prompt boundary and whether an accepted send owes a partial-line finish.
+Only after the complete batch has run
 does Session publish any remaining partial observation and perform the owed
 finish; multiple accepted sends still finish the line once. A failed game send
 and protocol traffic such as GMCP, NAWS, and Telnet negotiation do not finish

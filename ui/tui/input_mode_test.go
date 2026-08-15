@@ -358,7 +358,7 @@ func TestCtrlJLeavesInlinePickerForComposer(t *testing.T) {
 }
 
 // TestComposerEnterSubmitsVerbatimExactAndClears verifies mode and content
-// cross the controller boundary together; command delimiters and whitespace
+// cross the controller boundary together; command separators and whitespace
 // are still untouched when ownership transfers to the session.
 func TestComposerEnterSubmitsVerbatimExactAndClears(t *testing.T) {
 	h := newControllerHarness()
@@ -871,6 +871,9 @@ func TestKeepOnSubmitArrowDeselectsInPlace(t *testing.T) {
 	if h.ctl.input.Selected() {
 		t.Fatal("cursor movement must deselect")
 	}
+	if got := h.ctl.input.Position(); got != 4 {
+		t.Fatalf("Left cursor position = %d, want 4", got)
+	}
 }
 
 func TestKeepOnSubmitPasteReplacesSelection(t *testing.T) {
@@ -921,11 +924,12 @@ func TestKeepOnSubmitEmptySubmissionStaysClear(t *testing.T) {
 func TestKeepOnSubmitVerbatimStillClears(t *testing.T) {
 	h := newControllerHarness()
 	h.ctl.SetKeepOnSubmit(true)
-	h.ctl.SetSubmission(input.Verbatim("say one\nsay two"))
+	want := input.Verbatim("say one\nsay two")
+	h.ctl.SetSubmission(want)
 
 	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyEnter})
 
-	if len(h.submitted) != 1 || h.submitted[0].Mode != input.ModeVerbatim {
+	if len(h.submitted) != 1 || h.submitted[0] != want {
 		t.Fatalf("expected verbatim submit, got %v", h.submitted)
 	}
 	if got := h.ctl.input.Value(); got != "" || h.ctl.input.Selected() {

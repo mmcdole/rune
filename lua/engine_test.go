@@ -783,7 +783,7 @@ func TestWatchdogPausedDuringBlockingHostCall(t *testing.T) {
 }
 
 // TestWatchdogRunawayHookDoesNotHang verifies the watchdog also covers
-// the precommit input-hook path, not just direct script execution.
+// the pre-commit input-hook path, not just direct script execution.
 func TestWatchdogRunawayHookDoesNotHang(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()

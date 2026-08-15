@@ -23,8 +23,10 @@ rune.input.delete_word()          -- delete the word before the cursor
 
 `get`/`set` operate on the whole buffer; the word operations combine
 them with cursor moves and are what the default `ctrl+w`,
-`alt+left`/`alt+right` binds call. Setting the input fires the
-`"input_changed"` [hook event](/reference/api/hooks/), same as typing.
+`alt+left`/`alt+right` binds call. The `"input_changed"`
+[hook event](/reference/api/hooks/) fires whenever the buffer changes,
+including typing, history or completion, `rune.input.set`, and the draft left
+after submission.
 
 Cursor positions are zero-based UTF-8 byte offsets, using the same byte units
 as Lua 5.1 string operations. `set_cursor` clamps positions to the input and
@@ -73,16 +75,18 @@ rune.history.get()     -- submitted text, oldest first
 rune.history.add(cmd)  -- append a normal command entry
 ```
 
-The buffer is Go-owned, so it survives `/reload`. Input hooks run before the
-current submission is committed. If they accept it, its final effective text
-lands here with the original command or verbatim mode; if one returns `false`,
-nothing is added. Arrow navigation and `ctrl+r` restore the stored mode, so
-even a one-line verbatim entry returns to the composer. Consecutive entries are
-deduplicated only when both their effective text and mode match.
+History survives `/reload`. Input hooks run before Rune stores the current
+submission. Rune stores the final non-empty text with its original command or
+verbatim mode. A canceled submission or an accepted rewrite to `""` is not
+added. Arrow navigation and `ctrl+r` restore the stored mode, so even a
+one-line verbatim entry returns to the composer. Consecutive entries are
+deduplicated only when both their text and mode match.
 
 `get()` returns the text-only view and does not expose the stored mode.
 `add(cmd)` adds a normal command entry for scripts that want a synthetic
-command (one sent by an alias, say) to be recallable.
+command (one sent by an alias, say) to be recallable. Because it creates a
+normal command entry, `cmd` must be valid text on one line without tabs or control
+characters; verbatim history entries come only from submitted verbatim input.
 
 **Related:** [Input & History guide](/interface/input/) ·
 [rune.bind](/reference/api/bind/) ·

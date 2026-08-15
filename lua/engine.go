@@ -264,6 +264,12 @@ func (e *Engine) ApplyInputHooks(submission input.Submission) (input.Submission,
 	case result.False():
 		return submission, false
 	case result.Kind == script.KindString:
+		if submission.Mode != input.ModeVerbatim && !input.ValidCommandText(result.Str) {
+			e.reportError("input hooks", fmt.Errorf(
+				"command rewrite must be valid text on one line without tabs or control characters",
+			))
+			return submission, false
+		}
 		submission.Text = result.Str
 		return submission, true
 	default:

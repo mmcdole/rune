@@ -88,10 +88,9 @@ its return value controls what happens next: return a string to have
 it processed and sent in place of the input, or return nothing to
 consume the input entirely (the function already did the work).
 
-Interactive [history expansion](/interface/input/#history) happens in the
-precommit `history-expansion` input hook, before alias processing. It is not an
-alias: programmatic `rune.send("!")` and an alias that expands to `!` both send
-a literal bang.
+[History expansion](/interface/input/#history) runs only on commands typed into
+Rune's normal input, before aliases. Text sent with `rune.send`, including the
+result of an alias, does not go through history expansion again.
 
 ## Managing
 

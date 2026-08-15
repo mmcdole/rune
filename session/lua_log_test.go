@@ -8,8 +8,8 @@ import (
 )
 
 // TestLogCapturesSessionToFile drives a logged session end-to-end and
-// verifies the file reads like the screen: ANSI-stripped output, the
-// local echo of typed input, no gagged lines, start/stop stamps.
+// verifies the file reads like the screen: ANSI-stripped output, the locally
+// echoed command, no gagged lines, start/stop stamps.
 func TestLogCapturesSessionToFile(t *testing.T) {
 	s, net, _ := newTestSession(t)
 	net.connected = true

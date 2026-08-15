@@ -7,6 +7,7 @@ package lua
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -142,7 +143,7 @@ func TestHistoryNavigationRestoresSubmissionMode(t *testing.T) {
 	assertInputMode(t, host, input.ModeCommand)
 }
 
-func TestHistoryStructuredAndLegacyAPIs(t *testing.T) {
+func TestHistoryPublicAndInternalAPIs(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 	host.HistoryEntries = []input.Submission{
@@ -151,8 +152,8 @@ func TestHistoryStructuredAndLegacyAPIs(t *testing.T) {
 	}
 
 	script := `
-		local legacy = rune.history.get()
-		assert(#legacy == 2 and legacy[1] == "north" and legacy[2] == "say hi;look")
+		local public = rune.history.get()
+		assert(#public == 2 and public[1] == "north" and public[2] == "say hi;look")
 		local entries = rune._history.entries()
 		assert(#entries == 2)
 		assert(entries[1].text == "north" and entries[1].mode == "command")
@@ -160,6 +161,23 @@ func TestHistoryStructuredAndLegacyAPIs(t *testing.T) {
 	`
 	if err := engine.DoString("history_apis", script); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestHistoryAddRejectsStructuredCommandText(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	if err := engine.DoString("structured_history", `
+		rune.history.add("north")
+		local ok, err = pcall(rune.history.add, "one\ntwo")
+		assert(not ok, "rune.history.add accepted multiline command text")
+		assert(tostring(err):find("rune.history.add only accepts valid one-line command text", 1, true), tostring(err))
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := host.HistoryEntries, []input.Submission{input.Command("north")}; !slices.Equal(got, want) {
+		t.Fatalf("history after rejected command = %+v, want %+v", got, want)
 	}
 }
 

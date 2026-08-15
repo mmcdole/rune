@@ -5,39 +5,39 @@ local MAX_RECURSION_DEPTH = 100
 
 -- INTERNAL: Expand braced #N syntax before command splitting. Unbraced
 -- repeats expand after splitting so both forms honor an arbitrary configured
--- delimiter.
+-- command separator.
 --
 -- Repeats are anchored at command position (start of input, or right
--- after a delimiter): "#3 north" is a repeat, but "say #3 cheers" is
--- chat text and passes through untouched. A temporary leading delimiter
+-- after a separator): "#3 north" is a repeat, but "say #3 cheers" is
+-- chat text and passes through untouched. A temporary leading separator
 -- lets one pattern cover both anchor cases for braced groups.
-local function expand_braced_repeats(input, delimiter)
-    local escaped_delimiter = delimiter:gsub("([^%w])", "%%%1")
-    local result = delimiter .. input
+local function expand_braced_repeats(input, separator)
+    local escaped_separator = separator:gsub("([^%w])", "%%%1")
+    local result = separator .. input
 
-    result = result:gsub(escaped_delimiter .. "%s*#(%d+)%s*{([^}]+)}", function(count, content)
+    result = result:gsub(escaped_separator .. "%s*#(%d+)%s*{([^}]+)}", function(count, content)
         local n = tonumber(count)
         local expanded = {}
         for i = 1, n do
             table.insert(expanded, content)
         end
-        return delimiter .. table.concat(expanded, delimiter)
+        return separator .. table.concat(expanded, separator)
     end)
 
-    return result:sub(#delimiter + 1)
+    return result:sub(#separator + 1)
 end
 
--- INTERNAL: Expand repeats and split by delimiter
+-- INTERNAL: Expand repeats and split by the command separator.
 local function expand_input(input)
-    local delimiter = rune.config.get("delimiter")
-    input = expand_braced_repeats(input, delimiter)
+    local separator = rune.config.get("command_separator")
+    input = expand_braced_repeats(input, separator)
 
     local commands = {}
     if input == "" then return {""} end
 
     local start = 1
     while true do
-        local pos = input:find(delimiter, start, true)
+        local pos = input:find(separator, start, true)
         local piece = pos and input:sub(start, pos - 1) or input:sub(start)
         local command = piece:match("^%s*(.-)%s*$")
         local count, repeated = command:match("^#(%d+)%s+([^{}]+)$")
@@ -50,7 +50,7 @@ local function expand_input(input)
             table.insert(commands, command)
         end
         if not pos then break end
-        start = pos + #delimiter
+        start = pos + #separator
     end
     return commands
 end
