@@ -129,6 +129,7 @@ type mockUI struct {
 	inputCursor   []int
 	bindsPushed   map[string]bool // last UpdateBinds payload
 	layoutPushes  int             // UpdateLayout call count
+	userConfig    ui.UserConfig   // last UpdateConfig payload
 	events        chan ui.UIEvent
 	done          chan struct{}
 }
@@ -211,6 +212,18 @@ func (m *mockUI) UpdateLayout(top, bottom []ui.LayoutEntry) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.layoutPushes++
+}
+
+func (m *mockUI) UpdateConfig(cfg ui.UserConfig) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.userConfig = cfg
+}
+
+func (m *mockUI) pushedConfig() ui.UserConfig {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.userConfig
 }
 
 func (m *mockUI) drainLayoutPushes() int {

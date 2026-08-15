@@ -3,9 +3,27 @@
 -- rune.version is set by Go (single-sourced from the version package,
 -- which the telnet TTYPE/MNES responders also report) - data, not API.
 
-rune.config = {
-    delimiter = ";"
+-- User preferences. Plain assignment is the whole API:
+--   rune.config.keep_input = true
+-- rune.config is a proxy: every assignment pushes the full table to
+-- the client, which reads the keys it knows (keep_input) and leaves
+-- Lua-only keys (delimiter) to their Lua consumers. Lua never decides
+-- which keys the client consumes. Defaults here must match the client
+-- defaults; the set() below keeps them in sync explicitly.
+local config_values = {
+    delimiter = ";",
+    keep_input = false,
 }
+
+rune.config = setmetatable({}, {
+    __index = config_values,
+    __newindex = function(_, key, value)
+        config_values[key] = value
+        rune._config.set(config_values)
+    end,
+})
+
+rune._config.set(config_values)
 
 rune.debug = false
 

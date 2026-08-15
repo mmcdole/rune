@@ -1215,6 +1215,42 @@ func TestReloadRestoresDimensionsWithoutSyntheticResize(t *testing.T) {
 	`)
 }
 
+func TestConfigAssignmentPushesToUIAndReloadResets(t *testing.T) {
+	s, _, uiMock := newTestSession(t)
+
+	if uiMock.pushedConfig().KeepInput {
+		t.Fatal("keep_input must default off")
+	}
+
+	assertSessionLua(t, s.engine, `rune.config.keep_input = true`)
+	if !uiMock.pushedConfig().KeepInput {
+		t.Fatal("rune.config.keep_input = true did not reach the UI")
+	}
+	assertSessionLua(t, s.engine, `assert(rune.config.keep_input == true)`)
+
+	// A Lua-only key assignment must not disturb the pushed config.
+	assertSessionLua(t, s.engine, `rune.config.delimiter = "|"`)
+	if !uiMock.pushedConfig().KeepInput {
+		t.Fatal("unrelated config assignment reset keep_input")
+	}
+
+	// Reload without an init.lua reverts to defaults.
+	s.handleReloadRequested()
+	if uiMock.pushedConfig().KeepInput {
+		t.Fatal("reload did not reset keep_input to its default")
+	}
+
+	// Reload with an init.lua that sets it reapplies the preference.
+	initPath := filepath.Join(s.config.ConfigDir, "init.lua")
+	if err := os.WriteFile(initPath, []byte("rune.config.keep_input = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s.handleReloadRequested()
+	if !uiMock.pushedConfig().KeepInput {
+		t.Fatal("reload did not reapply keep_input from init.lua")
+	}
+}
+
 func TestHistoryDedupAndTrim(t *testing.T) {
 	s, _, _ := newTestSession(t)
 	s.historyLimit = 3

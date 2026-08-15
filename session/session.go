@@ -528,4 +528,9 @@ func (s *Session) pushBindsAndLayout() {
 	if len(luaLayout.Top) > 0 || len(luaLayout.Bottom) > 0 {
 		s.ui.UpdateLayout(luaLayout.Top, luaLayout.Bottom)
 	}
+
+	// The Session routes each Go-relevant preference to its consumer;
+	// today they all happen to be UI-facing.
+	cfg := s.engine.GetUserConfig()
+	s.ui.UpdateConfig(ui.UserConfig{KeepInput: cfg.KeepInput})
 }

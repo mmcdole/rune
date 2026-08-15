@@ -778,3 +778,158 @@ func TestSearchOverPickerSettlesPickerFirst(t *testing.T) {
 		t.Fatalf("expected ModeSearch, got %v", h.ctl.mode)
 	}
 }
+
+// --- keep-in-input (rune.config.keep_input) ---
+
+// submitKept submits text with keep-on-submit active and returns the
+// harness in the kept-selected state.
+func submitKept(t *testing.T, text string) *controllerHarness {
+	t.Helper()
+	h := newControllerHarness()
+	h.ctl.SetKeepOnSubmit(true)
+	h.ctl.SetText(text)
+	h.events = nil
+
+	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if len(h.submitted) != 1 || h.submitted[0] != input.Command(text) {
+		t.Fatalf("expected submit of %q, got %v", text, h.submitted)
+	}
+	return h
+}
+
+func TestKeepOnSubmitKeepsCommandSelectedAndResends(t *testing.T) {
+	h := submitKept(t, "north")
+
+	if got := h.ctl.input.Value(); got != "north" {
+		t.Fatalf("expected kept input %q, got %q", "north", got)
+	}
+	if !h.ctl.input.Selected() {
+		t.Fatal("kept input must be selected")
+	}
+	// The session cleared its tracked draft on accept, so the kept text
+	// must be re-reported exactly once.
+	changes := h.inputChanges()
+	if len(changes) != 1 || changes[0].Text != "north" {
+		t.Fatalf("expected one InputChangedMsg with kept text, got %v", changes)
+	}
+
+	// Enter again resends and stays kept.
+	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if len(h.submitted) != 2 || h.submitted[1] != input.Command("north") {
+		t.Fatalf("expected resend of %q, got %v", "north", h.submitted)
+	}
+	if !h.ctl.input.Selected() {
+		t.Fatal("resend must keep the selection")
+	}
+}
+
+func TestKeepOnSubmitTypingReplacesSelection(t *testing.T) {
+	h := submitKept(t, "north")
+
+	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+
+	if got := h.ctl.input.Value(); got != "s" {
+		t.Fatalf("typing over selection: input = %q, want %q", got, "s")
+	}
+	if h.ctl.input.Selected() {
+		t.Fatal("typing must clear the selection")
+	}
+}
+
+func TestKeepOnSubmitBackspaceClearsSelection(t *testing.T) {
+	h := submitKept(t, "north")
+
+	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyBackspace})
+
+	if got := h.ctl.input.Value(); got != "" {
+		t.Fatalf("backspace over selection: input = %q, want empty", got)
+	}
+	if h.ctl.input.Selected() {
+		t.Fatal("backspace must clear the selection")
+	}
+}
+
+func TestKeepOnSubmitArrowDeselectsInPlace(t *testing.T) {
+	h := submitKept(t, "north")
+
+	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyLeft})
+
+	if got := h.ctl.input.Value(); got != "north" {
+		t.Fatalf("cursor movement must keep the text, got %q", got)
+	}
+	if h.ctl.input.Selected() {
+		t.Fatal("cursor movement must deselect")
+	}
+}
+
+func TestKeepOnSubmitPasteReplacesSelection(t *testing.T) {
+	h := submitKept(t, "north")
+
+	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("say hi"), Paste: true})
+
+	if got := h.ctl.input.Value(); got != "say hi" {
+		t.Fatalf("paste over selection: input = %q, want %q", got, "say hi")
+	}
+	if h.ctl.input.Selected() {
+		t.Fatal("paste must clear the selection")
+	}
+}
+
+// TestKeepOnSubmitSelectedFiresPrintableBind pins the key policy: a
+// fully selected line counts as empty, so printable hotkeys keep firing.
+func TestKeepOnSubmitSelectedFiresPrintableBind(t *testing.T) {
+	h := submitKept(t, "north")
+	h.bound["n"] = true
+
+	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+
+	binds := h.executeBinds()
+	if len(binds) != 1 || string(binds[0]) != "n" {
+		t.Fatalf("expected bind %q to fire over selection, got %v", "n", binds)
+	}
+	if got := h.ctl.input.Value(); got != "north" {
+		t.Fatalf("bind dispatch must not touch the kept text, got %q", got)
+	}
+}
+
+func TestKeepOnSubmitEmptySubmissionStaysClear(t *testing.T) {
+	h := newControllerHarness()
+	h.ctl.SetKeepOnSubmit(true)
+
+	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if got := h.ctl.input.Value(); got != "" || h.ctl.input.Selected() {
+		t.Fatalf("empty submission must not keep anything, got %q selected=%v",
+			got, h.ctl.input.Selected())
+	}
+}
+
+func TestKeepOnSubmitVerbatimStillClears(t *testing.T) {
+	h := newControllerHarness()
+	h.ctl.SetKeepOnSubmit(true)
+	h.ctl.SetSubmission(input.Verbatim("say one\nsay two"))
+
+	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if len(h.submitted) != 1 || h.submitted[0].Mode != input.ModeVerbatim {
+		t.Fatalf("expected verbatim submit, got %v", h.submitted)
+	}
+	if got := h.ctl.input.Value(); got != "" || h.ctl.input.Selected() {
+		t.Fatalf("verbatim submit must clear, got %q selected=%v",
+			got, h.ctl.input.Selected())
+	}
+}
+
+func TestDisablingKeepReleasesSelection(t *testing.T) {
+	h := submitKept(t, "north")
+
+	h.ctl.SetKeepOnSubmit(false)
+
+	if h.ctl.input.Selected() {
+		t.Fatal("disabling keep_input must release the selection")
+	}
+	if got := h.ctl.input.Value(); got != "north" {
+		t.Fatalf("disabling keep_input must not clear the text, got %q", got)
+	}
+}

@@ -67,6 +67,19 @@ type UpdateLayoutMsg struct {
 	Bottom []LayoutEntry
 }
 
+// UserConfig carries the UI-facing subset of rune.config, the Lua-owned
+// user preference table, as routed by the Session. Each field mirrors
+// one rune.config key.
+type UserConfig struct {
+	// KeepInput (rune.config.keep_input) keeps a submitted command in
+	// the input line, selected, so Enter resends it and typing
+	// replaces it.
+	KeepInput bool
+}
+
+// UpdateConfigMsg pushes user preferences from Session to UI.
+type UpdateConfigMsg UserConfig
+
 // --- Push-based UI Messages (UI -> Session) ---
 
 // InputSubmittedMsg transfers an accepted input snapshot to Session. Once this

@@ -48,6 +48,7 @@ type inputController struct {
 	pickerCB      string // Lua callback ID to settle on close
 	pickerDismiss bool   // close inline picker once input contains a space
 	historyRecall bool   // unmodified verbatim entry restored from history
+	keepOnSubmit  bool   // rune.config.keep_input: keep the sent command selected
 
 	notify  func(ui.UIEvent)            // state and actions sent to the session
 	submit  func(input.Submission) bool // transfer an immutable draft to the session
@@ -230,8 +231,10 @@ func (c *inputController) handleNormalKey(msg tea.KeyMsg) {
 	if keyStr != "" && c.isBound(keyStr) {
 		// Alt-modified runes are chords, not typing: they never reach
 		// the input widget, so the empty-input guard doesn't apply.
+		// A fully selected line counts as empty: its text is about to
+		// be replaced anyway, so movement binds keep firing.
 		isPrintable := msg.Type == tea.KeyRunes && !msg.Alt
-		if !isPrintable || c.input.Value() == "" {
+		if !isPrintable || c.input.Value() == "" || c.input.Selected() {
 			c.notify(ui.ExecuteBindMsg(keyStr))
 			return
 		}
@@ -568,6 +571,16 @@ func (c *inputController) closePicker(accepted bool, value string) {
 	c.pickerDismiss = false
 }
 
+// SetKeepOnSubmit applies the pushed rune.config.keep_input preference.
+// Turning it off releases an active selection so no stale resend state
+// survives the config change.
+func (c *inputController) SetKeepOnSubmit(on bool) {
+	c.keepOnSubmit = on
+	if !on {
+		c.input.Deselect()
+	}
+}
+
 // submitInput transfers the current input snapshot and clears the local draft
 // only after Session accepts ownership.
 func (c *inputController) submitInput() {
@@ -578,7 +591,17 @@ func (c *inputController) submitInput() {
 	if !c.submit(submission) {
 		return
 	}
-	c.input.Reset()
 	c.mode = ModeNormal
 	c.historyRecall = false
+	if c.keepOnSubmit && submission.Mode == input.ModeCommand && submission.Text != "" {
+		// zMUD-style keep: the sent command stays in the line, selected,
+		// so Enter resends it and typing replaces it. The session cleared
+		// its tracked draft when it accepted the submission, so re-report
+		// the kept text to keep rune.input.get truthful.
+		c.input.SelectAll()
+		c.input.CursorEnd()
+		c.notify(ui.InputChangedMsg{Text: c.input.Value(), Cursor: c.input.Position()})
+		return
+	}
+	c.input.Reset()
 }

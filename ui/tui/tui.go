@@ -167,6 +167,11 @@ func (b *BubbleTeaUI) UpdateLayout(top, bottom []ui.LayoutEntry) {
 	b.send(ui.UpdateLayoutMsg{Top: top, Bottom: bottom})
 }
 
+// UpdateConfig sends user preferences from Session to UI.
+func (b *BubbleTeaUI) UpdateConfig(cfg ui.UserConfig) {
+	b.send(ui.UpdateConfigMsg(cfg))
+}
+
 // ShowPicker displays a picker overlay with items.
 func (b *BubbleTeaUI) ShowPicker(opts ui.ShowPickerMsg) {
 	b.send(opts)

@@ -118,7 +118,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleMouse(msg)
 
 	// Session config updates
-	case ui.UpdateBindsMsg, ui.UpdateBarsMsg, ui.UpdateLayoutMsg:
+	case ui.UpdateBindsMsg, ui.UpdateBarsMsg, ui.UpdateLayoutMsg, ui.UpdateConfigMsg:
 		return m.handleConfigUpdate(msg)
 
 	// Scrollback appends and the prompt overlay
@@ -243,6 +243,8 @@ func (m *Model) handleConfigUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.luaLayout.Top = msg.Top
 		m.luaLayout.Bottom = msg.Bottom
 		layoutChanged = true
+	case ui.UpdateConfigMsg:
+		m.inputCtl.SetKeepOnSubmit(msg.KeepInput)
 	}
 	if layoutChanged {
 		m.syncViewportSize()

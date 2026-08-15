@@ -34,6 +34,9 @@ type Engine struct {
 	// Layout config, marshaled from rune.ui.layout calls
 	barLayout ui.LayoutConfig
 
+	// Go-relevant user preferences, marshaled from rune.config assignments
+	userConfig UserConfig
+
 	// Re-applied after every Init so reloads keep it visible.
 	configDir string
 
@@ -133,6 +136,7 @@ func (e *Engine) Init() error {
 	e.pickerNextID = 0
 
 	e.barLayout = ui.DefaultLayoutConfig()
+	e.userConfig = UserConfig{}
 	e.hooksBrokenReported = false
 
 	if e.configDir != "" {
@@ -500,6 +504,7 @@ func (e *Engine) registerAPIs() {
 	e.registerRegexFuncs()
 	e.registerUIFuncs()
 	e.registerStateFuncs()
+	e.registerConfigFuncs()
 	e.registerBarFuncs()
 	e.registerPickerFuncs()
 	e.registerHistoryFuncs()

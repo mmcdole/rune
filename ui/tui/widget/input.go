@@ -27,6 +27,7 @@ type Input struct {
 	pickerActive   bool
 	searchActive   bool
 	discardPending bool
+	selected       bool // whole line selected (keep-input resend state)
 	width          int
 	height         int
 }
@@ -66,11 +67,51 @@ func (i *Input) UpdateTextInput(msg tea.Msg) tea.Cmd {
 			i.UpdateComposer(key)
 			return nil
 		}
+		if i.selected {
+			i.resolveSelection(key)
+		}
 	}
 
 	var cmd tea.Cmd
 	i.textinput, cmd = i.textinput.Update(msg)
 	return cmd
+}
+
+// resolveSelection applies select-and-replace semantics before an
+// editing key reaches the textinput: typing or deleting replaces the
+// whole selected line, any other key deselects and edits in place.
+func (i *Input) resolveSelection(key tea.KeyMsg) {
+	switch key.Type {
+	case tea.KeyRunes, tea.KeySpace, tea.KeyBackspace, tea.KeyDelete:
+		i.textinput.SetValue("")
+		i.textinput.SetCursor(0)
+	}
+	i.Deselect()
+}
+
+// SelectAll marks the whole line selected: the keep-input resend state,
+// where Enter resends it and typing replaces it. No-op while composing
+// or empty.
+func (i *Input) SelectAll() {
+	if i.composer != nil || i.textinput.Value() == "" {
+		return
+	}
+	i.selected = true
+	i.textinput.TextStyle = i.styles.InputSelected
+}
+
+// Deselect leaves the selected state, keeping the text editable.
+func (i *Input) Deselect() {
+	if !i.selected {
+		return
+	}
+	i.selected = false
+	i.textinput.TextStyle = i.styles.InputText
+}
+
+// Selected reports whether the whole line is selected.
+func (i *Input) Selected() bool {
+	return i.selected
 }
 
 // View implements Widget.
@@ -143,6 +184,7 @@ func (i *Input) Value() string {
 
 // SetValue sets the input text.
 func (i *Input) SetValue(s string) {
+	i.Deselect()
 	if i.composer != nil {
 		// Verbatim interpretation is sticky: replacing a structured draft
 		// with one non-empty physical line (for example through Ctrl+E) must
@@ -194,6 +236,7 @@ func (i *Input) Reset() {
 		i.composer.Reset()
 		i.composer = nil
 	}
+	i.Deselect()
 	i.discardPending = false
 	i.textinput.SetValue("")
 	i.textinput.SetCursor(0)
@@ -207,6 +250,7 @@ func (i *Input) IsComposing() bool {
 // BeginCompose replaces the active input with a canonical structured draft.
 // It does not submit and it never routes the text through bubbles/textinput.
 func (i *Input) BeginCompose(text string, cursor int) {
+	i.Deselect()
 	i.composer = newComposer(text, cursor)
 	i.discardPending = false
 }
@@ -235,6 +279,12 @@ func (i *Input) EndCompose() bool {
 // terminal-active content switches in place at the current cursor without
 // losing the already-typed prefix or suffix.
 func (i *Input) InsertPaste(text string) tea.Cmd {
+	if i.selected {
+		// Pasting over a selection replaces it, like typing.
+		i.textinput.SetValue("")
+		i.textinput.SetCursor(0)
+		i.Deselect()
+	}
 	i.discardPending = false
 	text = normalizeComposerText(text)
 	if i.composer != nil {

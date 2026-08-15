@@ -146,6 +146,21 @@ rune.debug = true
 rune.dbg("trigger fired for " .. name)
 ```
 
+## rune.config
+
+User preferences, set by plain assignment (usually in `init.lua`).
+Assignments take effect immediately, and `/reload` resets every key to
+its default before your scripts run again.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `delimiter` | `";"` | Separator for chaining commands in one input line |
+| `keep_input` | `false` | Keep a sent command in the input line, selected: `Enter` resends it, typing replaces it |
+
+```lua
+rune.config.keep_input = true
+```
+
 **Related:** [Scripting Basics](/getting-started/scripting-basics/) ·
 [State & Lines](/reference/api/state-lines/) ·
 [rune.alias](/reference/api/alias/) · [Storage](/reference/api/storage/)

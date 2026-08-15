@@ -24,6 +24,16 @@ separators, `#N` repeats, and `/commands` all work here.
 (Most terminals send `Ctrl+Backspace` as `Ctrl+H`, so it can't be bound
 distinctly — use `Ctrl+W` or `Alt+Backspace` to delete words.)
 
+## Keeping the last command
+
+By default the input clears after each submit. With
+`rune.config.keep_input = true` in your `init.lua`, the sent command
+stays in the input line, shown selected: press `Enter` to send it
+again, type to replace it, or use the arrow keys to edit it in place.
+Handy for walking with `n` `Enter` `Enter` `Enter`. While the line is
+selected it counts as empty for printable-key binds, so hotkeys keep
+firing.
+
 ## History
 
 `Up`/`Down` walk submission history, and normal command drafts prefix-match:
