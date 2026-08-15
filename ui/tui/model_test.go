@@ -5,13 +5,11 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
 	"github.com/mmcdole/rune/input"
 	runetext "github.com/mmcdole/rune/text"
 	"github.com/mmcdole/rune/ui"
 	"github.com/mmcdole/rune/ui/tui/widget"
-	"github.com/muesli/termenv"
 )
 
 // newTestModel builds a model with a sized window and enough
@@ -34,6 +32,24 @@ func newTestModel(t *testing.T) *Model {
 	return m
 }
 
+func TestTerminalStateIsDeclaredOnInitialView(t *testing.T) {
+	m := NewModel(make(chan ui.UIEvent, 1))
+	if cmd := m.Init(); cmd != nil {
+		t.Fatal("Init returned an imperative terminal-state command")
+	}
+
+	view := m.View()
+	if view.Content != "Loading..." {
+		t.Fatalf("initial content = %q, want Loading...", view.Content)
+	}
+	if !view.AltScreen {
+		t.Fatal("initial view does not request the alternate screen")
+	}
+	if view.MouseMode != tea.MouseModeCellMotion {
+		t.Fatalf("initial mouse mode = %v, want cell motion", view.MouseMode)
+	}
+}
+
 // TestMouseWheelScrollsViewport verifies wheel events scroll the main
 // viewport - the reason the terminal mouse is captured at all.
 func TestMouseWheelScrollsViewport(t *testing.T) {
@@ -43,7 +59,7 @@ func TestMouseWheelScrollsViewport(t *testing.T) {
 		t.Fatal("expected viewport to start at bottom")
 	}
 
-	wheelUp := tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp}
+	wheelUp := tea.MouseWheelMsg{Button: tea.MouseWheelUp}
 	next, _ := m.Update(wheelUp)
 	m = next.(*Model)
 
@@ -52,7 +68,7 @@ func TestMouseWheelScrollsViewport(t *testing.T) {
 	}
 
 	// Wheel down returns toward the bottom
-	wheelDown := tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown}
+	wheelDown := tea.MouseWheelMsg{Button: tea.MouseWheelDown}
 	next, _ = m.Update(wheelDown)
 	m = next.(*Model)
 
@@ -66,7 +82,7 @@ func TestMouseWheelScrollsViewport(t *testing.T) {
 func TestMouseNonWheelEventsIgnored(t *testing.T) {
 	m := newTestModel(t)
 
-	click := tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}
+	click := tea.MouseClickMsg{Button: tea.MouseLeft}
 	next, _ := m.Update(click)
 	m = next.(*Model)
 
@@ -87,13 +103,32 @@ func newBareModel(t *testing.T) *Model {
 	return next.(*Model)
 }
 
+func TestPasteMessageRoutesAtomicallyToComposer(t *testing.T) {
+	events := make(chan ui.UIEvent, 4)
+	m := NewModel(events)
+
+	next, _ := m.Update(tea.PasteMsg{Content: "say hello\nsay goodbye"})
+	m = next.(*Model)
+
+	if m.inputCtl.mode != ModeCompose {
+		t.Fatalf("paste mode = %v, want compose", m.inputCtl.mode)
+	}
+	if got := m.input.Value(); got != "say hello\nsay goodbye" {
+		t.Fatalf("pasted input = %q", got)
+	}
+	changed, ok := (<-events).(ui.InputChangedMsg)
+	if !ok || changed.Text != "say hello\nsay goodbye" {
+		t.Fatalf("paste event = %#v, want one atomic input change", changed)
+	}
+}
+
 func TestAcceptedSubmissionFollowsDraftChangeOnOneUIEventLane(t *testing.T) {
 	events := make(chan ui.UIEvent, 4)
 	m := NewModel(events)
 
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("look")})
+	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyExtended, Text: "look"})
 	m = next.(*Model)
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	_ = next.(*Model)
 
 	changed, ok := (<-events).(ui.InputChangedMsg)
@@ -120,7 +155,7 @@ func TestKeptSubmissionCarriesPostSubmitDraftInOneAcceptedEvent(t *testing.T) {
 
 	next, _ := m.Update(ui.UpdateConfigMsg{KeepInput: true})
 	m = next.(*Model)
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("north")})
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyExtended, Text: "north"})
 	m = next.(*Model)
 
 	// Drain the ordinary edit so the capacity-one queue can accept Enter.
@@ -128,7 +163,7 @@ func TestKeptSubmissionCarriesPostSubmitDraftInOneAcceptedEvent(t *testing.T) {
 		t.Fatalf("draft event = %#v, want north", changed)
 	}
 
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = next.(*Model)
 
 	got, ok := (<-events).(ui.InputSubmittedMsg)
@@ -158,9 +193,9 @@ func TestFullUIEventQueueRejectsSubmissionWithoutLosingDraft(t *testing.T) {
 	events := make(chan ui.UIEvent, 1)
 	m := NewModel(events)
 
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("look")})
+	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyExtended, Text: "look"})
 	m = next.(*Model)
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = next.(*Model)
 
 	if got := m.inputCtl.input.Value(); got != "look" {
@@ -528,7 +563,7 @@ func TestLayoutEntryOptsReachWidget(t *testing.T) {
 	})
 	m = next.(*Model)
 
-	view := m.View()
+	view := m.View().Content
 	if !strings.Contains(view, strings.Repeat("═", m.width)) {
 		t.Error("configured separator rule missing from view")
 	}
@@ -591,7 +626,7 @@ func drainPickerCancels(events chan ui.UIEvent) []ui.PickerSelectMsg {
 func TestInlinePickerDismissesOnSpace(t *testing.T) {
 	m, events := newInlinePickerModel(t, true, "/connect")
 
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}})
+	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
 	m = next.(*Model)
 
 	if m.inputCtl.mode != ModeNormal {
@@ -611,7 +646,7 @@ func TestInlinePickerDismissesOnSpace(t *testing.T) {
 func TestInlinePickerWithoutDismissOnSpaceKeepsFiltering(t *testing.T) {
 	m, events := newInlinePickerModel(t, false, "/connect")
 
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}})
+	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
 	m = next.(*Model)
 
 	if m.inputCtl.mode != ModePickerInline {
@@ -627,7 +662,7 @@ func TestInlinePickerWithoutDismissOnSpaceKeepsFiltering(t *testing.T) {
 func TestInlinePickerNormalTypingKeepsFiltering(t *testing.T) {
 	m, events := newInlinePickerModel(t, true, "/con")
 
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	next, _ := m.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	m = next.(*Model)
 
 	if m.inputCtl.mode != ModePickerInline {
@@ -643,7 +678,7 @@ func TestInlinePickerNormalTypingKeepsFiltering(t *testing.T) {
 func TestInlinePickerClosesCleanlyOnEmptiedInput(t *testing.T) {
 	m, events := newInlinePickerModel(t, true, "/")
 
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	m = next.(*Model)
 
 	if m.input.Value() != "" {
@@ -725,10 +760,10 @@ func TestHomeEndEditInputWhileCtrlVariantsScroll(t *testing.T) {
 	m := newTestModel(t)
 
 	typed := "say hello"
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(typed)})
+	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyExtended, Text: typed})
 	m = next.(*Model)
 
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyHome})
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyHome})
 	m = next.(*Model)
 	if m.viewport.Mode() != widget.ModeLive {
 		t.Fatal("Home scrolled the viewport instead of reaching the input")
@@ -737,7 +772,7 @@ func TestHomeEndEditInputWhileCtrlVariantsScroll(t *testing.T) {
 		t.Fatalf("Home left cursor at %d, want 0", pos)
 	}
 
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnd})
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnd})
 	m = next.(*Model)
 	if m.viewport.Mode() != widget.ModeLive {
 		t.Fatal("End scrolled the viewport instead of reaching the input")
@@ -746,13 +781,13 @@ func TestHomeEndEditInputWhileCtrlVariantsScroll(t *testing.T) {
 		t.Fatalf("End left cursor at %d, want %d", pos, len(typed))
 	}
 
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlHome})
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyHome, Mod: tea.ModCtrl})
 	m = next.(*Model)
 	if m.viewport.Mode() == widget.ModeLive {
 		t.Fatal("Ctrl+Home did not scroll the viewport to the top")
 	}
 
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlEnd})
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnd, Mod: tea.ModCtrl})
 	m = next.(*Model)
 	if m.viewport.Mode() != widget.ModeLive {
 		t.Fatal("Ctrl+End did not return the viewport to live")
@@ -767,10 +802,6 @@ func TestHomeEndEditInputWhileCtrlVariantsScroll(t *testing.T) {
 // before centering, or the selected source row can land just outside the
 // visible window even though it is selected in the overlay.
 func TestSearchFocusUsesFinalLayoutGeometry(t *testing.T) {
-	profile := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.ANSI256)
-	t.Cleanup(func() { lipgloss.SetColorProfile(profile) })
-
 	events := make(chan ui.UIEvent, 64)
 	m := NewModel(events)
 
@@ -796,7 +827,7 @@ func TestSearchFocusUsesFinalLayoutGeometry(t *testing.T) {
 	next, _ = m.Update(ui.ShowSearchMsg{})
 	m = next.(*Model)
 	m.View()
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("thief")})
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyExtended, Text: "thief"})
 	m = next.(*Model)
 	m.View()
 
@@ -804,7 +835,7 @@ func TestSearchFocusUsesFinalLayoutGeometry(t *testing.T) {
 
 	// Enter removes the overlay and expands the viewport. The accepted row
 	// must be centered again using that post-close height.
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = next.(*Model)
 	m.View()
 	assertViewportRowCentered(t, m.viewport.View(), "SELECTED thief")
@@ -818,12 +849,12 @@ func TestSearchFocusUsesFinalLayoutGeometry(t *testing.T) {
 	// the previously committed focus from the grouped search lifecycle state.
 	next, _ = m.Update(ui.ShowSearchMsg{})
 	m = next.(*Model)
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	m = next.(*Model)
 	if m.searchView.focus == nil || m.searchView.focus.Seq == committedSeq {
 		t.Fatal("replacement search did not preview an older result")
 	}
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m = next.(*Model)
 	if m.searchView.focus == nil || m.searchView.focus.Seq != committedSeq {
 		t.Fatal("cancelled replacement search did not restore committed focus")
@@ -831,7 +862,7 @@ func TestSearchFocusUsesFinalLayoutGeometry(t *testing.T) {
 	assertViewportRowHighlighted(t, m.viewport.View(), "SELECTED thief")
 
 	// Deliberate viewport navigation retires the accepted marker.
-	next, _ = m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp})
+	next, _ = m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
 	m = next.(*Model)
 	if m.searchView.focus != nil {
 		t.Fatal("manual scrolling should clear the accepted search marker")
@@ -847,7 +878,7 @@ func TestSearchReportsInteractionStateSeparatelyFromScrollState(t *testing.T) {
 
 	next, _ := m.Update(ui.ShowSearchMsg{})
 	m = next.(*Model)
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	_ = next.(*Model)
 
 	var states []bool
@@ -868,11 +899,11 @@ func TestManualViewportEntryPointsClearCommittedSearchFocus(t *testing.T) {
 	}{
 		{
 			name: "fallback scroll key",
-			msg:  tea.KeyMsg{Type: tea.KeyPgUp},
+			msg:  tea.KeyPressMsg{Code: tea.KeyPgUp},
 		},
 		{
 			name: "mouse wheel",
-			msg:  tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp},
+			msg:  tea.MouseWheelMsg{Button: tea.MouseWheelUp},
 		},
 		{
 			name: "Lua main-pane navigation",
@@ -908,7 +939,7 @@ func TestMouseWheelNavigatesActiveSearchMatches(t *testing.T) {
 		t.Fatalf("initial selection = (%q, %v), want newest match", newest.Stripped, ok)
 	}
 
-	next, _ := m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp})
+	next, _ := m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
 	m = next.(*Model)
 	middle, ok := m.input.SearchSelected()
 	if !ok || middle.Stripped != "thief middle" {
@@ -918,7 +949,7 @@ func TestMouseWheelNavigatesActiveSearchMatches(t *testing.T) {
 		t.Fatal("wheel navigation must keep search active and preview the selected match")
 	}
 
-	next, _ = m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown})
+	next, _ = m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
 	m = next.(*Model)
 	selected, ok := m.input.SearchSelected()
 	if !ok || selected.Seq != newest.Seq {

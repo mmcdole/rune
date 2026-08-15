@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/mmcdole/rune/input"
 	"github.com/mmcdole/rune/ui"
@@ -74,20 +74,7 @@ func (b *BubbleTeaUI) CommitPrompt(text string) {
 // Run starts the TUI and blocks until exit.
 func (b *BubbleTeaUI) Run() error {
 	model := NewModel(b.events)
-
-	opts := []tea.ProgramOption{
-		tea.WithAltScreen(),
-		tea.WithMouseCellMotion(),
-	}
-	// On Windows, resize events only arrive through the console input
-	// reader, which bubbletea engages only when the input is os.Stdin
-	// itself. WithInputTTY opens CONIN$ as a separate handle, so bubbletea
-	// silently falls back to its ANSI reader and window resizes (and
-	// native mouse events) are never delivered.
-	if runtime.GOOS != "windows" {
-		opts = append(opts, tea.WithInputTTY())
-	}
-	b.program = tea.NewProgram(model, opts...)
+	b.program = tea.NewProgram(model)
 
 	// Single goroutine drains message queue to Bubble Tea.
 	// This can block on Send() without affecting producers.
@@ -248,11 +235,6 @@ func (b *BubbleTeaUI) OpenEditor(initial string) (string, bool) {
 
 	// Resume TUI
 	restoreErr := b.program.RestoreTerminal()
-	if restoreErr == nil {
-		// Bubble Tea disables mouse reporting in ReleaseTerminal but does
-		// not restore it in RestoreTerminal.
-		b.program.Send(tea.EnableMouseCellMotion())
-	}
 	if err == nil && restoreErr != nil {
 		err = restoreErr
 	}

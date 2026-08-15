@@ -40,8 +40,8 @@ output viewport (that's what the default PageUp/PageDown/Ctrl+Home/Ctrl+End
 binds target). Aim a pane with binds of your own:
 
 ```lua
-rune.bind("shift+pageup",   function() rune.pane.scroll_up("chat", 5) end)
-rune.bind("shift+pagedown", function() rune.pane.scroll_down("chat", 5) end)
+rune.bind("shift+pgup",   function() rune.pane.scroll_up("chat", 5) end)
+rune.bind("shift+pgdown", function() rune.pane.scroll_down("chat", 5) end)
 ```
 
 While scrolled, the pane freezes on the history you're reading and its

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	osc52 "github.com/aymanbagabas/go-osc52/v2"
-	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/mmcdole/rune/input"
 	"github.com/mmcdole/rune/text"
@@ -100,7 +100,7 @@ func NewModel(events chan<- ui.UIEvent) *Model {
 // Init implements tea.Model. No standing tick: batch-window ticks are
 // scheduled on demand when server output arrives.
 func (m *Model) Init() tea.Cmd {
-	return tea.EnterAltScreen
+	return nil
 }
 
 // Update implements tea.Model.
@@ -111,10 +111,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleWindowSize(msg)
 	case tickMsg:
 		return m.handleTick()
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		m.inputCtl.HandleKey(msg)
 		return m, nil
-	case tea.MouseMsg:
+	case tea.PasteMsg:
+		m.inputCtl.HandlePaste(msg.Content)
+		return m, nil
+	case tea.MouseWheelMsg:
 		return m.handleMouse(msg)
 
 	// Session config updates
@@ -343,19 +346,16 @@ const wheelScrollLines = 3
 // handleMouse scrolls the main viewport on wheel events. The terminal
 // mouse is captured for this (which is why text selection needs
 // shift+drag); everything else is ignored.
-func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	if msg.Action != tea.MouseActionPress {
-		return m, nil
-	}
+func (m *Model) handleMouse(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 	switch msg.Button {
-	case tea.MouseButtonWheelUp:
+	case tea.MouseWheelUp:
 		if m.inputCtl.selectOlderSearch() {
 			return m, nil
 		}
 		m.navigateMainViewport(func() {
 			m.viewport.ScrollUp(wheelScrollLines)
 		})
-	case tea.MouseButtonWheelDown:
+	case tea.MouseWheelDown:
 		if m.inputCtl.selectNewerSearch() {
 			return m, nil
 		}
@@ -474,15 +474,15 @@ func (m *Model) navigateMainViewport(move func()) {
 
 // handleScrollKey handles viewport scrolling keys.
 // Returns true if the key was handled.
-func (m *Model) handleScrollKey(keyType tea.KeyType) bool {
-	switch keyType {
-	case tea.KeyPgUp:
+func (m *Model) handleScrollKey(msg tea.KeyPressMsg) bool {
+	switch {
+	case matchesKey(msg, tea.KeyPgUp, 0):
 		m.navigateMainViewport(m.viewport.PageUp)
-	case tea.KeyPgDown:
+	case matchesKey(msg, tea.KeyPgDown, 0):
 		m.navigateMainViewport(m.viewport.PageDown)
-	case tea.KeyCtrlHome:
+	case matchesKey(msg, tea.KeyHome, tea.ModCtrl):
 		m.navigateMainViewport(m.viewport.GotoTop)
-	case tea.KeyCtrlEnd:
+	case matchesKey(msg, tea.KeyEnd, tea.ModCtrl):
 		m.navigateMainViewport(m.viewport.GotoBottom)
 	default:
 		return false

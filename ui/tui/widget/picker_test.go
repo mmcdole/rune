@@ -30,14 +30,14 @@ func TestPickerFilterNarrowsMatches(t *testing.T) {
 	if !ok || sel.Text != "banana" {
 		t.Fatalf("Selected = %v (%v), want banana", sel, ok)
 	}
-	view := p.View()
+	view := runetext.StripANSI(p.View())
 	if strings.Contains(view, "apple") || strings.Contains(view, "cherry") {
 		t.Errorf("filtered view should only show matches, got %q", view)
 	}
 
 	// Clearing the query restores every item.
 	p.Filter("")
-	view = p.View()
+	view = runetext.StripANSI(p.View())
 	for _, want := range []string{"apple", "banana", "cherry"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("unfiltered view missing %q", want)
@@ -52,7 +52,7 @@ func TestPickerNoMatchesShowsEmptyText(t *testing.T) {
 	if _, ok := p.Selected(); ok {
 		t.Error("Selected should report no item when nothing matches")
 	}
-	if view := p.View(); !strings.Contains(view, "No matches") {
+	if view := runetext.StripANSI(p.View()); !strings.Contains(view, "No matches") {
 		t.Errorf("empty view should show placeholder, got %q", view)
 	}
 }
@@ -81,7 +81,7 @@ func TestPickerScrollWindowFollowsSelection(t *testing.T) {
 		p.SelectDown()
 	}
 	// Selection is item06; the 3-row window must have scrolled to it.
-	view := p.View()
+	view := runetext.StripANSI(p.View())
 	if !strings.Contains(view, "item06") {
 		t.Errorf("window should follow the selection, got %q", view)
 	}
@@ -146,8 +146,8 @@ func TestPickerRendersUntrustedTextAsOneSafeRow(t *testing.T) {
 		t.Fatalf("rendered rows = %d, PreferredHeight = %d: %q", rows, p.PreferredHeight(), plain)
 	}
 	for n, row := range strings.Split(view, "\n") {
-		if width := util.VisibleLen(row); width > 32 {
-			t.Fatalf("row %d width = %d, exceeds picker width: %q", n, width, row)
+		if width := util.VisibleLen(row); width != 32 {
+			t.Fatalf("row %d width = %d, want picker width 32: %q", n, width, row)
 		}
 	}
 	selected, ok := p.Selected()

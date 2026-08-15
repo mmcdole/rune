@@ -3,6 +3,8 @@ package tui
 import (
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/mmcdole/rune/ui"
 	"github.com/mmcdole/rune/ui/tui/widget"
 )
@@ -115,9 +117,14 @@ func (m *Model) syncViewportSize() {
 
 // View implements tea.Model.
 // Layout is calculated here to ensure it's always fresh when rendering.
-func (m *Model) View() string {
+func (m *Model) View() tea.View {
+	view := tea.View{
+		AltScreen: true,
+		MouseMode: tea.MouseModeCellMotion,
+	}
 	if !m.initialized {
-		return "Loading..."
+		view.Content = "Loading..."
+		return view
 	}
 
 	// Calculate layout fresh each render - guarantees no stale dimensions
@@ -138,5 +145,6 @@ func (m *Model) View() string {
 		parts = append(parts, bottomView)
 	}
 
-	return strings.Join(parts, "\n")
+	view.Content = strings.Join(parts, "\n")
+	return view
 }

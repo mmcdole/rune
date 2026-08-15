@@ -261,7 +261,7 @@ function rune.input.delete_word()
 end
 
 -- Escape: clear input
-rune.bind("escape", function()
+rune.bind("esc", function()
     rune.input.set("")
 end)
 

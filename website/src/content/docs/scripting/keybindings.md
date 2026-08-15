@@ -19,24 +19,57 @@ aliases and triggers do. Call `rune.send` inside the callback.
 
 ## Key names
 
-Printable keys use the character itself: `a`-`z`, digits, `` ` ``, and so
-on. Special keys: `f1`-`f12`, `up/down/left/right`,
-`pageup/pagedown`, `home/end`, `tab`, `escape`, `backspace`, `delete`,
-`insert`. Modifiers: `alt+` combines with any key; `ctrl+` with letters,
-arrows, `pageup/pagedown`, and `home/end`; `shift+` with `tab`, arrows, and
-`home/end`. Enter is not bindable: it submits a normal command or, while the
-visible composer is open, sends the draft verbatim. `Ctrl+Enter` (reported by
-most terminals as `ctrl+j`) is reserved for inserting a composer newline.
+The common key forms are below. Use the same exact name in `rune.bind`,
+`rune.unbind`, and `rune.binds` methods that take a key. Named keys and modifier
+prefixes are lowercase.
 
-## Printable keys and typing
+| Kind | Names | Examples |
+|---|---|---|
+| Printable | The character itself; use `space` for a space | `"j"`, `"/"`, `"."`, `"space"` |
+| Editing | `esc`, `tab`, `backspace`, `delete`, `insert` | `"esc"`, `"shift+tab"`, `"alt+backspace"` |
+| Navigation | `up`, `down`, `left`, `right`, `home`, `end`, `pgup`, `pgdown` | `"left"`, `"ctrl+home"`, `"shift+pgup"` |
+| Function keys | `f1` through `f63` | `"f1"`, `"f13"`, `"f20"` |
+| Modifiers | `ctrl`, `alt`, `shift`, `meta`, `hyper`, `super` | `"ctrl+r"`, `"shift+a"`, `"ctrl+alt+x"` |
 
-A bound printable key (like `` ` `` or `j`) fires only when the input line
-is empty, so hotkeys and typing coexist without a modal system. Type `jump`
-normally; press `j` on an empty line and it acts as a hotkey.
+For multiple modifiers, use the order `ctrl+alt+shift+meta+hyper+super`, then
+the base key. Your terminal determines which keys Rune can distinguish. In
+particular, extended function keys, modified navigation keys, and
+`meta`/`hyper`/`super` chords are not available in every terminal.
 
-Bracketed paste is also intercepted before binds, so pasting one bound
-character cannot trigger it. A plain one-line paste stays in normal input;
-structured text enters the [verbatim composer](/interface/input/#multiline-verbatim-composer).
+Key names are exact. Use `esc`, `pgup`, and `pgdown`; `escape`, `pageup`, and
+`pagedown` are not aliases.
+
+### Reserved input keys
+
+| Key | Normal input | Composer |
+|---|---|---|
+| `enter` | Submit the command | Send the draft verbatim |
+| `ctrl+enter`, `ctrl+j` | Start a composer newline | Insert a newline |
+
+These actions are built in and do not dispatch Lua binds. Terminals that cannot
+distinguish Ctrl+Enter report it as Ctrl+J. Picker and search behavior is shown
+in the context table below.
+
+## Where binds run
+
+| Context | Rune handles locally | Lua binds |
+|---|---|---|
+| Normal input | `enter` submits; `ctrl+enter`/`ctrl+j` starts a composer newline; paste is atomic | Non-printable binds run. A printable bind runs only when the input is empty or fully selected; otherwise the character is typed |
+| Inline picker | `esc`/`ctrl+c` cancel; `up`/`down` navigate; `tab` accepts; `enter` accepts and submits; `ctrl+enter`/`ctrl+j` starts the composer; unbound text filters | Any other bound key runs, including printable keys |
+| Modal picker | All keypresses | None |
+| Scrollback search | All keypresses | None |
+| Composer | Text entry, editing and navigation, literal `tab`, submit, newline, and two-step `esc` discard | Unused chords can run, including the default `ctrl+e` editor bind |
+
+This lets a printable hotkey coexist with typing: type `jump` normally, but
+press a bound `j` on an empty line and its callback runs. A fully selected
+kept command also counts as empty because the next typed character would
+replace it.
+
+Bracketed paste never runs a bind. Normal input, an inline picker, and the
+composer insert it all at once, so a bind can't fire partway through it;
+structured paste switches normal or inline input to the
+[verbatim composer](/interface/input/#multiline-verbatim-composer).
+Modal pickers and scrollback search append paste to their query.
 
 ## Options
 
@@ -50,8 +83,8 @@ To extend a default instead of discarding it, capture its action first.
 callback:
 
 ```lua
-local scroll = assert(rune.binds.get("pageup")):action()
-rune.bind("pageup", function()
+local scroll = assert(rune.binds.get("pgup")):action()
+rune.bind("pgup", function()
     scroll()
     rune.echo("scrolled")
 end)
@@ -62,9 +95,9 @@ end)
 Movement keys, grouped:
 
 ```lua
-rune.bind("up",    function() rune.send("north") end, { group = "numpad-walk" })
-rune.bind("down",  function() rune.send("south") end, { group = "numpad-walk" })
--- /group numpad-walk off  when you need arrows for history again
+rune.bind("f5", function() rune.send("north") end, { group = "movement" })
+rune.bind("f6", function() rune.send("south") end, { group = "movement" })
+-- /group movement off
 ```
 
 Editing helpers using the input API:
@@ -76,10 +109,36 @@ rune.bind("ctrl+w", function() rune.input.delete_word() end)
 
 ## Defaults
 
-The default keymap (history navigation, pickers, completion, scrolling,
-`$EDITOR` editing) is registered with `rune.bind` in the core scripts;
-the full table is in the [rune.bind reference](/reference/api/bind/#default-keymap).
-Rebinding a key in your `init.lua` replaces the default.
+The core scripts register every default through `rune.bind`, so rebinding a key
+in your `init.lua` replaces its default action.
+
+| Key | Default action |
+|---|---|
+| `ctrl+r` | Search command history |
+| `ctrl+f` | Search scrollback |
+| `ctrl+t` | Search aliases |
+| `/` | Open slash-command completion |
+| `ctrl+c` | Clear input; on empty input, press twice to quit |
+| `esc` | Clear normal input |
+| `ctrl+u` | Clear normal input |
+| `ctrl+w`, `alt+backspace` | Delete the previous word |
+| `up`, `down` | Navigate prefix-matching history |
+| `alt+left`, `alt+right`, `ctrl+left`, `ctrl+right` | Move by word |
+| `tab`, `shift+tab` | Cycle completion |
+| `ctrl+e` | Edit input in `$EDITOR` |
+| `pgup`, `pgdown` | Scroll output |
+| `ctrl+home`, `ctrl+end` | Jump to the top or bottom of output |
+
+Bare `home` and `end` are deliberately unbound, so they move the input cursor
+to the start or end of the line. In normal input, binding either key replaces
+that movement with your callback; the composer continues to own both keys.
+
+`pgup`, `pgdown`, `ctrl+home`, and `ctrl+end` also have a built-in fallback, so
+output remains scrollable if the Lua defaults are absent. Removing their binds
+restores that fallback; disabling a bind consumes its key instead.
+
+On terminals that encode Ctrl+Backspace as `ctrl+h`, Rune cannot distinguish
+it from Ctrl+H. Use `ctrl+w` or `alt+backspace` for delete-word there.
 
 ## Managing
 
@@ -88,20 +147,11 @@ the [API reference](/reference/api/#managing). In the client,
 `/binds` lists every binding with its state, group, and the `file:line`
 that registered it.
 
-## When a bind doesn't fire
-
-Pickers and the composer own the keys needed to edit or cancel them, so a bind
-on one of those keys goes quiet while they're open. In the composer that covers
-text and cursor editing, literal `Tab`, and two-step `Escape` discard.
-Application chords the composer does not use still run their Lua bind; the
-default `Ctrl+E` editor binding is the important example. Normal binding policy
-resumes when the composer or picker closes.
-
 ## Gotchas
 
-- A disabled bind (or one in a disabled group) swallows its key without
-  running the callback in normal input; the key does not fall through to
-  typing. Use `rune.unbind(key)` to give the key back to the input line.
+- When a bind would otherwise run, disabling it (or its group) consumes the key
+  without calling the callback. Use `rune.unbind(key)` to restore normal
+  fallthrough.
 - A callback that errors three times in a row is
   [quarantined](/scripting/model/#quarantine).
 

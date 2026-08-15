@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/mmcdole/rune/ui"
 	"github.com/mmcdole/rune/ui/tui/style"
@@ -43,7 +43,14 @@ func NewInput(styles style.Styles, search *Search) *Input {
 	ti.Placeholder = ""
 	ti.Prompt = "> "
 	ti.CharLimit = 0
-	ti.Width = 80
+	ti.SetWidth(80)
+	textStyles := ti.Styles()
+	textStyles.Focused.Text = styles.InputText
+	textStyles.Blurred.Text = styles.InputText
+	textStyles.Focused.Prompt = styles.InputText
+	textStyles.Blurred.Prompt = styles.InputText
+	textStyles.Cursor.Color = styles.InputCursor.GetBackground()
+	ti.SetStyles(textStyles)
 	ti.Focus()
 
 	return &Input{
@@ -59,10 +66,7 @@ func NewInput(styles style.Styles, search *Search) *Input {
 
 // UpdateTextInput forwards messages to the underlying textinput.
 func (i *Input) UpdateTextInput(msg tea.Msg) tea.Cmd {
-	if key, ok := msg.(tea.KeyMsg); ok {
-		if key.Paste {
-			return i.InsertPaste(string(key.Runes))
-		}
+	if key, ok := msg.(tea.KeyPressMsg); ok {
 		if i.composer != nil {
 			i.UpdateComposer(key)
 			return nil
@@ -80,9 +84,8 @@ func (i *Input) UpdateTextInput(msg tea.Msg) tea.Cmd {
 // resolveSelection applies select-and-replace semantics before an
 // editing key reaches the textinput: typing or deleting replaces the
 // whole selected line, any other key deselects and edits in place.
-func (i *Input) resolveSelection(key tea.KeyMsg) {
-	switch key.Type {
-	case tea.KeyRunes, tea.KeySpace, tea.KeyBackspace, tea.KeyDelete:
+func (i *Input) resolveSelection(key tea.KeyPressMsg) {
+	if key.Text != "" || matchesKey(key, tea.KeyBackspace, 0) || matchesKey(key, tea.KeyDelete, 0) {
 		i.textinput.SetValue("")
 		i.textinput.SetCursor(0)
 	}
@@ -97,7 +100,10 @@ func (i *Input) SelectAll() {
 		return
 	}
 	i.selected = true
-	i.textinput.TextStyle = i.styles.InputSelected
+	styles := i.textinput.Styles()
+	styles.Focused.Text = i.styles.InputSelected
+	styles.Blurred.Text = i.styles.InputSelected
+	i.textinput.SetStyles(styles)
 }
 
 // Deselect leaves the selected state, keeping the text editable.
@@ -106,7 +112,10 @@ func (i *Input) Deselect() {
 		return
 	}
 	i.selected = false
-	i.textinput.TextStyle = i.styles.InputText
+	styles := i.textinput.Styles()
+	styles.Focused.Text = i.styles.InputText
+	styles.Blurred.Text = i.styles.InputText
+	i.textinput.SetStyles(styles)
 }
 
 // Selected reports whether the whole line is selected.
@@ -142,7 +151,7 @@ func (i *Input) View() string {
 			// selected value without that padding, then fill the row normally so
 			// only actual command text receives the selection background.
 			selectedInput := i.textinput
-			selectedInput.Width = 0
+			selectedInput.SetWidth(0)
 			selectedInput.Blur() // the selection replaces the visual caret
 			inputView = selectedInput.View()
 			if padding := i.width - util.VisibleLen(inputView); padding > 0 {
@@ -160,7 +169,7 @@ func (i *Input) View() string {
 func (i *Input) SetSize(width, height int) {
 	i.width = width
 	i.height = height
-	i.textinput.Width = width - 2 // Account for prompt
+	i.textinput.SetWidth(width - 2) // Account for prompt
 	i.picker.SetWidth(width)
 	i.search.SetWidth(width)
 }
@@ -314,7 +323,7 @@ func (i *Input) InsertPaste(text string) tea.Cmd {
 	}
 
 	var cmd tea.Cmd
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(text), Paste: true}
+	msg := tea.PasteMsg{Content: text}
 	i.textinput, cmd = i.textinput.Update(msg)
 	return cmd
 }
@@ -323,7 +332,7 @@ func (i *Input) InsertPaste(text string) tea.Cmd {
 // false for keys owned by the controller (notably plain Enter, Escape,
 // Ctrl+C, and Ctrl+E). Compose mode remains sticky until submit/cancel so an
 // edit can never silently change the draft's interpretation.
-func (i *Input) UpdateComposer(msg tea.KeyMsg) bool {
+func (i *Input) UpdateComposer(msg tea.KeyPressMsg) bool {
 	if i.composer == nil {
 		return false
 	}

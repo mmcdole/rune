@@ -48,8 +48,8 @@ wrapped rows.
 Aim scrolling with binds:
 
 ```lua
-rune.bind("shift+pageup",   function() rune.pane.scroll_up("chat", 5) end)
-rune.bind("shift+pagedown", function() rune.pane.scroll_down("chat", 5) end)
+rune.bind("shift+pgup",   function() rune.pane.scroll_up("chat", 5) end)
+rune.bind("shift+pgdown", function() rune.pane.scroll_down("chat", 5) end)
 ```
 
 :::note

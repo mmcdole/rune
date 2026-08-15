@@ -3,7 +3,7 @@ package style
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 )
 
 // RenderBorder returns a horizontal border line with dim styling.

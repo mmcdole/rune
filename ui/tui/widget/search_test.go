@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	runetext "github.com/mmcdole/rune/text"
 	"github.com/mmcdole/rune/ui/tui/style"
 	"github.com/mmcdole/rune/ui/tui/util"
 )
@@ -266,7 +267,7 @@ func TestSearchViewHeaderAndRows(t *testing.T) {
 	s.SetWidth(60)
 	s.Open("thief", SearchScope{})
 
-	view := s.View()
+	view := runetext.StripANSI(s.View())
 	if !strings.Contains(view, "2/2") {
 		t.Errorf("header should show newest as the final chronological match, view:\n%s", view)
 	}
@@ -281,7 +282,7 @@ func TestSearchViewHeaderAndRows(t *testing.T) {
 		t.Errorf("footer should explain temporal navigation, view:\n%s", view)
 	}
 	s.SelectOlder()
-	if view := s.View(); !strings.Contains(view, "1/2") {
+	if view := runetext.StripANSI(s.View()); !strings.Contains(view, "1/2") {
 		t.Errorf("count should follow selection, view:\n%s", view)
 	}
 }
@@ -291,7 +292,7 @@ func TestSearchViewNoMatches(t *testing.T) {
 	s.SetWidth(60)
 	s.Open("zzz", SearchScope{})
 
-	view := s.View()
+	view := runetext.StripANSI(s.View())
 	if !strings.Contains(view, "0/0") || !strings.Contains(view, "No matches") {
 		t.Errorf("empty result view wrong:\n%s", view)
 	}
@@ -309,7 +310,7 @@ func TestSearchViewPartialCount(t *testing.T) {
 	s.SetWidth(60)
 	s.Open("thief", SearchScope{})
 
-	if view := s.View(); !strings.Contains(view, "250+ matches") {
+	if view := runetext.StripANSI(s.View()); !strings.Contains(view, "250+ matches") {
 		t.Errorf("partial scan should avoid a false ordinal, view:\n%s", view)
 	}
 }

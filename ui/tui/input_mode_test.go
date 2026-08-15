@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/mmcdole/rune/input"
 	runetext "github.com/mmcdole/rune/text"
@@ -64,10 +64,33 @@ func newControllerHarness() *controllerHarness {
 			return h.accept
 		},
 		func(key string) bool { return h.bound[key] },
-		func(tea.KeyType) bool { return false },
+		func(tea.KeyPressMsg) bool { return false },
 		h.fx,
 	)
 	return h
+}
+
+func keyPress(code rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: code}
+}
+
+func ctrlPress(code rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: code, Mod: tea.ModCtrl}
+}
+
+func textPress(text string) tea.KeyPressMsg {
+	code := tea.KeyExtended
+	if runes := []rune(text); len(runes) == 1 {
+		code = runes[0]
+		if code == ' ' {
+			code = tea.KeySpace
+		}
+	}
+	return tea.KeyPressMsg{Code: code, Text: text}
+}
+
+func altGrPress(code rune, text string) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: code, Text: text, Mod: tea.ModCtrl | tea.ModAlt}
 }
 
 func (h *controllerHarness) inputChanges() []ui.InputChangedMsg {
@@ -113,23 +136,29 @@ func TestPickerCallbackSettledOnEveryExit(t *testing.T) {
 		name     string
 		inline   bool
 		setup    func(h *controllerHarness)
-		key      tea.KeyMsg
+		key      tea.KeyPressMsg
 		accepted bool
 		value    string
 	}{
 		{
 			name:     "modal escape cancels",
-			key:      tea.KeyMsg{Type: tea.KeyEsc},
+			key:      keyPress(tea.KeyEsc),
 			accepted: false,
 		},
 		{
 			name:     "modal ctrl+c cancels",
-			key:      tea.KeyMsg{Type: tea.KeyCtrlC},
+			key:      ctrlPress('c'),
 			accepted: false,
 		},
 		{
 			name:     "modal enter accepts selection",
-			key:      tea.KeyMsg{Type: tea.KeyEnter},
+			key:      keyPress(tea.KeyEnter),
+			accepted: true,
+			value:    "/connect",
+		},
+		{
+			name:     "modal keypad enter accepts selection",
+			key:      keyPress(tea.KeyKpEnter),
 			accepted: true,
 			value:    "/connect",
 		},
@@ -138,19 +167,19 @@ func TestPickerCallbackSettledOnEveryExit(t *testing.T) {
 			setup: func(h *controllerHarness) {
 				h.ctl.input.PickerFilter("zzz")
 			},
-			key:      tea.KeyMsg{Type: tea.KeyEnter},
+			key:      keyPress(tea.KeyEnter),
 			accepted: false,
 		},
 		{
 			name:     "inline escape cancels",
 			inline:   true,
-			key:      tea.KeyMsg{Type: tea.KeyEsc},
+			key:      keyPress(tea.KeyEsc),
 			accepted: false,
 		},
 		{
 			name:     "inline tab accepts selection",
 			inline:   true,
-			key:      tea.KeyMsg{Type: tea.KeyTab},
+			key:      keyPress(tea.KeyTab),
 			accepted: true,
 			value:    "/connect",
 		},
@@ -160,13 +189,22 @@ func TestPickerCallbackSettledOnEveryExit(t *testing.T) {
 			setup: func(h *controllerHarness) {
 				h.ctl.SetText("zzz")
 			},
-			key:      tea.KeyMsg{Type: tea.KeyTab},
+			key:      keyPress(tea.KeyTab),
 			accepted: false,
 		},
 		{
 			name:     "inline enter accepts and submits",
 			inline:   true,
-			key:      tea.KeyMsg{Type: tea.KeyEnter},
+			setup:    func(h *controllerHarness) { h.bound["enter"] = true },
+			key:      keyPress(tea.KeyEnter),
+			accepted: true,
+			value:    "/connect",
+		},
+		{
+			name:     "inline keypad enter accepts and submits",
+			inline:   true,
+			setup:    func(h *controllerHarness) { h.bound["enter"] = true },
+			key:      keyPress(tea.KeyKpEnter),
 			accepted: true,
 			value:    "/connect",
 		},
@@ -207,10 +245,11 @@ func TestPickerCallbackSettledOnEveryExit(t *testing.T) {
 // so a second InputChangedMsg would duplicate it.
 func TestAcceptedSubmissionClearsLocalDraftOnce(t *testing.T) {
 	h := newControllerHarness()
+	h.bound["enter"] = true
 	h.ctl.SetText("look north")
 	h.events = nil
 
-	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	h.ctl.HandleKey(keyPress(tea.KeyEnter))
 
 	if len(h.submitted) != 1 || h.submitted[0] != input.Command("look north") {
 		t.Fatalf("expected submit of %q, got %v", "look north", h.submitted)
@@ -226,6 +265,35 @@ func TestAcceptedSubmissionClearsLocalDraftOnce(t *testing.T) {
 	}
 }
 
+func TestKeypadEnterSubmitsNormalAndComposerInput(t *testing.T) {
+	tests := []struct {
+		name  string
+		draft string
+		want  input.Submission
+	}{
+		{name: "normal input", draft: "look north", want: input.Command("look north")},
+		{name: "composer", draft: "say one\nsay two", want: input.Verbatim("say one\nsay two")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newControllerHarness()
+			h.bound["enter"] = true
+			h.ctl.SetText(tt.draft)
+			h.events = nil
+
+			h.ctl.HandleKey(keyPress(tea.KeyKpEnter))
+
+			if len(h.submitted) != 1 || h.submitted[0] != tt.want {
+				t.Fatalf("keypad Enter submissions = %+v, want [%+v]", h.submitted, tt.want)
+			}
+			if binds := h.executeBinds(); len(binds) != 0 {
+				t.Fatalf("keypad Enter dispatched a Lua bind: %v", binds)
+			}
+		})
+	}
+}
+
 // TestBracketedPasteBypassesPrintableBind guards the atomic-paste path: a
 // one-character paste must be inserted as data even when that same printable
 // key is configured as a hotkey for an empty input line.
@@ -233,11 +301,7 @@ func TestBracketedPasteBypassesPrintableBind(t *testing.T) {
 	h := newControllerHarness()
 	h.bound["j"] = true
 
-	h.ctl.HandleKey(tea.KeyMsg{
-		Type:  tea.KeyRunes,
-		Runes: []rune{'j'},
-		Paste: true,
-	})
+	h.ctl.HandlePaste("j")
 
 	if got := h.ctl.input.Value(); got != "j" {
 		t.Fatalf("pasted input = %q, want %q", got, "j")
@@ -258,12 +322,12 @@ func TestOneLineControlPasteEntersComposerWithoutLosingData(t *testing.T) {
 	h := newControllerHarness()
 	raw := "say\x1b]52;c;x\a\x00"
 
-	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(raw), Paste: true})
+	h.ctl.HandlePaste(raw)
 
 	if got := h.ctl.input.Value(); got != raw || !h.ctl.input.IsComposing() {
 		t.Fatalf("control paste = %q, composing=%v; want exact verbatim draft", got, h.ctl.input.IsComposing())
 	}
-	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	h.ctl.HandleKey(keyPress(tea.KeyEnter))
 	if len(h.submitted) != 1 || h.submitted[0] != input.Verbatim(raw) {
 		t.Fatalf("control submission = %+v, want exact verbatim", h.submitted)
 	}
@@ -277,11 +341,7 @@ func TestMultilinePasteEntersComposerLosslessly(t *testing.T) {
 	pasted := "  player->command(\"turn on <channel>\");\r\n\t// PLAYER_SILENT  \r\n\r\nlast;  "
 	want := "  player->command(\"turn on <channel>\");\n\t// PLAYER_SILENT  \n\nlast;  "
 
-	h.ctl.HandleKey(tea.KeyMsg{
-		Type:  tea.KeyRunes,
-		Runes: []rune(pasted),
-		Paste: true,
-	})
+	h.ctl.HandlePaste(pasted)
 
 	if got := h.ctl.input.Value(); got != want {
 		t.Fatalf("pasted input:\n%q\nwant:\n%q", got, want)
@@ -298,6 +358,118 @@ func TestMultilinePasteEntersComposerLosslessly(t *testing.T) {
 	}
 }
 
+func TestPasteMsgFiltersModalPickerWithoutChangingDraft(t *testing.T) {
+	h := newControllerHarness()
+	h.ctl.ShowPicker(ui.ShowPickerMsg{
+		Items:      pickerTestItems,
+		CallbackID: "cb",
+	})
+
+	h.ctl.HandlePaste("dis")
+
+	if got := h.ctl.input.PickerQuery(); got != "dis" {
+		t.Fatalf("picker query after paste = %q, want %q", got, "dis")
+	}
+	if got := h.ctl.input.Value(); got != "" {
+		t.Fatalf("modal paste changed hidden draft to %q", got)
+	}
+	if h.ctl.mode != ModePickerModal {
+		t.Fatalf("modal paste changed mode to %v", h.ctl.mode)
+	}
+}
+
+func TestPasteMsgEditsSearchQueryWithoutChangingDraft(t *testing.T) {
+	h := newControllerHarness()
+	h.buf.Append("a thief passes")
+	h.ctl.input.SetSize(80, 0)
+	h.ctl.ShowSearch(ui.ShowSearchMsg{})
+	previews := len(h.fx.previews)
+
+	h.ctl.HandlePaste("thief")
+
+	view := runetext.StripANSI(h.ctl.input.View())
+	if !strings.Contains(view, "Search: thief") {
+		t.Fatalf("search view after paste does not contain query: %q", view)
+	}
+	if len(h.fx.previews) != previews+1 || !h.fx.previews[len(h.fx.previews)-1] {
+		t.Fatalf("search paste previews = %v, want one additional match preview", h.fx.previews)
+	}
+	if got := h.ctl.input.Value(); got != "" {
+		t.Fatalf("search paste changed hidden draft to %q", got)
+	}
+	if h.ctl.mode != ModeSearch {
+		t.Fatalf("search paste changed mode to %v", h.ctl.mode)
+	}
+}
+
+func TestAltGrTextIsTypedInEveryInputMode(t *testing.T) {
+	msg := altGrPress('q', "@")
+
+	t.Run("normal", func(t *testing.T) {
+		h := newControllerHarness()
+		h.bound["ctrl+alt+q"] = true
+		h.ctl.SetText("say ")
+		h.events = nil
+
+		h.ctl.HandleKey(msg)
+
+		if got := h.ctl.input.Value(); got != "say @" {
+			t.Fatalf("AltGr input = %q, want %q", got, "say @")
+		}
+		if binds := h.executeBinds(); len(binds) != 0 {
+			t.Fatalf("AltGr text dispatched a chord bind: %v", binds)
+		}
+	})
+
+	t.Run("inline picker", func(t *testing.T) {
+		h := newControllerHarness()
+		h.ctl.ShowPicker(ui.ShowPickerMsg{Items: pickerTestItems, CallbackID: "cb", Inline: true})
+		h.ctl.SetText("/")
+		h.events = nil
+
+		h.ctl.HandleKey(msg)
+
+		if got := h.ctl.input.Value(); got != "/@" {
+			t.Fatalf("inline AltGr input = %q, want %q", got, "/@")
+		}
+	})
+
+	t.Run("modal picker", func(t *testing.T) {
+		h := newControllerHarness()
+		h.ctl.ShowPicker(ui.ShowPickerMsg{Items: pickerTestItems, CallbackID: "cb"})
+
+		h.ctl.HandleKey(msg)
+
+		if got := h.ctl.input.PickerQuery(); got != "@" {
+			t.Fatalf("modal AltGr query = %q, want %q", got, "@")
+		}
+	})
+
+	t.Run("search", func(t *testing.T) {
+		h := newControllerHarness()
+		h.ctl.input.SetSize(80, 0)
+		h.ctl.ShowSearch(ui.ShowSearchMsg{})
+
+		h.ctl.HandleKey(msg)
+
+		if view := runetext.StripANSI(h.ctl.input.View()); !strings.Contains(view, "Search: @") {
+			t.Fatalf("search after AltGr input does not contain query: %q", view)
+		}
+	})
+
+	t.Run("composer", func(t *testing.T) {
+		h := newControllerHarness()
+		h.ctl.SetText("say\n")
+		h.events = nil
+
+		h.ctl.HandleKey(altGrPress('h', "ħ"))
+
+		if got := h.ctl.input.Value(); got != "say\nħ" {
+			t.Fatalf("composer AltGr input = %q, want %q", got, "say\nħ")
+		}
+	})
+}
+
 // TestCtrlJInsertsComposerNewline pins the portable terminal representation
 // of Ctrl+Enter. It inserts LF and transitions an ordinary draft into the
 // visible composer instead of submitting it or delegating to Lua.
@@ -307,7 +479,7 @@ func TestCtrlJInsertsComposerNewline(t *testing.T) {
 	h.ctl.SetText("hello")
 	h.events = nil
 
-	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyCtrlJ})
+	h.ctl.HandleKey(ctrlPress('j'))
 
 	if got := h.ctl.input.Value(); got != "hello\n" {
 		t.Fatalf("input after Ctrl+J = %q, want %q", got, "hello\n")
@@ -327,6 +499,39 @@ func TestCtrlJInsertsComposerNewline(t *testing.T) {
 	}
 }
 
+// TestCtrlEnterInComposerInsertsNewline covers the unambiguous main and
+// keypad events reported by terminals with keyboard enhancement support.
+// Neither may fall through to ordinary Enter submission.
+func TestCtrlEnterInComposerInsertsNewline(t *testing.T) {
+	tests := []struct {
+		name string
+		code rune
+	}{
+		{name: "main enter", code: tea.KeyEnter},
+		{name: "keypad enter", code: tea.KeyKpEnter},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newControllerHarness()
+			h.ctl.SetText("hello\nworld")
+			h.events = nil
+
+			h.ctl.HandleKey(ctrlPress(tt.code))
+
+			if got := h.ctl.input.Value(); got != "hello\nworld\n" {
+				t.Fatalf("input after Ctrl+Enter = %q, want %q", got, "hello\nworld\n")
+			}
+			if len(h.submitted) != 0 {
+				t.Fatalf("Ctrl+Enter submitted composer input: %+v", h.submitted)
+			}
+			changes := h.inputChanges()
+			if len(changes) != 1 || changes[0].Text != "hello\nworld\n" || changes[0].Cursor != 12 {
+				t.Fatalf("input changes = %+v, want hello\\nworld\\n at cursor 12", changes)
+			}
+		})
+	}
+}
+
 func TestCtrlJLeavesInlinePickerForComposer(t *testing.T) {
 	h := newControllerHarness()
 	h.ctl.ShowPicker(ui.ShowPickerMsg{
@@ -337,7 +542,7 @@ func TestCtrlJLeavesInlinePickerForComposer(t *testing.T) {
 	h.ctl.SetText("/con")
 	h.events = nil
 
-	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyCtrlJ})
+	h.ctl.HandleKey(ctrlPress('j'))
 
 	if got := h.ctl.input.Value(); got != "/con\n" {
 		t.Fatalf("input after Ctrl+J = %q, want %q", got, "/con\n")
@@ -366,7 +571,7 @@ func TestComposerEnterSubmitsVerbatimExactAndClears(t *testing.T) {
 	h.ctl.SetText(draft)
 	h.events = nil
 
-	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	h.ctl.HandleKey(keyPress(tea.KeyEnter))
 
 	want := input.Verbatim(draft)
 	if len(h.submitted) != 1 || h.submitted[0] != want {
@@ -389,12 +594,12 @@ func TestComposerModeStaysVerbatimAfterJoiningLines(t *testing.T) {
 	h.ctl.input.SetCursor(len([]rune("one;\n")))
 	h.events = nil
 
-	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyBackspace})
+	h.ctl.HandleKey(keyPress(tea.KeyBackspace))
 	if got := h.ctl.input.Value(); got != "one;two" || !h.ctl.input.IsComposing() {
 		t.Fatalf("joined draft = %q, composing=%v; want sticky verbatim", got, h.ctl.input.IsComposing())
 	}
 
-	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	h.ctl.HandleKey(keyPress(tea.KeyEnter))
 	if len(h.submitted) != 1 || h.submitted[0] != input.Verbatim("one;two") {
 		t.Fatalf("joined submission = %+v, want one verbatim literal", h.submitted)
 	}
@@ -410,7 +615,7 @@ func TestFailedComposerSubmissionRetainsDraft(t *testing.T) {
 	h.ctl.SetText(draft)
 	h.events = nil
 
-	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	h.ctl.HandleKey(keyPress(tea.KeyEnter))
 
 	want := input.Verbatim(draft)
 	if len(h.submitted) != 1 || h.submitted[0] != want {
@@ -434,7 +639,7 @@ func TestComposerEscapeRequiresConfirmation(t *testing.T) {
 	h.ctl.SetText(draft)
 	h.events = nil
 
-	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	h.ctl.HandleKey(keyPress(tea.KeyEsc))
 	if got := h.ctl.input.Value(); got != draft || !h.ctl.input.IsComposing() {
 		t.Fatalf("first Escape discarded draft: value=%q composing=%v", got, h.ctl.input.IsComposing())
 	}
@@ -445,13 +650,71 @@ func TestComposerEscapeRequiresConfirmation(t *testing.T) {
 		t.Fatalf("arming discard emitted state changes: %+v", h.events)
 	}
 
-	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	h.ctl.HandleKey(keyPress(tea.KeyEsc))
 	if got := h.ctl.input.Value(); got != "" || h.ctl.input.IsComposing() {
 		t.Fatalf("confirmed discard left value=%q composing=%v", got, h.ctl.input.IsComposing())
 	}
 	changes := h.inputChanges()
 	if len(changes) != 1 || changes[0].Text != "" {
 		t.Fatalf("confirmed discard changes = %+v", changes)
+	}
+}
+
+func TestModifiedEscapeDoesNotCancelInternalModes(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(*controllerHarness)
+		mode  InputMode
+	}{
+		{
+			name: "composer",
+			setup: func(h *controllerHarness) {
+				h.ctl.SetText("first\nsecond")
+			},
+			mode: ModeCompose,
+		},
+		{
+			name: "modal picker",
+			setup: func(h *controllerHarness) {
+				h.ctl.ShowPicker(ui.ShowPickerMsg{Items: pickerTestItems, CallbackID: "cb"})
+			},
+			mode: ModePickerModal,
+		},
+		{
+			name: "inline picker",
+			setup: func(h *controllerHarness) {
+				h.ctl.ShowPicker(ui.ShowPickerMsg{Items: pickerTestItems, CallbackID: "cb", Inline: true})
+			},
+			mode: ModePickerInline,
+		},
+		{
+			name: "search",
+			setup: func(h *controllerHarness) {
+				h.ctl.ShowSearch(ui.ShowSearchMsg{})
+			},
+			mode: ModeSearch,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newControllerHarness()
+			tt.setup(h)
+			h.events = nil
+			cancels := h.fx.cancels
+
+			h.ctl.HandleKey(tea.KeyPressMsg{Code: tea.KeyEsc, Mod: tea.ModShift})
+
+			if h.ctl.mode != tt.mode {
+				t.Fatalf("modified Escape changed mode to %v, want %v", h.ctl.mode, tt.mode)
+			}
+			if selects := h.pickerSelects(); len(selects) != 0 {
+				t.Fatalf("modified Escape settled picker: %v", selects)
+			}
+			if h.fx.cancels != cancels {
+				t.Fatalf("modified Escape cancelled search: got %d cancels, want %d", h.fx.cancels, cancels)
+			}
+		})
 	}
 }
 
@@ -464,7 +727,7 @@ func TestCtrlEInComposerDelegatesToEditorBind(t *testing.T) {
 	h.ctl.SetText(draft)
 	h.events = nil
 
-	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyCtrlE})
+	h.ctl.HandleKey(ctrlPress('e'))
 
 	binds := h.executeBinds()
 	if len(binds) != 1 || binds[0] != ui.ExecuteBindMsg("ctrl+e") {
@@ -495,7 +758,7 @@ func TestSetSubmissionForcesOneLineVerbatimComposer(t *testing.T) {
 		t.Fatal("ordinary SetText discarded restored verbatim mode")
 	}
 	h.submitted = nil
-	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	h.ctl.HandleKey(keyPress(tea.KeyEnter))
 	if len(h.submitted) != 1 || h.submitted[0] != input.Verbatim("edited;still verbatim") {
 		t.Fatalf("submission = %+v, want sticky verbatim", h.submitted)
 	}
@@ -510,26 +773,26 @@ func TestRecalledVerbatimHistoryFallsThroughAtVisualBoundaries(t *testing.T) {
 	h.events = nil
 
 	// From the final visual row, Up remains a local cursor move.
-	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyUp})
+	h.ctl.HandleKey(keyPress(tea.KeyUp))
 	if binds := h.executeBinds(); len(binds) != 0 {
 		t.Fatalf("interior Up delegated to history: %v", binds)
 	}
 
 	// At the first visual row, the next Up resumes Lua history navigation.
 	h.events = nil
-	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyUp})
+	h.ctl.HandleKey(keyPress(tea.KeyUp))
 	if binds := h.executeBinds(); len(binds) != 1 || binds[0] != ui.ExecuteBindMsg("up") {
 		t.Fatalf("boundary Up binds = %v, want [up]", binds)
 	}
 
 	// Down mirrors the behavior: local inside the document, history at EOF.
 	h.events = nil
-	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyDown})
+	h.ctl.HandleKey(keyPress(tea.KeyDown))
 	if binds := h.executeBinds(); len(binds) != 0 {
 		t.Fatalf("interior Down delegated to history: %v", binds)
 	}
 	h.events = nil
-	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyDown})
+	h.ctl.HandleKey(keyPress(tea.KeyDown))
 	if binds := h.executeBinds(); len(binds) != 1 || binds[0] != ui.ExecuteBindMsg("down") {
 		t.Fatalf("boundary Down binds = %v, want [down]", binds)
 	}
@@ -541,9 +804,9 @@ func TestEditingRecalledVerbatimKeepsArrowsLocal(t *testing.T) {
 	h.ctl.SetSubmission(input.Verbatim("one line"))
 	h.events = nil
 
-	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("!")})
+	h.ctl.HandleKey(textPress("!"))
 	h.events = nil
-	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyUp})
+	h.ctl.HandleKey(keyPress(tea.KeyUp))
 
 	if binds := h.executeBinds(); len(binds) != 0 {
 		t.Fatalf("edited recalled entry delegated Up to history: %v", binds)
@@ -562,7 +825,7 @@ func TestSetSubmissionCommandOverridesStickyComposer(t *testing.T) {
 		t.Fatal("explicit command recall did not leave sticky composer")
 	}
 	h.submitted = nil
-	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	h.ctl.HandleKey(keyPress(tea.KeyEnter))
 	if len(h.submitted) != 1 || h.submitted[0] != input.Command("same") {
 		t.Fatalf("submission = %+v, want command", h.submitted)
 	}
@@ -581,7 +844,7 @@ func TestInlineTabReportsCompletedInput(t *testing.T) {
 	h.ctl.SetText("/con")
 	h.events = nil
 
-	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyTab})
+	h.ctl.HandleKey(keyPress(tea.KeyTab))
 
 	changedAt, selectAt := -1, -1
 	for i, ev := range h.events {
@@ -620,8 +883,8 @@ func TestReboundHomeOverridesInputCursor(t *testing.T) {
 	h := newControllerHarness()
 	h.bound["home"] = true
 
-	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("look")})
-	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyHome})
+	h.ctl.HandleKey(textPress("look"))
+	h.ctl.HandleKey(keyPress(tea.KeyHome))
 
 	if binds := h.executeBinds(); len(binds) != 1 || binds[0] != ui.ExecuteBindMsg("home") {
 		t.Fatalf("expected one home bind dispatch, got %v", binds)
@@ -643,17 +906,22 @@ func TestSearchSettledOnEveryExit(t *testing.T) {
 	}{
 		{
 			name:    "escape cancels",
-			exit:    func(h *controllerHarness) { h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyEsc}) },
+			exit:    func(h *controllerHarness) { h.ctl.HandleKey(keyPress(tea.KeyEsc)) },
 			cancels: 1,
 		},
 		{
 			name:    "ctrl+c cancels",
-			exit:    func(h *controllerHarness) { h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyCtrlC}) },
+			exit:    func(h *controllerHarness) { h.ctl.HandleKey(ctrlPress('c')) },
 			cancels: 1,
 		},
 		{
 			name:    "enter commits",
-			exit:    func(h *controllerHarness) { h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyEnter}) },
+			exit:    func(h *controllerHarness) { h.ctl.HandleKey(keyPress(tea.KeyEnter)) },
+			commits: 1,
+		},
+		{
+			name:    "keypad enter commits",
+			exit:    func(h *controllerHarness) { h.ctl.HandleKey(keyPress(tea.KeyKpEnter)) },
 			commits: 1,
 		},
 		{
@@ -712,15 +980,15 @@ func TestSearchOpensWithPreviewAndSteps(t *testing.T) {
 		t.Fatalf("open should preview the newest match, previews = %v", h.fx.previews)
 	}
 
-	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyDown})
-	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyUp})
+	h.ctl.HandleKey(keyPress(tea.KeyDown))
+	h.ctl.HandleKey(keyPress(tea.KeyUp))
 	if len(h.fx.previews) != 3 {
 		t.Fatalf("selection moves should re-preview, previews = %v", h.fx.previews)
 	}
 
 	// Editing the query re-previews; a query with no matches previews
 	// ok=false (restores the snapshot).
-	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("zzz")})
+	h.ctl.HandleKey(textPress("zzz"))
 	last := h.fx.previews[len(h.fx.previews)-1]
 	if last {
 		t.Fatal("no-match query must preview ok=false")
@@ -736,8 +1004,8 @@ func TestSearchTrapsBoundKeys(t *testing.T) {
 	h.bound["ctrl+t"] = true
 
 	h.ctl.ShowSearch(ui.ShowSearchMsg{})
-	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
-	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyCtrlT})
+	h.ctl.HandleKey(textPress("j"))
+	h.ctl.HandleKey(ctrlPress('t'))
 
 	if binds := h.executeBinds(); len(binds) != 0 {
 		t.Fatalf("search mode must not dispatch binds, got %v", binds)
@@ -795,7 +1063,7 @@ func submitKept(t *testing.T, text string) *controllerHarness {
 	h.ctl.SetText(text)
 	h.events = nil
 
-	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	h.ctl.HandleKey(keyPress(tea.KeyEnter))
 
 	if len(h.submitted) != 1 || h.submitted[0] != input.Command(text) {
 		t.Fatalf("expected submit of %q, got %v", text, h.submitted)
@@ -822,7 +1090,7 @@ func TestKeepOnSubmitKeepsCommandSelectedAndResends(t *testing.T) {
 	}
 
 	// Enter again resends and stays kept.
-	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	h.ctl.HandleKey(keyPress(tea.KeyEnter))
 	if len(h.submitted) != 2 || h.submitted[1] != input.Command("north") {
 		t.Fatalf("expected resend of %q, got %v", "north", h.submitted)
 	}
@@ -837,7 +1105,7 @@ func TestKeepOnSubmitKeepsCommandSelectedAndResends(t *testing.T) {
 func TestKeepOnSubmitTypingReplacesSelection(t *testing.T) {
 	h := submitKept(t, "north")
 
-	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	h.ctl.HandleKey(textPress("s"))
 
 	if got := h.ctl.input.Value(); got != "s" {
 		t.Fatalf("typing over selection: input = %q, want %q", got, "s")
@@ -850,7 +1118,7 @@ func TestKeepOnSubmitTypingReplacesSelection(t *testing.T) {
 func TestKeepOnSubmitBackspaceClearsSelection(t *testing.T) {
 	h := submitKept(t, "north")
 
-	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyBackspace})
+	h.ctl.HandleKey(keyPress(tea.KeyBackspace))
 
 	if got := h.ctl.input.Value(); got != "" {
 		t.Fatalf("backspace over selection: input = %q, want empty", got)
@@ -863,7 +1131,7 @@ func TestKeepOnSubmitBackspaceClearsSelection(t *testing.T) {
 func TestKeepOnSubmitArrowDeselectsInPlace(t *testing.T) {
 	h := submitKept(t, "north")
 
-	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyLeft})
+	h.ctl.HandleKey(keyPress(tea.KeyLeft))
 
 	if got := h.ctl.input.Value(); got != "north" {
 		t.Fatalf("cursor movement must keep the text, got %q", got)
@@ -879,7 +1147,7 @@ func TestKeepOnSubmitArrowDeselectsInPlace(t *testing.T) {
 func TestKeepOnSubmitPasteReplacesSelection(t *testing.T) {
 	h := submitKept(t, "north")
 
-	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("say hi"), Paste: true})
+	h.ctl.HandlePaste("say hi")
 
 	if got := h.ctl.input.Value(); got != "say hi" {
 		t.Fatalf("paste over selection: input = %q, want %q", got, "say hi")
@@ -895,7 +1163,7 @@ func TestKeepOnSubmitSelectedFiresPrintableBind(t *testing.T) {
 	h := submitKept(t, "north")
 	h.bound["n"] = true
 
-	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	h.ctl.HandleKey(textPress("n"))
 
 	binds := h.executeBinds()
 	if len(binds) != 1 || string(binds[0]) != "n" {
@@ -910,7 +1178,7 @@ func TestKeepOnSubmitEmptySubmissionStaysClear(t *testing.T) {
 	h := newControllerHarness()
 	h.ctl.SetKeepOnSubmit(true)
 
-	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	h.ctl.HandleKey(keyPress(tea.KeyEnter))
 
 	if got := h.ctl.input.Value(); got != "" || h.ctl.input.Selected() {
 		t.Fatalf("empty submission must not keep anything, got %q selected=%v",
@@ -927,7 +1195,7 @@ func TestKeepOnSubmitVerbatimStillClears(t *testing.T) {
 	want := input.Verbatim("say one\nsay two")
 	h.ctl.SetSubmission(want)
 
-	h.ctl.HandleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	h.ctl.HandleKey(keyPress(tea.KeyEnter))
 
 	if len(h.submitted) != 1 || h.submitted[0] != want {
 		t.Fatalf("expected verbatim submit, got %v", h.submitted)

@@ -18,7 +18,7 @@ task-oriented introduction, start with
 | `rune.alias` | [rune.alias](/reference/api/alias/) | Expand and transform your input |
 | `rune.timer` | [rune.timer](/reference/api/timer/) | One-shot and repeating timers |
 | `rune.hooks` | [rune.hooks](/reference/api/hooks/) | Event handlers, plus the full event catalog |
-| `rune.bind` | [rune.bind](/reference/api/bind/) | Key bindings, plus the default keymap |
+| `rune.bind` | [rune.bind](/reference/api/bind/) | Key binding registration and management |
 | `rune.command` | [rune.command](/reference/api/command/) | Custom `/commands` |
 | `rune.group` | [rune.group](/reference/api/group/) | Batch enable/disable across registries |
 | `rune.gmcp` | [rune.gmcp](/reference/api/gmcp/) | GMCP handlers, sending, subscriptions |

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/mmcdole/rune/input"
 	"github.com/mmcdole/rune/ui"
@@ -53,7 +53,7 @@ type inputController struct {
 	notify  func(ui.UIEvent)                // state and actions sent to the session
 	submit  func(ui.InputSubmittedMsg) bool // atomically transfer submission and following draft
 	isBound func(key string) bool           // key has a Lua bind
-	scroll  func(tea.KeyType) bool          // Go scroll-key fallback; true if handled
+	scroll  func(tea.KeyPressMsg) bool      // Go scroll-key fallback; true if handled
 	search  searchEffects                   // viewport side of scrollback search
 }
 
@@ -62,7 +62,7 @@ func newInputController(
 	notify func(ui.UIEvent),
 	submit func(ui.InputSubmittedMsg) bool,
 	isBound func(string) bool,
-	scroll func(tea.KeyType) bool,
+	scroll func(tea.KeyPressMsg) bool,
 	search searchEffects,
 ) *inputController {
 	return &inputController{
@@ -84,24 +84,17 @@ func newInputController(
 // Lua only when the input is empty (so "j" can be a hotkey without
 // breaking typing). Unbound scroll keys fall back to Go so scrollback
 // stays usable even in degraded mode.
-func (c *inputController) HandleKey(msg tea.KeyMsg) {
-	// Bracketed paste arrives atomically. Intercept it before binding
-	// dispatch so even a one-character paste can never fire a printable
-	// hotkey, and so structured text never passes through textinput's
-	// newline/tab sanitizer.
-	if msg.Paste && c.mode != ModePickerModal && c.mode != ModeSearch {
-		c.handlePaste(msg)
-		return
-	}
-	if c.mode == ModeCompose && msg.Type != tea.KeyEsc {
+func (c *inputController) HandleKey(msg tea.KeyPressMsg) {
+	isEscape := matchesKey(msg, tea.KeyEsc, 0)
+	if c.mode == ModeCompose && !isEscape {
 		c.input.ContinueCompose()
 	}
 
 	// Picker modes capture Ctrl+C/Esc as "cancel". In normal mode they
 	// fall through so the Lua binds decide (clear input, double-tap quit,
 	// ...). Compose mode owns Escape because it is an internal cancel.
-	switch msg.Type {
-	case tea.KeyCtrlC, tea.KeyEsc:
+	isCancel := isEscape || matchesKey(msg, 'c', tea.ModCtrl)
+	if isCancel {
 		if c.mode == ModePickerModal || c.mode == ModePickerInline {
 			c.closePicker(false, "")
 			return
@@ -110,7 +103,7 @@ func (c *inputController) HandleKey(msg tea.KeyMsg) {
 			c.closeSearch(false)
 			return
 		}
-		if c.mode == ModeCompose && msg.Type == tea.KeyEsc {
+		if c.mode == ModeCompose && isEscape {
 			if c.input.ConfirmDiscard() {
 				c.cancelCompose()
 			}
@@ -219,52 +212,50 @@ func (c *inputController) SetSubmission(submission input.Submission) {
 	}
 }
 
-func (c *inputController) handleNormalKey(msg tea.KeyMsg) {
-	// In Rune's terminal stack Ctrl+Enter is delivered as Ctrl+J. It is
-	// the explicit way to start a multiline draft without pasting.
-	if msg.Type == tea.KeyCtrlJ {
+func (c *inputController) handleNormalKey(msg tea.KeyPressMsg) {
+	// Accept both portable Ctrl+J and disambiguated Ctrl+Enter as the explicit
+	// way to start a multiline draft without pasting.
+	if isComposerNewline(msg) {
 		c.insertComposerText("\n")
+		return
+	}
+	if matchesEnterKey(msg, 0) {
+		c.submitInput()
 		return
 	}
 
 	keyStr := keyToString(msg)
 	if keyStr != "" && c.isBound(keyStr) {
-		// Alt-modified runes are chords, not typing: they never reach
-		// the input widget, so the empty-input guard doesn't apply.
+		// Text-bearing events are typing, including AltGr input. Modifier
+		// chords have no text, so the empty-input guard does not apply.
 		// A fully selected line counts as empty: its text is about to
 		// be replaced anyway, so movement binds keep firing.
-		isPrintable := msg.Type == tea.KeyRunes && !msg.Alt
+		isPrintable := msg.Text != ""
 		if !isPrintable || c.input.Value() == "" || c.input.Selected() {
 			c.notify(ui.ExecuteBindMsg(keyStr))
 			return
 		}
 	}
-
-	if msg.Type == tea.KeyEnter {
-		c.submitInput()
-		return
-	}
-
 	// Unbound scroll keys: Go fallback (keeps degraded mode scrollable)
-	if c.scroll(msg.Type) {
+	if c.scroll(msg) {
 		return
 	}
 
 	c.forwardToInput(msg)
 }
 
-func (c *inputController) handleComposeKey(msg tea.KeyMsg) {
-	if msg.Type == tea.KeyEnter && !msg.Alt {
+func (c *inputController) handleComposeKey(msg tea.KeyPressMsg) {
+	if matchesEnterKey(msg, 0) {
 		c.submitInput()
 		return
 	}
 	if c.historyRecall {
 		key := ""
 		delta := 0
-		switch msg.Type {
-		case tea.KeyUp:
+		switch {
+		case matchesKey(msg, tea.KeyUp, 0):
 			key, delta = "up", -1
-		case tea.KeyDown:
+		case matchesKey(msg, tea.KeyDown, 0):
 			key, delta = "down", 1
 		}
 		if key != "" && !c.input.CanMoveComposerVertically(delta) && c.isBound(key) {
@@ -292,13 +283,28 @@ func (c *inputController) handleComposeKey(msg tea.KeyMsg) {
 	}
 }
 
-func (c *inputController) handlePaste(msg tea.KeyMsg) {
+// HandlePaste routes one atomic bracketed-paste payload. It bypasses bind
+// dispatch even when the payload is a single printable character.
+func (c *inputController) HandlePaste(text string) {
+	switch c.mode {
+	case ModePickerModal:
+		c.input.PickerFilter(c.input.PickerQuery() + text)
+		return
+	case ModeSearch:
+		c.input.SearchTypeRunes([]rune(text))
+		c.previewSearch()
+		return
+	}
+	c.handlePaste(text)
+}
+
+func (c *inputController) handlePaste(text string) {
 	c.historyRecall = false
 	oldValue := c.input.Value()
 	oldCursor := c.input.Position()
 	wasInline := c.mode == ModePickerInline
 
-	c.input.InsertPaste(string(msg.Runes))
+	c.input.InsertPaste(text)
 	c.reportInputUpdate(oldValue, oldCursor)
 
 	if c.input.IsComposing() {
@@ -334,20 +340,20 @@ func (c *inputController) cancelCompose() {
 // inlinePickerLocalKeys are navigation keys the inline picker handles
 // itself instead of forwarding to Lua binds.
 var inlinePickerLocalKeys = map[string]bool{
-	"up":   true,
-	"down": true,
-	"tab":  true,
+	"up":    true,
+	"down":  true,
+	"tab":   true,
+	"enter": true,
 }
 
-func (c *inputController) handleInlineKey(msg tea.KeyMsg) {
+func (c *inputController) handleInlineKey(msg tea.KeyPressMsg) {
 	// Ctrl+Enter transitions from single-line completion into a structured
 	// draft. Treat it like a bracketed newline paste so the input update is
 	// visible to Lua before the picker callback is cancelled.
-	if msg.Type == tea.KeyCtrlJ {
-		c.handlePaste(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'\n'}, Paste: true})
+	if isComposerNewline(msg) {
+		c.handlePaste("\n")
 		return
 	}
-
 	keyStr := keyToString(msg)
 	// Don't send picker navigation keys to Lua - handle them locally
 	if keyStr != "" && c.isBound(keyStr) && !inlinePickerLocalKeys[keyStr] {
@@ -355,16 +361,16 @@ func (c *inputController) handleInlineKey(msg tea.KeyMsg) {
 		return
 	}
 
-	switch msg.Type {
-	case tea.KeyUp:
+	switch {
+	case matchesKey(msg, tea.KeyUp, 0):
 		c.input.PickerSelectUp()
 		return
 
-	case tea.KeyDown:
+	case matchesKey(msg, tea.KeyDown, 0):
 		c.input.PickerSelectDown()
 		return
 
-	case tea.KeyTab:
+	case matchesKey(msg, tea.KeyTab, 0):
 		if item, ok := c.input.PickerSelected(); ok {
 			c.input.SetValue(item.GetValue() + " ")
 			c.input.CursorEnd()
@@ -377,7 +383,7 @@ func (c *inputController) handleInlineKey(msg tea.KeyMsg) {
 		}
 		return
 
-	case tea.KeyEnter:
+	case matchesEnterKey(msg, 0):
 		if item, ok := c.input.PickerSelected(); ok {
 			c.closePicker(true, item.GetValue())
 		} else {
@@ -387,7 +393,7 @@ func (c *inputController) handleInlineKey(msg tea.KeyMsg) {
 		return
 	}
 
-	if c.scroll(msg.Type) {
+	if c.scroll(msg) {
 		return
 	}
 
@@ -396,31 +402,36 @@ func (c *inputController) handleInlineKey(msg tea.KeyMsg) {
 	}
 }
 
-func (c *inputController) handleModalKey(msg tea.KeyMsg) {
-	switch msg.Type {
-	case tea.KeyUp:
+// isComposerNewline accepts the portable Ctrl+J representation as well as the
+// distinct Ctrl+Enter event reported by terminals with key disambiguation.
+func isComposerNewline(msg tea.KeyPressMsg) bool {
+	return matchesKey(msg, 'j', tea.ModCtrl) || matchesEnterKey(msg, tea.ModCtrl)
+}
+
+func (c *inputController) handleModalKey(msg tea.KeyPressMsg) {
+	switch {
+	case matchesKey(msg, tea.KeyUp, 0):
 		c.input.PickerSelectUp()
 
-	case tea.KeyDown:
+	case matchesKey(msg, tea.KeyDown, 0):
 		c.input.PickerSelectDown()
 
-	case tea.KeyEnter, tea.KeyTab:
+	case matchesEnterKey(msg, 0), matchesKey(msg, tea.KeyTab, 0):
 		if item, ok := c.input.PickerSelected(); ok {
 			c.closePicker(true, item.GetValue())
 		} else {
 			c.closePicker(false, "")
 		}
 
-	case tea.KeyRunes:
-		c.input.PickerFilter(c.input.PickerQuery() + string(msg.Runes))
-
-	case tea.KeySpace:
-		c.input.PickerFilter(c.input.PickerQuery() + " ")
-
-	case tea.KeyBackspace:
+	case matchesKey(msg, tea.KeyBackspace, 0):
 		query := []rune(c.input.PickerQuery())
 		if len(query) > 0 {
 			c.input.PickerFilter(string(query[:len(query)-1]))
+		}
+
+	default:
+		if msg.Text != "" {
+			c.input.PickerFilter(c.input.PickerQuery() + msg.Text)
 		}
 	}
 }
@@ -428,7 +439,7 @@ func (c *inputController) handleModalKey(msg tea.KeyMsg) {
 // forwardToInput passes an editing key to the text input and reports
 // the resulting text or cursor change to the session. Returns true if
 // the text changed.
-func (c *inputController) forwardToInput(msg tea.KeyMsg) bool {
+func (c *inputController) forwardToInput(msg tea.KeyPressMsg) bool {
 	oldValue := c.input.Value()
 	oldCursor := c.input.Position()
 	c.input.UpdateTextInput(msg)
@@ -486,31 +497,26 @@ func (c *inputController) ShowSearch(opts ui.ShowSearchMsg) {
 
 // handleSearchKey traps all keys while the search overlay is open,
 // like the modal picker: bound keys do not dispatch to Lua.
-func (c *inputController) handleSearchKey(msg tea.KeyMsg) {
-	switch msg.Type {
-	case tea.KeyUp:
+func (c *inputController) handleSearchKey(msg tea.KeyPressMsg) {
+	switch {
+	case matchesKey(msg, tea.KeyUp, 0):
 		c.selectOlderSearch()
 
-	case tea.KeyDown:
+	case matchesKey(msg, tea.KeyDown, 0):
 		c.selectNewerSearch()
 
-	case tea.KeyEnter:
+	case matchesEnterKey(msg, 0):
 		c.closeSearch(true)
 
-	case tea.KeyRunes:
-		if msg.Alt {
-			return
-		}
-		c.input.SearchTypeRunes(msg.Runes)
-		c.previewSearch()
-
-	case tea.KeySpace:
-		c.input.SearchTypeRunes([]rune{' '})
-		c.previewSearch()
-
-	case tea.KeyBackspace:
+	case matchesKey(msg, tea.KeyBackspace, 0):
 		c.input.SearchBackspace()
 		c.previewSearch()
+
+	default:
+		if msg.Text != "" {
+			c.input.SearchTypeRunes([]rune(msg.Text))
+			c.previewSearch()
+		}
 	}
 }
 
