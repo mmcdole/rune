@@ -366,6 +366,10 @@ func (s *Session) handleUIEvent(event ui.UIEvent) {
 			_ = s.net.SendFrame(s.connectionID, frame)
 		}
 		s.engine.UpdateState(s.clientState)
+		// State first, then the hook, then bars: handlers observe
+		// matching rune.state values, and a layout or bar change they
+		// make lands in this same resize cycle.
+		s.engine.NotifyWindowSizeChanged(event.Width, event.Height)
 		s.pushBarUpdates()
 	case ui.ScrollStateChangedMsg:
 		s.clientState.ScrollMode = event.Mode
@@ -412,6 +416,12 @@ func (s *Session) boot() error {
 	if err := s.initLua(); err != nil {
 		return err
 	}
+	// A rebuilt VM starts from default state; restore the live client
+	// state before any script runs so init.lua reads real dimensions
+	// and connection status from rune.state. No hook fires for this -
+	// scripts apply their initial layout from state, not from a
+	// synthetic resize event.
+	s.engine.UpdateState(s.clientState)
 	if err := s.loadCoreScripts(); err != nil {
 		return err
 	}

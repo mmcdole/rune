@@ -40,6 +40,10 @@ the current values, and writing any field raises an error.
 | `width` | number | Terminal width in columns |
 | `height` | number | Terminal height in rows |
 
+To react to resizes rather than poll, register a
+[`window_size_changed` hook](/reference/api/hooks/#notification-events);
+it fires with the new width and height after these fields update.
+
 Because it's always current, `rune.state` is the natural input for
 [bar renderers](/interface/bars/):
 

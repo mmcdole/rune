@@ -40,6 +40,12 @@ func (e *Engine) NotifyLoaded(path string) {
 	e.notify("loaded", path)
 }
 
+// NotifyWindowSizeChanged notifies Lua that the terminal size changed.
+// The caller updates rune.state first so handlers see matching values.
+func (e *Engine) NotifyWindowSizeChanged(width, height int) {
+	e.notify("window_size_changed", width, height)
+}
+
 // NotifyInputChanged notifies Lua that the input's current text changed.
 func (e *Engine) NotifyInputChanged(text string) {
 	e.notify("input_changed", text)

@@ -141,8 +141,26 @@ All handlers run; return values are ignored.
 | `loaded` | path | After `/load` or `rune.load` loads a file (not for startup auto-load) |
 | `error` | message | On reported errors |
 | `input_changed` | text | As the input line changes while typing |
+| `window_size_changed` | width, height | On the first reported terminal size and every resize; `rune.state.width`/`height` already hold the new values |
 | `gmcp` | package, data, raw JSON | On every GMCP message, before package-specific `rune.gmcp.on` handlers |
 | `gmcp_enabled` | none | GMCP negotiated; the core handler sends `Core.Hello` |
+
+`window_size_changed` receives the terminal columns and rows as numbers,
+so a script can switch layouts at its own breakpoint:
+
+```lua
+rune.hooks.on("window_size_changed", function(width, height)
+    if width < 80 then
+        rune.ui.layout({ bottom = { "input" } })
+    else
+        rune.ui.layout({ bottom = { "input", "status" } })
+    end
+end)
+```
+
+`/reload` does not fire it; apply your initial layout from
+`rune.state.width` when your script loads, and use the hook for later
+changes.
 
 ## Named core handlers
 

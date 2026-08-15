@@ -462,19 +462,21 @@ func escapeRawJSONControlsInStrings(raw string) string {
 }
 
 // notify dispatches a fire-and-forget event through the Lua hook registry.
-func (e *Engine) notify(event string, args ...string) {
+func (e *Engine) notify(event string, args ...any) {
 	callArgs := make([]any, len(args)+1)
 	callArgs[0] = event
-	for i, arg := range args {
-		callArgs[i+1] = arg
-	}
+	copy(callArgs[1:], args)
 
 	_, found, err := e.callHooks(0, callArgs...)
 	if !found {
 		e.reportHooksBroken()
 		// Errors must never disappear, even with hooks broken.
 		if event == "error" {
-			e.host.Print(text.Red("[Error] " + strings.Join(args, " ")))
+			parts := make([]string, len(args))
+			for i, arg := range args {
+				parts[i] = fmt.Sprint(arg)
+			}
+			e.host.Print(text.Red("[Error] " + strings.Join(parts, " ")))
 		}
 		return
 	}
