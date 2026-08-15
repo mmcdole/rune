@@ -101,10 +101,12 @@ application policy.
   through one bounded `Events()` channel.
 
 Bubble Tea's update/render goroutine never blocks waiting for Session to drain
-that channel; every event is offered with the same non-blocking send. Once an
-`InputSubmittedMsg` is accepted, the UI may clear its local draft because Session
-owns the immutable snapshot; Session clears its tracked draft and calls the
-`input_changed` hook before processing the submission. If the queue is full,
+that channel; every event is offered with the same non-blocking send. An
+`InputSubmittedMsg` atomically carries both the immutable authored submission
+and the editable draft that should follow it. Once Session accepts the event,
+the UI applies that same post-submit state locally; Session mirrors it and
+calls the `input_changed` hook when the draft text changed, before processing
+the submission. If the queue is full,
 the UI leaves a submission in the editor and shows a warning. Other rejected
 events are dropped with a warning. This keeps the UI responsive without
 silently losing typed input.
@@ -116,6 +118,8 @@ implements by default and the LuaJIT backend implements under `-tags luajit`.
 
 - **Single Host interface:** The Engine depends on one `lua.Host` interface (`lua/host.go`). Session implements it, with the methods grouped by service area across `session/lua_*.go` (network, ui, timers, system, history, session, store, log, state). Tests substitute a mock Host.
 - **Reactivity:** The Engine updates a global `rune.state` table whenever system state changes (connection, scroll position), allowing scripts to reactively render UI elements.
+- **Precommit input:** The Engine first folds an interactive submission through `input` hooks. Strings rewrite and chain, `nil` or other values pass through, and `false` consumes before history, echo, or routing. Session records and echoes the effective value, then the Engine invokes the separate internal command/verbatim dispatcher.
+- **Transactional config:** Go owns the typed config schema and defaults. Core scripts, user scripts, and ready hooks evaluate `rune.config.set` against a staged candidate during startup or reload; after they finish, Engine publishes one complete snapshot to Session. Later runtime updates publish immediately through a dedicated callback that does not re-enter Lua.
 
 ## 3. UI Architecture: The "Push" Model
 
@@ -213,7 +217,7 @@ Session turns those facts into Rune events:
 | A line delimiter arrives | Consume the completed line through `output` exactly once. Output and multi-line triggers see it. |
 | A GA/EOR prompt boundary follows server data in the same batch | Consume the non-empty partial line through `prompt(line, true)` without first exposing it as `confirmed = false`. |
 | A prompt boundary arrives in a later batch | Consume the previously observed partial line through `prompt(line, true)`. Empty boundaries do nothing. |
-| The user submits anything | Finish the partial line before history, local echo, input hooks, aliases, or slash commands. |
+| The user submits anything | Apply the atomic post-submit draft and finish the partial line; then run input hooks before local echo, history, aliases, or slash commands. |
 | A programmatic game send is accepted | Queue the write immediately. Finish the partial line after the active `network.EventBatch` has installed its final rewrite or gag. |
 
 Each trigger selects one stream: text may first reach prompt triggers while
@@ -224,14 +228,19 @@ an accepted game send commits its already processed overlay and closes spans;
 it does not run the prompt hook again. A send with no partial line leaves open
 spans alone.
 
-Every submission is a display boundary regardless of local echo, whether an
-input hook consumes it, whether it is a slash command, connection state, or a
-later send failure. Separately, Lua actions from aliases, triggers, timers, and
-other callbacks finish the partial line only when the connection accepts their
-game send. Deferring that finish to the end of the active batch keeps the wire
-write immediate while letting the callback that sent it rewrite or gag the
-visible line before it is committed. During inbound processing, `activeBatch`
-points to the `eventBatchState` for one `network.EventBatch`; it records
+Every submission closes any active partial-line display, regardless of whether
+an input hook consumes it, whether it is a slash command, connection state, or
+a later send failure. Input hooks run against the prior history and fold their
+string rewrites in priority order. A `false` result suppresses history, local
+echo, and dispatch; otherwise the final effective text is recorded, echoed,
+and routed. Command/verbatim routing is an internal Lua call after all input
+hooks, so there is no priority cutoff. Separately, Lua actions from aliases,
+triggers, timers, and other callbacks finish the partial line only when the
+connection accepts their game send. Deferring that finish to the end of the
+active batch keeps the wire write immediate while letting the callback that
+sent it rewrite or gag the visible line before it is committed. During inbound
+processing, `activeBatch` points to the `eventBatchState` for one
+`network.EventBatch`; it records
 whether server data arrived since the last prompt boundary and whether an
 accepted send owes a partial-line finish. Only after the complete batch has run
 does Session publish any remaining partial observation and perform the owed

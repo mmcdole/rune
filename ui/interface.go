@@ -20,7 +20,7 @@ type UI interface {
 	UpdateBars(content map[string]BarContent)
 	UpdateBinds(keys map[string]bool)
 	UpdateLayout(top, bottom []LayoutEntry)
-	UpdateConfig(cfg UserConfig)
+	UpdateConfig(cfg Config)
 
 	// Components
 	ShowPicker(opts ShowPickerMsg)

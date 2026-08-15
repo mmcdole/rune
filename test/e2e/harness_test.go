@@ -214,7 +214,7 @@ func (m *mockUI) SetInputSubmission(submission input.Submission) {
 func (m *mockUI) UpdateBars(content map[string]ui.BarContent) {}
 func (m *mockUI) UpdateBinds(keys map[string]bool)            {}
 func (m *mockUI) UpdateLayout(top, bottom []ui.LayoutEntry)   {}
-func (m *mockUI) UpdateConfig(cfg ui.UserConfig)              {}
+func (m *mockUI) UpdateConfig(cfg ui.Config)                  {}
 func (m *mockUI) ShowPicker(opts ui.ShowPickerMsg)            {}
 func (m *mockUI) ShowSearch(opts ui.ShowSearchMsg)            {}
 func (m *mockUI) SetClipboard(text string)                    {}

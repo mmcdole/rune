@@ -430,6 +430,78 @@ func TestOncePromptTriggerUsesFirstMatchingObservation(t *testing.T) {
 	}
 }
 
+func TestInputRewriteControlsEchoHistoryAndDispatch(t *testing.T) {
+	s, net, uiMock := newTestSession(t)
+	net.connected = true
+
+	if err := s.engine.DoString("rewrite input", `
+		history_seen_by_input = -1
+		history_seen_by_echo = -1
+		rune.hooks.on("input", function(text)
+			history_seen_by_input = #rune.history.get()
+			assert(text == "north")
+			return "east"
+		end, { name = "test-rewrite", priority = 90 })
+		rune.hooks.on("echo", function(text)
+			history_seen_by_echo = #rune.history.get()
+		end, { name = "test-history-before-echo", priority = 90 })
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	s.handleUIEvent(ui.InputSubmittedMsg{
+		Submission: input.Command("north"),
+		NextDraft:  "north",
+	})
+
+	if got := s.GetInput(); got != "north" {
+		t.Fatalf("retained editor draft = %q, want authored text", got)
+	}
+	if got := net.drainSent(); !slices.Equal(got, []string{"east"}) {
+		t.Fatalf("wire submission = %q, want rewritten text", got)
+	}
+	if got := s.GetHistoryEntries(); !slices.Equal(got, []input.Submission{input.Command("east")}) {
+		t.Fatalf("history = %+v, want rewritten submission", got)
+	}
+	echoed := uiMock.drainEchoed()
+	if len(echoed) != 1 || runetext.StripANSI(echoed[0]) != "> east" {
+		t.Fatalf("echo = %q, want rewritten submission", echoed)
+	}
+	assertSessionLua(t, s.engine, `
+		assert(history_seen_by_input == 0)
+		assert(history_seen_by_echo == 1)
+	`)
+}
+
+func TestConsumedInputHasNoEchoHistoryOrDispatch(t *testing.T) {
+	s, net, uiMock := newTestSession(t)
+	net.connected = true
+
+	if err := s.engine.DoString("consume input", `
+		rune.hooks.on("input", function()
+			rune.echo("input rejected")
+			return false
+		end, { name = "test-consume", priority = 90 })
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	s.handleSubmission(input.Command("north"))
+
+	if sent := net.drainSent(); len(sent) != 0 {
+		t.Fatalf("consumed input sent %q", sent)
+	}
+	if history := s.GetHistoryEntries(); len(history) != 0 {
+		t.Fatalf("consumed input entered history: %+v", history)
+	}
+	if echoed := uiMock.drainEchoed(); len(echoed) != 0 {
+		t.Fatalf("consumed input was locally echoed: %q", echoed)
+	}
+	if printed := uiMock.drainPrinted(); !contains(printed, "input rejected") {
+		t.Fatalf("consuming handler feedback missing: %q", printed)
+	}
+}
+
 func TestConfirmedPromptBatchFinishesAfterRewriteOrGag(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -1215,39 +1287,51 @@ func TestReloadRestoresDimensionsWithoutSyntheticResize(t *testing.T) {
 	`)
 }
 
-func TestConfigAssignmentPushesToUIAndReloadResets(t *testing.T) {
+func TestConfigSetPublishesRuntimeChangesAndOneFinalReloadSnapshot(t *testing.T) {
 	s, _, uiMock := newTestSession(t)
+	uiMock.drainConfigPushes()
 
 	if uiMock.pushedConfig().KeepInput {
 		t.Fatal("keep_input must default off")
 	}
 
-	assertSessionLua(t, s.engine, `rune.config.keep_input = true`)
+	assertSessionLua(t, s.engine, `rune.config.set("keep_input", true)`)
 	if !uiMock.pushedConfig().KeepInput {
-		t.Fatal("rune.config.keep_input = true did not reach the UI")
+		t.Fatal("keep_input=true did not reach the UI")
 	}
-	assertSessionLua(t, s.engine, `assert(rune.config.keep_input == true)`)
+	assertSessionLua(t, s.engine, `assert(rune.config.get("keep_input") == true)`)
+	if pushes := uiMock.drainConfigPushes(); len(pushes) != 1 || !pushes[0].KeepInput {
+		t.Fatalf("runtime config pushes = %+v, want one keep_input=true", pushes)
+	}
 
-	// A Lua-only key assignment must not disturb the pushed config.
-	assertSessionLua(t, s.engine, `rune.config.delimiter = "|"`)
+	// All settings share one typed API and complete snapshot. Changing the
+	// delimiter must retain keep_input and must not rebuild binds or bars.
+	assertSessionLua(t, s.engine, `rune.config.set("delimiter", "|")`)
 	if !uiMock.pushedConfig().KeepInput {
-		t.Fatal("unrelated config assignment reset keep_input")
+		t.Fatal("delimiter change reset keep_input")
 	}
+	uiMock.drainConfigPushes()
 
 	// Reload without an init.lua reverts to defaults.
 	s.handleReloadRequested()
 	if uiMock.pushedConfig().KeepInput {
 		t.Fatal("reload did not reset keep_input to its default")
 	}
+	if pushes := uiMock.drainConfigPushes(); len(pushes) != 1 || pushes[0].KeepInput {
+		t.Fatalf("default reload pushes = %+v, want exactly one final false snapshot", pushes)
+	}
 
 	// Reload with an init.lua that sets it reapplies the preference.
 	initPath := filepath.Join(s.config.ConfigDir, "init.lua")
-	if err := os.WriteFile(initPath, []byte("rune.config.keep_input = true\n"), 0o644); err != nil {
+	if err := os.WriteFile(initPath, []byte("rune.config.set(\"keep_input\", true)\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	s.handleReloadRequested()
 	if !uiMock.pushedConfig().KeepInput {
 		t.Fatal("reload did not reapply keep_input from init.lua")
+	}
+	if pushes := uiMock.drainConfigPushes(); len(pushes) != 1 || !pushes[0].KeepInput {
+		t.Fatalf("configured reload pushes = %+v, want exactly one final true snapshot", pushes)
 	}
 }
 
@@ -1258,8 +1342,8 @@ func TestHistoryDedupAndTrim(t *testing.T) {
 	for _, cmd := range []string{"a", "a", "b", "", "c", "d"} {
 		s.AddToHistory(cmd)
 	}
-	got := s.GetHistory()
-	want := []string{"b", "c", "d"}
+	got := s.GetHistoryEntries()
+	want := []input.Submission{input.Command("b"), input.Command("c"), input.Command("d")}
 	if len(got) != len(want) {
 		t.Fatalf("history = %v, want %v", got, want)
 	}
@@ -1299,13 +1383,6 @@ func TestHistoryPreservesModeAndDedupesWholeSubmission(t *testing.T) {
 		}
 	}
 
-	// The compatibility API deliberately projects both differently-modeled
-	// entries to strings, even when that makes adjacent text look duplicated.
-	legacy := s.GetHistory()
-	if got, want := strings.Join(legacy, "|"), "same|same|next"; got != want {
-		t.Fatalf("legacy history = %q, want %q", got, want)
-	}
-
 	// Callers receive a copy, not Session's canonical backing slice.
 	got[0] = input.Command("mutated")
 	if s.GetHistoryEntries()[0].Text != "same" {
@@ -1330,7 +1407,7 @@ func TestSetInputSubmissionForwardsExplicitMode(t *testing.T) {
 	}
 }
 
-func TestSubmissionEventClearsInputBeforeInputHooks(t *testing.T) {
+func TestSubmissionEventAppliesNextDraftBeforeInputHooks(t *testing.T) {
 	s, net, _ := newTestSession(t)
 	net.connected = true
 
@@ -1346,20 +1423,21 @@ func TestSubmissionEventClearsInputBeforeInputHooks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s.handleUIEvent(ui.InputChangedMsg{Text: "look", Cursor: 4})
-	s.handleUIEvent(ui.InputSubmittedMsg{Submission: input.Command("look")})
+	s.handleUIEvent(ui.InputSubmittedMsg{
+		Submission: input.Command("café"),
+		NextDraft:  "café",
+	})
 
-	if got := s.GetInput(); got != "" {
-		t.Fatalf("input after accepted submission = %q, want empty", got)
+	if got := s.GetInput(); got != "café" {
+		t.Fatalf("input after accepted submission = %q, want retained draft", got)
 	}
-	if got := s.InputGetCursor(); got != 0 {
-		t.Fatalf("cursor after accepted submission = %d, want 0", got)
+	if got := s.InputGetCursor(); got != len("café") {
+		t.Fatalf("cursor after accepted submission = %d, want end", got)
 	}
 	assertSessionLua(t, s.engine, `
-		assert(#observed == 3, "observed " .. table.concat(observed, " | "))
-		assert(observed[1] == "changed:look:look", observed[1])
-		assert(observed[2] == "changed::", observed[2])
-		assert(observed[3] == "input:look:", observed[3])
+		assert(#observed == 2, "observed " .. table.concat(observed, " | "))
+		assert(observed[1] == "changed:café:café", observed[1])
+		assert(observed[2] == "input:café:café", observed[2])
 	`)
 }
 
@@ -1426,9 +1504,6 @@ func TestVerbatimSubmissionPreservesPhysicalLines(t *testing.T) {
 		}
 	}
 
-	if history := s.GetHistory(); len(history) != 1 || history[0] != text {
-		t.Fatalf("history = %q, want one exact submission %q", history, text)
-	}
 	if history := s.GetHistoryEntries(); len(history) != 1 || history[0] != input.Verbatim(text) {
 		t.Fatalf("structured history = %+v, want one verbatim submission", history)
 	}

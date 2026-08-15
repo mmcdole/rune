@@ -14,7 +14,7 @@
 --   priority = 50         -- Execution order (lower = first, default 50)
 --
 -- Events (data-flow):
---   "input"        -- User input: (text, context); return false to consume
+--   "input"        -- User input: (text, context); strings rewrite, false consumes
 --   "output"       -- Server output line object (false gags, string rewrites)
 --   "prompt"       -- Prompt observation: (line, confirmed); confirmed is
 --                     false for a partial line, true for a GA/EOR-confirmed
@@ -148,8 +148,8 @@ end
 -- For output/prompt: chains modifications (each handler sees the
 --   previous handler's rewrite), false gags
 -- For echo: like output/prompt, but the argument is a plain string
---   (the text the user typed), not a line object
--- For input: false stops processing
+--   (the effective submitted text), not a line object
+-- For input: strings chain; false stops processing
 -- For sys events: all handlers run (notifications)
 --
 -- Return semantics for handlers:
@@ -166,7 +166,7 @@ function rune.hooks.call(event, ...)
         elseif event == "echo" then
             return select(1, ...), true
         elseif event == "input" then
-            return true
+            return select(1, ...)
         end
         return
     end
@@ -210,7 +210,7 @@ function rune.hooks.call(event, ...)
         return line:raw(), true
 
     elseif event == "echo" then
-        -- Echo receives the typed text as a plain string. Rewrites
+        -- Echo receives the effective submitted text as a plain string. Rewrites
         -- chain like output/prompt; false hides the echo entirely.
         local text = select(1, ...)
         for _, entry in ipairs(handlers) do
@@ -226,7 +226,8 @@ function rune.hooks.call(event, ...)
         return text, true
 
     elseif event == "input" then
-        -- Any handler returning false stops processing
+        -- Input is a pre-commit transform pass. Each handler sees the result
+        -- of the previous rewrite; false consumes the whole submission.
         local text = select(1, ...)
         local context = select(2, ...)
         local mode = context and context.mode or "command"
@@ -236,11 +237,13 @@ function rune.hooks.call(event, ...)
                 -- simply ignore the submission context.
                 local result = run_handler(entry, text, input_context(mode))
                 if result == false then
-                    return false  -- consumed/stopped
+                    return false
+                elseif type(result) == "string" then
+                    text = result
                 end
             end
         end
-        return true
+        return text
 
     else
         -- System events (notifications) - all handlers run.

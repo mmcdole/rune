@@ -67,25 +67,24 @@ type UpdateLayoutMsg struct {
 	Bottom []LayoutEntry
 }
 
-// UserConfig carries the UI-facing subset of rune.config, the Lua-owned
-// user preference table, as routed by the Session. Each field mirrors
-// one rune.config key.
-type UserConfig struct {
-	// KeepInput (rune.config.keep_input) keeps a submitted command in
-	// the input line, selected, so Enter resends it and typing
-	// replaces it.
+// Config carries the UI-facing subset of Rune's typed configuration.
+type Config struct {
+	// KeepInput keeps a submitted command selected in the input line, so Enter
+	// resends it and typing replaces it.
 	KeepInput bool
 }
 
-// UpdateConfigMsg pushes user preferences from Session to UI.
-type UpdateConfigMsg UserConfig
+// UpdateConfigMsg pushes UI-facing configuration from Session to UI.
+type UpdateConfigMsg Config
 
 // --- Push-based UI Messages (UI -> Session) ---
 
-// InputSubmittedMsg transfers an accepted input snapshot to Session. Once this
-// event is queued, the UI may clear its draft.
+// InputSubmittedMsg atomically transfers an accepted submission and the
+// editable draft that should follow it to Session. Once this event is queued,
+// the UI may apply the same transition locally.
 type InputSubmittedMsg struct {
 	Submission input.Submission
+	NextDraft  string // editable text after submit; cursor is at its end
 }
 
 func (InputSubmittedMsg) uiEvent() {}

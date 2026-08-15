@@ -46,20 +46,21 @@ end, {name = "auto-look"})
 
 Handlers run in priority order (lower first, default 50).
 
-For `output`, `prompt`, and `echo`: `nil` passes through, a string
-replaces the text for subsequent handlers (rewrites chain), and `false`
-stops the chain (gag or hide).
+For `output`, `prompt`, `echo`, and `input`, a string replaces the text for
+subsequent handlers, so rewrites chain in priority order. `nil` and other
+values pass the current text through. `false` stops the chain: it gags output
+or a prompt, hides an echo, or consumes an input submission.
 
-For `input`: `false` consumes the submission; other return values are ignored.
-Input handlers cannot rewrite by returning a string. Use `rune.input.set`, or
-call `rune.send`/`rune.send_raw` yourself and return `false`.
+Input is a precommit hook. A consumed submission is not locally echoed, added
+to history, or dispatched. Otherwise its final effective text is recorded,
+echoed, and routed after every input handler has run.
 
 | Event | Handler receives | Fired |
 |---|---|---|
-| `input` | submitted text, context | Once per submission, before command or verbatim routing |
+| `input` | submitted text, context | At precommit, before local echo, history, and command or verbatim routing |
 | `output` | line object (`:raw()`, `:clean()`) | Once for every complete server line |
 | `prompt` | line object, `confirmed` boolean | On cumulative partial-line observations and GA/EOR-confirmed prompts |
-| `echo` | typed text | On each physical line of local echo; skipped while the server has echo suppressed (passwords) |
+| `echo` | effective input text | On each physical line after input rewrites; skipped while the server has echo suppressed (passwords) |
 
 `prompt` drives the prompt overlay. With `confirmed = false`, the value is a
 partial line. It may be `Username:` or only the start of an ordinary line, and
@@ -72,12 +73,12 @@ confirm a partial line.
 
 Finishing a partial line means one thing throughout Rune: the prompt overlay
 is committed to scrollback and open trigger spans close. Every user submission
-finishes the partial line before history, echo, and input hooks run, even for
-a local slash command, a consumed submission, a disconnected submission, or
-one whose eventual send fails. Separately, a programmatic game line from an
-alias, trigger, timer, or other callback finishes it only after the connection
-accepts the send. A failed programmatic send and protocol traffic such as GMCP
-do not.
+finishes the partial line before input hooks and any echo, history, or routing,
+even for a local slash command, a consumed submission, a disconnected
+submission, or one whose eventual send fails. Separately, a programmatic game
+line from an alias, trigger, timer, or other callback finishes it only after
+the connection accepts the send. A failed programmatic send and protocol
+traffic such as GMCP do not.
 
 If the partial text was really the start of a fragmented ordinary line,
 sending commits the visible prefix; the rest arrives through `output` as a new
@@ -98,7 +99,8 @@ or accepted send commits its latest processed overlay without calling the
 `prompt` hook again.
 
 Every `input` handler receives `(text, context)`. The context is read-only, and
-`context.mode` is always `"command"` or `"verbatim"`:
+`context.mode` is always `"command"` or `"verbatim"`. Each handler sees the
+text returned by the preceding handler:
 
 ```lua
 rune.hooks.on("input", function(text, context)
@@ -106,25 +108,43 @@ rune.hooks.on("input", function(text, context)
         -- The handler sees the whole submission once, line breaks included.
         rune.echo("Sending verbatim block (" .. #text .. " bytes)")
     end
+    return text:gsub("^l$", "look")
 end, { priority = 10 })
 ```
 
-Command mode applies Rune aliases, separators, repeats, and slash commands.
-Verbatim mode bypasses command processing and splits LF, CRLF, and bare CR into
-physical lines. Custom `input` handlers still receive the whole submission
-once. Existing one-argument handlers remain valid because Lua ignores extra
-arguments.
+Input hooks run before the current submission enters history, so a handler
+that calls `rune.history.get()` sees only earlier accepted submissions. A
+string rewrite controls the later local echo, history entry, and dispatch.
+Existing one-argument handlers remain valid because Lua ignores the context
+argument. Echo hooks run after the effective submission is recorded and can
+therefore observe its history entry.
 
-The core registers its own handlers at priority 100: command or verbatim
-routing on `input`, trigger processing on `output`/`prompt`,
-the `> ` styling on `echo`. For `output`/`prompt`/`echo`, register
-below 100 to run before the core, or above 100 to see its results
+Command mode applies Rune aliases, separators, `#N` repeats, and slash
+commands after the input-hook chain. Verbatim mode instead splits LF, CRLF,
+and bare CR into physical lines without command processing. Routing is an
+internal step, not an input hook, so there is no priority cutoff: handlers at
+any priority run unless an earlier handler returns `false`.
+
+The named core input hook `history-expansion` runs at priority 100. On
+interactive command submissions, complete delimiter-separated components
+matching `!`, `!!`, or `!prefix` expand from the prior command history. It
+skips slash-command entries, verbatim entries, and entries that contain an
+unresolved bang designator. If any designator has no match, it warns and
+consumes the entire submission. A submission beginning with `/` bypasses this
+hook, leaving local-command arguments literal. Disable it with:
+
+```lua
+rune.hooks.remove("history-expansion")
+```
+
+History expansion is not command dispatch: `rune.send("!")` sends a literal
+`!`, and verbatim submissions never expand it. Hooks below priority 100 see
+the text before the core expansion; hooks above 100 see its result.
+
+For `output`, `prompt`, and `echo`, the core handlers remain at priority 100:
+trigger processing on `output`/`prompt` and the `> ` styling on `echo`.
+Register below 100 to run before them, or above 100 to see their results
 (post-trigger rewrites; gagged lines never reach you).
-
-:::caution
-The core `input` handler always returns `false`, so `input` handlers
-must register with a priority **below 100** to run at all.
-:::
 
 ## Notification events
 
@@ -167,8 +187,9 @@ changes.
 Handlers the core registers under stable names, so you can disable or
 replace them: `log-output`, `log-echo` (logging policy, priority 200),
 `gmcp-hello` (the GMCP handshake), `gmcp-reset`, `first-run-welcome`,
-and `_completion_cache` / `_completion_input` (tab-completion word
-harvesting, priority 200).
+`history-expansion` (interactive `!` expansion, priority 100), and
+`_completion_cache` / `_completion_input` (tab-completion word harvesting,
+priority 200).
 
 ## Managing
 

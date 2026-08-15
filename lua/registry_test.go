@@ -91,8 +91,8 @@ func TestRegistryOnceAlias(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	engine.OnInput("gg")
-	engine.OnInput("gg")
+	dispatchTestCommand(engine, "gg")
+	dispatchTestCommand(engine, "gg")
 
 	sent := host.DrainNetworkCalls()
 	// First use expands; the alias is gone for the second, which goes

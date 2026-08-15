@@ -2,38 +2,74 @@ package lua
 
 import "github.com/mmcdole/rune/script"
 
-// UserConfig is the Go-relevant subset of rune.config, the Lua-owned
-// user preference table. Lua pushes the whole table on every
-// assignment; Go parses only the keys a Go consumer needs, so adding a
-// preference here is a new field plus its consumer, never new
-// plumbing. Keys with no field (delimiter) stay Lua-only. Zero values
-// must match the Lua defaults in 00_init.lua.
-type UserConfig struct {
-	KeepInput bool // keep_input: keep a sent command selected in the input line
+// Config is Rune's typed application configuration. Go owns the values,
+// defaults, and validation; Lua exposes the public rune.config facade.
+type Config struct {
+	Delimiter string
+	KeepInput bool
 }
 
-// registerConfigFuncs registers the rune._config primitive behind the
-// rune.config proxy (00_init.lua).
+func defaultConfig() Config {
+	return Config{
+		Delimiter: ";",
+		KeepInput: false,
+	}
+}
+
+// registerConfigFuncs registers the rune._config primitives behind the public
+// rune.config.get/set wrappers in 00_init.lua.
 func (e *Engine) registerConfigFuncs() {
 	e.vm.RegisterModule("rune._config", map[string]script.GoFunc{
-		// rune._config.set(config) - push the full rune.config table.
-		// The host is notified only when a Go-relevant key changed, so
-		// Lua-only assignments and the load-time defaults sync are
-		// free of side effects.
-		"set": func(c *script.Call) error {
-			cfg := UserConfig{
-				KeepInput: c.Table(1).Field("keep_input").Bool(),
+		"get": func(c *script.Call) error {
+			if c.Arg(1).Kind() != script.KindString {
+				return c.Errorf("config key must be a string")
 			}
-			if cfg != e.userConfig {
-				e.userConfig = cfg
-				e.host.OnConfigChange()
+			switch key := c.Str(1); key {
+			case "delimiter":
+				c.Return(e.config.Delimiter)
+			case "keep_input":
+				c.Return(e.config.KeepInput)
+			default:
+				return c.Errorf("unknown config key %q", key)
+			}
+			return nil
+		},
+
+		"set": func(c *script.Call) error {
+			if c.Arg(1).Kind() != script.KindString {
+				return c.Errorf("config key must be a string")
+			}
+			before := e.config
+			switch key := c.Str(1); key {
+			case "delimiter":
+				if c.Arg(2).Kind() != script.KindString {
+					return c.Errorf("config %q must be a string", key)
+				}
+				delimiter := c.Str(2)
+				if delimiter == "" {
+					return c.Errorf("config %q must not be empty", key)
+				}
+				e.config.Delimiter = delimiter
+			case "keep_input":
+				e.config.KeepInput = c.Bool(2)
+			default:
+				return c.Errorf("unknown config key %q", key)
+			}
+			if e.config != before && !e.configStaging {
+				e.host.OnConfigChange(e.config)
 			}
 			return nil
 		},
 	}, nil)
 }
 
-// GetUserConfig returns the current Lua-defined user preferences.
-func (e *Engine) GetUserConfig() UserConfig {
-	return e.userConfig
+// CommitConfig finishes the configuration transaction started by Init and
+// publishes its final typed value exactly once. Subsequent changes are
+// published immediately by rune.config.set.
+func (e *Engine) CommitConfig() {
+	if !e.configStaging {
+		return
+	}
+	e.configStaging = false
+	e.host.OnConfigChange(e.config)
 }

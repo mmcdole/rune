@@ -17,17 +17,19 @@ type MockHost struct {
 	mu sync.Mutex
 
 	// Captured calls
-	SendCalls       []string
-	PrintCalls      []string
-	QuitCalled      bool
-	ConnectCalls    []string
-	DisconnectCalls int
-	ReloadCalls     int
-	PaneCalls       []struct{ Op, Name, Data string }
-	PickerCalls     []ui.ShowPickerMsg
-	SearchCalls     []ui.ShowSearchMsg
-	ClipboardCalls  []string
-	ScheduledTimers []struct {
+	SendCalls           []string
+	PrintCalls          []string
+	QuitCalled          bool
+	ConnectCalls        []string
+	DisconnectCalls     int
+	ReloadCalls         int
+	PaneCalls           []struct{ Op, Name, Data string }
+	PickerCalls         []ui.ShowPickerMsg
+	SearchCalls         []ui.ShowSearchMsg
+	ClipboardCalls      []string
+	ConfigChanges       []Config
+	PresentationChanges int
+	ScheduledTimers     []struct {
 		ID       int
 		Duration time.Duration
 		Repeat   bool
@@ -67,8 +69,7 @@ type MockHost struct {
 	InputCursor int
 	InputMode   input.SubmissionMode
 
-	// Command history returned by GetHistory, oldest first
-	History        []string
+	// Command history, oldest first.
 	HistoryEntries []input.Submission
 }
 
@@ -172,8 +173,32 @@ func (m *MockHost) PaneClear(name string) {
 	m.PaneCalls = append(m.PaneCalls, struct{ Op, Name, Data string }{"clear", name, ""})
 }
 
-func (m *MockHost) OnConfigChange() {
-	// No-op for tests - config change notifications not tracked
+func (m *MockHost) OnPresentationChange() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.PresentationChanges++
+}
+
+func (m *MockHost) OnConfigChange(config Config) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.ConfigChanges = append(m.ConfigChanges, config)
+}
+
+func (m *MockHost) DrainConfigChanges() []Config {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	changes := append([]Config(nil), m.ConfigChanges...)
+	m.ConfigChanges = nil
+	return changes
+}
+
+func (m *MockHost) DrainPresentationChanges() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	changes := m.PresentationChanges
+	m.PresentationChanges = 0
+	return changes
 }
 
 func (m *MockHost) ShowPicker(opts ui.ShowPickerMsg) {
@@ -194,30 +219,10 @@ func (m *MockHost) ClipboardSet(text string) {
 	m.ClipboardCalls = append(m.ClipboardCalls, text)
 }
 
-func (m *MockHost) GetHistory() []string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.HistoryEntries != nil {
-		result := make([]string, len(m.HistoryEntries))
-		for i, entry := range m.HistoryEntries {
-			result[i] = entry.Text
-		}
-		return result
-	}
-	return append([]string(nil), m.History...)
-}
-
 func (m *MockHost) GetHistoryEntries() []input.Submission {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.HistoryEntries != nil {
-		return append([]input.Submission(nil), m.HistoryEntries...)
-	}
-	result := make([]input.Submission, len(m.History))
-	for i, text := range m.History {
-		result[i] = input.Command(text)
-	}
-	return result
+	return append([]input.Submission(nil), m.HistoryEntries...)
 }
 
 func (m *MockHost) SessionSet(key, value string) {
@@ -271,24 +276,11 @@ func (m *MockHost) AddToHistory(cmd string) {
 	defer m.mu.Unlock()
 	// Mirror the session's contract: skip empty and adjacent-duplicate
 	// entries, so Lua-layer tests observe real history semantics.
-	if cmd == "" || (len(m.History) > 0 && m.History[len(m.History)-1] == cmd) {
+	entry := input.Command(cmd)
+	if cmd == "" || (len(m.HistoryEntries) > 0 && m.HistoryEntries[len(m.HistoryEntries)-1] == entry) {
 		return
 	}
-	m.History = append(m.History, cmd)
-	if m.HistoryEntries != nil {
-		m.HistoryEntries = append(m.HistoryEntries, input.Command(cmd))
-	}
-}
-
-func (m *MockHost) PopHistory() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if len(m.History) > 0 {
-		m.History = m.History[:len(m.History)-1]
-	}
-	if len(m.HistoryEntries) > 0 {
-		m.HistoryEntries = m.HistoryEntries[:len(m.HistoryEntries)-1]
-	}
+	m.HistoryEntries = append(m.HistoryEntries, entry)
 }
 
 func (m *MockHost) LogStart(path string) (string, error) {

@@ -52,6 +52,21 @@ func TestInputValueAndCursorRoundTrip(t *testing.T) {
 	}
 }
 
+func TestInputSetCursorReleasesWholeLineSelection(t *testing.T) {
+	in := newTestInput(40)
+	in.SetValue("north")
+	in.SelectAll()
+
+	in.SetCursor(2)
+
+	if in.Selected() {
+		t.Fatal("moving the cursor left the whole line selected")
+	}
+	if got := in.Value(); got != "north" {
+		t.Fatalf("moving the cursor changed input to %q", got)
+	}
+}
+
 func TestInputPickerOverlayGrowsView(t *testing.T) {
 	in := newTestInput(40)
 	items := []ui.PickerItem{

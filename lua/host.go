@@ -66,13 +66,8 @@ type Host interface {
 	RefreshBars() // Force immediate bar refresh
 
 	// History
-	GetHistory() []string
 	GetHistoryEntries() []input.Submission
 	AddToHistory(cmd string)
-	// PopHistory removes the newest entry. It exists so the core `!`
-	// alias can replace the recorded bang line with its expansion,
-	// shell-style; pop-then-add inherits AddToHistory's adjacent dedup.
-	PopHistory()
 
 	// Session store: a small Go-owned string store that survives
 	// script reloads (but not client exit). Lets Lua keep state
@@ -106,7 +101,11 @@ type Host interface {
 	HTTPRequest(id int, req HTTPRequest)
 
 	// State
-	OnConfigChange()
+	// OnConfigChange applies one complete, validated configuration
+	// generation. It is separate from presentation invalidation so changing a
+	// setting cannot trigger Lua re-entry to rebuild binds, layout, and bars.
+	OnConfigChange(Config)
+	OnPresentationChange()
 }
 
 // HTTPRequest describes one request handed to Host.HTTPRequest.

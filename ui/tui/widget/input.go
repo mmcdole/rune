@@ -223,6 +223,7 @@ func (i *Input) Position() int {
 
 // SetCursor sets the cursor position.
 func (i *Input) SetCursor(pos int) {
+	i.Deselect()
 	if i.composer != nil {
 		i.composer.SetCursor(pos)
 		return

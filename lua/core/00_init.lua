@@ -3,27 +3,27 @@
 -- rune.version is set by Go (single-sourced from the version package,
 -- which the telnet TTYPE/MNES responders also report) - data, not API.
 
--- User preferences. Plain assignment is the whole API:
---   rune.config.keep_input = true
--- rune.config is a proxy: every assignment pushes the full table to
--- the client, which reads the keys it knows (keep_input) and leaves
--- Lua-only keys (delimiter) to their Lua consumers. Lua never decides
--- which keys the client consumes. Defaults here must match the client
--- defaults; the set() below keeps them in sync explicitly.
-local config_values = {
-    delimiter = ";",
-    keep_input = false,
-}
+-- Application configuration. Go owns the typed values and defaults; these
+-- wrappers keep the public API in Lua like every other rune.* namespace.
+rune.config = {}
 
-rune.config = setmetatable({}, {
-    __index = config_values,
-    __newindex = function(_, key, value)
-        config_values[key] = value
-        rune._config.set(config_values)
+function rune.config.get(key)
+    return rune._config.get(key)
+end
+
+function rune.config.set(key, value)
+    return rune._config.set(key, value)
+end
+
+setmetatable(rune.config, {
+    __newindex = function()
+        error("config values cannot be assigned directly; use rune.config.set(key, value)", 2)
     end,
 })
 
-rune._config.set(config_values)
+-- Interactive input helpers are filled in by later core scripts. Create the
+-- namespace here so dispatch can be defined before navigation and binds load.
+rune.input = {}
 
 rune.debug = false
 
@@ -254,7 +254,12 @@ end
 rune.history = {}
 
 function rune.history.get()
-    return rune._history.get()
+    local entries = rune._history.entries()
+    local history = {}
+    for i, entry in ipairs(entries) do
+        history[i] = entry.text
+    end
+    return history
 end
 
 function rune.history.add(cmd)

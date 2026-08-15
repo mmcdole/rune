@@ -394,20 +394,21 @@ func (m *Model) appendMessage(text string) {
 	m.appendRows(splitRows(text, m.width)...)
 }
 
-// submit offers a submitted input snapshot to the session. It rejects
-// oversized verbatim drafts or a busy engine with a visible warning rather
-// than blocking the render loop; false tells the controller to retain them.
-func (m *Model) submit(submission input.Submission) bool {
-	if submission.Mode == input.ModeVerbatim {
-		lineCount := len(submission.PhysicalLines())
-		if len(submission.Text) > maxVerbatimBytes || lineCount > maxVerbatimLines {
+// submit offers a submission and its following draft to the session as one
+// transition. It rejects oversized verbatim drafts or a busy engine with a
+// visible warning rather than blocking the render loop; false tells the
+// controller to retain the current local draft.
+func (m *Model) submit(msg ui.InputSubmittedMsg) bool {
+	if msg.Submission.Mode == input.ModeVerbatim {
+		lineCount := len(msg.Submission.PhysicalLines())
+		if len(msg.Submission.Text) > maxVerbatimBytes || lineCount > maxVerbatimLines {
 			// A size rejection is local validation, not queue pressure, so
 			// the normal reporting append keeps scroll state in sync.
 			m.appendMessage(text.Red("[WARNING] Verbatim input not sent - limit is 1000 lines or 256 KiB"))
 			return false
 		}
 	}
-	if m.tryPost(ui.InputSubmittedMsg{Submission: submission}) {
+	if m.tryPost(msg) {
 		return true
 	}
 	m.showWarning("Input not sent - engine lagging")

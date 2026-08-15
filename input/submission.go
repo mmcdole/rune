@@ -1,5 +1,5 @@
-// Package input defines the user-authored text that crosses from the
-// interactive composer into the session.
+// Package input defines typed submissions as they move from the interactive
+// composer through Session and Lua policy.
 package input
 
 import "strings"
@@ -21,7 +21,8 @@ func (m SubmissionMode) String() string {
 	return "command"
 }
 
-// Submission holds submitted text and its interpretation mode.
+// Submission holds text at one input-pipeline stage and its interpretation
+// mode. Lua may rewrite Text; Mode remains Go-owned and immutable by policy.
 type Submission struct {
 	Text string
 	Mode SubmissionMode

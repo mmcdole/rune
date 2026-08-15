@@ -45,7 +45,9 @@ func assertInputMode(t *testing.T, host *MockHost, want input.SubmissionMode) {
 func TestHistoryNavigationCyclesWithEmptyDraft(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
-	host.History = []string{"alpha", "bravo", "charlie"} // oldest first
+	host.HistoryEntries = []input.Submission{
+		input.Command("alpha"), input.Command("bravo"), input.Command("charlie"),
+	}
 
 	// Up walks newest -> oldest and sticks at the oldest entry.
 	for _, want := range []string{"charlie", "bravo", "alpha", "alpha"} {
@@ -63,7 +65,9 @@ func TestHistoryNavigationCyclesWithEmptyDraft(t *testing.T) {
 func TestHistoryNavigationPrefixMatching(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
-	host.History = []string{"north", "say hi", "nod"}
+	host.HistoryEntries = []input.Submission{
+		input.Command("north"), input.Command("say hi"), input.Command("nod"),
+	}
 
 	// A typed prefix restricts navigation to matching entries.
 	typeInput(engine, host, "n")
@@ -84,7 +88,7 @@ func TestHistoryNavigationPrefixMatching(t *testing.T) {
 func TestHistoryNavigationResetOnExternalEdit(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
-	host.History = []string{"look", "smile"}
+	host.HistoryEntries = []input.Submission{input.Command("look"), input.Command("smile")}
 
 	engine.HandleKeyBind("up")
 	assertInput(t, host, "smile")
@@ -100,14 +104,14 @@ func TestHistoryNavigationResetOnExternalEdit(t *testing.T) {
 func TestHistoryNavigationResetOnSubmit(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
-	host.History = []string{"first", "second"}
+	host.HistoryEntries = []input.Submission{input.Command("first"), input.Command("second")}
 
 	engine.HandleKeyBind("up")
 	engine.HandleKeyBind("up")
 	assertInput(t, host, "first")
 
 	// Submitting input resets navigation (input hook at priority 1).
-	engine.OnInput("go")
+	dispatchTestCommand(engine, "go")
 	host.SetInput("")
 
 	engine.HandleKeyBind("up")
@@ -386,7 +390,7 @@ func TestTabCompletionIgnoresShortPrefixAndInput(t *testing.T) {
 	assertInput(t, host, "g")
 
 	// User input also seeds the cache.
-	engine.OnInput("brandish sword")
+	dispatchTestCommand(engine, "brandish sword")
 	typeInput(engine, host, "bra")
 	engine.HandleKeyBind("tab")
 	assertInput(t, host, "brandish ")

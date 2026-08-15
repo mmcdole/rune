@@ -4,10 +4,12 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/mmcdole/rune/input"
 	"github.com/mmcdole/rune/text"
 	"github.com/mmcdole/rune/version"
 )
@@ -74,9 +76,9 @@ func TestWatchdogStateUsableAfterInterrupt(t *testing.T) {
 	}
 }
 
-// TestBrokenHooksDegradesGracefully verifies that destroying rune.hooks
-// from a user script does not crash the client: output passes through
-// raw, input goes to the server, and the escape hatches keep working.
+// TestBrokenHooksDegradesGracefully verifies that destroying rune.hooks does
+// not crash the client: output passes through raw while the independent input
+// dispatcher continues routing commands.
 func TestBrokenHooksDegradesGracefully(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
@@ -93,17 +95,17 @@ func TestBrokenHooksDegradesGracefully(t *testing.T) {
 	}
 
 	// Input goes straight to the server
-	engine.OnInput("north")
+	dispatchTestCommand(engine, "north")
 	if sent := host.DrainNetworkCalls(); len(sent) != 1 || sent[0] != "north" {
 		t.Errorf("expected raw send of input, got %v", sent)
 	}
 
 	// Escape hatches still work
-	engine.OnInput("/quit")
+	dispatchTestCommand(engine, "/quit")
 	if !host.QuitCalled {
 		t.Error("expected /quit to reach host in degraded mode")
 	}
-	engine.OnInput("/reload")
+	dispatchTestCommand(engine, "/reload")
 	if host.ReloadCalls != 1 {
 		t.Errorf("expected /reload to reach host in degraded mode, got %d calls", host.ReloadCalls)
 	}
@@ -111,12 +113,79 @@ func TestBrokenHooksDegradesGracefully(t *testing.T) {
 	// The warning is printed exactly once
 	warnings := 0
 	for _, p := range host.DrainPrintCalls() {
-		if strings.Contains(p, "rune.hooks.call is unavailable") {
+		if strings.Contains(p, "core Lua pipeline is incomplete") {
 			warnings++
 		}
 	}
 	if warnings != 1 {
 		t.Errorf("expected exactly one degraded-mode warning, got %d", warnings)
+	}
+}
+
+func TestMissingInputDispatcherUsesGoFallback(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	if err := engine.DoString("remove dispatcher", `rune.input._dispatch = nil`); err != nil {
+		t.Fatal(err)
+	}
+
+	dispatchTestCommand(engine, "north")
+	dispatchTestSubmission(engine, input.Verbatim("one\r\ntwo"))
+	dispatchTestCommand(engine, "/quit")
+	dispatchTestCommand(engine, "/reload")
+
+	if got, want := host.DrainNetworkCalls(), []string{"north", "one", "two"}; !slices.Equal(got, want) {
+		t.Fatalf("fallback sends = %q, want %q", got, want)
+	}
+	if !host.QuitCalled || host.ReloadCalls != 1 {
+		t.Fatalf("fallback escape hatches: quit=%v reload=%d", host.QuitCalled, host.ReloadCalls)
+	}
+}
+
+func TestFailingInputDispatcherIsNotRetried(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	if err := engine.DoString("broken dispatcher", `
+		function rune.input._dispatch(text)
+			rune.send_raw(text .. ":once")
+			error("dispatch failed after send")
+		end
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	dispatchTestCommand(engine, "north")
+	if got, want := host.DrainNetworkCalls(), []string{"north:once"}; !slices.Equal(got, want) {
+		t.Fatalf("dispatcher sends = %q, want no fallback duplicate %q", got, want)
+	}
+}
+
+func TestMalformedInputHookResultCancelsSubmission(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	if err := engine.DoString("malformed hooks", `
+		function rune.hooks.call()
+			return true
+		end
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	if dispatchTestCommand(engine, "north") {
+		t.Fatal("malformed input-hook result was accepted")
+	}
+	if sent := host.DrainNetworkCalls(); len(sent) != 0 {
+		t.Fatalf("malformed input-hook result sent %q", sent)
+	}
+	warned := false
+	for _, line := range host.DrainPrintCalls() {
+		warned = warned || strings.Contains(line, "core Lua pipeline is incomplete")
+	}
+	if !warned {
+		t.Fatal("malformed input-hook result produced no visible warning")
 	}
 }
 
@@ -276,8 +345,7 @@ func TestFailingHookIsQuarantined(t *testing.T) {
 
 // TestFailingCommandIsQuarantinedIndividually verifies that a slash
 // command throwing repeatedly is disabled by itself - its failures
-// must not accrue against the core input hook, which would take the
-// whole input pipeline (including /reload) down with it.
+// must not disable the shared input pipeline (including /reload).
 func TestFailingCommandIsQuarantinedIndividually(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
@@ -288,7 +356,7 @@ func TestFailingCommandIsQuarantinedIndividually(t *testing.T) {
 	}
 
 	for i := 0; i < 3; i++ {
-		engine.OnInput("/badcmd")
+		dispatchTestCommand(engine, "/badcmd")
 	}
 
 	disabled := false
@@ -303,13 +371,13 @@ func TestFailingCommandIsQuarantinedIndividually(t *testing.T) {
 
 	// The input pipeline must still be alive: plain input sends, and
 	// other slash commands still dispatch.
-	engine.OnInput("north")
+	dispatchTestCommand(engine, "north")
 	sent := host.DrainNetworkCalls()
 	if len(sent) != 1 || sent[0] != "north" {
 		t.Fatalf("input pipeline dead after command quarantine: sent %v", sent)
 	}
 
-	engine.OnInput("/badcmd")
+	dispatchTestCommand(engine, "/badcmd")
 	sawDisabled := false
 	for _, p := range host.DrainPrintCalls() {
 		if strings.Contains(p, "is disabled") {
@@ -715,9 +783,9 @@ func TestWatchdogPausedDuringBlockingHostCall(t *testing.T) {
 }
 
 // TestWatchdogRunawayHookDoesNotHang verifies the watchdog also covers
-// the hook dispatch path (OnInput), not just direct script execution.
+// the precommit input-hook path, not just direct script execution.
 func TestWatchdogRunawayHookDoesNotHang(t *testing.T) {
-	engine, _, cleanup := setupTest(t)
+	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 
 	engine.CallTimeout = 100 * time.Millisecond
@@ -727,16 +795,28 @@ func TestWatchdogRunawayHookDoesNotHang(t *testing.T) {
 		t.Fatalf("setup failed: %v", err)
 	}
 
-	done := make(chan struct{})
+	done := make(chan bool, 1)
 	go func() {
-		engine.OnInput("north")
-		close(done)
+		done <- dispatchTestCommand(engine, "north")
 	}()
 
 	select {
-	case <-done:
+	case proceed := <-done:
+		if proceed {
+			t.Fatal("runaway input hook failed open")
+		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("OnInput hung despite watchdog")
+		t.Fatal("input hook dispatch hung despite watchdog")
+	}
+	if sent := host.DrainNetworkCalls(); len(sent) != 0 {
+		t.Fatalf("runaway input hook dispatched authored input: %q", sent)
+	}
+	reported := false
+	for _, line := range host.DrainPrintCalls() {
+		reported = reported || strings.Contains(line, "interrupted")
+	}
+	if !reported {
+		t.Fatal("runaway input hook cancellation was not reported")
 	}
 }
 

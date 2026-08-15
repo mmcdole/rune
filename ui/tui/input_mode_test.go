@@ -36,13 +36,14 @@ func (r *recordingSearchEffects) CancelSearch() { r.cancels++ }
 // controllerHarness drives an inputController directly, recording UI events
 // and submitted lines.
 type controllerHarness struct {
-	ctl       *inputController
-	events    []ui.UIEvent
-	submitted []input.Submission
-	bound     map[string]bool
-	accept    bool
-	fx        *recordingSearchEffects
-	buf       *widget.ScrollbackBuffer
+	ctl        *inputController
+	events     []ui.UIEvent
+	submitted  []input.Submission
+	nextDrafts []string
+	bound      map[string]bool
+	accept     bool
+	fx         *recordingSearchEffects
+	buf        *widget.ScrollbackBuffer
 }
 
 func newControllerHarness() *controllerHarness {
@@ -57,8 +58,9 @@ func newControllerHarness() *controllerHarness {
 	h.ctl = newInputController(
 		draftInput,
 		func(ev ui.UIEvent) { h.events = append(h.events, ev) },
-		func(submission input.Submission) bool {
-			h.submitted = append(h.submitted, submission)
+		func(msg ui.InputSubmittedMsg) bool {
+			h.submitted = append(h.submitted, msg.Submission)
+			h.nextDrafts = append(h.nextDrafts, msg.NextDraft)
 			return h.accept
 		},
 		func(key string) bool { return h.bound[key] },
@@ -215,6 +217,9 @@ func TestAcceptedSubmissionClearsLocalDraftOnce(t *testing.T) {
 	}
 	if got := h.ctl.input.Value(); got != "" {
 		t.Fatalf("expected input cleared after submit, got %q", got)
+	}
+	if len(h.nextDrafts) != 1 || h.nextDrafts[0] != "" {
+		t.Fatalf("next drafts = %q, want one empty draft", h.nextDrafts)
 	}
 	if len(h.events) != 0 {
 		t.Fatalf("accepted submission emitted redundant input event: %v", h.events)
@@ -779,7 +784,7 @@ func TestSearchOverPickerSettlesPickerFirst(t *testing.T) {
 	}
 }
 
-// --- keep-in-input (rune.config.keep_input) ---
+// --- keep-in-input (keep_input config) ---
 
 // submitKept submits text with keep-on-submit active and returns the
 // harness in the kept-selected state.
@@ -807,11 +812,13 @@ func TestKeepOnSubmitKeepsCommandSelectedAndResends(t *testing.T) {
 	if !h.ctl.input.Selected() {
 		t.Fatal("kept input must be selected")
 	}
-	// The session cleared its tracked draft on accept, so the kept text
-	// must be re-reported exactly once.
-	changes := h.inputChanges()
-	if len(changes) != 1 || changes[0].Text != "north" {
-		t.Fatalf("expected one InputChangedMsg with kept text, got %v", changes)
+	// The kept draft is part of the accepted submission transition, so it
+	// cannot be dropped as a second notification.
+	if len(h.nextDrafts) != 1 || h.nextDrafts[0] != "north" {
+		t.Fatalf("next drafts = %q, want [north]", h.nextDrafts)
+	}
+	if changes := h.inputChanges(); len(changes) != 0 {
+		t.Fatalf("kept submit emitted redundant input changes: %v", changes)
 	}
 
 	// Enter again resends and stays kept.
@@ -821,6 +828,9 @@ func TestKeepOnSubmitKeepsCommandSelectedAndResends(t *testing.T) {
 	}
 	if !h.ctl.input.Selected() {
 		t.Fatal("resend must keep the selection")
+	}
+	if len(h.nextDrafts) != 2 || h.nextDrafts[1] != "north" {
+		t.Fatalf("resend next drafts = %q, want two copies of north", h.nextDrafts)
 	}
 }
 
@@ -903,6 +913,9 @@ func TestKeepOnSubmitEmptySubmissionStaysClear(t *testing.T) {
 		t.Fatalf("empty submission must not keep anything, got %q selected=%v",
 			got, h.ctl.input.Selected())
 	}
+	if len(h.nextDrafts) != 1 || h.nextDrafts[0] != "" {
+		t.Fatalf("next drafts = %q, want one empty draft", h.nextDrafts)
+	}
 }
 
 func TestKeepOnSubmitVerbatimStillClears(t *testing.T) {
@@ -918,6 +931,9 @@ func TestKeepOnSubmitVerbatimStillClears(t *testing.T) {
 	if got := h.ctl.input.Value(); got != "" || h.ctl.input.Selected() {
 		t.Fatalf("verbatim submit must clear, got %q selected=%v",
 			got, h.ctl.input.Selected())
+	}
+	if len(h.nextDrafts) != 1 || h.nextDrafts[0] != "" {
+		t.Fatalf("verbatim next drafts = %q, want one empty draft", h.nextDrafts)
 	}
 }
 

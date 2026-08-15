@@ -15,8 +15,8 @@ One command starts a transcript:
 
 The log mirrors what you saw: server lines after triggers ran (rewrites
 logged as rewritten, gagged lines omitted) plus the local echo of what
-you typed. Prompts are skipped. Passwords stay out, because the echo
-doesn't fire while the server hides input. By default the log is
+Rune accepted and echoed. Prompts are skipped. Passwords stay out, because
+the echo doesn't fire while the server hides input. By default the log is
 ANSI-stripped so it reads anywhere; `raw` keeps the escape codes for a
 color-faithful transcript.
 

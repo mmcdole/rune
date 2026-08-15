@@ -78,7 +78,7 @@ func TestLogCommandStartRaw(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 
-	engine.OnInput("/log start raw quest.log")
+	dispatchTestCommand(engine, "/log start raw quest.log")
 	if path, active := host.LogStatus(); !active || path != "quest.log" {
 		t.Fatalf("expected active log at quest.log, got %q active=%v", path, active)
 	}
@@ -87,8 +87,8 @@ func TestLogCommandStartRaw(t *testing.T) {
 		t.Error("/log start raw should keep ANSI codes")
 	}
 
-	engine.OnInput("/log stop")
-	engine.OnInput("/log start plain.log")
+	dispatchTestCommand(engine, "/log stop")
+	dispatchTestCommand(engine, "/log start plain.log")
 	host.LogWrites = nil
 	engine.OnOutput(text.NewLine("\x1b[35mmagenta\x1b[m"))
 	if logContains(host, "\x1b[35m") {

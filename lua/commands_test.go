@@ -43,7 +43,7 @@ func TestListingCommandsShowRegistrations(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		engine.OnInput(c.command)
+		dispatchTestCommand(engine, c.command)
 		printed := strings.Join(host.DrainPrintCalls(), "\n")
 
 		if printed == "" {
@@ -83,7 +83,7 @@ func TestCommandRegistrationRejectsTableDescriptionWithoutBreakingHelp(t *testin
 	}
 
 	host.DrainPrintCalls()
-	engine.OnInput("/help")
+	dispatchTestCommand(engine, "/help")
 	printed := strings.Join(host.DrainPrintCalls(), "\n")
 	if strings.Contains(printed, "error:") {
 		t.Errorf("/help was broken by the rejected command:\n%s", printed)
@@ -147,7 +147,7 @@ func TestErrorTagIsRed(t *testing.T) {
 	defer cleanup()
 
 	engine.NotifyError("something broke")
-	engine.OnInput("/nosuchcommand")
+	dispatchTestCommand(engine, "/nosuchcommand")
 
 	printed := strings.Join(host.DrainPrintCalls(), "\n")
 	for _, want := range []string{

@@ -9,7 +9,7 @@ introduction, see [Scripting Basics](/getting-started/scripting-basics/).
 ## Quick reference
 
 ```lua
-rune.send(text)        -- process aliases and expansion, then send
+rune.send(text)        -- process command syntax and aliases, then send
 rune.send_raw(text)    -- game lines, bypassing command processing
 rune.echo(text)        -- print to the local display only
 rune.connect(address)  -- "host:port", optional tls:// scheme
@@ -22,6 +22,9 @@ rune.config_dir        -- path to the config directory (data, not a function)
 rune.version           -- client version string
 rune.debug             -- set true to enable rune.dbg output
 rune.dbg(msg)          -- print msg, but only while rune.debug is true
+
+rune.config.get(key)          -- read a typed configuration value
+rune.config.set(key, value)   -- validate and update a configuration value
 ```
 
 `rune.echo` prints locally and never touches the server — pair it with
@@ -35,15 +38,19 @@ tears down the Lua VM and re-runs the core plus your scripts;
 rune.send(text)
 ```
 
-- `text` (string) — input to process exactly as if you had typed it.
+- `text` (string) — command text to process programmatically.
 
-The full input pipeline: `;` splits the text into separate commands,
-`#N` repeats expand, and each command runs through
-[aliases](/reference/api/alias/) before going to the server. Repeats
+The full command pipeline: the configured delimiter (`;` by default) splits
+the text into separate commands, `#N` repeats expand, and each command runs
+through [aliases](/reference/api/alias/) before going to the server. Repeats
 are anchored at command position — `#3 north` repeats, but
 `say #3 cheers` is chat text and passes through untouched. Alias
 expansions are processed recursively (nested aliases work), with a
 depth limit to catch loops.
+
+`rune.send` does not run interactive input hooks or add history. In particular,
+`rune.send("!")` sends a literal `!`; shell-style history expansion happens
+only for interactive command submissions.
 
 ```lua
 rune.send("#2 {get bread bag;eat bread}")  -- get/eat, twice
@@ -66,10 +73,10 @@ when the send fails — typically because you're disconnected. This is
 what alias and trigger string actions ultimately call.
 
 Before processing any user submission, Rune finishes an active partial line:
-it commits the prompt overlay and closes open multiline spans before history,
-local echo, input hooks, aliases, or slash commands. This is independent of
-local echo, connection state, whether a hook consumes the submission, and
-whether it eventually sends anything.
+it commits the prompt overlay and closes open multiline spans before input
+hooks and any local echo, history, aliases, or slash commands. This is
+independent of local echo, connection state, whether a hook consumes the
+submission, and whether it eventually sends anything.
 
 A game line sent programmatically by an alias, trigger, timer, or other Lua
 callback also finishes the partial line, once the connection accepts it for
@@ -148,18 +155,35 @@ rune.dbg("trigger fired for " .. name)
 
 ## rune.config
 
-User preferences, set by plain assignment (usually in `init.lua`).
-Assignments take effect immediately, and `/reload` resets every key to
-its default before your scripts run again.
-
-| Key | Default | Meaning |
-|---|---|---|
-| `delimiter` | `";"` | Separator for chaining commands in one input line |
-| `keep_input` | `false` | Keep a sent command in the input line, selected: `Enter` resends it, typing replaces it |
+Go owns Rune's typed configuration, including its schema, validation, and
+defaults. Read and update values through `get` and `set`; direct property
+assignment is rejected.
 
 ```lua
-rune.config.keep_input = true
+rune.config.get(key)          -- value
+rune.config.set(key, value)
 ```
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `delimiter` | string, non-empty | `";"` | Separator for chaining commands in one input line |
+| `keep_input` | boolean | `false` | Keep an authored command in the input line, selected: `Enter` resends it, typing replaces it |
+
+An unknown key, a value of the wrong type, or an empty `delimiter` raises an
+error and leaves the configuration unchanged.
+
+```lua
+rune.config.set("keep_input", true)
+rune.config.set("delimiter", "|")
+assert(rune.config.get("keep_input") == true)
+```
+
+At normal runtime, a successful `set` takes effect immediately. Startup and
+`/reload` are transactional: Rune starts a candidate at the defaults, evaluates
+core scripts, user scripts, and ready hooks against it, then publishes one
+complete snapshot. A consumer never observes the intermediate defaults or
+staged updates. If a user script does not set a key again, the published value
+reverts to its default.
 
 **Related:** [Scripting Basics](/getting-started/scripting-basics/) ·
 [State & Lines](/reference/api/state-lines/) ·

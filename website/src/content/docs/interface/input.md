@@ -27,12 +27,16 @@ distinctly — use `Ctrl+W` or `Alt+Backspace` to delete words.)
 ## Keeping the last command
 
 By default the input clears after each submit. With
-`rune.config.keep_input = true` in your `init.lua`, the sent command
-stays in the input line, shown selected: press `Enter` to send it
+`rune.config.set("keep_input", true)` in your `init.lua`, the authored command
+stays in the input line, shown selected: press `Enter` to submit it
 again, type to replace it, or use the arrow keys to edit it in place.
 Handy for walking with `n` `Enter` `Enter` `Enter`. While the line is
 selected it counts as empty for printable-key binds, so hotkeys keep
 firing.
+
+Input hooks may rewrite what is actually recorded, echoed, and dispatched;
+the selected text remains what you authored. For example, if `!` expands to
+`north`, the input still shows `!` while the effective submission is `north`.
 
 ## History
 
@@ -43,15 +47,38 @@ with `tell `. With an empty line, they walk everything.
 `Ctrl+R` opens a fuzzy history picker; type a few characters, watch the list
 narrow, and press `Enter` to restore the match.
 
-History is owned by the client, so it survives `/reload`. Consecutive identical
-submissions in the same mode are stored once.
+History is owned by the client, so it survives `/reload`. Input hooks run
+before a submission is stored and therefore see only earlier entries. A
+successful rewrite stores the effective text; a submission consumed with
+`false` is not stored. Consecutive identical effective submissions in the same
+mode are stored once.
 
 Shell-style history expansion works too: `!` (or `!!`) resends the last
 command, and `!prefix` resends the newest command starting with `prefix`, so
 `!k` after `kill rat` attacks again. As in the shells, history records the
-expanded command, not the bang line. It is a normal named alias
-(`repeat-last`), so `rune.alias.remove("repeat-last")` turns it off on games
-where `!` means something.
+expanded command, not the bang line.
+
+Expansion is the named input hook `history-expansion` at priority 100. Each
+complete component separated by the configured delimiter can expand, so
+`north;!` sends `north` and then the previously recorded command. All
+components resolve from the same prior-history snapshot. Eligible candidates
+come from command-mode entries, but slash commands and entries that still
+contain a bang designator are skipped; verbatim entries are skipped as well.
+If any designator has no match, Rune warns and consumes the entire submission
+without echoing, recording, or dispatching it.
+
+A submission whose first byte is `/` bypasses expansion, so `!` remains literal
+inside local-command arguments. Delimiter recognition also happens before
+designator recognition: if the configured delimiter itself contains `!`, bytes
+used as part of that delimiter are separators, not history designators.
+
+History expansion applies only to interactive command input. Verbatim input
+bypasses it, and `rune.send("!")` sends a literal bang. Disable expansion on a
+game where `!` is a command with:
+
+```lua
+rune.hooks.remove("history-expansion")
+```
 
 ## Tab completion
 

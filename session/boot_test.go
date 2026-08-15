@@ -29,9 +29,9 @@ func bootSessionInDir(t *testing.T, dir string) (*Session, *mockNetwork, *mockUI
 }
 
 // TestBootDoesNotReportLuaReentryErrors exercises the complete startup path.
-// Core script configuration callbacks synchronously query binds and bars, so
-// boot must reuse the callback's active Lua execution rather than reentering
-// the already-running State.
+// Core presentation callbacks synchronously query binds and bars, so boot must
+// reuse the callback's active Lua execution rather than reentering the
+// already-running State. User configuration uses a separate one-way callback.
 func TestBootDoesNotReportLuaReentryErrors(t *testing.T) {
 	_, _, uiMock := bootSessionInDir(t, t.TempDir())
 

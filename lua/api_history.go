@@ -6,17 +6,6 @@ import "github.com/mmcdole/rune/script"
 // The public rune.history API is defined in Lua (00_init.lua).
 func (e *Engine) registerHistoryFuncs() {
 	e.vm.RegisterModule("rune._history", map[string]script.GoFunc{
-		// rune._history.get() - Returns array of input history strings
-		"get": func(c *script.Call) error {
-			history := e.host.GetHistory()
-			arr := make([]any, len(history))
-			for i, cmd := range history {
-				arr[i] = cmd
-			}
-			c.Return(script.Tree{V: arr})
-			return nil
-		},
-
 		// rune._history.entries() - Returns structured history, oldest first.
 		// Mode is a stable string so Lua does not depend on Go enum values.
 		"entries": func(c *script.Call) error {
@@ -36,14 +25,6 @@ func (e *Engine) registerHistoryFuncs() {
 		"add": func(c *script.Call) error {
 			cmd := c.Str(1)
 			e.host.AddToHistory(cmd)
-			return nil
-		},
-
-		// rune._history.pop() - Remove the newest history entry. Used by
-		// the core `!` alias to store the expansion instead of the bang
-		// line; pop-then-add rides AddToHistory's adjacent dedup.
-		"pop": func(c *script.Call) error {
-			e.host.PopHistory()
 			return nil
 		},
 	}, nil)

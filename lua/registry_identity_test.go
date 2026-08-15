@@ -253,7 +253,7 @@ func TestWrappingABuiltInCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	engine.OnInput("/echo hello")
+	dispatchTestCommand(engine, "/echo hello")
 
 	printed := strings.Join(host.DrainPrintCalls(), "\n")
 	if !strings.Contains(printed, "wrapped: hello") {

@@ -76,7 +76,7 @@ func runFeatureCases(t *testing.T, cases []featureCase) {
 				}
 			}
 			if tc.input != "" {
-				engine.OnInput(tc.input)
+				dispatchTestCommand(engine, tc.input)
 			}
 			if tc.output != "" {
 				engine.OnOutput(text.NewLine(tc.output))

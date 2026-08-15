@@ -27,7 +27,7 @@ func TestConnectCommandForms(t *testing.T) {
 	}
 	for _, c := range cases {
 		host.ConnectCalls = nil
-		engine.OnInput(c.input)
+		dispatchTestCommand(engine, c.input)
 		if c.want == "" {
 			if len(host.ConnectCalls) != 0 {
 				t.Errorf("%q: expected usage error, connected to %v", c.input, host.ConnectCalls)
@@ -46,10 +46,10 @@ func TestWorldResolution(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 
-	engine.OnInput("/world add arctic mud.arcticmud.org 2700")
-	engine.OnInput("/world add secure example.com 4000 tls")
-	engine.OnInput("/connect arctic")
-	engine.OnInput("/connect secure")
+	dispatchTestCommand(engine, "/world add arctic mud.arcticmud.org 2700")
+	dispatchTestCommand(engine, "/world add secure example.com 4000 tls")
+	dispatchTestCommand(engine, "/connect arctic")
+	dispatchTestCommand(engine, "/connect secure")
 
 	want := []string{"mud.arcticmud.org:2700", "tls://example.com:4000"}
 	if len(host.ConnectCalls) != 2 || host.ConnectCalls[0] != want[0] || host.ConnectCalls[1] != want[1] {
@@ -57,9 +57,9 @@ func TestWorldResolution(t *testing.T) {
 	}
 
 	// Removed worlds no longer resolve (and a bare name is not an address)
-	engine.OnInput("/world remove arctic")
+	dispatchTestCommand(engine, "/world remove arctic")
 	host.ConnectCalls = nil
-	engine.OnInput("/connect arctic")
+	dispatchTestCommand(engine, "/connect arctic")
 	if len(host.ConnectCalls) != 0 {
 		t.Errorf("removed world still resolved: %v", host.ConnectCalls)
 	}
@@ -72,7 +72,7 @@ func TestReconnectUsesStoredAddress(t *testing.T) {
 	defer cleanup()
 
 	engine.NotifyConnected("tls://mud.example.com:4000")
-	engine.OnInput("/reconnect")
+	dispatchTestCommand(engine, "/reconnect")
 
 	if len(host.ConnectCalls) != 1 || host.ConnectCalls[0] != "tls://mud.example.com:4000" {
 		t.Errorf("connect calls = %v, want the stored address (scheme intact)", host.ConnectCalls)

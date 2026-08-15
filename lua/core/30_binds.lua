@@ -26,13 +26,13 @@ local registry = rune.registry.new{
         -- Rebinding a key replaces the old binding through the registry's
         -- name upsert, which has already removed it by the time we get here.
         by_key[data.key] = data
-        rune._ui.config_changed()
+        rune._ui.presentation_changed()
     end,
     on_remove = function(data)
         if by_key[data.key] == data then
             by_key[data.key] = nil
         end
-        rune._ui.config_changed()
+        rune._ui.presentation_changed()
     end,
 }
 

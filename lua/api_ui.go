@@ -15,10 +15,10 @@ func (e *Engine) registerUIFuncs() {
 // core modules (not part of the public API).
 func (e *Engine) registerUIInternalFuncs() {
 	e.vm.RegisterModule("rune._ui", map[string]script.GoFunc{
-		// rune._ui.config_changed(): notify the host that binds/layout
+		// rune._ui.presentation_changed(): notify the host that binds/layout
 		// changed so it can push fresh state to the UI.
-		"config_changed": func(c *script.Call) error {
-			e.host.OnConfigChange()
+		"presentation_changed": func(c *script.Call) error {
+			e.host.OnPresentationChange()
 			return nil
 		},
 

@@ -104,9 +104,52 @@ func TestAcceptedSubmissionFollowsDraftChangeOnOneUIEventLane(t *testing.T) {
 	if !ok || submitted.Submission != input.Command("look") {
 		t.Fatalf("second event = %#v, want command submission", submitted)
 	}
+	if submitted.NextDraft != "" {
+		t.Fatalf("next draft = %q, want empty", submitted.NextDraft)
+	}
 	select {
 	case event := <-events:
 		t.Fatalf("accepted submission emitted redundant event %#v", event)
+	default:
+	}
+}
+
+func TestKeptSubmissionCarriesPostSubmitDraftInOneAcceptedEvent(t *testing.T) {
+	events := make(chan ui.UIEvent, 1)
+	m := NewModel(events)
+
+	next, _ := m.Update(ui.UpdateConfigMsg{KeepInput: true})
+	m = next.(*Model)
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("north")})
+	m = next.(*Model)
+
+	// Drain the ordinary edit so the capacity-one queue can accept Enter.
+	if changed, ok := (<-events).(ui.InputChangedMsg); !ok || changed.Text != "north" {
+		t.Fatalf("draft event = %#v, want north", changed)
+	}
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(*Model)
+
+	got, ok := (<-events).(ui.InputSubmittedMsg)
+	if !ok {
+		t.Fatalf("event = %T, want InputSubmittedMsg", got)
+	}
+	if got.Submission != input.Command("north") {
+		t.Fatalf("submission = %+v, want north command", got.Submission)
+	}
+	if got.NextDraft != "north" {
+		t.Fatalf("next draft = %q, want north", got.NextDraft)
+	}
+	if got := m.input.Value(); got != "north" || !m.input.Selected() {
+		t.Fatalf("local input = %q selected=%v, want kept selection", got, m.input.Selected())
+	}
+	if got := m.scrollback.Count(); got != 0 {
+		t.Fatalf("warning rows = %d, want none", got)
+	}
+	select {
+	case event := <-events:
+		t.Fatalf("kept submit emitted a second event %#v", event)
 	default:
 	}
 }
@@ -408,15 +451,15 @@ func TestOversizedVerbatimSubmissionIsRejectedAtomically(t *testing.T) {
 	m := newBareModel(t)
 
 	tooManyLines := input.Verbatim(strings.Repeat("\n", maxVerbatimLines))
-	if m.submit(tooManyLines) {
+	if m.submit(ui.InputSubmittedMsg{Submission: tooManyLines}) {
 		t.Fatal("over-line-limit verbatim submission was accepted")
 	}
 	tooManyBytes := input.Verbatim(strings.Repeat("x", maxVerbatimBytes+1))
-	if m.submit(tooManyBytes) {
+	if m.submit(ui.InputSubmittedMsg{Submission: tooManyBytes}) {
 		t.Fatal("over-byte-limit verbatim submission was accepted")
 	}
 	tooManyCRLines := input.Verbatim(strings.Repeat("\r", maxVerbatimLines))
-	if m.submit(tooManyCRLines) {
+	if m.submit(ui.InputSubmittedMsg{Submission: tooManyCRLines}) {
 		t.Fatal("over-line-limit bare-CR verbatim submission was accepted")
 	}
 
@@ -440,7 +483,7 @@ func TestVerbatimSubmissionAtLimitsIsAccepted(t *testing.T) {
 	if len(text) != maxVerbatimBytes {
 		t.Fatalf("test setup bytes = %d, want %d", len(text), maxVerbatimBytes)
 	}
-	if !m.submit(submission) {
+	if !m.submit(ui.InputSubmittedMsg{Submission: submission}) {
 		t.Fatal("at-limit verbatim submission was rejected")
 	}
 	got, ok := (<-events).(ui.InputSubmittedMsg)

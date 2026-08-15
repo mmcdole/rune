@@ -3,59 +3,53 @@
 
 local MAX_RECURSION_DEPTH = 100
 
--- INTERNAL: Expand #N repeat syntax
--- e.g., "#6 north" becomes "north;north;north;north;north;north"
--- e.g., "#3 {kill rat;loot}" becomes "kill rat;loot;kill rat;loot;kill rat;loot"
+-- INTERNAL: Expand braced #N syntax before command splitting. Unbraced
+-- repeats expand after splitting so both forms honor an arbitrary configured
+-- delimiter.
 --
 -- Repeats are anchored at command position (start of input, or right
 -- after a delimiter): "#3 north" is a repeat, but "say #3 cheers" is
--- chat text and passes through untouched. The temporary leading ";"
--- lets one pattern cover both anchor cases.
-local function expand_repeats(input)
-    local result = ";" .. input
+-- chat text and passes through untouched. A temporary leading delimiter
+-- lets one pattern cover both anchor cases for braced groups.
+local function expand_braced_repeats(input, delimiter)
+    local escaped_delimiter = delimiter:gsub("([^%w])", "%%%1")
+    local result = delimiter .. input
 
-    -- Handle #N {braced content}
-    result = result:gsub(";%s*#(%d+)%s*{([^}]+)}", function(count, content)
+    result = result:gsub(escaped_delimiter .. "%s*#(%d+)%s*{([^}]+)}", function(count, content)
         local n = tonumber(count)
         local expanded = {}
         for i = 1, n do
             table.insert(expanded, content)
         end
-        return ";" .. table.concat(expanded, ";")
+        return delimiter .. table.concat(expanded, delimiter)
     end)
 
-    -- Handle #N single_command (text until ; or end)
-    result = result:gsub(";%s*#(%d+)%s+([^;{]+)", function(count, content)
-        local n = tonumber(count)
-        local cmd = content:match("^%s*(.-)%s*$") -- trim
-        local expanded = {}
-        for i = 1, n do
-            table.insert(expanded, cmd)
-        end
-        return ";" .. table.concat(expanded, ";")
-    end)
-
-    return result:sub(2)
+    return result:sub(#delimiter + 1)
 end
 
 -- INTERNAL: Expand repeats and split by delimiter
 local function expand_input(input)
-    -- 1. Handle #N repeat syntax
-    input = expand_repeats(input)
+    local delimiter = rune.config.get("delimiter")
+    input = expand_braced_repeats(input, delimiter)
 
-    -- 2. Split by delimiter
     local commands = {}
     if input == "" then return {""} end
 
-    local delimiter = rune.config.delimiter
     local start = 1
     while true do
         local pos = input:find(delimiter, start, true)
-        if not pos then
-            table.insert(commands, input:sub(start):match("^%s*(.-)%s*$"))
-            break
+        local piece = pos and input:sub(start, pos - 1) or input:sub(start)
+        local command = piece:match("^%s*(.-)%s*$")
+        local count, repeated = command:match("^#(%d+)%s+([^{}]+)$")
+        if count then
+            repeated = repeated:match("^%s*(.-)%s*$")
+            for _ = 1, tonumber(count) do
+                table.insert(commands, repeated)
+            end
+        else
+            table.insert(commands, command)
         end
-        table.insert(commands, input:sub(start, pos - 1):match("^%s*(.-)%s*$"))
+        if not pos then break end
         start = pos + #delimiter
     end
     return commands
@@ -97,31 +91,27 @@ function rune.send(input)
     send_impl(input, 0)
 end
 
--- Register input handler
-rune.hooks.on("input", function(input, context)
-    -- Verbatim is a submission policy, not a separate lifecycle: earlier
-    -- input hooks still observe it and may consume it, but none of Rune's
-    -- command syntax is applied once it reaches this core handler.
-    if context.mode == "verbatim" then
+-- INTERNAL: Route one submission after input hooks and history commit.
+-- Programmatic rune.send deliberately enters below this boundary.
+function rune.input._dispatch(input, mode)
+    if mode == "verbatim" then
         rune.send_raw(input) -- no alias or command interpretation
-        return false
+        return
     end
 
     -- Check for slash command first. Dispatch runs the handler under
     -- its own quarantine, so a broken command is disabled individually
-    -- instead of its failures accruing against this core hook.
+    -- instead of breaking the terminal dispatcher.
     local cmd, args = input:match("^/(%S+)%s*(.*)")
     if cmd then
         if not rune.command.dispatch(cmd, args) then
             rune.echo(rune.style.red("[Error]") .. " Unknown command: /" .. cmd)
         end
-        return false
+        return
     end
 
-    -- Process as normal command
     rune.send(input)
-    return false
-end, { priority = 100 })
+end
 
 -- Register output handler
 rune.hooks.on("output", function(line)

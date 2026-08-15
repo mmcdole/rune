@@ -55,10 +55,10 @@ func TestLoadCanReenterLuaAndReuseOuterExecution(t *testing.T) {
 	}
 }
 
-// configChangeReentryHost mirrors Session.OnConfigChange: a Lua-side
-// configuration mutation synchronously asks the same engine for its updated
+// presentationChangeReentryHost mirrors Session.OnPresentationChange: a
+// Lua-side presentation mutation synchronously asks the same engine for updated
 // binds and bars before returning to the script that made the mutation.
-type configChangeReentryHost struct {
+type presentationChangeReentryHost struct {
 	*MockHost
 	engine *Engine
 	active bool
@@ -67,7 +67,7 @@ type configChangeReentryHost struct {
 	bars      map[string]ui.BarContent
 }
 
-func (h *configChangeReentryHost) OnConfigChange() {
+func (h *presentationChangeReentryHost) OnPresentationChange() {
 	if !h.active {
 		return
 	}
@@ -75,12 +75,12 @@ func (h *configChangeReentryHost) OnConfigChange() {
 	h.bars = h.engine.RenderBars(80)
 }
 
-// TestConfigChangeCanReenterLuaAndResume verifies the real Session call path:
-// Lua -> Go OnConfigChange -> Lua bind/bar queries -> return to the outer Lua
+// TestPresentationChangeCanReenterLuaAndResume verifies the real Session call
+// path: Lua -> Go OnPresentationChange -> Lua bind/bar queries -> outer Lua
 // invocation. The nested calls must observe the mutation, and the outer script
 // must resume after the host callback returns.
-func TestConfigChangeCanReenterLuaAndResume(t *testing.T) {
-	engine, host := newConfigChangeReentryEngine(t)
+func TestPresentationChangeCanReenterLuaAndResume(t *testing.T) {
+	engine, host := newPresentationChangeReentryEngine(t)
 
 	if err := engine.DoString("reentry setup", `
 		rune.ui.bar("reentry", function(width)
@@ -96,7 +96,7 @@ func TestConfigChangeCanReenterLuaAndResume(t *testing.T) {
 		rune.bind("ctrl+shift+r", function() end)
 		rune.send_raw("outer resumed")
 	`); err != nil {
-		t.Fatalf("configuration mutation: %v", err)
+		t.Fatalf("presentation mutation: %v", err)
 	}
 
 	if !containsString(host.boundKeys, "ctrl+shift+r") {
@@ -113,11 +113,11 @@ func TestConfigChangeCanReenterLuaAndResume(t *testing.T) {
 	}
 }
 
-// TestConfigChangeCanReenterFromCoroutine verifies that ordinary Engine calls
+// TestPresentationChangeCanReenterFromCoroutine verifies that ordinary Engine calls
 // made by the host remain bound to the Lua thread that entered Go rather than
 // silently using the VM's main thread.
-func TestConfigChangeCanReenterFromCoroutine(t *testing.T) {
-	engine, host := newConfigChangeReentryEngine(t)
+func TestPresentationChangeCanReenterFromCoroutine(t *testing.T) {
+	engine, host := newPresentationChangeReentryEngine(t)
 	if err := engine.DoString("coroutine setup", `
 		worker = false
 		rune.ui.bar("thread", function()
@@ -140,7 +140,7 @@ func TestConfigChangeCanReenterFromCoroutine(t *testing.T) {
 		assert(ok, err)
 		assert(coroutine.status(worker) == "dead")
 	`); err != nil {
-		t.Fatalf("configuration mutation from coroutine: %v", err)
+		t.Fatalf("presentation mutation from coroutine: %v", err)
 	}
 
 	if !containsString(host.boundKeys, "ctrl+shift+c") {
@@ -164,7 +164,7 @@ func TestConfigChangeCanReenterFromCoroutine(t *testing.T) {
 // nested call reaches the error hook through the active callback frame instead
 // of trying to start a second outer execution.
 func TestReentryFailureUsesActiveFrame(t *testing.T) {
-	engine, host := newConfigChangeReentryEngine(t)
+	engine, host := newPresentationChangeReentryEngine(t)
 	if err := engine.DoString("failure setup", `
 		rune.hooks.on("error", function(message)
 			rune.send_raw("reported:" .. message)
@@ -210,11 +210,11 @@ func TestReentryFailureUsesActiveFrame(t *testing.T) {
 	}
 }
 
-func newConfigChangeReentryEngine(
+func newPresentationChangeReentryEngine(
 	t *testing.T,
-) (*Engine, *configChangeReentryHost) {
+) (*Engine, *presentationChangeReentryHost) {
 	t.Helper()
-	host := &configChangeReentryHost{MockHost: NewMockHost()}
+	host := &presentationChangeReentryHost{MockHost: NewMockHost()}
 	engine := NewEngine(host)
 	host.engine = engine
 	t.Cleanup(engine.Close)

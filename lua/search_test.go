@@ -29,12 +29,12 @@ func TestSearchEntryPoints(t *testing.T) {
 		},
 		{
 			name:  "/find with pattern",
-			run:   func(e *Engine) error { e.OnInput("/find the guard"); return nil },
+			run:   func(e *Engine) error { dispatchTestCommand(e, "/find the guard"); return nil },
 			query: "the guard",
 		},
 		{
 			name:  "/find bare reopens with last query",
-			run:   func(e *Engine) error { e.OnInput("/find"); return nil },
+			run:   func(e *Engine) error { dispatchTestCommand(e, "/find"); return nil },
 			query: "",
 		},
 	}

@@ -40,7 +40,7 @@ func TestClipboardDocExampleCollectAndCopy(t *testing.T) {
 	} {
 		engine.OnOutput(text.NewLine(line))
 	}
-	engine.OnInput("copynote")
+	dispatchTestCommand(engine, "copynote")
 
 	want := "-- BEGIN NOTE\nmeet at the crossroads\nbring the key\n-- END NOTE"
 	if len(host.ClipboardCalls) != 1 || host.ClipboardCalls[0] != want {

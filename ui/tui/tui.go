@@ -167,8 +167,8 @@ func (b *BubbleTeaUI) UpdateLayout(top, bottom []ui.LayoutEntry) {
 	b.send(ui.UpdateLayoutMsg{Top: top, Bottom: bottom})
 }
 
-// UpdateConfig sends user preferences from Session to UI.
-func (b *BubbleTeaUI) UpdateConfig(cfg ui.UserConfig) {
+// UpdateConfig sends UI-facing configuration from Session to UI.
+func (b *BubbleTeaUI) UpdateConfig(cfg ui.Config) {
 	b.send(ui.UpdateConfigMsg(cfg))
 }
 

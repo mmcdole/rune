@@ -73,15 +73,16 @@ rune.history.get()     -- submitted text, oldest first
 rune.history.add(cmd)  -- append a normal command entry
 ```
 
-The buffer is Go-owned, so it survives `/reload`. Everything the user submits
-lands here automatically with its command or verbatim mode. Arrow navigation
-and `ctrl+r` restore that mode, so even a one-line verbatim entry returns to the
-composer. Consecutive entries are deduplicated only when both their text and
-mode match.
+The buffer is Go-owned, so it survives `/reload`. Input hooks run before the
+current submission is committed. If they accept it, its final effective text
+lands here with the original command or verbatim mode; if one returns `false`,
+nothing is added. Arrow navigation and `ctrl+r` restore the stored mode, so
+even a one-line verbatim entry returns to the composer. Consecutive entries are
+deduplicated only when both their effective text and mode match.
 
-`get()` is the compatibility text view: it returns strings and does not expose
-the stored mode. `add(cmd)` adds a normal command entry for scripts that want a
-synthetic command (one sent by an alias, say) to be recallable.
+`get()` returns the text-only view and does not expose the stored mode.
+`add(cmd)` adds a normal command entry for scripts that want a synthetic
+command (one sent by an alias, say) to be recallable.
 
 **Related:** [Input & History guide](/interface/input/) ·
 [rune.bind](/reference/api/bind/) ·

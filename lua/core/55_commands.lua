@@ -2,7 +2,7 @@
 -- Built on rune.registry (15_registry.lua), so commands get the same
 -- upsert-by-name, source attribution, and failure quarantine as every
 -- other callback registry. A command that keeps throwing is disabled
--- individually - it can never take the core input hook down with it.
+-- individually - it can never take the terminal input dispatcher down with it.
 
 -- Styling shorthands (see 05_style.lua)
 local green, red, yellow, cyan, dim =
@@ -62,7 +62,7 @@ function rune.command.get(name)
     return registry:get(name)
 end
 
--- INTERNAL: run a command protected (called by the core input hook).
+-- INTERNAL: run a command protected (called by the input dispatcher).
 -- Returns true if the name was a known command, even when it is
 -- disabled or its handler failed - the input is consumed either way.
 function rune.command.dispatch(name, args)

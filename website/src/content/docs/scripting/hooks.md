@@ -4,9 +4,10 @@ description: The event pipeline under everything else. Intercept input, output, 
 ---
 
 Hooks are the lowest-level scripting surface: every line in or out of the
-client flows through them, and the core's own behavior (trigger dispatch,
-echo styling, command handling) is implemented as hook handlers you can see
-in `/hooks`.
+client flows through them. Core policies such as trigger dispatch, echo
+styling, and interactive history expansion are handlers you can see in
+`/hooks`; final command or verbatim routing is an internal step after input
+hooks finish.
 
 ```lua
 rune.hooks.on(event, handler, opts?)
@@ -27,18 +28,21 @@ Handlers run in priority order:
 
 | Event | Handler receives | Notes |
 |---|---|---|
-| `input` | submitted text, context | Return `false` to consume; other returns are ignored. `context.mode` is read-only and always `"command"` or `"verbatim"`. |
+| `input` | submitted text, context | Precommit: strings rewrite and chain, `false` consumes, and other values pass through. `context.mode` is read-only and always `"command"` or `"verbatim"`. |
 | `output` | a line object | Once per complete line. `false` gags, a string rewrites. The core handler runs output triggers at priority 100. |
 | `prompt` | a line object, `confirmed` | Cumulative partial-line observation (`false`) or GA/EOR-confirmed prompt (`true`). The core runs prompt triggers at priority 100. |
-| `echo` | one physical line of typed text | Like `output` but a plain string. The `> ` prefix is the core handler; replace it if you like. |
+| `echo` | one physical line of effective input | Like `output` but a plain string. The `> ` prefix is the core handler; replace it if you like. |
 
-For `output`, `prompt`, and `echo`, rewrites chain: a handler returning a
-string replaces the text for every subsequent handler, and `false` stops the
-chain (gags the line or hides the echo). For `input`, only `false` means
-anything. The hook fires once per submission: in verbatim mode `text` is the
-whole draft and may contain line breaks. Existing handlers that accept only
-`text` continue to work because Lua ignores extra arguments. To rewrite normal
-command input, use an [alias](/scripting/aliases/).
+For every data-flow event, rewrites chain: a handler returning a string
+replaces the text for every subsequent handler, `nil` or another value passes
+the current text through, and `false` stops the chain. For input, `false`
+consumes before local echo, history, and dispatch. Otherwise the final rewrite
+is the text Rune records, echoes, and routes.
+
+The input hook runs before the current submission enters history, so handlers
+see only earlier accepted submissions. In verbatim mode `text` is the whole
+draft and may contain line breaks. Existing handlers that accept only `text`
+continue to work because Lua ignores the extra context argument.
 
 ```lua
 -- Timestamp every line, after triggers have run
@@ -58,9 +62,22 @@ rune.hooks.on("input", function(text, context)
 end, { priority = 1 })
 ```
 
-The core handler at priority 100 applies aliases, `;` separators, `#N`
-repeats, and slash commands when `context.mode == "command"`. Verbatim input
-bypasses command processing and recognizes LF, CRLF, and bare CR line breaks.
+```lua
+-- Rewrites chain: later input hooks, echo, history, and dispatch see "look".
+rune.hooks.on("input", function(text)
+    if text == "l" then return "look" end
+end, { priority = 25 })
+```
+
+After every input hook runs, Rune internally applies aliases, delimiters,
+`#N` repeats, or slash commands when `context.mode == "command"`. Verbatim
+input instead recognizes LF, CRLF, and bare CR line breaks and bypasses command
+processing. Routing is not a hook, so input handlers have no priority cutoff.
+
+The named core input hook `history-expansion` runs at priority 100. It expands
+interactive command components such as `!`, `!!`, and `!k`; see
+[Input & History](/interface/input/#history) for the full behavior. Remove it
+with `rune.hooks.remove("history-expansion")` if your game uses bang commands.
 
 ## Prompt semantics
 
@@ -86,12 +103,12 @@ pattern to infer one. A confirmed prompt is committed before later server text
 and closes open spans before `prompt` handlers run, so span actions have
 already fired by the time your handler sees the prompt.
 
-Every user submission finishes the partial line before history, echo, and
-input hooks, including local slash commands and submissions that are consumed,
-disconnected, or eventually fail to send. Programmatic game lines from aliases,
-triggers, timers, and other callbacks finish it only after the connection
-accepts the send. Failed programmatic sends and protocol traffic such as GMCP
-do not.
+Every user submission finishes the partial line before input hooks and any
+echo, history, or routing, including local slash commands and submissions that
+are consumed, disconnected, or eventually fail to send. Programmatic game
+lines from aliases, triggers, timers, and other callbacks finish it only after
+the connection accepts the send. Failed programmatic sends and protocol
+traffic such as GMCP do not.
 
 ## Notification events
 
@@ -109,12 +126,14 @@ end)
 
 ## Priorities in practice
 
-The core's data-flow handlers sit at priority 100. Run before them
-(priority below 100) to intercept raw input and output. Run after them
-(priority above 100) to see the post-trigger result; that is where the
-session logger lives (priority 200, named `log-output`). One exception: the
-core `input` handler always consumes, so `input` handlers above priority
-100 never run.
+The core's output, prompt, and echo handlers sit at priority 100. Run before
+them to see the pre-trigger/pre-style value, or after them to see their result;
+the session logger, for example, is `log-output` at priority 200.
+
+Input uses priority 100 for the named `history-expansion` rewrite, not for
+routing. Lower-priority hooks run before expansion and higher-priority hooks
+see its result. All continue to run unless an earlier input handler returns
+`false`.
 
 ## Options
 

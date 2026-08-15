@@ -2,16 +2,6 @@ package session
 
 import "github.com/mmcdole/rune/input"
 
-// GetHistory implements lua.Host.
-// It is the compatibility projection used by rune.history.get().
-func (s *Session) GetHistory() []string {
-	result := make([]string, len(s.historyEntries))
-	for i, entry := range s.historyEntries {
-		result[i] = entry.Text
-	}
-	return result
-}
-
 // GetHistoryEntries implements lua.Host and preserves submission mode.
 func (s *Session) GetHistoryEntries() []input.Submission {
 	result := make([]input.Submission, len(s.historyEntries))
@@ -23,13 +13,6 @@ func (s *Session) GetHistoryEntries() []input.Submission {
 // The legacy Lua API adds ordinary command entries.
 func (s *Session) AddToHistory(cmd string) {
 	s.addHistorySubmission(input.Command(cmd))
-}
-
-// PopHistory implements lua.Host.
-func (s *Session) PopHistory() {
-	if len(s.historyEntries) > 0 {
-		s.historyEntries = s.historyEntries[:len(s.historyEntries)-1]
-	}
 }
 
 // addHistorySubmission records the immutable submission as one history item.
