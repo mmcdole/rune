@@ -72,6 +72,9 @@ type Config struct {
 	// KeepInput keeps a submitted command selected in the input line, so Enter
 	// resends it and typing replaces it.
 	KeepInput bool
+	// Numpad asks terminals with legacy keypad support to report physical
+	// numpad keys separately from their number-row equivalents.
+	Numpad bool
 }
 
 // UpdateConfigMsg pushes UI-facing configuration from Session to UI.

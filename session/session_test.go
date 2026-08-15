@@ -1322,6 +1322,9 @@ func TestConfigSetPublishesRuntimeChangesAndOneFinalReloadSnapshot(t *testing.T)
 	if uiMock.pushedConfig().KeepInput {
 		t.Fatal("keep_input must default off")
 	}
+	if uiMock.pushedConfig().Numpad {
+		t.Fatal("numpad must default off")
+	}
 
 	assertSessionLua(t, s.engine, `rune.config.set("keep_input", true)`)
 	if !uiMock.pushedConfig().KeepInput {
@@ -1332,8 +1335,16 @@ func TestConfigSetPublishesRuntimeChangesAndOneFinalReloadSnapshot(t *testing.T)
 		t.Fatalf("runtime config pushes = %+v, want one keep_input=true", pushes)
 	}
 
+	assertSessionLua(t, s.engine, `rune.config.set("numpad", true)`)
+	if !uiMock.pushedConfig().Numpad {
+		t.Fatal("numpad=true did not reach the UI")
+	}
+	if pushes := uiMock.drainConfigPushes(); len(pushes) != 1 || !pushes[0].Numpad {
+		t.Fatalf("runtime config pushes = %+v, want one numpad=true", pushes)
+	}
+
 	// Parser settings use the same config publication path. Each update must
-	// retain the current UI-facing keep_input value.
+	// retain the current UI-facing values.
 	assertSessionLua(t, s.engine, `
 		rune.config.set("command_separator", "|")
 		rune.config.set("history_character", "^")
@@ -1343,8 +1354,8 @@ func TestConfigSetPublishesRuntimeChangesAndOneFinalReloadSnapshot(t *testing.T)
 		t.Fatalf("parser config pushes = %+v, want exactly two snapshots", pushes)
 	}
 	for i, push := range pushes {
-		if !push.KeepInput {
-			t.Fatalf("parser config push %d reset keep_input: %+v", i, push)
+		if !push.KeepInput || !push.Numpad {
+			t.Fatalf("parser config push %d reset UI config: %+v", i, push)
 		}
 	}
 
@@ -1353,7 +1364,10 @@ func TestConfigSetPublishesRuntimeChangesAndOneFinalReloadSnapshot(t *testing.T)
 	if uiMock.pushedConfig().KeepInput {
 		t.Fatal("reload did not reset keep_input to its default")
 	}
-	if pushes := uiMock.drainConfigPushes(); len(pushes) != 1 || pushes[0].KeepInput {
+	if uiMock.pushedConfig().Numpad {
+		t.Fatal("reload did not reset numpad to its default")
+	}
+	if pushes := uiMock.drainConfigPushes(); len(pushes) != 1 || pushes[0].KeepInput || pushes[0].Numpad {
 		t.Fatalf("default reload pushes = %+v, want exactly one final false snapshot", pushes)
 	}
 	assertSessionLua(t, s.engine, `
@@ -1367,6 +1381,7 @@ func TestConfigSetPublishesRuntimeChangesAndOneFinalReloadSnapshot(t *testing.T)
 rune.config.set("command_separator", "||")
 rune.config.set("history_character", "?")
 rune.config.set("keep_input", true)
+rune.config.set("numpad", true)
 `
 	if err := os.WriteFile(initPath, []byte(initLua), 0o644); err != nil {
 		t.Fatal(err)
@@ -1375,13 +1390,17 @@ rune.config.set("keep_input", true)
 	if !uiMock.pushedConfig().KeepInput {
 		t.Fatal("reload did not reapply keep_input from init.lua")
 	}
-	if pushes := uiMock.drainConfigPushes(); len(pushes) != 1 || !pushes[0].KeepInput {
+	if !uiMock.pushedConfig().Numpad {
+		t.Fatal("reload did not reapply numpad from init.lua")
+	}
+	if pushes := uiMock.drainConfigPushes(); len(pushes) != 1 || !pushes[0].KeepInput || !pushes[0].Numpad {
 		t.Fatalf("configured reload pushes = %+v, want exactly one final true snapshot", pushes)
 	}
 	assertSessionLua(t, s.engine, `
 		assert(rune.config.get("command_separator") == "||")
 		assert(rune.config.get("history_character") == "?")
 		assert(rune.config.get("keep_input") == true)
+		assert(rune.config.get("numpad") == true)
 	`)
 }
 

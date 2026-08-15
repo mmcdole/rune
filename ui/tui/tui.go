@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"io"
 	"os"
 	"os/exec"
 	"runtime"
@@ -8,6 +9,7 @@ import (
 	"sync"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/mmcdole/rune/input"
 	"github.com/mmcdole/rune/ui"
@@ -16,6 +18,7 @@ import (
 // BubbleTeaUI implements ui.UI with Bubble Tea.
 type BubbleTeaUI struct {
 	program *tea.Program
+	output  io.Writer
 
 	// Message queue - buffered channel drained by a single goroutine.
 	// This decouples callers from tea.Program.Send() which can block.
@@ -28,6 +31,10 @@ type BubbleTeaUI struct {
 	// Shutdown coordination
 	done     chan struct{}
 	doneOnce sync.Once
+
+	keypadMu         sync.Mutex
+	keypadConfigured bool
+	keypadEnabled    bool
 }
 
 // NewBubbleTeaUI creates a new Bubble Tea-based UI.
@@ -36,7 +43,35 @@ func NewBubbleTeaUI() *BubbleTeaUI {
 		msgQueue: make(chan tea.Msg, 4096),
 		events:   make(chan ui.UIEvent, 2048),
 		done:     make(chan struct{}),
+		output:   os.Stdout,
 	}
+}
+
+func keypadModeSequence(enabled bool) string {
+	if enabled {
+		return ansi.KeypadApplicationMode
+	}
+	return ansi.KeypadNumericMode
+}
+
+func (b *BubbleTeaUI) writeKeypadMode(enabled bool) error {
+	_, err := io.WriteString(b.output, keypadModeSequence(enabled))
+	return err
+}
+
+func (b *BubbleTeaUI) updateKeypadMode(enabled bool) bool {
+	b.keypadMu.Lock()
+	defer b.keypadMu.Unlock()
+	changed := !b.keypadConfigured || b.keypadEnabled != enabled
+	b.keypadConfigured = true
+	b.keypadEnabled = enabled
+	return changed
+}
+
+func (b *BubbleTeaUI) keypadMode() bool {
+	b.keypadMu.Lock()
+	defer b.keypadMu.Unlock()
+	return b.keypadEnabled
 }
 
 // send queues a message for delivery to the Bubble Tea program.
@@ -72,9 +107,20 @@ func (b *BubbleTeaUI) CommitPrompt(text string) {
 }
 
 // Run starts the TUI and blocks until exit.
-func (b *BubbleTeaUI) Run() error {
+func (b *BubbleTeaUI) Run() (err error) {
 	model := NewModel(b.events)
-	b.program = tea.NewProgram(model)
+	b.program = tea.NewProgram(model, tea.WithOutput(b.output))
+
+	defer func() {
+		if resetErr := b.writeKeypadMode(false); err == nil {
+			err = resetErr
+		}
+		// The queue is deliberately never closed: send races the done signal
+		// in a select, and closing it would make a late Print panic.
+		b.doneOnce.Do(func() {
+			close(b.done)
+		})
+	}()
 
 	// Single goroutine drains message queue to Bubble Tea.
 	// This can block on Send() without affecting producers.
@@ -90,15 +136,7 @@ func (b *BubbleTeaUI) Run() error {
 	}()
 
 	// Run blocks until quit
-	_, err := b.program.Run()
-
-	// Signal shutdown. The queue is deliberately never closed: send()
-	// races the done signal in a select, and closing the channel would
-	// turn a late Print from the session into a send-on-closed panic.
-	b.doneOnce.Do(func() {
-		close(b.done)
-	})
-
+	_, err = b.program.Run()
 	return err
 }
 
@@ -156,7 +194,11 @@ func (b *BubbleTeaUI) UpdateLayout(top, bottom []ui.LayoutEntry) {
 
 // UpdateConfig sends UI-facing configuration from Session to UI.
 func (b *BubbleTeaUI) UpdateConfig(cfg ui.Config) {
+	keypadChanged := b.updateKeypadMode(cfg.Numpad)
 	b.send(ui.UpdateConfigMsg(cfg))
+	if keypadChanged {
+		b.send(tea.RawMsg{Msg: keypadModeSequence(cfg.Numpad)})
+	}
 }
 
 // ShowPicker displays a picker overlay with items.
@@ -216,8 +258,10 @@ func (b *BubbleTeaUI) OpenEditor(initial string) (string, bool) {
 
 	// Suspend TUI
 	if err := b.program.ReleaseTerminal(); err != nil {
+		_ = b.writeKeypadMode(false)
 		return "", false
 	}
+	_ = b.writeKeypadMode(false)
 
 	// Run editor. The fallback must exist on the platform: vi ships
 	// with effectively every Unix, notepad with every Windows.
@@ -235,11 +279,10 @@ func (b *BubbleTeaUI) OpenEditor(initial string) (string, bool) {
 
 	// Resume TUI
 	restoreErr := b.program.RestoreTerminal()
-	if err == nil && restoreErr != nil {
-		err = restoreErr
+	if restoreErr == nil {
+		_ = b.writeKeypadMode(b.keypadMode())
 	}
-
-	if err != nil {
+	if err != nil || restoreErr != nil {
 		return "", false
 	}
 
