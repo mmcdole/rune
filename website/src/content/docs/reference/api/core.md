@@ -170,6 +170,7 @@ rune.config.set(key, value)
 | `history_character` | empty or one visible, non-space character | `"!"` | Character used for history expansion (`!`, `!!`, `!prefix`); empty disables it |
 | `keep_input` | boolean | `false` | After `Enter`, leave the text you typed selected; `Enter` repeats it and typing replaces it |
 | `numpad` | boolean | `false` | Ask legacy terminals to report physical numpad keys separately; see [Numpad keys](/scripting/keybindings/#numpad-keys) |
+| `mouse` | boolean | `false` | Capture the mouse so its wheel scrolls Rune; see [Scrolling and the mouse](/interface/input/#scrolling-and-the-mouse) |
 
 An unknown key, a value of the wrong type, an empty `command_separator`, or an
 invalid history character raises an error and leaves the configuration unchanged.
@@ -179,6 +180,7 @@ rune.config.set("keep_input", true)
 rune.config.set("command_separator", "|")
 rune.config.set("history_character", "^")
 rune.config.set("numpad", true)
+rune.config.set("mouse", true)
 assert(rune.config.get("keep_input") == true)
 ```
 

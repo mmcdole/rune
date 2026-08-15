@@ -36,8 +36,8 @@ across restarts.
 - `Up`/`Down` navigate history with prefix matching: type `tell ` and press
   `Up` to cycle only through your previous tells. `Ctrl+R` searches history.
 - `Tab` completes words the server has used recently.
-- `PageUp`/`PageDown` or the mouse wheel scroll the output. The status bar
-  shows `SCROLL (n new)` while you're off the bottom.
+- `PageUp`/`PageDown` scroll the output. The status bar shows `SCROLL (n new)`
+  while you're off the bottom.
 - `Ctrl+C` clears the input line; pressed twice on an empty line it quits.
 
 The full tour of the input line (editing keys, `Ctrl+E` into `$EDITOR`,

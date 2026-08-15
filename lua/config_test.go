@@ -14,6 +14,7 @@ func TestConfigGetReturnsGoDefaults(t *testing.T) {
 		assert(rune.config.get("history_character") == "!")
 		assert(rune.config.get("keep_input") == false)
 		assert(rune.config.get("numpad") == false)
+		assert(rune.config.get("mouse") == false)
 	`); err != nil {
 		t.Fatalf("read config defaults: %v", err)
 	}
@@ -28,6 +29,8 @@ func TestConfigSetUpdatesRecognizedValue(t *testing.T) {
 		assert(rune.config.get("keep_input") == true)
 		rune.config.set("numpad", true)
 		assert(rune.config.get("numpad") == true)
+		rune.config.set("mouse", true)
+		assert(rune.config.get("mouse") == true)
 	`); err != nil {
 		t.Fatalf("set recognized config value: %v", err)
 	}
@@ -150,6 +153,7 @@ func TestConfigBootPublishesOneFinalTypedConfig(t *testing.T) {
 		rune.config.set("history_character", "^")
 		rune.config.set("keep_input", true)
 		rune.config.set("numpad", true)
+		rune.config.set("mouse", true)
 	`); err != nil {
 		t.Fatalf("stage config during boot: %v", err)
 	}
@@ -160,7 +164,7 @@ func TestConfigBootPublishesOneFinalTypedConfig(t *testing.T) {
 	engine.CommitConfig()
 	engine.CommitConfig()
 
-	want := []Config{{CommandSeparator: "|", HistoryCharacter: "^", KeepInput: true, Numpad: true}}
+	want := []Config{{CommandSeparator: "|", HistoryCharacter: "^", KeepInput: true, Numpad: true, Mouse: true}}
 	if got := host.DrainConfigChanges(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("committed config publications = %+v, want %+v", got, want)
 	}
@@ -230,6 +234,24 @@ func TestConfigNumpadRuntimeChangePublishesImmediately(t *testing.T) {
 	}
 }
 
+func TestConfigMouseRuntimeChangePublishesImmediately(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+	engine.CommitConfig()
+	host.DrainConfigChanges()
+
+	if err := engine.DoString("enable mouse", `
+		rune.config.set("mouse", true)
+	`); err != nil {
+		t.Fatalf("change mouse config: %v", err)
+	}
+
+	want := []Config{{CommandSeparator: ";", HistoryCharacter: "!", Mouse: true}}
+	if got := host.DrainConfigChanges(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("mouse config publications = %+v, want %+v", got, want)
+	}
+}
+
 func TestPresentationChangesDoNotRepublishConfig(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
@@ -267,6 +289,9 @@ func TestConfigRejectsWrongTypeWithoutMutation(t *testing.T) {
 		ok = pcall(rune.config.set, "numpad", "yes")
 		assert(not ok)
 		assert(rune.config.get("numpad") == false)
+		ok = pcall(rune.config.set, "mouse", "yes")
+		assert(not ok)
+		assert(rune.config.get("mouse") == false)
 	`); err != nil {
 		t.Fatalf("validate config type before mutation: %v", err)
 	}
@@ -286,6 +311,7 @@ func TestConfigRejectsUnknownKeys(t *testing.T) {
 		assert(rune.config.get("history_character") == "!")
 		assert(rune.config.get("keep_input") == false)
 		assert(rune.config.get("numpad") == false)
+		assert(rune.config.get("mouse") == false)
 	`); err != nil {
 		t.Fatalf("reject unknown config keys: %v", err)
 	}

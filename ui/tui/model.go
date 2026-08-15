@@ -58,12 +58,13 @@ type Model struct {
 	}
 
 	// State
-	promptText  string
-	width       int
-	height      int
-	events      chan<- ui.UIEvent
-	initialized bool
-	pendingRows []string
+	promptText   string
+	width        int
+	height       int
+	events       chan<- ui.UIEvent
+	mouseEnabled bool
+	initialized  bool
+	pendingRows  []string
 	// flushScheduled is true while a batch-window tick is outstanding.
 	// At most one tick is ever in flight: it is armed only on the
 	// idle->hot transition and re-armed only from handleTick while
@@ -248,6 +249,7 @@ func (m *Model) handleConfigUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 		layoutChanged = true
 	case ui.UpdateConfigMsg:
 		m.inputCtl.SetKeepOnSubmit(msg.KeepInput)
+		m.mouseEnabled = msg.Mouse
 	}
 	if layoutChanged {
 		m.syncViewportSize()
@@ -343,9 +345,8 @@ func (m *Model) handlePaneMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 // viewport. Matches the common terminal-emulator default.
 const wheelScrollLines = 3
 
-// handleMouse scrolls the main viewport on wheel events. The terminal
-// mouse is captured for this (which is why text selection needs
-// shift+drag); everything else is ignored.
+// handleMouse scrolls the main viewport on wheel events when the terminal
+// reports them; everything else is ignored.
 func (m *Model) handleMouse(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 	switch msg.Button {
 	case tea.MouseWheelUp:

@@ -45,8 +45,32 @@ func TestTerminalStateIsDeclaredOnInitialView(t *testing.T) {
 	if !view.AltScreen {
 		t.Fatal("initial view does not request the alternate screen")
 	}
+	if view.MouseMode != tea.MouseModeNone {
+		t.Fatalf("initial mouse mode = %v, want none", view.MouseMode)
+	}
+}
+
+func TestMouseModeFollowsRuntimeConfig(t *testing.T) {
+	m := NewModel(make(chan ui.UIEvent, 1))
+
+	next, _ := m.Update(ui.UpdateConfigMsg{Mouse: true})
+	m = next.(*Model)
+	view := m.View()
+	if !view.AltScreen {
+		t.Fatal("mouse-enabled view does not request the alternate screen")
+	}
 	if view.MouseMode != tea.MouseModeCellMotion {
-		t.Fatalf("initial mouse mode = %v, want cell motion", view.MouseMode)
+		t.Fatalf("enabled mouse mode = %v, want cell motion", view.MouseMode)
+	}
+
+	next, _ = m.Update(ui.UpdateConfigMsg{Mouse: false})
+	m = next.(*Model)
+	view = m.View()
+	if !view.AltScreen {
+		t.Fatal("mouse-disabled view does not request the alternate screen")
+	}
+	if view.MouseMode != tea.MouseModeNone {
+		t.Fatalf("disabled mouse mode = %v, want none", view.MouseMode)
 	}
 }
 
@@ -54,17 +78,23 @@ func TestTerminalStateIsDeclaredOnInitialView(t *testing.T) {
 // viewport - the reason the terminal mouse is captured at all.
 func TestMouseWheelScrollsViewport(t *testing.T) {
 	m := newTestModel(t)
+	next, _ := m.Update(ui.UpdateConfigMsg{Mouse: true})
+	m = next.(*Model)
 
 	if m.viewport.Mode() != widget.ModeLive {
 		t.Fatal("expected viewport to start at bottom")
 	}
+	liveBottom := m.viewport.SaveScroll().BottomSeq
 
 	wheelUp := tea.MouseWheelMsg{Button: tea.MouseWheelUp}
-	next, _ := m.Update(wheelUp)
+	next, _ = m.Update(wheelUp)
 	m = next.(*Model)
 
 	if m.viewport.Mode() == widget.ModeLive {
 		t.Fatal("wheel up did not scroll the viewport")
+	}
+	if got := liveBottom - m.viewport.SaveScroll().BottomSeq; got != wheelScrollLines {
+		t.Fatalf("wheel up scrolled %d lines, want %d", got, wheelScrollLines)
 	}
 
 	// Wheel down returns toward the bottom
@@ -81,9 +111,11 @@ func TestMouseWheelScrollsViewport(t *testing.T) {
 // disturb the viewport.
 func TestMouseNonWheelEventsIgnored(t *testing.T) {
 	m := newTestModel(t)
+	next, _ := m.Update(ui.UpdateConfigMsg{Mouse: true})
+	m = next.(*Model)
 
 	click := tea.MouseClickMsg{Button: tea.MouseLeft}
-	next, _ := m.Update(click)
+	next, _ = m.Update(click)
 	m = next.(*Model)
 
 	if m.viewport.Mode() != widget.ModeLive {
@@ -862,6 +894,8 @@ func TestSearchFocusUsesFinalLayoutGeometry(t *testing.T) {
 	assertViewportRowHighlighted(t, m.viewport.View(), "SELECTED thief")
 
 	// Deliberate viewport navigation retires the accepted marker.
+	next, _ = m.Update(ui.UpdateConfigMsg{Mouse: true})
+	m = next.(*Model)
 	next, _ = m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
 	m = next.(*Model)
 	if m.searchView.focus != nil {
@@ -894,16 +928,18 @@ func TestSearchReportsInteractionStateSeparatelyFromScrollState(t *testing.T) {
 
 func TestManualViewportEntryPointsClearCommittedSearchFocus(t *testing.T) {
 	tests := []struct {
-		name string
-		msg  tea.Msg
+		name  string
+		msg   tea.Msg
+		mouse bool
 	}{
 		{
 			name: "fallback scroll key",
 			msg:  tea.KeyPressMsg{Code: tea.KeyPgUp},
 		},
 		{
-			name: "mouse wheel",
-			msg:  tea.MouseWheelMsg{Button: tea.MouseWheelUp},
+			name:  "mouse wheel",
+			msg:   tea.MouseWheelMsg{Button: tea.MouseWheelUp},
+			mouse: true,
 		},
 		{
 			name: "Lua main-pane navigation",
@@ -914,6 +950,10 @@ func TestManualViewportEntryPointsClearCommittedSearchFocus(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := newTestModel(t)
+			if tt.mouse {
+				next, _ := m.Update(ui.UpdateConfigMsg{Mouse: true})
+				m = next.(*Model)
+			}
 			focus := widget.SearchMatch{Seq: m.scrollback.Seq(50)}
 			m.searchView.focus = &focus
 			m.viewport.SetHighlight(focus.Seq, focus.Ranges)
@@ -929,6 +969,8 @@ func TestManualViewportEntryPointsClearCommittedSearchFocus(t *testing.T) {
 
 func TestMouseWheelNavigatesActiveSearchMatches(t *testing.T) {
 	m := newBareModel(t)
+	next, _ := m.Update(ui.UpdateConfigMsg{Mouse: true})
+	m = next.(*Model)
 	for _, line := range []string{"thief oldest", "quiet", "thief middle", "quiet", "thief newest"} {
 		m.appendMessage(line)
 	}
@@ -939,7 +981,7 @@ func TestMouseWheelNavigatesActiveSearchMatches(t *testing.T) {
 		t.Fatalf("initial selection = (%q, %v), want newest match", newest.Stripped, ok)
 	}
 
-	next, _ := m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	next, _ = m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
 	m = next.(*Model)
 	middle, ok := m.input.SearchSelected()
 	if !ok || middle.Stripped != "thief middle" {
