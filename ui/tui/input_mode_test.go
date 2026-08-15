@@ -294,6 +294,133 @@ func TestKeypadEnterSubmitsNormalAndComposerInput(t *testing.T) {
 	}
 }
 
+func TestNumpadBindUsesSameNameAcrossInputEncodings(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  tea.KeyPressMsg
+	}{
+		{name: "DECKPAM", msg: tea.KeyPressMsg{Code: tea.KeyKp8}},
+		{name: "kitty", msg: tea.KeyPressMsg{Code: tea.KeyKp8, Text: "8"}},
+		{name: "win32", msg: tea.KeyPressMsg{Code: '8', BaseCode: tea.KeyKp8, Text: "8"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newControllerHarness()
+			h.bound["numpad8"] = true
+
+			h.ctl.HandleKey(tt.msg)
+
+			if binds := h.executeBinds(); len(binds) != 1 || binds[0] != ui.ExecuteBindMsg("numpad8") {
+				t.Fatalf("numpad binds = %v, want [numpad8]", binds)
+			}
+			if got := h.ctl.input.Value(); got != "" {
+				t.Fatalf("bound numpad key typed %q", got)
+			}
+		})
+	}
+}
+
+func TestModifiedNumpadBindUsesSameNameAcrossInputEncodings(t *testing.T) {
+	encodings := []struct {
+		name string
+		msg  tea.KeyPressMsg
+	}{
+		{name: "DECKPAM", msg: tea.KeyPressMsg{Code: tea.KeyKp8, Mod: tea.ModCtrl}},
+		{name: "kitty", msg: tea.KeyPressMsg{Code: tea.KeyKp8, Mod: tea.ModCtrl}},
+		{name: "win32", msg: tea.KeyPressMsg{Code: '8', BaseCode: tea.KeyKp8, Text: "8", Mod: tea.ModCtrl}},
+	}
+	modes := []struct {
+		name  string
+		draft string
+	}{
+		{name: "normal", draft: "look"},
+		{name: "composer", draft: "say one\nsay two"},
+	}
+
+	for _, encoding := range encodings {
+		for _, mode := range modes {
+			t.Run(encoding.name+"/"+mode.name, func(t *testing.T) {
+				h := newControllerHarness()
+				h.bound["ctrl+numpad8"] = true
+				h.ctl.SetText(mode.draft)
+				h.events = nil
+
+				h.ctl.HandleKey(encoding.msg)
+
+				if binds := h.executeBinds(); len(binds) != 1 || binds[0] != ui.ExecuteBindMsg("ctrl+numpad8") {
+					t.Fatalf("modified numpad binds = %v, want [ctrl+numpad8]", binds)
+				}
+				if got := h.ctl.input.Value(); got != mode.draft {
+					t.Fatalf("modified numpad key changed input to %q", got)
+				}
+			})
+		}
+	}
+}
+
+func TestUnboundDECKPAMKeysTypeTheirCharacters(t *testing.T) {
+	h := newControllerHarness()
+
+	h.ctl.HandleKey(keyPress(tea.KeyKp8))
+	h.ctl.HandleKey(keyPress(tea.KeyKpMinus))
+	h.ctl.HandleKey(keyPress(tea.KeyKpEqual))
+
+	if got := h.ctl.input.Value(); got != "8-=" {
+		t.Fatalf("unbound DECKPAM input = %q, want %q", got, "8-=")
+	}
+	if binds := h.executeBinds(); len(binds) != 0 {
+		t.Fatalf("unbound DECKPAM keys dispatched binds: %v", binds)
+	}
+}
+
+func TestBoundNumpadEnterPrecedesSubmit(t *testing.T) {
+	tests := []struct {
+		name  string
+		draft string
+	}{
+		{name: "normal", draft: "look"},
+		{name: "composer", draft: "say one\nsay two"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newControllerHarness()
+			h.bound["numpad_enter"] = true
+			h.ctl.SetText(tt.draft)
+			h.events = nil
+
+			h.ctl.HandleKey(keyPress(tea.KeyKpEnter))
+
+			if binds := h.executeBinds(); len(binds) != 1 || binds[0] != ui.ExecuteBindMsg("numpad_enter") {
+				t.Fatalf("numpad Enter binds = %v, want [numpad_enter]", binds)
+			}
+			if len(h.submitted) != 0 {
+				t.Fatalf("bound numpad Enter submitted input: %+v", h.submitted)
+			}
+			if got := h.ctl.input.Value(); got != tt.draft {
+				t.Fatalf("bound numpad Enter changed draft to %q, want %q", got, tt.draft)
+			}
+		})
+	}
+}
+
+func TestBoundCtrlNumpadEnterKeepsReservedNewline(t *testing.T) {
+	h := newControllerHarness()
+	h.bound["ctrl+numpad_enter"] = true
+	h.ctl.SetText("hello")
+	h.events = nil
+
+	h.ctl.HandleKey(ctrlPress(tea.KeyKpEnter))
+
+	if got := h.ctl.input.Value(); got != "hello\n" {
+		t.Fatalf("input after Ctrl+numpad Enter = %q, want %q", got, "hello\n")
+	}
+	if binds := h.executeBinds(); len(binds) != 0 {
+		t.Fatalf("Ctrl+numpad Enter delegated to Lua: %v", binds)
+	}
+}
+
 // TestBracketedPasteBypassesPrintableBind guards the atomic-paste path: a
 // one-character paste must be inserted as data even when that same printable
 // key is configured as a hotkey for an empty input line.

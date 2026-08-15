@@ -169,6 +169,7 @@ rune.config.set(key, value)
 | `command_separator` | non-empty string | `";"` | Text that separates multiple commands entered on one line |
 | `history_character` | empty or one visible, non-space character | `"!"` | Character used for history expansion (`!`, `!!`, `!prefix`); empty disables it |
 | `keep_input` | boolean | `false` | After `Enter`, leave the text you typed selected; `Enter` repeats it and typing replaces it |
+| `numpad` | boolean | `false` | Ask legacy terminals to report physical numpad keys separately; see [Numpad keys](/scripting/keybindings/#numpad-keys) |
 
 An unknown key, a value of the wrong type, an empty `command_separator`, or an
 invalid history character raises an error and leaves the configuration unchanged.
@@ -177,6 +178,7 @@ invalid history character raises an error and leaves the configuration unchanged
 rune.config.set("keep_input", true)
 rune.config.set("command_separator", "|")
 rune.config.set("history_character", "^")
+rune.config.set("numpad", true)
 assert(rune.config.get("keep_input") == true)
 ```
 

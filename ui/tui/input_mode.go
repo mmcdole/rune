@@ -85,6 +85,7 @@ func newInputController(
 // breaking typing). Unbound scroll keys fall back to Go so scrollback
 // stays usable even in degraded mode.
 func (c *inputController) HandleKey(msg tea.KeyPressMsg) {
+	msg = normalizeNumpadText(msg)
 	isEscape := matchesKey(msg, tea.KeyEsc, 0)
 	if c.mode == ModeCompose && !isEscape {
 		c.input.ContinueCompose()
@@ -212,7 +213,19 @@ func (c *inputController) SetSubmission(submission input.Submission) {
 	}
 }
 
+func (c *inputController) dispatchNumpadEnterBind(msg tea.KeyPressMsg) bool {
+	name, _, ok := numpadKey(msg)
+	if !ok || name != "numpad_enter" || msg.Mod&keyModifiers != 0 || !c.isBound(name) {
+		return false
+	}
+	c.notify(ui.ExecuteBindMsg(name))
+	return true
+}
+
 func (c *inputController) handleNormalKey(msg tea.KeyPressMsg) {
+	if c.dispatchNumpadEnterBind(msg) {
+		return
+	}
 	// Accept both portable Ctrl+J and disambiguated Ctrl+Enter as the explicit
 	// way to start a multiline draft without pasting.
 	if isComposerNewline(msg) {
@@ -245,6 +258,9 @@ func (c *inputController) handleNormalKey(msg tea.KeyPressMsg) {
 }
 
 func (c *inputController) handleComposeKey(msg tea.KeyPressMsg) {
+	if c.dispatchNumpadEnterBind(msg) {
+		return
+	}
 	if matchesEnterKey(msg, 0) {
 		c.submitInput()
 		return

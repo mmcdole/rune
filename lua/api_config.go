@@ -14,6 +14,7 @@ type Config struct {
 	CommandSeparator string
 	HistoryCharacter string
 	KeepInput        bool
+	Numpad           bool
 }
 
 func defaultConfig() Config {
@@ -21,6 +22,7 @@ func defaultConfig() Config {
 		CommandSeparator: ";",
 		HistoryCharacter: "!",
 		KeepInput:        false,
+		Numpad:           false,
 	}
 }
 
@@ -50,6 +52,8 @@ func (e *Engine) registerConfigFuncs() {
 				c.Return(e.config.HistoryCharacter)
 			case "keep_input":
 				c.Return(e.config.KeepInput)
+			case "numpad":
+				c.Return(e.config.Numpad)
 			default:
 				return c.Errorf("unknown config key %q", key)
 			}
@@ -85,6 +89,8 @@ func (e *Engine) registerConfigFuncs() {
 				e.config.HistoryCharacter = value
 			case "keep_input":
 				e.config.KeepInput = c.Bool(2)
+			case "numpad":
+				e.config.Numpad = c.Bool(2)
 			default:
 				return c.Errorf("unknown config key %q", key)
 			}

@@ -13,6 +13,7 @@ func TestConfigGetReturnsGoDefaults(t *testing.T) {
 		assert(rune.config.get("command_separator") == ";")
 		assert(rune.config.get("history_character") == "!")
 		assert(rune.config.get("keep_input") == false)
+		assert(rune.config.get("numpad") == false)
 	`); err != nil {
 		t.Fatalf("read config defaults: %v", err)
 	}
@@ -25,6 +26,8 @@ func TestConfigSetUpdatesRecognizedValue(t *testing.T) {
 	if err := engine.DoString("set config", `
 		rune.config.set("keep_input", true)
 		assert(rune.config.get("keep_input") == true)
+		rune.config.set("numpad", true)
+		assert(rune.config.get("numpad") == true)
 	`); err != nil {
 		t.Fatalf("set recognized config value: %v", err)
 	}
@@ -146,6 +149,7 @@ func TestConfigBootPublishesOneFinalTypedConfig(t *testing.T) {
 		rune.config.set("command_separator", "|")
 		rune.config.set("history_character", "^")
 		rune.config.set("keep_input", true)
+		rune.config.set("numpad", true)
 	`); err != nil {
 		t.Fatalf("stage config during boot: %v", err)
 	}
@@ -156,7 +160,7 @@ func TestConfigBootPublishesOneFinalTypedConfig(t *testing.T) {
 	engine.CommitConfig()
 	engine.CommitConfig()
 
-	want := []Config{{CommandSeparator: "|", HistoryCharacter: "^", KeepInput: true}}
+	want := []Config{{CommandSeparator: "|", HistoryCharacter: "^", KeepInput: true, Numpad: true}}
 	if got := host.DrainConfigChanges(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("committed config publications = %+v, want %+v", got, want)
 	}
@@ -208,6 +212,24 @@ func TestConfigRuntimeChangePublishesTypedConfigImmediately(t *testing.T) {
 	}
 }
 
+func TestConfigNumpadRuntimeChangePublishesImmediately(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+	engine.CommitConfig()
+	host.DrainConfigChanges()
+
+	if err := engine.DoString("enable numpad", `
+		rune.config.set("numpad", true)
+	`); err != nil {
+		t.Fatalf("change numpad config: %v", err)
+	}
+
+	want := []Config{{CommandSeparator: ";", HistoryCharacter: "!", Numpad: true}}
+	if got := host.DrainConfigChanges(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("numpad config publications = %+v, want %+v", got, want)
+	}
+}
+
 func TestPresentationChangesDoNotRepublishConfig(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
@@ -242,6 +264,9 @@ func TestConfigRejectsWrongTypeWithoutMutation(t *testing.T) {
 		local ok = pcall(rune.config.set, "keep_input", "yes")
 		assert(not ok)
 		assert(rune.config.get("keep_input") == true)
+		ok = pcall(rune.config.set, "numpad", "yes")
+		assert(not ok)
+		assert(rune.config.get("numpad") == false)
 	`); err != nil {
 		t.Fatalf("validate config type before mutation: %v", err)
 	}
@@ -260,6 +285,7 @@ func TestConfigRejectsUnknownKeys(t *testing.T) {
 		assert(rune.config.get("command_separator") == ";")
 		assert(rune.config.get("history_character") == "!")
 		assert(rune.config.get("keep_input") == false)
+		assert(rune.config.get("numpad") == false)
 	`); err != nil {
 		t.Fatalf("reject unknown config keys: %v", err)
 	}

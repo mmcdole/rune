@@ -29,6 +29,8 @@ prefixes are lowercase.
 | Editing | `esc`, `tab`, `backspace`, `delete`, `insert` | `"esc"`, `"shift+tab"`, `"alt+backspace"` |
 | Navigation | `up`, `down`, `left`, `right`, `home`, `end`, `pgup`, `pgdown` | `"left"`, `"ctrl+home"`, `"shift+pgup"` |
 | Function keys | `f1` through `f63` | `"f1"`, `"f13"`, `"f20"` |
+| Numpad digits | `numpad0` through `numpad9` | `"numpad8"`, `"ctrl+numpad4"` |
+| Numpad operators | `numpad_dot`, `numpad_slash`, `numpad_star`, `numpad_minus`, `numpad_plus`, `numpad_enter` | `"numpad_plus"`, `"numpad_enter"` |
 | Modifiers | `ctrl`, `alt`, `shift`, `meta`, `hyper`, `super` | `"ctrl+r"`, `"shift+a"`, `"ctrl+alt+x"` |
 
 For multiple modifiers, use the order `ctrl+alt+shift+meta+hyper+super`, then
@@ -37,7 +39,41 @@ particular, extended function keys, modified navigation keys, and
 `meta`/`hyper`/`super` chords are not available in every terminal.
 
 Key names are exact. Use `esc`, `pgup`, and `pgdown`; `escape`, `pageup`, and
-`pagedown` are not aliases.
+`pagedown` are not aliases. Numpad names begin with `numpad`; `kp8` and
+`kpenter` are not aliases for `numpad8` and `numpad_enter`.
+
+### Numpad keys
+
+Terminals using an enhanced keyboard protocol report physical numpad keys to
+Rune automatically. Older terminals need application keypad mode, which is
+off by default. Enable it in `init.lua`:
+
+```lua
+rune.config.set("numpad", true)
+```
+
+The setting takes effect immediately. Turning it off returns the terminal to
+numeric keypad mode; Rune also does that while `$EDITOR` is open and whenever
+the client exits.
+
+NumLock generally needs to be on. Some legacy terminals, including urxvt and
+some xterm configurations, report application-keypad sequences only with it
+off. With no matching bind, numpad digits and operators type their usual
+characters, and `numpad_enter` acts like `enter`. In normal input, bound numpad
+digits and operators follow the same empty-or-selected rule as other printable
+binds.
+
+Terminal support varies. On a system with `timeout`, this probe requests
+application keypad mode for ten seconds and then restores the terminal:
+
+```sh
+(saved=$(stty -g); trap 'stty "$saved"; printf "\033>"' EXIT; printf '\033='; stty raw -echo; timeout 10 cat -v)
+```
+
+Press a numpad key while it runs. `^[Ox` for numpad 8 means the terminal
+supports application keypad mode; a bare `8` means it does not. Enhanced
+keyboard-protocol terminals may still support Rune's numpad binds even when
+this legacy probe prints a digit.
 
 ### Reserved input keys
 
@@ -98,6 +134,16 @@ Movement keys, grouped:
 rune.bind("f5", function() rune.send("north") end, { group = "movement" })
 rune.bind("f6", function() rune.send("south") end, { group = "movement" })
 -- /group movement off
+```
+
+Numpad movement:
+
+```lua
+rune.config.set("numpad", true) -- needed only for legacy terminal input
+rune.bind("numpad8", function() rune.send("north") end)
+rune.bind("numpad2", function() rune.send("south") end)
+rune.bind("numpad6", function() rune.send("east") end)
+rune.bind("numpad4", function() rune.send("west") end)
 ```
 
 Editing helpers using the input API:
