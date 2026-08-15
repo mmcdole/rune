@@ -66,7 +66,6 @@ type Host interface {
 	RefreshBars() // Force immediate bar refresh
 
 	// History
-	GetHistory() []string
 	GetHistoryEntries() []input.Submission
 	AddToHistory(cmd string)
 
@@ -102,7 +101,11 @@ type Host interface {
 	HTTPRequest(id int, req HTTPRequest)
 
 	// State
-	OnConfigChange()
+	// OnConfigChange applies one complete, validated configuration
+	// generation. It is separate from presentation invalidation so changing a
+	// setting cannot trigger Lua re-entry to rebuild binds, layout, and bars.
+	OnConfigChange(Config)
+	OnPresentationChange()
 }
 
 // HTTPRequest describes one request handed to Host.HTTPRequest.

@@ -13,7 +13,7 @@ type UIEvent interface {
 // the TUI splits and wraps it into rows.
 type PrintLineMsg string
 
-// EchoLineMsg carries a local echo (user input, already styled by the
+// EchoLineMsg carries a local echo (submitted input, already styled by the
 // Lua "echo" hook) to append to scrollback. Like PrintLineMsg, the
 // text may contain newlines.
 type EchoLineMsg string
@@ -67,12 +67,24 @@ type UpdateLayoutMsg struct {
 	Bottom []LayoutEntry
 }
 
+// Config carries the UI-facing subset of Rune's typed configuration.
+type Config struct {
+	// KeepInput keeps a submitted command selected in the input line, so Enter
+	// resends it and typing replaces it.
+	KeepInput bool
+}
+
+// UpdateConfigMsg pushes UI-facing configuration from Session to UI.
+type UpdateConfigMsg Config
+
 // --- Push-based UI Messages (UI -> Session) ---
 
-// InputSubmittedMsg transfers an accepted input snapshot to Session. Once this
-// event is queued, the UI may clear its draft.
+// InputSubmittedMsg atomically transfers an accepted submission and the
+// editable draft that should follow it to Session. Once this event is queued,
+// the UI may apply the same transition locally.
 type InputSubmittedMsg struct {
 	Submission input.Submission
+	NextDraft  string // editable text after submit; cursor is at its end
 }
 
 func (InputSubmittedMsg) uiEvent() {}

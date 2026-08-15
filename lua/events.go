@@ -1,6 +1,7 @@
 package lua
 
-// NotifyReady notifies Lua that Session boot has completed.
+// NotifyReady notifies Lua after scripts load and before staged settings and
+// UI state are applied.
 func (e *Engine) NotifyReady() {
 	e.notify("ready")
 }

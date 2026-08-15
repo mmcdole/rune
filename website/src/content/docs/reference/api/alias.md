@@ -88,6 +88,10 @@ its return value controls what happens next: return a string to have
 it processed and sent in place of the input, or return nothing to
 consume the input entirely (the function already did the work).
 
+[History expansion](/interface/input/#history) runs only on commands typed into
+Rune's normal input, before aliases. Text sent with `rune.send`, including the
+result of an alias, does not go through history expansion again.
+
 ## Managing
 
 Standard registry management applies:

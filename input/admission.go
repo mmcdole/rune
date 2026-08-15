@@ -1,6 +1,16 @@
 package input
 
-import "github.com/mmcdole/rune/text"
+import (
+	"unicode/utf8"
+
+	"github.com/mmcdole/rune/text"
+)
+
+// ValidCommandText reports whether value can safely retain command-mode
+// interpretation across submission, history, and the one-line input widget.
+func ValidCommandText(value string) bool {
+	return utf8.ValidString(value) && !RequiresVerbatim(value)
+}
 
 // RequiresVerbatim reports whether value contains text that the ordinary
 // single-line command input cannot admit without losing data or rendering

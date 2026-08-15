@@ -129,7 +129,7 @@ func TestGroupMasterSwitch(t *testing.T) {
 			name: "slash command group off",
 			setup: `
 				rune.alias.exact('k', 'kill', {group = 'combat'})
-				rune.hooks.call('input', '/group combat off')
+				rune.input._dispatch('/group combat off', 'command')
 			`,
 			input: "k orc",
 			want:  []string{"k orc"},
@@ -138,8 +138,8 @@ func TestGroupMasterSwitch(t *testing.T) {
 			name: "slash command group back on",
 			setup: `
 				rune.alias.exact('k', 'kill', {group = 'combat'})
-				rune.hooks.call('input', '/group combat off')
-				rune.hooks.call('input', '/group combat on')
+				rune.input._dispatch('/group combat off', 'command')
+				rune.input._dispatch('/group combat on', 'command')
 			`,
 			input: "k orc",
 			want:  []string{"kill orc"},

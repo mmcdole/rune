@@ -7,6 +7,7 @@ package lua
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -45,7 +46,9 @@ func assertInputMode(t *testing.T, host *MockHost, want input.SubmissionMode) {
 func TestHistoryNavigationCyclesWithEmptyDraft(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
-	host.History = []string{"alpha", "bravo", "charlie"} // oldest first
+	host.HistoryEntries = []input.Submission{
+		input.Command("alpha"), input.Command("bravo"), input.Command("charlie"),
+	}
 
 	// Up walks newest -> oldest and sticks at the oldest entry.
 	for _, want := range []string{"charlie", "bravo", "alpha", "alpha"} {
@@ -63,7 +66,9 @@ func TestHistoryNavigationCyclesWithEmptyDraft(t *testing.T) {
 func TestHistoryNavigationPrefixMatching(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
-	host.History = []string{"north", "say hi", "nod"}
+	host.HistoryEntries = []input.Submission{
+		input.Command("north"), input.Command("say hi"), input.Command("nod"),
+	}
 
 	// A typed prefix restricts navigation to matching entries.
 	typeInput(engine, host, "n")
@@ -84,7 +89,7 @@ func TestHistoryNavigationPrefixMatching(t *testing.T) {
 func TestHistoryNavigationResetOnExternalEdit(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
-	host.History = []string{"look", "smile"}
+	host.HistoryEntries = []input.Submission{input.Command("look"), input.Command("smile")}
 
 	engine.HandleKeyBind("up")
 	assertInput(t, host, "smile")
@@ -100,14 +105,14 @@ func TestHistoryNavigationResetOnExternalEdit(t *testing.T) {
 func TestHistoryNavigationResetOnSubmit(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
-	host.History = []string{"first", "second"}
+	host.HistoryEntries = []input.Submission{input.Command("first"), input.Command("second")}
 
 	engine.HandleKeyBind("up")
 	engine.HandleKeyBind("up")
 	assertInput(t, host, "first")
 
 	// Submitting input resets navigation (input hook at priority 1).
-	engine.OnInput("go")
+	dispatchTestCommand(engine, "go")
 	host.SetInput("")
 
 	engine.HandleKeyBind("up")
@@ -138,7 +143,7 @@ func TestHistoryNavigationRestoresSubmissionMode(t *testing.T) {
 	assertInputMode(t, host, input.ModeCommand)
 }
 
-func TestHistoryStructuredAndLegacyAPIs(t *testing.T) {
+func TestHistoryPublicAndInternalAPIs(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 	host.HistoryEntries = []input.Submission{
@@ -147,8 +152,8 @@ func TestHistoryStructuredAndLegacyAPIs(t *testing.T) {
 	}
 
 	script := `
-		local legacy = rune.history.get()
-		assert(#legacy == 2 and legacy[1] == "north" and legacy[2] == "say hi;look")
+		local public = rune.history.get()
+		assert(#public == 2 and public[1] == "north" and public[2] == "say hi;look")
 		local entries = rune._history.entries()
 		assert(#entries == 2)
 		assert(entries[1].text == "north" and entries[1].mode == "command")
@@ -156,6 +161,23 @@ func TestHistoryStructuredAndLegacyAPIs(t *testing.T) {
 	`
 	if err := engine.DoString("history_apis", script); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestHistoryAddRejectsStructuredCommandText(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	if err := engine.DoString("structured_history", `
+		rune.history.add("north")
+		local ok, err = pcall(rune.history.add, "one\ntwo")
+		assert(not ok, "rune.history.add accepted multiline command text")
+		assert(tostring(err):find("rune.history.add only accepts valid one-line command text", 1, true), tostring(err))
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := host.HistoryEntries, []input.Submission{input.Command("north")}; !slices.Equal(got, want) {
+		t.Fatalf("history after rejected command = %+v, want %+v", got, want)
 	}
 }
 
@@ -386,7 +408,7 @@ func TestTabCompletionIgnoresShortPrefixAndInput(t *testing.T) {
 	assertInput(t, host, "g")
 
 	// User input also seeds the cache.
-	engine.OnInput("brandish sword")
+	dispatchTestCommand(engine, "brandish sword")
 	typeInput(engine, host, "bra")
 	engine.HandleKeyBind("tab")
 	assertInput(t, host, "brandish ")

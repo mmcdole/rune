@@ -29,8 +29,8 @@ input line; `/log status` shows `(raw)` when the mode is on.
 What gets written is Lua policy, carried by two priority-200 hooks
 named `log-output` and `log-echo`: server output after trigger
 processing (rewrites are logged as rewritten, gagged lines are not
-logged) and the local echo of typed input. Plain mode strips ANSI so
-the log reads like the screen; raw mode keeps the codes. Prompts and
+logged) and the local echo of accepted, possibly rewritten input. Plain mode
+strips ANSI so the log reads like the screen; raw mode keeps the codes. Prompts and
 client messages (`rune.echo`) are not logged.
 
 :::note

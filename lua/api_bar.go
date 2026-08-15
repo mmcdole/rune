@@ -36,7 +36,7 @@ func (e *Engine) registerBarFuncs() {
 				e.barLayout.Bottom = nil
 			}
 
-			e.host.OnConfigChange() // Notify Session to push layout update to UI
+			e.host.OnPresentationChange()
 			return nil
 		},
 	}, nil)

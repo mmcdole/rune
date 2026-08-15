@@ -48,18 +48,19 @@ type inputController struct {
 	pickerCB      string // Lua callback ID to settle on close
 	pickerDismiss bool   // close inline picker once input contains a space
 	historyRecall bool   // unmodified verbatim entry restored from history
+	keepOnSubmit  bool   // keep_input: keep the sent command selected
 
-	notify  func(ui.UIEvent)            // state and actions sent to the session
-	submit  func(input.Submission) bool // transfer an immutable draft to the session
-	isBound func(key string) bool       // key has a Lua bind
-	scroll  func(tea.KeyType) bool      // Go scroll-key fallback; true if handled
-	search  searchEffects               // viewport side of scrollback search
+	notify  func(ui.UIEvent)                // state and actions sent to the session
+	submit  func(ui.InputSubmittedMsg) bool // atomically transfer submission and following draft
+	isBound func(key string) bool           // key has a Lua bind
+	scroll  func(tea.KeyType) bool          // Go scroll-key fallback; true if handled
+	search  searchEffects                   // viewport side of scrollback search
 }
 
 func newInputController(
 	input *widget.Input,
 	notify func(ui.UIEvent),
-	submit func(input.Submission) bool,
+	submit func(ui.InputSubmittedMsg) bool,
 	isBound func(string) bool,
 	scroll func(tea.KeyType) bool,
 	search searchEffects,
@@ -230,8 +231,10 @@ func (c *inputController) handleNormalKey(msg tea.KeyMsg) {
 	if keyStr != "" && c.isBound(keyStr) {
 		// Alt-modified runes are chords, not typing: they never reach
 		// the input widget, so the empty-input guard doesn't apply.
+		// A fully selected line counts as empty: its text is about to
+		// be replaced anyway, so movement binds keep firing.
 		isPrintable := msg.Type == tea.KeyRunes && !msg.Alt
-		if !isPrintable || c.input.Value() == "" {
+		if !isPrintable || c.input.Value() == "" || c.input.Selected() {
 			c.notify(ui.ExecuteBindMsg(keyStr))
 			return
 		}
@@ -568,17 +571,40 @@ func (c *inputController) closePicker(accepted bool, value string) {
 	c.pickerDismiss = false
 }
 
-// submitInput transfers the current input snapshot and clears the local draft
-// only after Session accepts ownership.
+// SetKeepOnSubmit applies the pushed keep_input preference.
+// Turning it off releases the keep-input selection without clearing the draft.
+func (c *inputController) SetKeepOnSubmit(on bool) {
+	c.keepOnSubmit = on
+	if !on {
+		c.input.Deselect()
+	}
+}
+
+// submitInput transfers the current submission and its following draft as one
+// event, then applies that same transition locally only after Session accepts
+// ownership.
 func (c *inputController) submitInput() {
 	submission := input.Command(c.input.Value())
 	if c.input.IsComposing() {
 		submission = input.Verbatim(c.input.Value())
 	}
-	if !c.submit(submission) {
+	keep := c.keepOnSubmit && submission.Mode == input.ModeCommand && submission.Text != ""
+	nextDraft := ""
+	if keep {
+		nextDraft = submission.Text
+	}
+	if !c.submit(ui.InputSubmittedMsg{Submission: submission, NextDraft: nextDraft}) {
+		return
+	}
+	c.mode = ModeNormal
+	c.historyRecall = false
+	if keep {
+		// zMUD-style keep: the sent command stays in the line, selected,
+		// so Enter resends it and typing replaces it. The accepted submission
+		// already carries this post-submit draft to Session.
+		c.input.SelectAll()
+		c.input.CursorEnd()
 		return
 	}
 	c.input.Reset()
-	c.mode = ModeNormal
-	c.historyRecall = false
 }

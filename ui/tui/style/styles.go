@@ -20,8 +20,9 @@ func RenderBorder(width int, char string) string {
 // only chrome the TUI draws itself is styled here.
 type Styles struct {
 	// Input
-	InputText   lipgloss.Style
-	InputCursor lipgloss.Style
+	InputText     lipgloss.Style
+	InputCursor   lipgloss.Style
+	InputSelected lipgloss.Style // whole-line keep-input selection
 
 	// Picker overlay
 	OverlayBorder        lipgloss.Style
@@ -47,6 +48,7 @@ func DefaultStyles() Styles {
 		InputCursor: lipgloss.NewStyle().
 			Background(lipgloss.Color("255")).
 			Foreground(lipgloss.Color("0")),
+		InputSelected: lipgloss.NewStyle().Reverse(true),
 
 		// Picker overlay (slash picker, fuzzy search)
 		OverlayBorder: lipgloss.NewStyle().

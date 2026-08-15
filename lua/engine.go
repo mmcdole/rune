@@ -34,6 +34,11 @@ type Engine struct {
 	// Layout config, marshaled from rune.ui.layout calls
 	barLayout ui.LayoutConfig
 
+	// Application configuration, owned and validated by Go. Init starts a
+	// fresh candidate at the defaults; Session commits it after scripts load.
+	config        Config
+	configStaging bool
+
 	// Re-applied after every Init so reloads keep it visible.
 	configDir string
 
@@ -42,9 +47,9 @@ type Engine struct {
 	inLua       bool               // True while inside a guarded Lua call (re-entrancy)
 	guardCancel context.CancelFunc // Cancels the active watchdog context
 
-	// True once the user has been warned that rune.hooks.call is
-	// missing and the client is degraded to raw pass-through.
-	hooksBrokenReported bool
+	// True once the user has been warned that the core Lua pipeline is missing
+	// or violated a result contract. Reset for each VM generation.
+	coreBrokenReported bool
 
 	// True while dispatching the "error" event, so failures inside
 	// error handlers print directly instead of recursing.
@@ -60,6 +65,8 @@ func NewEngine(host Host) *Engine {
 		vm:              newScriptEngine(),
 		pickerCallbacks: make(map[string]script.FuncRef),
 		barLayout:       ui.DefaultLayoutConfig(),
+		config:          defaultConfig(),
+		configStaging:   true,
 		CallTimeout:     DefaultCallTimeout,
 	}
 	e.registerAPIs()
@@ -90,10 +97,17 @@ func (e *Engine) guard(fn func() error) error {
 	}()
 
 	err := fn()
-	// The active context may have been replaced by pauseWatchdog, so
-	// consult the VM's current context rather than the original.
-	if lctx := e.vm.Context(); err != nil && lctx != nil && lctx.Err() != nil {
-		return fmt.Errorf("script interrupted after %v (runaway loop?): %w", e.CallTimeout, err)
+	// The active context may have been replaced by pauseWatchdog, so consult
+	// the VM's current context rather than the original. Treat an expired
+	// watchdog as an entry failure even if Lua pcall caught the interruption;
+	// otherwise backend-specific catch behavior could let a timed-out pipeline
+	// continue and dispatch.
+	if lctx := e.vm.Context(); lctx != nil && lctx.Err() != nil {
+		cause := err
+		if cause == nil {
+			cause = lctx.Err()
+		}
+		return fmt.Errorf("script interrupted after %v (runaway loop?): %w", e.CallTimeout, cause)
 	}
 	return err
 }
@@ -133,7 +147,9 @@ func (e *Engine) Init() error {
 	e.pickerNextID = 0
 
 	e.barLayout = ui.DefaultLayoutConfig()
-	e.hooksBrokenReported = false
+	e.config = defaultConfig()
+	e.configStaging = true
+	e.coreBrokenReported = false
 
 	if e.configDir != "" {
 		e.vm.SetModuleField("rune", "config_dir", e.configDir)
@@ -213,12 +229,6 @@ func (e *Engine) DoFile(path string) error {
 	return e.guard(func() error { return e.vm.DoFile(path) })
 }
 
-// OnInput handles traditional command input. It remains as a convenience for
-// callers that do not need to construct an explicit submission.
-func (e *Engine) OnInput(text string) {
-	e.OnSubmission(input.Command(text))
-}
-
 // callHooks dispatches through rune.hooks.call; found=false means the
 // hook system is unavailable (core failed to load or was clobbered).
 func (e *Engine) callHooks(nret int, args ...any) ([]script.Result, bool, error) {
@@ -232,41 +242,92 @@ func (e *Engine) callHooks(nret int, args ...any) ([]script.Result, bool, error)
 	return results, found, err
 }
 
-// OnSubmission runs input hooks and command or verbatim routing.
-func (e *Engine) OnSubmission(submission input.Submission) {
+// ApplyInputHooks runs the interactive pre-commit input pass. Lua may return
+// a replacement string or false to consume the submission. Interpretation
+// mode is owned by Go and cannot be rewritten by scripts.
+func (e *Engine) ApplyInputHooks(submission input.Submission) (input.Submission, bool) {
 	ctx := script.Tree{V: map[string]any{"mode": submission.Mode.String()}}
-
-	// The consumed/pass-through result is dispatch routing state that
-	// lives in Lua; nothing on the Go side acts on it.
-	_, found, err := e.callHooks(1, "input", submission.Text, ctx)
-	if !found {
-		e.reportHooksBroken()
-		if submission.Mode == input.ModeVerbatim {
-			e.sendVerbatimFallback(submission.Text)
-			return
-		}
-
-		// Degraded command mode keeps the escape hatches working and passes
-		// everything else to the server as a plain telnet client.
-		switch submission.Text {
-		case "/quit":
-			e.host.Quit()
-		case "/reload":
-			e.host.Reload()
-		default:
-			_ = e.host.Send(submission.Text)
-		}
-		return
-	}
+	results, found, err := e.callHooks(1, "input", submission.Text, ctx)
 	if err != nil {
-		e.reportError("input dispatch", err)
+		e.reportError("input hooks", err)
+		// Some handlers may already have rewritten input or produced side
+		// effects. Fail closed rather than dispatching the authored text and
+		// risking a duplicate send or bypassed interceptor.
+		return submission, false
+	}
+	if !found {
+		e.reportCoreBroken()
+		return submission, true
+	}
+	result := results[0]
+	switch {
+	case result.False():
+		return submission, false
+	case result.Kind == script.KindString:
+		if submission.Mode != input.ModeVerbatim && !input.ValidCommandText(result.Str) {
+			e.reportError("input hooks", fmt.Errorf(
+				"command rewrite must be valid text on one line without tabs or control characters",
+			))
+			return submission, false
+		}
+		submission.Text = result.Str
+		return submission, true
+	default:
+		e.reportError("input hooks", fmt.Errorf(
+			"expected a string or false, got %s", result.Kind,
+		))
+		e.reportCoreBroken()
+		return submission, false
 	}
 }
 
-// sendVerbatimFallback sends verbatim input when the Lua input hook is missing.
-func (e *Engine) sendVerbatimFallback(text string) {
-	for _, line := range input.Verbatim(text).PhysicalLines() {
-		_ = e.host.Send(line)
+// DispatchSubmission routes a submission without running input hooks or
+// committing echo or history. If the Lua dispatcher is missing, a small Go
+// fallback preserves raw input and the /quit and /reload escape hatches. A
+// dispatcher that starts and then fails is never retried, because it may
+// already have produced side effects.
+func (e *Engine) DispatchSubmission(submission input.Submission) {
+	var found bool
+	err := e.guard(func() error {
+		var callErr error
+		_, found, callErr = e.vm.CallModule(
+			"rune.input", "_dispatch", 0,
+			submission.Text, submission.Mode.String(),
+		)
+		return callErr
+	})
+	if err != nil {
+		e.reportError("input dispatch", err)
+		return
+	}
+	if found {
+		return
+	}
+
+	e.reportCoreBroken()
+	e.dispatchSubmissionFallback(submission)
+}
+
+func (e *Engine) dispatchSubmissionFallback(submission input.Submission) {
+	if submission.Mode == input.ModeVerbatim {
+		for _, line := range submission.PhysicalLines() {
+			if err := e.host.Send(line); err != nil {
+				e.reportError("input fallback", err)
+				return
+			}
+		}
+		return
+	}
+
+	switch submission.Text {
+	case "/quit":
+		e.host.Quit()
+	case "/reload":
+		e.host.Reload()
+	default:
+		if err := e.host.Send(submission.Text); err != nil {
+			e.reportError("input fallback", err)
+		}
 	}
 }
 
@@ -281,7 +342,7 @@ func (e *Engine) OnEcho(in string) (string, bool) {
 
 	results, found, err := e.callHooks(2, "echo", in)
 	if !found {
-		e.reportHooksBroken()
+		e.reportCoreBroken()
 		return fallback, true
 	}
 	if err != nil {
@@ -300,7 +361,7 @@ func (e *Engine) OnEcho(in string) (string, bool) {
 func (e *Engine) OnOutput(line text.Line) (string, bool) {
 	results, found, err := e.callHooks(2, "output", script.Obj{Type: "line", Payload: &line})
 	if !found {
-		e.reportHooksBroken()
+		e.reportCoreBroken()
 		return line.Raw, true
 	}
 	if err != nil {
@@ -322,7 +383,7 @@ func (e *Engine) OnPrompt(line text.Line, confirmed bool) string {
 	results, found, err := e.callHooks(2, "prompt",
 		script.Obj{Type: "line", Payload: &line}, confirmed)
 	if !found {
-		e.reportHooksBroken()
+		e.reportCoreBroken()
 		return line.Raw
 	}
 	if err != nil {
@@ -469,7 +530,7 @@ func (e *Engine) notify(event string, args ...any) {
 
 	_, found, err := e.callHooks(0, callArgs...)
 	if !found {
-		e.reportHooksBroken()
+		e.reportCoreBroken()
 		// Errors must never disappear, even with hooks broken.
 		if event == "error" {
 			parts := make([]string, len(args))
@@ -500,6 +561,7 @@ func (e *Engine) registerAPIs() {
 	e.registerRegexFuncs()
 	e.registerUIFuncs()
 	e.registerStateFuncs()
+	e.registerConfigFuncs()
 	e.registerBarFuncs()
 	e.registerPickerFuncs()
 	e.registerHistoryFuncs()
@@ -525,14 +587,13 @@ func (e *Engine) reportError(source string, err error) {
 	e.NotifyError(msg)
 }
 
-// reportHooksBroken warns the user, once per VM generation, that the
-// hook system is unavailable and the client is running degraded.
-func (e *Engine) reportHooksBroken() {
-	if e.hooksBrokenReported {
+// reportCoreBroken warns once per VM generation that a required internal Lua
+// entry point is unavailable. Callers retain their own safe fallback policy.
+func (e *Engine) reportCoreBroken() {
+	if e.coreBrokenReported {
 		return
 	}
-	e.hooksBrokenReported = true
-	e.host.Print(text.Red("[System] rune.hooks.call is unavailable - scripting disabled. " +
-		"Input and output pass through raw; /reload and /quit still work. " +
-		"Fix your scripts and /reload."))
+	e.coreBrokenReported = true
+	e.host.Print(text.Red("[System] Rune's core Lua pipeline is incomplete; some scripting is disabled. " +
+		"Fix your scripts, then reload or restart Rune."))
 }

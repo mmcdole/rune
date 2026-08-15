@@ -351,11 +351,16 @@ func (s *Session) finishPartialLine() {
 func (s *Session) handleUIEvent(event ui.UIEvent) {
 	switch event := event.(type) {
 	case ui.InputSubmittedMsg:
-		// The UI has accepted this immutable snapshot and cleared its draft.
-		// Mirror that change before input hooks inspect rune.input state.
-		s.currentInput = ""
-		s.currentCursor = 0
-		s.engine.NotifyInputChanged("")
+		// The accepted event carries both the immutable submission and the
+		// editor draft that follows it. Apply them as one transition before
+		// input hooks inspect rune.input state. Post-submit drafts always put
+		// the cursor at the end, so Session's byte offset is simply len.
+		draftChanged := s.currentInput != event.NextDraft
+		s.currentInput = event.NextDraft
+		s.currentCursor = len(event.NextDraft)
+		if draftChanged {
+			s.engine.NotifyInputChanged(event.NextDraft)
+		}
 		s.handleSubmission(event.Submission)
 	case ui.ExecuteBindMsg:
 		s.engine.HandleKeyBind(string(event))
@@ -392,19 +397,26 @@ func (s *Session) handleUIEvent(event ui.UIEvent) {
 }
 
 func (s *Session) handleSubmission(submission input.Submission) {
-	// Submission is a display boundary regardless of local echo, aliases,
-	// slash commands, input-hook consumption, connection state, or send result.
+	// Every submission closes any active partial-line display, even when an
+	// input hook later consumes it or dispatch produces no network send.
 	s.finishPartialLine()
-	s.addHistorySubmission(submission)
+
+	effective, proceed := s.engine.ApplyInputHooks(submission)
+	if !proceed {
+		return
+	}
+
+	s.addHistorySubmission(effective)
+
 	if s.protocol.LocalEchoEnabled() {
-		for _, line := range submission.PhysicalLines() {
+		for _, line := range effective.PhysicalLines() {
 			if styled, show := s.engine.OnEcho(line); show {
 				s.ui.Echo(styled)
 			}
 		}
 	}
 
-	s.engine.OnSubmission(submission)
+	s.engine.DispatchSubmission(effective)
 }
 
 // boot loads the VM state.
@@ -431,6 +443,7 @@ func (s *Session) boot() error {
 	// is reported individually and the rest of boot proceeds.
 	s.loadUserScript()
 	s.engine.NotifyReady()
+	s.engine.CommitConfig()
 	s.pushBindsAndLayout()
 	s.pushBarUpdates()
 
@@ -440,7 +453,7 @@ func (s *Session) boot() error {
 	if s.connectTarget != "" {
 		target := s.connectTarget
 		s.connectTarget = ""
-		s.engine.OnInput("/connect " + target)
+		s.engine.DispatchSubmission(input.Command("/connect " + target))
 	}
 	return nil
 }

@@ -48,7 +48,7 @@ func TestSendExpansion(t *testing.T) {
 			want:  []string{"north", "north", "north"},
 		},
 		{
-			name:  "repeat after delimiter",
+			name:  "repeat after command separator",
 			input: "open gate;#2 south",
 			want:  []string{"open gate", "south", "south"},
 		},
@@ -70,6 +70,22 @@ func TestSendExpansion(t *testing.T) {
 	})
 }
 
+func TestSendExpansionUsesConfiguredCommandSeparator(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	if err := engine.DoString("configured command separator repeats", `
+		rune.config.set("command_separator", "|")
+		rune.send("look|#2 north|#2 {east|west}|say #3 cheers")
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	assertCommands(t, host, []string{
+		"look", "north", "north", "east", "west", "east", "west", "say #3 cheers",
+	})
+}
+
 func TestVerbatimInputPreservesLinesAndBypassesCommands(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
@@ -81,7 +97,7 @@ func TestVerbatimInputPreservesLinesAndBypassesCommands(t *testing.T) {
 	}
 
 	draft := "  indented;still one line  \n\n/quit\n#2 north\naliased\ntrailing  \n"
-	engine.OnSubmission(input.Verbatim(draft))
+	dispatchTestSubmission(engine, input.Verbatim(draft))
 
 	assertCommands(t, host, []string{
 		"  indented;still one line  ",
@@ -105,7 +121,7 @@ func TestVerbatimInputDegradedModePreservesPhysicalLines(t *testing.T) {
 		t.Fatalf("sabotage failed: %v", err)
 	}
 
-	engine.OnSubmission(input.Verbatim("first\r\n\r/quit\r"))
+	dispatchTestSubmission(engine, input.Verbatim("first\r\n\r/quit\r"))
 
 	assertCommands(t, host, []string{"first", "", "/quit", ""})
 	if host.QuitCalled {
@@ -117,9 +133,96 @@ func TestInputWithCommandContextKeepsNormalExpansion(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 
-	engine.OnSubmission(input.Command("look;#2 north"))
+	dispatchTestSubmission(engine, input.Command("look;#2 north"))
 
 	assertCommands(t, host, []string{"look", "north", "north"})
+}
+
+func TestInputHooksChainStringsAndReturnOneFinalValue(t *testing.T) {
+	engine, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	assertLua(t, engine, `
+		rune.hooks.clear("input")
+		assert(rune.hooks.call("input", "unchanged", {mode = "command"}) == "unchanged")
+
+		local seen = {}
+		rune.hooks.on("input", function(text)
+			seen[#seen + 1] = text
+			return text .. "-first"
+		end, {name = "rewrite-first", priority = 10})
+		rune.hooks.on("input", function(text)
+			seen[#seen + 1] = text
+			return 42 -- non-string, non-false values pass through
+		end, {name = "rewrite-ignore", priority = 20})
+		rune.hooks.on("input", function(text)
+			seen[#seen + 1] = text
+			return text .. "-last"
+		end, {name = "rewrite-last", priority = 200})
+
+		local result = rune.hooks.call("input", "raw", {mode = "command"})
+		assert(result == "raw-first-last", tostring(result))
+		assert(#seen == 3)
+		assert(seen[1] == "raw")
+		assert(seen[2] == "raw-first")
+		assert(seen[3] == "raw-first")
+	`)
+}
+
+func TestInputHookFalseStopsTransformChain(t *testing.T) {
+	engine, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	assertLua(t, engine, `
+		local after = false
+		rune.hooks.on("input", function(text)
+			return text .. "-changed"
+		end, {name = "before-consume", priority = 10})
+		rune.hooks.on("input", function(text)
+			assert(text == "raw-changed")
+			return false
+		end, {name = "consume", priority = 20})
+		rune.hooks.on("input", function()
+			after = true
+		end, {name = "after-consume", priority = 30})
+
+		assert(rune.hooks.call("input", "raw", {mode = "command"}) == false)
+		assert(after == false)
+	`)
+}
+
+func TestInputDispatchDoesNotRunInputHooks(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	if err := engine.DoString("dispatch", `
+		input_hook_calls = 0
+		rune.hooks.on("input", function()
+			input_hook_calls = input_hook_calls + 1
+		end, {name = "dispatch-observer", priority = 1})
+		rune.input._dispatch("look;#2 north", "command")
+		assert(input_hook_calls == 0)
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	assertCommands(t, host, []string{"look", "north", "north"})
+}
+
+func TestInputDispatchVerbatimBypassesCommandSyntax(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	if err := engine.DoString("dispatch verbatim", `
+		rune.input._dispatch("first;second\n/quit", "verbatim")
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	assertCommands(t, host, []string{"first;second", "/quit"})
+	if host.QuitCalled {
+		t.Fatal("verbatim dispatcher interpreted /quit")
+	}
 }
 
 func TestCommandInputHookReceivesContext(t *testing.T) {
@@ -135,7 +238,7 @@ func TestCommandInputHookReceivesContext(t *testing.T) {
 		t.Fatalf("setup failed: %v", err)
 	}
 
-	engine.OnInput("look")
+	dispatchTestCommand(engine, "look")
 	assertCommands(t, host, []string{"command|look"})
 }
 
@@ -154,7 +257,7 @@ func TestVerbatimInputHookReceivesContextAndCanConsume(t *testing.T) {
 	}
 
 	draft := "first;second\n/quit"
-	engine.OnSubmission(input.Verbatim(draft))
+	dispatchTestSubmission(engine, input.Verbatim(draft))
 
 	assertCommands(t, host, nil)
 	assertLua(t, engine, `
@@ -181,12 +284,33 @@ func TestInputHookCannotMutateVerbatimRouting(t *testing.T) {
 		t.Fatalf("setup failed: %v", err)
 	}
 
-	engine.OnSubmission(input.Verbatim("first;second\n/quit"))
+	dispatchTestSubmission(engine, input.Verbatim("first;second\n/quit"))
 
 	assertCommands(t, host, []string{"context-readonly", "first;second", "/quit"})
 	if host.QuitCalled {
 		t.Fatal("mutating one hook context changed canonical verbatim routing")
 	}
+}
+
+func TestInputRewritePreservesVerbatimMode(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	if err := engine.DoString("rewrite verbatim", `
+		rune.hooks.on("input", function()
+			return "first;second\nthird"
+		end, { priority = 90 })
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	effective, proceed := engine.ApplyInputHooks(input.Verbatim("original"))
+	if !proceed || effective != input.Verbatim("first;second\nthird") {
+		t.Fatalf("effective submission = %+v proceed=%v", effective, proceed)
+	}
+	engine.DispatchSubmission(effective)
+
+	assertCommands(t, host, []string{"first;second", "third"})
 }
 
 func TestOneArgumentInputHookStillObservesVerbatim(t *testing.T) {
@@ -201,7 +325,7 @@ func TestOneArgumentInputHookStillObservesVerbatim(t *testing.T) {
 		t.Fatalf("setup failed: %v", err)
 	}
 
-	engine.OnSubmission(input.Verbatim("one\ntwo"))
+	dispatchTestSubmission(engine, input.Verbatim("one\ntwo"))
 
 	assertCommands(t, host, []string{"one", "two"})
 	assertLua(t, engine, `assert(observed == "one\ntwo")`)

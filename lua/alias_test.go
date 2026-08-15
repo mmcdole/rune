@@ -78,10 +78,12 @@ func TestAliasMatching(t *testing.T) {
 			want:  []string{"general off temporarily"},
 		},
 		{
-			name:  "multi-word exact treats whitespace as a token separator",
-			setup: `rune.alias.exact('chat off', 'matched')`,
-			input: "chat\t  off   temporarily",
-			want:  []string{"matched temporarily"},
+			name: "multi-word exact treats whitespace as a token separator",
+			setup: `
+				rune.alias.exact('chat off', 'matched')
+				rune.send("chat\t  off   temporarily")
+			`,
+			want: []string{"matched temporarily"},
 		},
 		{
 			name:  "multi-word exact normalizes registration whitespace",

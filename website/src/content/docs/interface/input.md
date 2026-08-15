@@ -24,6 +24,21 @@ separators, `#N` repeats, and `/commands` all work here.
 (Most terminals send `Ctrl+Backspace` as `Ctrl+H`, so it can't be bound
 distinctly — use `Ctrl+W` or `Alt+Backspace` to delete words.)
 
+## Keeping the last command
+
+By default the input clears after each submit. With
+`rune.config.set("keep_input", true)` in your `init.lua`, the command you typed
+stays in the input line, shown selected: press `Enter` to submit it
+again, type to replace it, or press `Left` or `Right` to deselect it and edit
+in place.
+Handy for walking with `n` `Enter` `Enter` `Enter`. While the line is
+selected it counts as empty for printable-key binds, so hotkeys keep
+firing.
+
+Input hooks can change a command before Rune runs it, but the selected text
+still shows exactly what you typed. For example, if `!` expands to `north`,
+the input line keeps `!` while Rune runs and saves `north`.
+
 ## History
 
 `Up`/`Down` walk submission history, and normal command drafts prefix-match:
@@ -33,8 +48,40 @@ with `tell `. With an empty line, they walk everything.
 `Ctrl+R` opens a fuzzy history picker; type a few characters, watch the list
 narrow, and press `Enter` to restore the match.
 
-History is owned by the client, so it survives `/reload`. Consecutive identical
-submissions in the same mode are stored once.
+History survives `/reload`. Rune saves the final submitted text after history
+expansion and input hooks have changed it. Canceled commands and accepted
+rewrites to an empty string are not saved. Consecutive copies are stored once;
+normal and verbatim history remain distinct.
+
+History expansion works too. With the default history character, `!` (or `!!`)
+repeats the last command, and `!prefix` repeats the newest command beginning
+with `prefix`. For example, after `kill rat`, type `!k` to attack again. Rune
+saves `kill rat` in history, not `!k`.
+
+You can use one of these forms anywhere a complete command can appear. With the
+default `;` command separator, `north;!` sends `north` followed by the command
+that came before it. Every expansion on the line searches the history that
+existed before you pressed `Enter`, so the line cannot accidentally repeat
+itself.
+
+Rune searches earlier normal commands. It ignores local `/commands`, verbatim
+blocks, and earlier commands that still contain history expansion syntax. If
+any expansion has no match, Rune shows a warning and sends none of the line.
+
+A line beginning with `/` is a local Rune command, so Rune does not perform
+history expansion anywhere on that line. It also does not perform history
+expansion in verbatim input or in text sent by a script with `rune.send`.
+
+If your game uses `!` commands, choose another history character or turn the
+feature off:
+
+```lua
+rune.config.set("history_character", "^") -- ^, ^^, and ^prefix
+rune.config.set("history_character", "")  -- disabled
+```
+
+`history_character` accepts one visible character, such as `!`, `^`, or `§`.
+Use an empty string to disable history expansion.
 
 ## Tab completion
 
@@ -77,9 +124,10 @@ behavior is explicit:
 
 Verbatim submission treats LF, CRLF, and bare CR as line breaks and sends each
 physical line without command processing. Rune does not expand aliases, split
-semicolons, apply `#N` repeats, or interpret `/quit` and other slash-looking
-lines. Those are all data. The mode remains verbatim after edits even if you
-remove the last newline or tab; it ends when you send or discard the draft.
+at the configured command separator, apply `#N` repeats, or interpret `/quit`
+and other slash-looking lines. Those are all data. The mode remains verbatim
+after edits even if you remove the last newline or tab; it ends when you send
+or discard the draft.
 
 Composer editing keys are handled locally rather than by Lua binds. `Up`/`Down`
 move through the draft's visual rows, `PageUp`/`PageDown` move by a composer
@@ -102,7 +150,7 @@ Once you change its text, the arrows remain local to the draft.
 
 `Ctrl+E` opens the current input in Vim, Emacs, or whatever `$EDITOR` points
 at. Save and exit, and the edited result replaces the input without converting
-newlines into command separators or trimming authored whitespace. Rune
+newlines into command separators or trimming whitespace you wrote. Rune
 normalizes CRLF and bare CR to LF and removes exactly one final LF used as the
 text file terminator. Additional blank lines, indentation, tabs, trailing
 spaces, and an intentionally empty result are preserved.
@@ -115,9 +163,9 @@ line.
 
 Application actions such as history, completion, and `Ctrl+E` are registered
 with `rune.bind` in the core scripts and can be rebound or removed in
-`init.lua`. Input mechanics — atomic paste, composer editing, `Ctrl+Enter`, and
-`Enter` submission — are owned by the client. The full policy and default table
-are in the [rune.bind reference](/reference/api/bind/#key-policy).
+`init.lua`. Paste handling, composer editing, `Ctrl+Enter`, and submitting with
+`Enter` keep their built-in behavior. The full policy and default table are in
+the [rune.bind reference](/reference/api/bind/#key-policy).
 
 **Related:** [rune.input reference](/reference/api/input/),
 [Key Bindings](/scripting/keybindings/) for binding your
