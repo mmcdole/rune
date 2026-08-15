@@ -36,6 +36,13 @@ narrow, and press `Enter` to restore the match.
 History is owned by the client, so it survives `/reload`. Consecutive identical
 submissions in the same mode are stored once.
 
+Shell-style history expansion works too: `!` (or `!!`) resends the last
+command, and `!prefix` resends the newest command starting with `prefix`, so
+`!k` after `kill rat` attacks again. As in the shells, history records the
+expanded command, not the bang line. It is a normal named alias
+(`repeat-last`), so `rune.alias.remove("repeat-last")` turns it off on games
+where `!` means something.
+
 ## Tab completion
 
 In normal input, `Tab` cycles completions from a cache of words seen in server

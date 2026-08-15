@@ -269,9 +269,25 @@ func (m *MockHost) StoreDelete(key string) error {
 func (m *MockHost) AddToHistory(cmd string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// Mirror the session's contract: skip empty and adjacent-duplicate
+	// entries, so Lua-layer tests observe real history semantics.
+	if cmd == "" || (len(m.History) > 0 && m.History[len(m.History)-1] == cmd) {
+		return
+	}
 	m.History = append(m.History, cmd)
 	if m.HistoryEntries != nil {
 		m.HistoryEntries = append(m.HistoryEntries, input.Command(cmd))
+	}
+}
+
+func (m *MockHost) PopHistory() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.History) > 0 {
+		m.History = m.History[:len(m.History)-1]
+	}
+	if len(m.HistoryEntries) > 0 {
+		m.HistoryEntries = m.HistoryEntries[:len(m.HistoryEntries)-1]
 	}
 }
 

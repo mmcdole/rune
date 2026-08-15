@@ -92,6 +92,7 @@ func TestAliasMatching(t *testing.T) {
 		{
 			name: "equivalent exact phrase replaces previous alias",
 			setup: `
+				rune.alias.remove('repeat-last') -- ignore the default alias
 				rune.alias.exact('chat off', 'old')
 				rune.alias.exact('chat  off', 'new')
 				local aliases = rune.alias.list()
@@ -181,7 +182,7 @@ func TestExactAliasRejectsEmptyPhrase(t *testing.T) {
 	if !strings.Contains(err.Error(), "must contain at least one word") {
 		t.Fatalf("registration error = %q, want empty phrase error", err)
 	}
-	if err := engine.DoString("assert.lua", `assert(rune.alias.count() == 0)`); err != nil {
+	if err := engine.DoString("assert.lua", `rune.alias.remove("repeat-last") assert(rune.alias.count() == 0)`); err != nil {
 		t.Fatalf("rejected alias remained registered: %v", err)
 	}
 }
@@ -197,7 +198,7 @@ func TestExactAliasRejectsNonStringPhrase(t *testing.T) {
 	if !strings.Contains(err.Error(), "phrase must be a string") {
 		t.Fatalf("registration error = %q, want phrase type error", err)
 	}
-	if err := engine.DoString("assert.lua", `assert(rune.alias.count() == 0)`); err != nil {
+	if err := engine.DoString("assert.lua", `rune.alias.remove("repeat-last") assert(rune.alias.count() == 0)`); err != nil {
 		t.Fatalf("rejected alias remained registered: %v", err)
 	}
 }

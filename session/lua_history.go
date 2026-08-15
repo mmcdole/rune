@@ -25,6 +25,13 @@ func (s *Session) AddToHistory(cmd string) {
 	s.addHistorySubmission(input.Command(cmd))
 }
 
+// PopHistory implements lua.Host.
+func (s *Session) PopHistory() {
+	if len(s.historyEntries) > 0 {
+		s.historyEntries = s.historyEntries[:len(s.historyEntries)-1]
+	}
+}
+
 // addHistorySubmission records the immutable submission as one history item.
 // Adjacent entries dedupe only when both text and interpretation match.
 func (s *Session) addHistorySubmission(entry input.Submission) {

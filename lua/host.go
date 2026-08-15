@@ -69,6 +69,10 @@ type Host interface {
 	GetHistory() []string
 	GetHistoryEntries() []input.Submission
 	AddToHistory(cmd string)
+	// PopHistory removes the newest entry. It exists so the core `!`
+	// alias can replace the recorded bang line with its expansion,
+	// shell-style; pop-then-add inherits AddToHistory's adjacent dedup.
+	PopHistory()
 
 	// Session store: a small Go-owned string store that survives
 	// script reloads (but not client exit). Lets Lua keep state

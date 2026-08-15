@@ -88,6 +88,15 @@ its return value controls what happens next: return a string to have
 it processed and sent in place of the input, or return nothing to
 consume the input entirely (the function already did the work).
 
+## Default aliases
+
+The core registers one alias, named `repeat-last`: shell-style history
+expansion, where `!` or `!!` resends the last command and `!prefix`
+resends the newest command starting with `prefix`. History keeps the
+expanded command, not the bang line. Remove it with
+`rune.alias.remove("repeat-last")` if your game uses `!` as a real
+command; verbatim submissions always bypass aliases.
+
 ## Managing
 
 Standard registry management applies:

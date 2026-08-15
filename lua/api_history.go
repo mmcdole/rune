@@ -38,5 +38,13 @@ func (e *Engine) registerHistoryFuncs() {
 			e.host.AddToHistory(cmd)
 			return nil
 		},
+
+		// rune._history.pop() - Remove the newest history entry. Used by
+		// the core `!` alias to store the expansion instead of the bang
+		// line; pop-then-add rides AddToHistory's adjacent dedup.
+		"pop": func(c *script.Call) error {
+			e.host.PopHistory()
+			return nil
+		},
 	}, nil)
 }

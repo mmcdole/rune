@@ -9,6 +9,16 @@
         { "type": "gg" },
         { "expect_sent": "cast gate" }
       ]
+    },
+    {
+      "name": "bang repeats the last command from history",
+      "steps": [
+        { "connect": true },
+        { "type": "north" },
+        { "expect_sent": "north" },
+        { "type": "!" },
+        { "expect_sent": "north" }
+      ]
     }
   ]
 }
