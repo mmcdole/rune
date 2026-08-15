@@ -168,11 +168,10 @@ func (p *Picker) PreferredHeight() int {
 func (p *Picker) View() string {
 	var lines []string
 	overlay := p.styles.OverlayBorder
-	// Lipgloss Width includes padding but excludes the border. Derive both
-	// reservations from the style so later theme changes cannot introduce an
-	// uncounted soft-wrapped row.
-	frameWidth := max(1, p.width-overlay.GetHorizontalBorderSize())
-	contentWidth := max(1, frameWidth-overlay.GetHorizontalPadding())
+	// Lip Gloss v2 Width is the outer width before margins. Reserve its border
+	// and padding once when sizing content so no row soft-wraps inside the frame.
+	frameWidth := max(1, p.width)
+	contentWidth := max(1, frameWidth-overlay.GetHorizontalBorderSize()-overlay.GetHorizontalPadding())
 
 	if p.config.Header != "" {
 		header := p.styles.Muted.Render(text.VisualizeTerminalControls(p.config.Header, false)) +

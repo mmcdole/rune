@@ -21,8 +21,8 @@ separators, `#N` repeats, and `/commands` all work here.
 | `Home`/`End` | Move the cursor to the start/end of the line |
 | `Ctrl+C` | Clear the input line; pressed twice on an empty line, quit |
 
-(Most terminals send `Ctrl+Backspace` as `Ctrl+H`, so it can't be bound
-distinctly — use `Ctrl+W` or `Alt+Backspace` to delete words.)
+(On terminals that encode `Ctrl+Backspace` as `Ctrl+H`, Rune cannot bind them
+distinctly. Use `Ctrl+W` or `Alt+Backspace` to delete words instead.)
 
 ## Keeping the last command
 
@@ -165,7 +165,7 @@ Application actions such as history, completion, and `Ctrl+E` are registered
 with `rune.bind` in the core scripts and can be rebound or removed in
 `init.lua`. Paste handling, composer editing, `Ctrl+Enter`, and submitting with
 `Enter` keep their built-in behavior. The full policy and default table are in
-the [rune.bind reference](/reference/api/bind/#key-policy).
+the [Key Bindings guide](/scripting/keybindings/#where-binds-run).
 
 **Related:** [rune.input reference](/reference/api/input/),
 [Key Bindings](/scripting/keybindings/) for binding your

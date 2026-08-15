@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/mmcdole/rune/text"
 	"github.com/mmcdole/rune/ui/tui/style"
@@ -91,25 +91,40 @@ func TestComposerLocalKeySemantics(t *testing.T) {
 	in := newComposerInput(50)
 	in.BeginCompose("one\ntwo", len([]rune("one\ntwo")))
 
-	if !in.UpdateComposer(tea.KeyMsg{Type: tea.KeyCtrlJ}) {
+	if !in.UpdateComposer(tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl}) {
 		t.Fatal("Ctrl+J should be handled as newline")
 	}
 	if got := in.Value(); got != "one\ntwo\n" {
 		t.Fatalf("after Ctrl+J Value = %q", got)
 	}
-	if in.UpdateComposer(tea.KeyMsg{Type: tea.KeyEnter}) {
+	if !in.UpdateComposer(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModCtrl}) {
+		t.Fatal("Ctrl+Enter should be handled as newline")
+	}
+	if got := in.Value(); got != "one\ntwo\n\n" {
+		t.Fatalf("after Ctrl+Enter Value = %q", got)
+	}
+	if !in.UpdateComposer(tea.KeyPressMsg{Code: tea.KeyKpEnter, Mod: tea.ModCtrl}) {
+		t.Fatal("Ctrl+keypad Enter should be handled as newline")
+	}
+	if got := in.Value(); got != "one\ntwo\n\n\n" {
+		t.Fatalf("after Ctrl+keypad Enter Value = %q", got)
+	}
+	if in.UpdateComposer(tea.KeyPressMsg{Code: tea.KeyEnter}) {
 		t.Fatal("plain Enter belongs to the submit controller")
 	}
-	if got := in.Value(); got != "one\ntwo\n" {
+	if in.UpdateComposer(tea.KeyPressMsg{Code: tea.KeyKpEnter}) {
+		t.Fatal("keypad Enter belongs to the submit controller")
+	}
+	if got := in.Value(); got != "one\ntwo\n\n\n" {
 		t.Fatalf("plain Enter mutated draft: %q", got)
 	}
-	if in.UpdateComposer(tea.KeyMsg{Type: tea.KeyCtrlE}) {
+	if in.UpdateComposer(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl}) {
 		t.Fatal("Ctrl+E must remain available to the external-editor binding")
 	}
-	if in.UpdateComposer(tea.KeyMsg{Type: tea.KeyEnter, Alt: true}) {
+	if in.UpdateComposer(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt}) {
 		t.Fatal("Alt+Enter should remain available as an alternate-submit chord")
 	}
-	if got := in.Value(); got != "one\ntwo\n" {
+	if got := in.Value(); got != "one\ntwo\n\n\n" {
 		t.Fatalf("after Alt+Enter Value = %q", got)
 	}
 }
@@ -118,7 +133,7 @@ func TestComposerStaysVerbatimAfterLastStructureDeleted(t *testing.T) {
 	in := newComposerInput(40)
 	in.BeginCompose("north\neast", len([]rune("north\n")))
 
-	if !in.UpdateComposer(tea.KeyMsg{Type: tea.KeyBackspace}) {
+	if !in.UpdateComposer(tea.KeyPressMsg{Code: tea.KeyBackspace}) {
 		t.Fatal("Backspace should be handled locally")
 	}
 	if !in.IsComposing() {
@@ -291,13 +306,13 @@ func TestComposerAltArrowsMoveByWord(t *testing.T) {
 	in := newComposerInput(40)
 	in.BeginCompose("one two\nthree", len([]rune("one two\nthree")))
 
-	if !in.UpdateComposer(tea.KeyMsg{Type: tea.KeyLeft, Alt: true}) {
+	if !in.UpdateComposer(tea.KeyPressMsg{Code: tea.KeyLeft, Mod: tea.ModAlt}) {
 		t.Fatal("Alt+Left should be handled locally")
 	}
 	if got, want := in.Position(), len([]rune("one two\n")); got != want {
 		t.Fatalf("Alt+Left Position = %d, want word start %d", got, want)
 	}
-	if !in.UpdateComposer(tea.KeyMsg{Type: tea.KeyRight, Alt: true}) {
+	if !in.UpdateComposer(tea.KeyPressMsg{Code: tea.KeyRight, Mod: tea.ModAlt}) {
 		t.Fatal("Alt+Right should be handled locally")
 	}
 	if got, want := in.Position(), len([]rune("one two\nthree")); got != want {

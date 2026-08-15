@@ -173,8 +173,8 @@ something instead of replacing it. Calling the result runs it directly,
 skipping the enabled and group checks and the failure quarantine:
 
 ```lua
-local scroll = assert(rune.binds.get("pageup")):action()
-rune.bind("pageup", function()
+local scroll = assert(rune.binds.get("pgup")):action()
+rune.bind("pgup", function()
     scroll()
     rune.echo("scrolled")
 end)

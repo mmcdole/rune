@@ -5,7 +5,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/mattn/go-runewidth"
 
 	"github.com/mmcdole/rune/input"
@@ -207,107 +207,95 @@ func (c *Composer) DeleteToLineEnd() {
 // Update applies keys that have local editing meaning in compose mode. It
 // deliberately leaves plain Enter, Escape, Ctrl+C, and Ctrl+E unhandled so
 // the controller can submit/cancel/delegate to the external-editor binding.
-func (c *Composer) Update(msg tea.KeyMsg, widgetWidth int) bool {
-	switch msg.Type {
-	case tea.KeyCtrlJ:
+func (c *Composer) Update(msg tea.KeyPressMsg, widgetWidth int) bool {
+	if msg.Text != "" {
+		c.Insert(msg.Text)
+		return true
+	}
+
+	switch {
+	case matchesKey(msg, 'j', tea.ModCtrl), matchesEnterKey(msg, tea.ModCtrl):
 		c.Insert("\n")
 		return true
-	case tea.KeyEnter:
-		// Plain Enter submits; Alt+Enter is intentionally left to the
-		// controller as the reserved alternate-submit chord.
+	case matchesEnterKey(msg, 0):
+		// Plain Enter submits; modified Enter chords remain available to the
+		// controller for bind dispatch.
 		return false
-	case tea.KeyTab:
+	case matchesKey(msg, tea.KeyTab, 0):
 		c.Insert("\t")
 		return true
-	case tea.KeyLeft:
-		if msg.Alt {
-			c.WordLeft()
-		} else {
-			c.Left()
-		}
-		return true
-	case tea.KeyRight:
-		if msg.Alt {
-			c.WordRight()
-		} else {
-			c.Right()
-		}
-		return true
-	case tea.KeyCtrlB:
+	case matchesKey(msg, tea.KeyLeft, 0), matchesKey(msg, 'b', tea.ModCtrl):
 		c.Left()
 		return true
-	case tea.KeyCtrlF:
-		c.Right()
-		return true
-	case tea.KeyUp, tea.KeyCtrlP:
-		c.moveVertical(-1, widgetWidth)
-		return true
-	case tea.KeyDown, tea.KeyCtrlN:
-		c.moveVertical(1, widgetWidth)
-		return true
-	case tea.KeyHome, tea.KeyCtrlA:
-		c.LineStart()
-		return true
-	case tea.KeyEnd:
-		c.LineEnd()
-		return true
-	case tea.KeyCtrlHome:
-		c.DocStart()
-		return true
-	case tea.KeyCtrlEnd:
-		c.DocEnd()
-		return true
-	case tea.KeyBackspace, tea.KeyCtrlH:
-		if msg.Alt {
-			c.DeleteWordBack()
-		} else {
-			c.Backspace()
-		}
-		return true
-	case tea.KeyDelete, tea.KeyCtrlD:
-		c.Delete()
-		return true
-	case tea.KeyCtrlW:
-		c.DeleteWordBack()
-		return true
-	case tea.KeyCtrlU:
-		c.DeleteToLineStart()
-		return true
-	case tea.KeyCtrlK:
-		c.DeleteToLineEnd()
-		return true
-	case tea.KeyCtrlLeft:
+	case matchesKey(msg, tea.KeyLeft, tea.ModAlt),
+		matchesKey(msg, tea.KeyLeft, tea.ModCtrl),
+		matchesKey(msg, 'b', tea.ModAlt):
 		c.WordLeft()
 		return true
-	case tea.KeyCtrlRight:
+	case matchesKey(msg, tea.KeyRight, 0), matchesKey(msg, 'f', tea.ModCtrl):
+		c.Right()
+		return true
+	case matchesKey(msg, tea.KeyRight, tea.ModAlt),
+		matchesKey(msg, tea.KeyRight, tea.ModCtrl),
+		matchesKey(msg, 'f', tea.ModAlt):
 		c.WordRight()
 		return true
-	case tea.KeyPgUp:
+	case matchesKey(msg, tea.KeyUp, 0), matchesKey(msg, 'p', tea.ModCtrl):
+		c.moveVertical(-1, widgetWidth)
+		return true
+	case matchesKey(msg, tea.KeyDown, 0), matchesKey(msg, 'n', tea.ModCtrl):
+		c.moveVertical(1, widgetWidth)
+		return true
+	case matchesKey(msg, tea.KeyHome, 0), matchesKey(msg, 'a', tea.ModCtrl):
+		c.LineStart()
+		return true
+	case matchesKey(msg, tea.KeyEnd, 0):
+		c.LineEnd()
+		return true
+	case matchesKey(msg, tea.KeyHome, tea.ModCtrl):
+		c.DocStart()
+		return true
+	case matchesKey(msg, tea.KeyEnd, tea.ModCtrl):
+		c.DocEnd()
+		return true
+	case matchesKey(msg, tea.KeyBackspace, 0), matchesKey(msg, 'h', tea.ModCtrl):
+		c.Backspace()
+		return true
+	case matchesKey(msg, tea.KeyBackspace, tea.ModAlt),
+		matchesKey(msg, 'h', tea.ModCtrl|tea.ModAlt),
+		matchesKey(msg, 'w', tea.ModCtrl):
+		c.DeleteWordBack()
+		return true
+	case matchesKey(msg, tea.KeyDelete, 0), matchesKey(msg, 'd', tea.ModCtrl):
+		c.Delete()
+		return true
+	case matchesKey(msg, 'u', tea.ModCtrl):
+		c.DeleteToLineStart()
+		return true
+	case matchesKey(msg, 'k', tea.ModCtrl):
+		c.DeleteToLineEnd()
+		return true
+	case matchesKey(msg, tea.KeyPgUp, 0):
 		c.moveVertical(-maxComposerBodyRows, widgetWidth)
 		return true
-	case tea.KeyPgDown:
+	case matchesKey(msg, tea.KeyPgDown, 0):
 		c.moveVertical(maxComposerBodyRows, widgetWidth)
-		return true
-	case tea.KeySpace:
-		c.Insert(" ")
-		return true
-	case tea.KeyRunes:
-		if msg.Alt {
-			switch string(msg.Runes) {
-			case "b":
-				c.WordLeft()
-				return true
-			case "f":
-				c.WordRight()
-				return true
-			}
-			return false
-		}
-		c.Insert(string(msg.Runes))
 		return true
 	}
 
 	return false
+}
+
+const keyModifiers = tea.ModShift | tea.ModAlt | tea.ModCtrl |
+	tea.ModMeta | tea.ModHyper | tea.ModSuper
+
+func matchesKey(msg tea.KeyPressMsg, code rune, modifiers tea.KeyMod) bool {
+	return msg.Code == code && msg.Mod&keyModifiers == modifiers
+}
+
+func matchesEnterKey(msg tea.KeyPressMsg, modifiers tea.KeyMod) bool {
+	return (msg.Code == tea.KeyEnter || msg.Code == tea.KeyKpEnter) &&
+		msg.Mod&keyModifiers == modifiers
 }
 
 func (c *Composer) moveVertical(delta, widgetWidth int) {

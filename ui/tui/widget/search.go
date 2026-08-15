@@ -485,8 +485,8 @@ func (s *Search) PreferredHeight() int {
 func (s *Search) View() string {
 	var lines []string
 	overlay := s.styles.OverlayBorder
-	frameWidth := max(1, s.width-overlay.GetHorizontalBorderSize())
-	contentWidth := max(1, frameWidth-overlay.GetHorizontalPadding())
+	frameWidth := max(1, s.width)
+	contentWidth := max(1, frameWidth-overlay.GetHorizontalBorderSize()-overlay.GetHorizontalPadding())
 
 	lines = append(lines, s.headerLine(contentWidth))
 

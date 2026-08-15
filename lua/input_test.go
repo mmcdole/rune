@@ -295,7 +295,7 @@ func TestClearInputBinds(t *testing.T) {
 	defer cleanup()
 
 	host.SetInput("half-typed command")
-	engine.HandleKeyBind("escape")
+	engine.HandleKeyBind("esc")
 	assertInput(t, host, "")
 
 	host.SetInput("another one")

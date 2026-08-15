@@ -4,9 +4,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
+	"github.com/mmcdole/rune/text"
 	"github.com/mmcdole/rune/ui"
 	"github.com/mmcdole/rune/ui/tui/style"
 )
@@ -70,11 +71,39 @@ func TestInputSetCursorReleasesWholeLineSelection(t *testing.T) {
 	}
 }
 
-func TestInputSelectionStylesTextWithoutFillingRow(t *testing.T) {
-	profile := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.ANSI256)
-	t.Cleanup(func() { lipgloss.SetColorProfile(profile) })
+func TestInputSelectionReplacementUsesExactDeleteChords(t *testing.T) {
+	tests := []struct {
+		name string
+		key  tea.KeyPressMsg
+		want string
+	}{
+		{name: "backspace", key: tea.KeyPressMsg{Code: tea.KeyBackspace}, want: ""},
+		{name: "delete", key: tea.KeyPressMsg{Code: tea.KeyDelete}, want: ""},
+		{name: "shift backspace", key: tea.KeyPressMsg{Code: tea.KeyBackspace, Mod: tea.ModShift}, want: "north east"},
+		{name: "alt backspace", key: tea.KeyPressMsg{Code: tea.KeyBackspace, Mod: tea.ModAlt}, want: "north "},
+		{name: "shift delete", key: tea.KeyPressMsg{Code: tea.KeyDelete, Mod: tea.ModShift}, want: "north east"},
+		{name: "alt delete", key: tea.KeyPressMsg{Code: tea.KeyDelete, Mod: tea.ModAlt}, want: "north east"},
+	}
 
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			in := newTestInput(40)
+			in.SetValue("north east")
+			in.SelectAll()
+
+			in.UpdateTextInput(tt.key)
+
+			if got := in.Value(); got != tt.want {
+				t.Fatalf("input value = %q, want %q", got, tt.want)
+			}
+			if in.Selected() {
+				t.Fatal("editing key left the input selected")
+			}
+		})
+	}
+}
+
+func TestInputSelectionStylesTextWithoutFillingRow(t *testing.T) {
 	in := newTestInput(40)
 	in.SetValue("north")
 	in.SelectAll()
@@ -84,7 +113,8 @@ func TestInputSelectionStylesTextWithoutFillingRow(t *testing.T) {
 		t.Fatalf("selected input rows = %d, want 3", len(rows))
 	}
 	selectedText := in.styles.InputSelected.Inline(true).Render("north")
-	prefix := in.textinput.PromptStyle.Render(in.textinput.Prompt) + selectedText
+	promptStyle := in.textinput.Styles().Blurred.Prompt
+	prefix := promptStyle.Render(in.textinput.Prompt) + selectedText
 	padding := in.width - lipgloss.Width(prefix)
 	if padding < 0 {
 		t.Fatalf("selected input prefix width = %d, exceeds row width %d",
@@ -111,7 +141,7 @@ func TestInputPickerOverlayGrowsView(t *testing.T) {
 	if in.PreferredHeight() <= 3 {
 		t.Error("active picker must add to the preferred height")
 	}
-	view := in.View()
+	view := text.StripANSI(in.View())
 	if !strings.Contains(view, "midgaard") || !strings.Contains(view, "arctic") {
 		t.Errorf("picker overlay should list items, got %q", view)
 	}
@@ -123,7 +153,7 @@ func TestInputPickerOverlayGrowsView(t *testing.T) {
 	if in.PreferredHeight() != 3 {
 		t.Errorf("PreferredHeight after hide = %d, want 3", in.PreferredHeight())
 	}
-	if strings.Contains(in.View(), "midgaard") {
+	if strings.Contains(text.StripANSI(in.View()), "midgaard") {
 		t.Error("hidden picker must not render")
 	}
 }
@@ -146,14 +176,14 @@ func TestInputInlinePickerSeedsFilterFromInput(t *testing.T) {
 	if !ok || sel.Text != "reload" {
 		t.Errorf("inline selection = %v (%v), want reload", sel, ok)
 	}
-	if view := in.View(); strings.Contains(view, "disconnect") {
+	if view := text.StripANSI(in.View()); strings.Contains(view, "disconnect") {
 		t.Errorf("non-matching items should be filtered out, got %q", view)
 	}
 
 	// Typing more re-filters from the input value.
 	in.SetValue("re")
 	in.UpdatePickerFilter()
-	view := in.View()
+	view := text.StripANSI(in.View())
 	if !strings.Contains(view, "reload") {
 		t.Errorf("re-filtered view should keep matches, got %q", view)
 	}
@@ -168,7 +198,7 @@ func TestInputSearchReplacesInactiveCommandField(t *testing.T) {
 	in.SetValue("COMMAND-DRAFT")
 	in.ShowSearch("thief", SearchScope{})
 
-	view := in.View()
+	view := text.StripANSI(in.View())
 	if !strings.Contains(view, "Search:") || !strings.Contains(view, "a thief passes") {
 		t.Fatalf("search navigator missing from input view:\n%s", view)
 	}
@@ -180,7 +210,7 @@ func TestInputSearchReplacesInactiveCommandField(t *testing.T) {
 	}
 
 	in.HideSearch()
-	if view := in.View(); !strings.Contains(view, "COMMAND-DRAFT") {
+	if view := text.StripANSI(in.View()); !strings.Contains(view, "COMMAND-DRAFT") {
 		t.Fatalf("command draft did not return after search closed:\n%s", view)
 	}
 }

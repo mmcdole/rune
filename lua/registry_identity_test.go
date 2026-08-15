@@ -82,7 +82,7 @@ func TestCoreRegistrationsAreAddressable(t *testing.T) {
 	assertLua(t, engine, `
 		assert(rune.bars.get("status"), "the core status bar must be addressable")
 		assert(rune.bars.disable("status"), "the core status bar must be manageable")
-		assert(rune.binds.get("pageup"), "a default keymap bind must be addressable")
+		assert(rune.binds.get("pgup"), "a default keymap bind must be addressable")
 		assert(rune.command.get("quit"), "a built-in command must be addressable")
 	`)
 }
@@ -268,15 +268,15 @@ func TestWrappingADefaultBind(t *testing.T) {
 
 	assertLua(t, engine, `
 		wrapped = false
-		local scroll = assert(rune.binds.get("pageup")):action()
-		rune.bind("pageup", function()
+		local scroll = assert(rune.binds.get("pgup")):action()
+		rune.bind("pgup", function()
 			scroll()
 			wrapped = true
 		end)
 	`)
 
 	assertLua(t, engine, `
-		assert(rune.binds._dispatch("pageup"), "pageup should still be bound")
+		assert(rune.binds._dispatch("pgup"), "pgup should still be bound")
 		assert(wrapped, "the wrapper did not run")
 	`)
 }
