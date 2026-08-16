@@ -44,33 +44,50 @@ Key names are exact. Use `esc`, `pgup`, and `pgdown`; `escape`, `pageup`, and
 
 ### Numpad keys
 
-Numpad names refer to physical keys: `numpad8` is the key itself, whether
-NumLock makes it type `8` or act as Up. Add this to `init.lua` when you use
-numpad binds:
+Numpad bindings depend on terminal support. If your terminal sends numpad 8 as
+an ordinary `8` or `Up`, Rune cannot tell that it came from the number pad.
+
+Rune supports both ways terminals preserve that information:
+
+- **Modern protocol (Kitty keyboard protocol):** identifies the physical key
+  with NumLock on or off.
+- **Legacy mode (DEC application keypad mode, or DECKPAM):** supported by
+  older terminals, usually with NumLock off.
+
+Enable both in `init.lua`:
 
 ```lua
 rune.config.set("numpad", true)
 ```
 
-| Terminal | Terminal setup |
-|---|---|
-| Ghostty, Kitty, Alacritty, foot, iTerm2 | None |
-| WezTerm | Set `enable_kitty_keyboard = true` |
-| Windows Terminal | Version 1.25 or newer; 1.25 is currently Preview |
-| macOS Terminal | Enable **Profiles → Advanced → Allow VT100 application keypad mode** |
-| xterm | Launch `xterm -kt vt220` with NumLock off |
-| urxvt | Use NumLock off |
-| GNOME Terminal, Ptyxis, COSMIC Terminal | Not supported |
+Rune requests both modes; your terminal uses the one it supports.
 
-Current tmux releases do not pass modern numpad keys through. If numpad binds
-fail inside tmux, test Rune without tmux. Some older terminal setups can still
-work inside tmux.
+| Input mode | Known terminals | Required setup |
+|---|---|---|
+| Modern | Ghostty, Kitty, Alacritty, foot, iTerm2 | None |
+| Modern | WezTerm | Set `enable_kitty_keyboard = true` |
+| Modern | Windows Terminal | Version 1.25 or newer |
+| Legacy | macOS Terminal | Enable **Profiles → Advanced → Allow VT100 application keypad mode** |
+| Legacy | xterm | Launch `xterm -kt vt220` with NumLock off |
+| Legacy | urxvt | Use NumLock off |
+| Not supported | GNOME Terminal, Ptyxis, COSMIC Terminal | These terminals do not preserve the physical number-pad key |
 
-On modern terminals, NumLock can be on or off. With NumLock off, unbound keys
-act like their arrows, while bound movement keys still work with a half-typed
-command. In the multiline composer, numpad arrows move around the draft
-instead of running movement binds. `numpad_enter` acts like `enter` when it has
-no bind.
+Current tmux releases do not pass the modern protocol through. Some legacy
+setups work inside tmux, but test Rune without tmux first.
+
+Bind the physical keys using `numpad0` through `numpad9`:
+
+```lua
+rune.bind("numpad8", function() rune.send("north") end)
+rune.bind("numpad2", function() rune.send("south") end)
+rune.bind("numpad6", function() rune.send("east") end)
+rune.bind("numpad4", function() rune.send("west") end)
+rune.bind("numpad9", function() rune.send("up") end)
+rune.bind("numpad3", function() rune.send("down") end)
+```
+
+`numpad8` always means the 8 key on the number pad. The number-row key remains
+`8`.
 
 ### Reserved input keys
 
@@ -131,16 +148,6 @@ Movement keys, grouped:
 rune.bind("f5", function() rune.send("north") end, { group = "movement" })
 rune.bind("f6", function() rune.send("south") end, { group = "movement" })
 -- /group movement off
-```
-
-Numpad movement:
-
-```lua
-rune.config.set("numpad", true) -- enable terminal numpad support
-rune.bind("numpad8", function() rune.send("north") end)
-rune.bind("numpad2", function() rune.send("south") end)
-rune.bind("numpad6", function() rune.send("east") end)
-rune.bind("numpad4", function() rune.send("west") end)
 ```
 
 Editing helpers using the input API:
