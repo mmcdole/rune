@@ -359,6 +359,230 @@ func TestModifiedNumpadBindUsesSameNameAcrossInputEncodings(t *testing.T) {
 	}
 }
 
+func TestNormalBoundKpNavigationWinsWithDraft(t *testing.T) {
+	h := newControllerHarness()
+	h.bound["numpad8"] = true
+	h.bound["up"] = true
+	h.ctl.SetText("look")
+	h.events = nil
+	wantCursor := h.ctl.input.Position()
+
+	h.ctl.HandleKey(keyPress(tea.KeyKpUp))
+
+	if binds := h.executeBinds(); len(binds) != 1 || binds[0] != ui.ExecuteBindMsg("numpad8") {
+		t.Fatalf("keypad Up binds = %v, want [numpad8]", binds)
+	}
+	if got := h.ctl.input.Value(); got != "look" {
+		t.Fatalf("bound keypad Up changed input to %q", got)
+	}
+	if got := h.ctl.input.Position(); got != wantCursor {
+		t.Fatalf("bound keypad Up moved cursor to %d, want %d", got, wantCursor)
+	}
+}
+
+func TestUnboundKpNavigationActsAsNavigationKey(t *testing.T) {
+	t.Run("bound base key dispatches", func(t *testing.T) {
+		h := newControllerHarness()
+		h.bound["up"] = true
+
+		h.ctl.HandleKey(keyPress(tea.KeyKpUp))
+
+		if binds := h.executeBinds(); len(binds) != 1 || binds[0] != ui.ExecuteBindMsg("up") {
+			t.Fatalf("keypad Up binds = %v, want [up]", binds)
+		}
+	})
+
+	t.Run("editing key moves the cursor", func(t *testing.T) {
+		h := newControllerHarness()
+		h.ctl.SetText("ab")
+		h.events = nil
+
+		h.ctl.HandleKey(keyPress(tea.KeyKpLeft))
+
+		moved := false
+		for _, ev := range h.events {
+			if cur, ok := ev.(ui.CursorMovedMsg); ok && cur.Cursor == 1 {
+				moved = true
+			}
+		}
+		if !moved {
+			t.Fatalf("keypad Left did not move the cursor: %v", h.events)
+		}
+	})
+}
+
+func TestComposerKpNavigationUsesEditingBeforeBinds(t *testing.T) {
+	t.Run("unmodified key stays local", func(t *testing.T) {
+		h := newControllerHarness()
+		h.bound["numpad8"] = true
+		h.ctl.input.SetSize(80, 0)
+		h.ctl.SetText("one\ntwo")
+		h.events = nil
+
+		h.ctl.HandleKey(keyPress(tea.KeyKpUp))
+
+		if binds := h.executeBinds(); len(binds) != 0 {
+			t.Fatalf("composer dispatched keypad navigation bind: %v", binds)
+		}
+		if got := h.ctl.input.Position(); got != 3 {
+			t.Fatalf("keypad Up moved composer cursor to %d, want 3", got)
+		}
+		if got := h.ctl.input.Value(); got != "one\ntwo" {
+			t.Fatalf("keypad Up changed composer to %q", got)
+		}
+	})
+
+	t.Run("consumed modified key stays local", func(t *testing.T) {
+		h := newControllerHarness()
+		h.bound["ctrl+numpad7"] = true
+		h.ctl.SetText("one\ntwo")
+		h.events = nil
+
+		h.ctl.HandleKey(tea.KeyPressMsg{Code: tea.KeyKpHome, Mod: tea.ModCtrl})
+
+		if binds := h.executeBinds(); len(binds) != 0 {
+			t.Fatalf("composer dispatched consumed keypad chord: %v", binds)
+		}
+		if got := h.ctl.input.Position(); got != 0 {
+			t.Fatalf("Ctrl+keypad Home moved composer cursor to %d, want 0", got)
+		}
+	})
+
+	t.Run("unconsumed modified key keeps physical bind", func(t *testing.T) {
+		h := newControllerHarness()
+		h.bound["ctrl+numpad8"] = true
+		h.bound["ctrl+up"] = true
+		h.ctl.SetText("one\ntwo")
+		h.events = nil
+		wantCursor := h.ctl.input.Position()
+
+		h.ctl.HandleKey(tea.KeyPressMsg{Code: tea.KeyKpUp, Mod: tea.ModCtrl})
+
+		if binds := h.executeBinds(); len(binds) != 1 || binds[0] != ui.ExecuteBindMsg("ctrl+numpad8") {
+			t.Fatalf("composer keypad chord binds = %v, want [ctrl+numpad8]", binds)
+		}
+		if got := h.ctl.input.Position(); got != wantCursor {
+			t.Fatalf("unconsumed keypad chord moved cursor to %d, want %d", got, wantCursor)
+		}
+	})
+
+	t.Run("unconsumed unmodified key does not delegate", func(t *testing.T) {
+		h := newControllerHarness()
+		h.bound["numpad5"] = true
+		h.ctl.SetText("one\ntwo")
+		h.events = nil
+
+		h.ctl.HandleKey(keyPress(tea.KeyKpBegin))
+
+		if binds := h.executeBinds(); len(binds) != 0 {
+			t.Fatalf("composer dispatched unmodified keypad bind: %v", binds)
+		}
+	})
+
+	t.Run("unconsumed chord falls back to base bind", func(t *testing.T) {
+		h := newControllerHarness()
+		h.bound["ctrl+up"] = true
+		h.ctl.SetText("one\ntwo")
+		h.events = nil
+
+		h.ctl.HandleKey(tea.KeyPressMsg{Code: tea.KeyKpUp, Mod: tea.ModCtrl})
+
+		if binds := h.executeBinds(); len(binds) != 1 || binds[0] != ui.ExecuteBindMsg("ctrl+up") {
+			t.Fatalf("composer fallback binds = %v, want [ctrl+up]", binds)
+		}
+	})
+}
+
+func TestPickerKpNavigationFollowsModePolicy(t *testing.T) {
+	t.Run("inline physical bind wins", func(t *testing.T) {
+		h := newControllerHarness()
+		h.bound["numpad2"] = true
+		h.bound["down"] = true
+		h.ctl.ShowPicker(ui.ShowPickerMsg{Items: pickerTestItems, CallbackID: "cb", Inline: true})
+		h.events = nil
+
+		h.ctl.HandleKey(keyPress(tea.KeyKpDown))
+
+		if binds := h.executeBinds(); len(binds) != 1 || binds[0] != ui.ExecuteBindMsg("numpad2") {
+			t.Fatalf("inline keypad binds = %v, want [numpad2]", binds)
+		}
+		selected, ok := h.ctl.input.PickerSelected()
+		if !ok || selected.Value != "/connect" {
+			t.Fatalf("inline physical bind moved selection to %+v", selected)
+		}
+	})
+
+	t.Run("inline unbound key navigates locally", func(t *testing.T) {
+		h := newControllerHarness()
+		h.bound["down"] = true
+		h.ctl.ShowPicker(ui.ShowPickerMsg{Items: pickerTestItems, CallbackID: "cb", Inline: true})
+		h.events = nil
+
+		h.ctl.HandleKey(keyPress(tea.KeyKpDown))
+
+		if binds := h.executeBinds(); len(binds) != 0 {
+			t.Fatalf("inline picker dispatched base bind: %v", binds)
+		}
+		selected, ok := h.ctl.input.PickerSelected()
+		if !ok || selected.Value != "/disconnect" {
+			t.Fatalf("inline keypad Down selected %+v, want /disconnect", selected)
+		}
+	})
+
+	t.Run("modal always navigates locally", func(t *testing.T) {
+		h := newControllerHarness()
+		h.bound["numpad2"] = true
+		h.bound["down"] = true
+		h.ctl.ShowPicker(ui.ShowPickerMsg{Items: pickerTestItems, CallbackID: "cb"})
+		h.events = nil
+
+		h.ctl.HandleKey(keyPress(tea.KeyKpDown))
+
+		if binds := h.executeBinds(); len(binds) != 0 {
+			t.Fatalf("modal picker dispatched keypad bind: %v", binds)
+		}
+		selected, ok := h.ctl.input.PickerSelected()
+		if !ok || selected.Value != "/disconnect" {
+			t.Fatalf("modal keypad Down selected %+v, want /disconnect", selected)
+		}
+	})
+}
+
+// TestSearchModeTreatsKpNavigationAsNavigation guards both the trap-all rule
+// and the direction of NumLock-off keypad navigation.
+func TestSearchModeTreatsKpNavigationAsNavigation(t *testing.T) {
+	h := newControllerHarness()
+	h.buf.Append("thief one")
+	h.buf.Append("quiet row")
+	h.buf.Append("thief two")
+	h.bound["numpad8"] = true
+	h.bound["numpad2"] = true
+	h.bound["up"] = true
+	h.bound["down"] = true
+	h.ctl.ShowSearch(ui.ShowSearchMsg{Query: "thief"})
+	h.events = nil
+
+	selected, ok := h.ctl.input.SearchSelected()
+	if !ok || selected.Stripped != "thief two" {
+		t.Fatalf("initial search selection = %+v, want thief two", selected)
+	}
+
+	h.ctl.HandleKey(keyPress(tea.KeyKpUp))
+	selected, ok = h.ctl.input.SearchSelected()
+	if !ok || selected.Stripped != "thief one" {
+		t.Fatalf("keypad Up selected %+v, want thief one", selected)
+	}
+
+	h.ctl.HandleKey(keyPress(tea.KeyKpDown))
+	selected, ok = h.ctl.input.SearchSelected()
+	if !ok || selected.Stripped != "thief two" {
+		t.Fatalf("keypad Down selected %+v, want thief two", selected)
+	}
+	if binds := h.executeBinds(); len(binds) != 0 {
+		t.Fatalf("search mode dispatched a keypad bind: %v", binds)
+	}
+}
+
 func TestUnboundDECKPAMKeysTypeTheirCharacters(t *testing.T) {
 	h := newControllerHarness()
 

@@ -44,36 +44,33 @@ Key names are exact. Use `esc`, `pgup`, and `pgdown`; `escape`, `pageup`, and
 
 ### Numpad keys
 
-Terminals using an enhanced keyboard protocol report physical numpad keys to
-Rune automatically. Older terminals need application keypad mode, which is
-off by default. Enable it in `init.lua`:
+Numpad names refer to physical keys: `numpad8` is the key itself, whether
+NumLock makes it type `8` or act as Up. Add this to `init.lua` when you use
+numpad binds:
 
 ```lua
 rune.config.set("numpad", true)
 ```
 
-The setting takes effect immediately. Turning it off returns the terminal to
-numeric keypad mode; Rune also does that while `$EDITOR` is open and whenever
-the client exits.
+| Terminal | Terminal setup |
+|---|---|
+| Ghostty, Kitty, Alacritty, foot, iTerm2 | None |
+| WezTerm | Set `enable_kitty_keyboard = true` |
+| Windows Terminal | Version 1.25 or newer; 1.25 is currently Preview |
+| macOS Terminal | Enable **Profiles → Advanced → Allow VT100 application keypad mode** |
+| xterm | Launch `xterm -kt vt220` with NumLock off |
+| urxvt | Use NumLock off |
+| GNOME Terminal, Ptyxis, COSMIC Terminal | Not supported |
 
-NumLock generally needs to be on. Some legacy terminals, including urxvt and
-some xterm configurations, report application-keypad sequences only with it
-off. With no matching bind, numpad digits and operators type their usual
-characters, and `numpad_enter` acts like `enter`. In normal input, bound numpad
-digits and operators follow the same empty-or-selected rule as other printable
-binds.
+Current tmux releases do not pass modern numpad keys through. If numpad binds
+fail inside tmux, test Rune without tmux. Some older terminal setups can still
+work inside tmux.
 
-Terminal support varies. On a system with `timeout`, this probe requests
-application keypad mode for ten seconds and then restores the terminal:
-
-```sh
-(saved=$(stty -g); trap 'stty "$saved"; printf "\033>"' EXIT; printf '\033='; stty raw -echo; timeout 10 cat -v)
-```
-
-Press a numpad key while it runs. `^[Ox` for numpad 8 means the terminal
-supports application keypad mode; a bare `8` means it does not. Enhanced
-keyboard-protocol terminals may still support Rune's numpad binds even when
-this legacy probe prints a digit.
+On modern terminals, NumLock can be on or off. With NumLock off, unbound keys
+act like their arrows, while bound movement keys still work with a half-typed
+command. In the multiline composer, numpad arrows move around the draft
+instead of running movement binds. `numpad_enter` acts like `enter` when it has
+no bind.
 
 ### Reserved input keys
 
@@ -139,7 +136,7 @@ rune.bind("f6", function() rune.send("south") end, { group = "movement" })
 Numpad movement:
 
 ```lua
-rune.config.set("numpad", true) -- needed only for legacy terminal input
+rune.config.set("numpad", true) -- enable terminal numpad support
 rune.bind("numpad8", function() rune.send("north") end)
 rune.bind("numpad2", function() rune.send("south") end)
 rune.bind("numpad6", function() rune.send("east") end)

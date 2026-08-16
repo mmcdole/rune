@@ -192,6 +192,15 @@ func (m *Model) View() tea.View {
 	if m.mouseEnabled {
 		view.MouseMode = tea.MouseModeCellMotion
 	}
+	if m.numpadMode {
+		// The default kitty disambiguation flag reports NumLock-on keypad
+		// digits as plain text, indistinguishable from the number row.
+		// Encoding all keys as escape codes preserves the physical key;
+		// associated text keeps the typed characters coming from the
+		// terminal instead of being reconstructed from key codes.
+		view.KeyboardEnhancements.ReportAllKeysAsEscapeCodes = true
+		view.KeyboardEnhancements.ReportAssociatedText = true
+	}
 	if !m.initialized {
 		view.Content = "Loading..."
 		return view
