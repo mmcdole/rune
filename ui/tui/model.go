@@ -64,6 +64,7 @@ type Model struct {
 	height       int
 	events       chan<- ui.UIEvent
 	mouseEnabled bool
+	numpadMode   bool
 	initialized  bool
 	pendingRows  []string
 	// flushScheduled is true while a batch-window tick is outstanding.
@@ -252,6 +253,7 @@ func (m *Model) handleConfigUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ui.UpdateConfigMsg:
 		m.inputCtl.SetKeepOnSubmit(msg.KeepInput)
 		m.mouseEnabled = msg.Mouse
+		m.numpadMode = msg.Numpad
 	}
 	if layoutChanged {
 		m.syncViewportSize()

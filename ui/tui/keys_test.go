@@ -117,6 +117,54 @@ func TestNormalizeNumpadTextFillsOnlyPrintableUnmodifiedKeys(t *testing.T) {
 	}
 }
 
+// TestKpNavigationKeysShareDigitBindNames covers the NumLock-off keypad
+// reported by the kitty keyboard protocol: the physical key keeps its
+// numpad bind name but must not type a digit.
+func TestKpNavigationKeysShareDigitBindNames(t *testing.T) {
+	tests := []struct {
+		code rune
+		name string
+		nav  rune
+	}{
+		{tea.KeyKpInsert, "numpad0", tea.KeyInsert},
+		{tea.KeyKpEnd, "numpad1", tea.KeyEnd},
+		{tea.KeyKpDown, "numpad2", tea.KeyDown},
+		{tea.KeyKpPgDown, "numpad3", tea.KeyPgDown},
+		{tea.KeyKpLeft, "numpad4", tea.KeyLeft},
+		{tea.KeyKpBegin, "numpad5", tea.KeyBegin},
+		{tea.KeyKpRight, "numpad6", tea.KeyRight},
+		{tea.KeyKpHome, "numpad7", tea.KeyHome},
+		{tea.KeyKpUp, "numpad8", tea.KeyUp},
+		{tea.KeyKpPgUp, "numpad9", tea.KeyPgUp},
+		{tea.KeyKpDelete, "numpad_dot", tea.KeyDelete},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := tea.KeyPressMsg{Code: tt.code, Mod: tea.ModCtrl}
+			if got := keyToString(msg); got != "ctrl+"+tt.name {
+				t.Fatalf("keyToString(Code=%v) = %q, want %q", tt.code, got, "ctrl+"+tt.name)
+			}
+			if got := normalizeNumpadText(msg).Text; got != "" {
+				t.Fatalf("NumLock-off keypad key produced text %q", got)
+			}
+
+			info, ok := numpadNavigation(msg)
+			if !ok || info.name != tt.name || info.nav != tt.nav || info.text != "" {
+				t.Fatalf("numpadNavigation(Code=%v) = %+v, %v", tt.code, info, ok)
+			}
+			routeMsg := tea.KeyPressMsg{Code: tt.code, BaseCode: 'q', Mod: tea.ModCtrl, Text: "preserved"}
+			fallback := info.navigationFallback(routeMsg)
+			if fallback.Code != tt.nav || fallback.BaseCode != 0 {
+				t.Fatalf("fallback = %#v, want Code=%v and no BaseCode", fallback, tt.nav)
+			}
+			if fallback.Mod != routeMsg.Mod || fallback.Text != routeMsg.Text {
+				t.Fatalf("fallback lost event metadata: got %#v, started %#v", fallback, routeMsg)
+			}
+		})
+	}
+}
+
 func TestUndocumentedNumpadKeysDoNotCollideWithOrdinaryBinds(t *testing.T) {
 	for _, code := range []rune{tea.KeyKpEqual, tea.KeyKpComma, tea.KeyKpSep} {
 		if got := keyToString(tea.KeyPressMsg{Code: code}); got != "" {

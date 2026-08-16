@@ -214,11 +214,26 @@ func (c *inputController) SetSubmission(submission input.Submission) {
 }
 
 func (c *inputController) dispatchNumpadEnterBind(msg tea.KeyPressMsg) bool {
-	name, _, ok := numpadKey(msg)
-	if !ok || name != "numpad_enter" || msg.Mod&keyModifiers != 0 || !c.isBound(name) {
+	info, ok := numpadKey(msg)
+	if !ok || info.name != "numpad_enter" || msg.Mod&keyModifiers != 0 || !c.isBound(info.name) {
 		return false
 	}
-	c.notify(ui.ExecuteBindMsg(name))
+	c.notify(ui.ExecuteBindMsg(info.name))
+	return true
+}
+
+// tryNormalBind applies normal mode's typing-safety rule. Text-bearing
+// keys dispatch only when the draft is empty or selected; non-text keys can
+// remain useful as movement binds while a command is being composed.
+func (c *inputController) tryNormalBind(msg tea.KeyPressMsg) bool {
+	key := keyToString(msg)
+	if key == "" || !c.isBound(key) {
+		return false
+	}
+	if msg.Text != "" && c.input.Value() != "" && !c.input.Selected() {
+		return false
+	}
+	c.notify(ui.ExecuteBindMsg(key))
 	return true
 }
 
@@ -237,17 +252,17 @@ func (c *inputController) handleNormalKey(msg tea.KeyPressMsg) {
 		return
 	}
 
-	keyStr := keyToString(msg)
-	if keyStr != "" && c.isBound(keyStr) {
-		// Text-bearing events are typing, including AltGr input. Modifier
-		// chords have no text, so the empty-input guard does not apply.
-		// A fully selected line counts as empty: its text is about to
-		// be replaced anyway, so movement binds keep firing.
-		isPrintable := msg.Text != ""
-		if !isPrintable || c.input.Value() == "" || c.input.Selected() {
-			c.notify(ui.ExecuteBindMsg(keyStr))
+	// A NumLock-off physical bind gets first refusal. If there is no such
+	// bind, route the key through its ordinary navigation meaning, including
+	// any Lua bind on that base key.
+	if info, ok := numpadNavigation(msg); ok {
+		if c.tryNormalBind(msg) {
 			return
 		}
+		msg = info.navigationFallback(msg)
+	}
+	if c.tryNormalBind(msg) {
+		return
 	}
 	// Unbound scroll keys: Go fallback (keeps degraded mode scrollable)
 	if c.scroll(msg) {
@@ -264,6 +279,17 @@ func (c *inputController) handleComposeKey(msg tea.KeyPressMsg) {
 	if matchesEnterKey(msg, 0) {
 		c.submitInput()
 		return
+	}
+
+	// Compose owns editing mechanics. Give NumLock-off keypad keys their
+	// semantic navigation meaning first, but retain the physical name so an
+	// unconsumed modified chord can still be delegated to Lua.
+	physicalKey := ""
+	physicalModified := false
+	if info, ok := numpadNavigation(msg); ok {
+		physicalKey = keyToString(msg)
+		physicalModified = msg.Mod&keyModifiers != 0
+		msg = info.navigationFallback(msg)
 	}
 	if c.historyRecall {
 		key := ""
@@ -289,6 +315,11 @@ func (c *inputController) handleComposeKey(msg tea.KeyPressMsg) {
 		if !c.input.IsComposing() {
 			c.mode = ModeNormal
 		}
+		return
+	}
+
+	if physicalModified && physicalKey != "" && c.isBound(physicalKey) {
+		c.notify(ui.ExecuteBindMsg(physicalKey))
 		return
 	}
 
@@ -370,6 +401,15 @@ func (c *inputController) handleInlineKey(msg tea.KeyPressMsg) {
 		c.handlePaste("\n")
 		return
 	}
+	// An exact physical numpad bind wins in the inline picker. Without one,
+	// the NumLock-off form becomes the local navigation key engraved on it.
+	if info, ok := numpadNavigation(msg); ok {
+		if key := keyToString(msg); key != "" && c.isBound(key) {
+			c.notify(ui.ExecuteBindMsg(key))
+			return
+		}
+		msg = info.navigationFallback(msg)
+	}
 	keyStr := keyToString(msg)
 	// Don't send picker navigation keys to Lua - handle them locally
 	if keyStr != "" && c.isBound(keyStr) && !inlinePickerLocalKeys[keyStr] {
@@ -425,6 +465,9 @@ func isComposerNewline(msg tea.KeyPressMsg) bool {
 }
 
 func (c *inputController) handleModalKey(msg tea.KeyPressMsg) {
+	if info, ok := numpadNavigation(msg); ok {
+		msg = info.navigationFallback(msg)
+	}
 	switch {
 	case matchesKey(msg, tea.KeyUp, 0):
 		c.input.PickerSelectUp()
@@ -514,6 +557,9 @@ func (c *inputController) ShowSearch(opts ui.ShowSearchMsg) {
 // handleSearchKey traps all keys while the search overlay is open,
 // like the modal picker: bound keys do not dispatch to Lua.
 func (c *inputController) handleSearchKey(msg tea.KeyPressMsg) {
+	if info, ok := numpadNavigation(msg); ok {
+		msg = info.navigationFallback(msg)
+	}
 	switch {
 	case matchesKey(msg, tea.KeyUp, 0):
 		c.selectOlderSearch()

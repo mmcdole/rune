@@ -74,6 +74,29 @@ func TestMouseModeFollowsRuntimeConfig(t *testing.T) {
 	}
 }
 
+// TestKeyboardEnhancementsFollowNumpadConfig verifies the numpad setting
+// requests the kitty keyboard flags that make NumLock-on keypad digits
+// distinguishable from the number row, and releases them when turned off.
+func TestKeyboardEnhancementsFollowNumpadConfig(t *testing.T) {
+	m := NewModel(make(chan ui.UIEvent, 1))
+	if ke := m.View().KeyboardEnhancements; ke.ReportAllKeysAsEscapeCodes || ke.ReportAssociatedText {
+		t.Fatal("numpad-off view enables enhanced key mode")
+	}
+
+	next, _ := m.Update(ui.UpdateConfigMsg{Numpad: true})
+	m = next.(*Model)
+	ke := m.View().KeyboardEnhancements
+	if !ke.ReportAllKeysAsEscapeCodes || !ke.ReportAssociatedText {
+		t.Fatalf("numpad-on view enhancements = %+v, want all keys as escape codes with associated text", ke)
+	}
+
+	next, _ = m.Update(ui.UpdateConfigMsg{Numpad: false})
+	m = next.(*Model)
+	if ke := m.View().KeyboardEnhancements; ke.ReportAllKeysAsEscapeCodes || ke.ReportAssociatedText {
+		t.Fatal("numpad-off view still enables enhanced key mode")
+	}
+}
+
 // TestMouseWheelScrollsViewport verifies wheel events scroll the main
 // viewport - the reason the terminal mouse is captured at all.
 func TestMouseWheelScrollsViewport(t *testing.T) {
