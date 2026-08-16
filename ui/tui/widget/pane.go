@@ -2,125 +2,80 @@ package widget
 
 import (
 	"fmt"
-	"strings"
 
-	"github.com/mmcdole/rune/ui/tui/style"
 	"github.com/mmcdole/rune/ui/tui/util"
 )
-
-// Compile-time check that Pane implements Widget
-var _ Widget = (*Pane)(nil)
 
 // Pane represents a named buffer that can be shown/hidden.
 //
 // Lines are stored as written (logical lines) and soft-wrapped to the
-// pane width at render time, so a resize re-fits everything. Scrolling
-// is tracked as a logical-line offset from the newest line; while
-// scrolled the view stays anchored on the same history, new writes are
-// counted, and the header shows a scroll indicator.
+// requested width when ContentRows is called, so a resize re-fits
+// everything. Scrolling is tracked as a logical-line offset from the
+// newest line; while scrolled the view stays anchored on the same
+// history and new writes are counted for the title indicator.
 type Pane struct {
 	Name     string
 	Lines    []string
 	Visible  bool
-	height   int // Number of content lines to show when visible
-	styles   style.Styles
-	width    int
 	offset   int // logical lines scrolled back from the newest (0 = live)
 	newLines int // writes that arrived while scrolled
 }
 
-// NewPane creates a new pane widget.
-func NewPane(name string, styles style.Styles) *Pane {
+// NewPane creates a new pane.
+func NewPane(name string) *Pane {
 	return &Pane{
 		Name:    name,
 		Lines:   make([]string, 0, 100),
 		Visible: false,
-		height:  10,
-		styles:  styles,
 	}
 }
 
-// visibleRows renders exactly p.height rows of wrapped content for the
-// current scroll position. The window is anchored at the logical line
-// end = len(Lines)-offset; when a deep scroll leaves it underfull, it
-// extends forward so the pane stays full whenever the buffer allows.
-func (p *Pane) visibleRows() []string {
+// Title returns the unstyled pane title for its current scroll state.
+func (p *Pane) Title() string {
+	if p.offset == 0 {
+		return p.Name
+	}
+	if p.newLines > 0 {
+		return fmt.Sprintf("%s · scroll +%d", p.Name, p.newLines)
+	}
+	return p.Name + " · scroll"
+}
+
+// ContentRows returns exactly height rows of wrapped content for the current
+// scroll position. The window is anchored at the logical line end =
+// len(Lines)-offset; when a deep scroll leaves it underfull, it extends
+// forward so the pane stays full whenever the buffer allows. Visibility is a
+// layout concern and does not affect the returned content.
+func (p *Pane) ContentRows(width, height int) []string {
+	if height <= 0 {
+		return nil
+	}
+
 	end := len(p.Lines) - p.offset
 	if end < 0 {
 		end = 0
 	}
 
 	var rows []string
-	for i := end - 1; i >= 0 && len(rows) < p.height; i-- {
-		rows = append(util.WrapLine(p.Lines[i], p.width), rows...)
+	for i := end - 1; i >= 0 && len(rows) < height; i-- {
+		rows = append(util.WrapLine(p.Lines[i], width), rows...)
 	}
 
-	if len(rows) >= p.height {
-		rows = rows[len(rows)-p.height:]
+	if len(rows) >= height {
+		rows = rows[len(rows)-height:]
 	} else {
-		for i := end; i < len(p.Lines) && len(rows) < p.height; i++ {
-			rows = append(rows, util.WrapLine(p.Lines[i], p.width)...)
+		for i := end; i < len(p.Lines) && len(rows) < height; i++ {
+			rows = append(rows, util.WrapLine(p.Lines[i], width)...)
 		}
-		if len(rows) > p.height {
-			rows = rows[:p.height]
+		if len(rows) > height {
+			rows = rows[:height]
 		}
 	}
 
-	for len(rows) < p.height {
+	for len(rows) < height {
 		rows = append(rows, "")
 	}
 	return rows
-}
-
-// View implements Widget.
-func (p *Pane) View() string {
-	if !p.Visible {
-		return ""
-	}
-
-	var parts []string
-
-	// Header, with a scroll indicator while off the live tail
-	// (mirrors the status bar's SCROLL/LIVE vocabulary).
-	label := " " + p.Name + " "
-	if p.offset > 0 {
-		if p.newLines > 0 {
-			label = fmt.Sprintf(" %s · scroll +%d ", p.Name, p.newLines)
-		} else {
-			label = " " + p.Name + " · scroll "
-		}
-	}
-	title := p.styles.PaneHeader.Render(label)
-	titlePad := p.width - util.VisibleLen(title)
-	if titlePad > 0 {
-		title += p.styles.PaneBorder.Render(strings.Repeat("─", titlePad))
-	}
-	parts = append(parts, title)
-	parts = append(parts, p.visibleRows()...)
-
-	// Bottom border
-	parts = append(parts, p.styles.PaneBorder.Render(strings.Repeat("─", p.width)))
-
-	return strings.Join(parts, "\n")
-}
-
-// SetSize implements Widget.
-func (p *Pane) SetSize(width, height int) {
-	p.width = width
-	// Height includes header (1) + border (1), so content height = height - 2
-	if height > 2 {
-		p.height = height - 2
-	} else if height > 0 {
-		p.height = height
-	}
-}
-
-// PreferredHeight implements Widget. Returns 0 if hidden.
-func (p *Pane) PreferredHeight() int {
-	if !p.Visible {
-		return 0
-	}
-	return p.height + 2 // content + header + border
 }
 
 // Write appends text as logical lines, one per line break. While
@@ -203,15 +158,13 @@ func (p *Pane) Clear() {
 
 // PaneManager handles multiple named panes.
 type PaneManager struct {
-	panes  map[string]*Pane
-	styles style.Styles
+	panes map[string]*Pane
 }
 
 // NewPaneManager creates a new pane manager.
-func NewPaneManager(styles style.Styles) *PaneManager {
+func NewPaneManager() *PaneManager {
 	return &PaneManager{
-		panes:  make(map[string]*Pane),
-		styles: styles,
+		panes: make(map[string]*Pane),
 	}
 }
 
@@ -220,7 +173,7 @@ func (pm *PaneManager) Create(name string) {
 	if _, exists := pm.panes[name]; exists {
 		return
 	}
-	pm.panes[name] = NewPane(name, pm.styles)
+	pm.panes[name] = NewPane(name)
 }
 
 // Get returns a pane by name, creating it if needed.
@@ -229,6 +182,12 @@ func (pm *PaneManager) Get(name string) *Pane {
 		pm.Create(name)
 	}
 	return pm.panes[name]
+}
+
+// Lookup returns an existing pane without creating it.
+func (pm *PaneManager) Lookup(name string) (*Pane, bool) {
+	pane, ok := pm.panes[name]
+	return pane, ok
 }
 
 // Write appends a line to a pane (auto-creates if missing).
@@ -255,10 +214,4 @@ func (pm *PaneManager) Clear(name string) {
 	if pane, exists := pm.panes[name]; exists {
 		pane.Clear()
 	}
-}
-
-// Exists returns true if a pane exists.
-func (pm *PaneManager) Exists(name string) bool {
-	_, ok := pm.panes[name]
-	return ok
 }
