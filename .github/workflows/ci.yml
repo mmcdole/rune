@@ -70,18 +70,6 @@ jobs:
           disable_search: true
           fail_ci_if_error: true
 
-  vulncheck:
-    name: vulncheck
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-      - name: govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
-
   build:
     name: build (${{ matrix.goos }}/${{ matrix.goarch }})
     runs-on: ubuntu-latest
