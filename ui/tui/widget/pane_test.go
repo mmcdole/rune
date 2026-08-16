@@ -5,44 +5,39 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmcdole/rune/ui/tui/style"
 	"github.com/mmcdole/rune/ui/tui/util"
 )
 
-// newTestPane returns a visible pane sized to width x (content+2),
-// matching how the layout sizes docked panes.
-func newTestPane(t *testing.T, width, contentHeight int) *Pane {
+func newTestPane(t *testing.T) *Pane {
 	t.Helper()
-	p := NewPane("test", style.DefaultStyles())
+	p := NewPane("test")
 	p.Visible = true
-	p.SetSize(width, contentHeight+2)
 	return p
 }
 
-// contentRows strips the header and bottom border from View.
-func contentRows(t *testing.T, p *Pane) []string {
+func contentRows(t *testing.T, p *Pane, width, height int) []string {
 	t.Helper()
-	rows := strings.Split(p.View(), "\n")
-	if len(rows) < 3 {
-		t.Fatalf("view too short: %d rows", len(rows))
+	rows := p.ContentRows(width, height)
+	if len(rows) != height {
+		t.Fatalf("content height = %d rows, want %d", len(rows), height)
 	}
-	return rows[1 : len(rows)-1]
+	return rows
 }
 
 // TestPaneMultilineWriteWhileScrolled verifies a multi-line write
 // counts each segment: the scrolled view stays anchored and the
 // header indicator reflects every new line.
 func TestPaneMultilineWriteWhileScrolled(t *testing.T) {
-	p := newTestPane(t, 40, 2)
+	p := newTestPane(t)
 	for i := 1; i <= 6; i++ {
 		p.Write(fmt.Sprintf("line %d", i))
 	}
 	p.ScrollUp(3)
-	before := contentRows(t, p)
+	before := contentRows(t, p, 40, 2)
 
 	p.Write("line 7\nline 8")
 
-	after := contentRows(t, p)
+	after := contentRows(t, p, 40, 2)
 	if before[0] != after[0] || before[1] != after[1] {
 		t.Fatalf("scrolled view moved: before %q, after %q", before, after)
 	}
@@ -55,7 +50,7 @@ func TestPaneMultilineWriteWhileScrolled(t *testing.T) {
 // write containing newlines stores one logical line per segment, and
 // the rendered view keeps its budgeted height.
 func TestPaneMultilineWriteSplitsIntoLines(t *testing.T) {
-	p := newTestPane(t, 40, 5)
+	p := newTestPane(t)
 	p.Write("a\rb\r\nc\nd")
 
 	if len(p.Lines) != 4 {
@@ -66,16 +61,16 @@ func TestPaneMultilineWriteSplitsIntoLines(t *testing.T) {
 			t.Fatalf("stored line %d contains a line break: %q", i, line)
 		}
 	}
-	if rows := contentRows(t, p); len(rows) != 5 {
+	if rows := contentRows(t, p, 40, 5); len(rows) != 5 {
 		t.Fatalf("view content height = %d rows, want the budgeted 5", len(rows))
 	}
 }
 
 func TestPaneWrapsLongLines(t *testing.T) {
-	p := newTestPane(t, 20, 4)
+	p := newTestPane(t)
 	p.Write("one two three four five six seven")
 
-	rows := contentRows(t, p)
+	rows := contentRows(t, p, 20, 4)
 	for i, r := range rows {
 		if util.VisibleLen(r) > 20 {
 			t.Errorf("row %d exceeds width: %q (%d cols)", i, r, util.VisibleLen(r))
@@ -89,12 +84,12 @@ func TestPaneWrapsLongLines(t *testing.T) {
 }
 
 func TestPaneTailShowsNewestRows(t *testing.T) {
-	p := newTestPane(t, 40, 3)
+	p := newTestPane(t)
 	for i := 1; i <= 10; i++ {
 		p.Write(fmt.Sprintf("line %d", i))
 	}
 
-	rows := contentRows(t, p)
+	rows := contentRows(t, p, 40, 3)
 	want := []string{"line 8", "line 9", "line 10"}
 	for i, w := range want {
 		if rows[i] != w {
@@ -106,10 +101,10 @@ func TestPaneTailShowsNewestRows(t *testing.T) {
 func TestPaneWrappedTailCountsVisualRows(t *testing.T) {
 	// One long line wraps to more rows than the pane height: the pane
 	// must show the newest rows of it, not blank out.
-	p := newTestPane(t, 10, 2)
+	p := newTestPane(t)
 	p.Write("aaaa bbbb cccc dddd eeee")
 
-	rows := contentRows(t, p)
+	rows := contentRows(t, p, 10, 2)
 	if strings.TrimSpace(rows[0]) == "" || strings.TrimSpace(rows[1]) == "" {
 		t.Errorf("expected the newest wrapped rows, got %q", rows)
 	}
@@ -119,58 +114,58 @@ func TestPaneWrappedTailCountsVisualRows(t *testing.T) {
 }
 
 func TestPaneScrollUpShowsHistoryAndIndicator(t *testing.T) {
-	p := newTestPane(t, 40, 2)
+	p := newTestPane(t)
 	for i := 1; i <= 10; i++ {
 		p.Write(fmt.Sprintf("line %d", i))
 	}
 
 	p.ScrollUp(5)
-	rows := contentRows(t, p)
+	rows := contentRows(t, p, 40, 2)
 	if rows[0] != "line 4" || rows[1] != "line 5" {
 		t.Errorf("scrolled view = %q, want lines 4-5", rows)
 	}
-	if header := strings.Split(p.View(), "\n")[0]; !strings.Contains(header, "scroll") {
-		t.Errorf("header should show scroll indicator, got %q", header)
+	if title := p.Title(); title != "test · scroll" {
+		t.Errorf("title = %q, want scroll indicator", title)
 	}
 }
 
 func TestPaneWritesWhileScrolledFreezeViewAndCount(t *testing.T) {
-	p := newTestPane(t, 40, 2)
+	p := newTestPane(t)
 	for i := 1; i <= 6; i++ {
 		p.Write(fmt.Sprintf("line %d", i))
 	}
 	p.ScrollUp(3)
-	before := contentRows(t, p)
+	before := contentRows(t, p, 40, 2)
 
 	p.Write("line 7")
 	p.Write("line 8")
 
-	after := contentRows(t, p)
+	after := contentRows(t, p, 40, 2)
 	if before[0] != after[0] || before[1] != after[1] {
 		t.Errorf("view should stay anchored while scrolled: %q -> %q", before, after)
 	}
-	if header := strings.Split(p.View(), "\n")[0]; !strings.Contains(header, "+2") {
-		t.Errorf("header should count new lines, got %q", header)
+	if title := p.Title(); title != "test · scroll +2" {
+		t.Errorf("title = %q, want new-line count", title)
 	}
 
 	p.ScrollToBottom()
-	rows := contentRows(t, p)
+	rows := contentRows(t, p, 40, 2)
 	if rows[1] != "line 8" {
 		t.Errorf("bottom should show the newest line, got %q", rows)
 	}
-	if header := strings.Split(p.View(), "\n")[0]; strings.Contains(header, "scroll") {
-		t.Errorf("indicator should clear at bottom, got %q", header)
+	if title := p.Title(); title != "test" {
+		t.Errorf("title should clear its scroll indicator at bottom, got %q", title)
 	}
 }
 
 func TestPaneScrollClamps(t *testing.T) {
-	p := newTestPane(t, 40, 3)
+	p := newTestPane(t)
 	for i := 1; i <= 5; i++ {
 		p.Write(fmt.Sprintf("line %d", i))
 	}
 
 	p.ScrollUp(1000)
-	rows := contentRows(t, p)
+	rows := contentRows(t, p, 40, 3)
 	if rows[0] != "line 1" {
 		t.Errorf("over-scroll should clamp to the top, got %q", rows)
 	}
@@ -180,7 +175,7 @@ func TestPaneScrollClamps(t *testing.T) {
 	}
 
 	p.ScrollDown(1000)
-	rows = contentRows(t, p)
+	rows = contentRows(t, p, 40, 3)
 	if rows[2] != "line 5" {
 		t.Errorf("scroll down past the end should return to live, got %q", rows)
 	}
@@ -189,7 +184,7 @@ func TestPaneScrollClamps(t *testing.T) {
 // Visibility never touches scroll state. A pane hidden while scrolled
 // reopens on the same history, even as writes land while it is hidden.
 func TestPaneHiddenWhileScrolledKeepsPosition(t *testing.T) {
-	p := newTestPane(t, 40, 2)
+	p := newTestPane(t)
 	for i := 1; i <= 6; i++ {
 		p.Write(fmt.Sprintf("line %d", i))
 	}
@@ -198,14 +193,14 @@ func TestPaneHiddenWhileScrolledKeepsPosition(t *testing.T) {
 	p.Write("line 7")
 	p.SetVisible(true)
 
-	rows := contentRows(t, p)
+	rows := contentRows(t, p, 40, 2)
 	if rows[0] != "line 2" {
 		t.Errorf("re-shown pane should keep its scroll anchor, got %q", rows)
 	}
 
 	p.Toggle() // hide
 	p.Toggle() // show again
-	rows = contentRows(t, p)
+	rows = contentRows(t, p, 40, 2)
 	if rows[0] != "line 2" {
 		t.Errorf("toggle must not touch scroll state either, got %q", rows)
 	}
@@ -214,7 +209,7 @@ func TestPaneHiddenWhileScrolledKeepsPosition(t *testing.T) {
 // A pane on the live tail when hidden stays in follow mode, so
 // reopening shows the newest lines.
 func TestPaneHiddenOnTailReopensLive(t *testing.T) {
-	p := newTestPane(t, 40, 2)
+	p := newTestPane(t)
 	for i := 1; i <= 6; i++ {
 		p.Write(fmt.Sprintf("line %d", i))
 	}
@@ -222,7 +217,7 @@ func TestPaneHiddenOnTailReopensLive(t *testing.T) {
 	p.Write("line 7")
 	p.SetVisible(true)
 
-	rows := contentRows(t, p)
+	rows := contentRows(t, p, 40, 2)
 	if rows[1] != "line 7" {
 		t.Errorf("pane hidden on the tail should reopen live, got %q", rows)
 	}
@@ -232,7 +227,7 @@ func TestPaneHiddenOnTailReopensLive(t *testing.T) {
 // anchor clamps to the oldest remaining line instead of jumping to
 // the tail.
 func TestPaneHiddenAnchorClampsWhenTrimmed(t *testing.T) {
-	p := newTestPane(t, 40, 2)
+	p := newTestPane(t)
 	for i := 1; i <= 6; i++ {
 		p.Write(fmt.Sprintf("line %d", i))
 	}
@@ -243,15 +238,15 @@ func TestPaneHiddenAnchorClampsWhenTrimmed(t *testing.T) {
 	}
 	p.SetVisible(true)
 
-	rows := contentRows(t, p)
+	rows := contentRows(t, p, 40, 2)
 	if rows[0] != "line 502" {
 		t.Errorf("trimmed anchor should clamp to the oldest remaining line, got %q", rows)
 	}
 }
 
 func TestPaneEmptyAndClear(t *testing.T) {
-	p := newTestPane(t, 40, 3)
-	rows := contentRows(t, p)
+	p := newTestPane(t)
+	rows := contentRows(t, p, 40, 3)
 	for i, r := range rows {
 		if r != "" {
 			t.Errorf("empty pane row %d should be blank, got %q", i, r)
@@ -261,9 +256,50 @@ func TestPaneEmptyAndClear(t *testing.T) {
 	p.Write("something")
 	p.ScrollUp(1)
 	p.Clear()
-	rows = contentRows(t, p)
+	rows = contentRows(t, p, 40, 3)
 	if strings.TrimSpace(strings.Join(rows, "")) != "" {
 		t.Errorf("cleared pane should be blank, got %q", rows)
+	}
+}
+
+func TestPaneContentRowsUseRequestedGeometry(t *testing.T) {
+	p := newTestPane(t)
+	for i := 1; i <= 5; i++ {
+		p.Write(fmt.Sprintf("line %d", i))
+	}
+
+	short := contentRows(t, p, 40, 2)
+	if short[0] != "line 4" || short[1] != "line 5" {
+		t.Fatalf("two-row view = %q, want lines 4-5", short)
+	}
+
+	tall := contentRows(t, p, 40, 4)
+	if tall[0] != "line 2" || tall[3] != "line 5" {
+		t.Fatalf("four-row view = %q, want lines 2-5", tall)
+	}
+
+	again := contentRows(t, p, 40, 2)
+	if again[0] != "line 4" || again[1] != "line 5" {
+		t.Fatalf("second two-row view = %q, want lines 4-5", again)
+	}
+	if rows := p.ContentRows(40, 0); rows != nil {
+		t.Fatalf("zero-height content = %q, want nil", rows)
+	}
+}
+
+func TestPaneManagerLookupDoesNotCreate(t *testing.T) {
+	panes := NewPaneManager()
+	if pane, ok := panes.Lookup("missing"); ok || pane != nil {
+		t.Fatalf("missing lookup = (%v, %v), want (nil, false)", pane, ok)
+	}
+	if len(panes.panes) != 0 {
+		t.Fatal("lookup created a missing pane")
+	}
+
+	panes.Create("chat")
+	pane, ok := panes.Lookup("chat")
+	if !ok || pane == nil || pane.Name != "chat" {
+		t.Fatalf("created lookup = (%v, %v), want chat pane", pane, ok)
 	}
 }
 

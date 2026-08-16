@@ -36,6 +36,7 @@ func doTick() tea.Cmd {
 type Model struct {
 	// Layout
 	widgets map[string]widget.Widget // all named widgets: input, separator, bars
+	styles  style.Styles
 
 	// Widgets
 	scrollback *widget.ScrollbackBuffer
@@ -79,7 +80,7 @@ func NewModel(events chan<- ui.UIEvent) *Model {
 	viewport := widget.NewViewport(scrollback, styles)
 	search := widget.NewSearch(scrollback, styles)
 	input := widget.NewInput(styles, search)
-	panes := widget.NewPaneManager(styles)
+	panes := widget.NewPaneManager()
 
 	m := &Model{
 		scrollback: scrollback,
@@ -88,6 +89,7 @@ func NewModel(events chan<- ui.UIEvent) *Model {
 		panes:      panes,
 		events:     events,
 		widgets:    make(map[string]widget.Widget),
+		styles:     styles,
 	}
 	m.inputCtl = newInputController(input, m.notifySession, m.submit, m.isBound, m.handleScrollKey, m)
 
@@ -167,8 +169,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.navigateMainViewport(func() {
 				m.viewport.ScrollUp(msg.Lines)
 			})
-		} else if m.panes.Exists(msg.Name) {
-			m.panes.Get(msg.Name).ScrollUp(msg.Lines)
+		} else if pane, ok := m.panes.Lookup(msg.Name); ok {
+			pane.ScrollUp(msg.Lines)
 		}
 		return m, nil
 	case ui.PaneScrollDownMsg:
@@ -176,22 +178,22 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.navigateMainViewport(func() {
 				m.viewport.ScrollDown(msg.Lines)
 			})
-		} else if m.panes.Exists(msg.Name) {
-			m.panes.Get(msg.Name).ScrollDown(msg.Lines)
+		} else if pane, ok := m.panes.Lookup(msg.Name); ok {
+			pane.ScrollDown(msg.Lines)
 		}
 		return m, nil
 	case ui.PaneScrollToTopMsg:
 		if msg.Name == "main" {
 			m.navigateMainViewport(m.viewport.GotoTop)
-		} else if m.panes.Exists(msg.Name) {
-			m.panes.Get(msg.Name).ScrollToTop()
+		} else if pane, ok := m.panes.Lookup(msg.Name); ok {
+			pane.ScrollToTop()
 		}
 		return m, nil
 	case ui.PaneScrollToBottomMsg:
 		if msg.Name == "main" {
 			m.navigateMainViewport(m.viewport.GotoBottom)
-		} else if m.panes.Exists(msg.Name) {
-			m.panes.Get(msg.Name).ScrollToBottom()
+		} else if pane, ok := m.panes.Lookup(msg.Name); ok {
+			pane.ScrollToBottom()
 		}
 		return m, nil
 	}

@@ -27,11 +27,20 @@ rune.ui.layout({
 })
 ```
 
-A docked pane renders a title header and a bottom border, which use two of
-its `height` lines. Panes start hidden; `toggle` shows them. A hidden pane
-keeps accumulating writes (the buffer is capped at 1000 lines), so toggling
-it back shows the recent history. Lines longer than the pane width
-soft-wrap, and re-fit when the terminal resizes.
+A pane's configured `height` is its standalone height. Omit `height` or set it
+to `0` to use the default height of 12 lines; any other value below 2 is
+treated as 2. The titled header and bottom border use two rows, and the rest
+show content. When visible panes are adjacent in the same dock, Rune omits the
+upper pane's bottom border and uses the lower pane's titled header as their
+shared boundary. Each pane still shows the same number of content rows, so
+each shared boundary saves one row. For example, two adjacent panes with
+`height = 12` each still show 10 content rows apiece but occupy 23 rows
+together instead of 24.
+
+Panes start hidden; `toggle` shows them. A hidden pane keeps accumulating
+writes (the buffer is capped at 1000 lines), so toggling it back shows the
+recent history. Lines longer than the pane width soft-wrap, and re-fit when
+the terminal resizes.
 
 ## Scrolling
 

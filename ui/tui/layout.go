@@ -4,10 +4,33 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/mmcdole/rune/ui"
+	"github.com/mmcdole/rune/ui/tui/util"
 	"github.com/mmcdole/rune/ui/tui/widget"
 )
+
+const (
+	defaultPaneContentHeight = 10
+	paneChromeHeight         = 2 // titled header + closing rule
+)
+
+// sizedDockEntry is the walker's private representation of one rendered
+// layout entry. Exactly one of widget or pane is set.
+type sizedDockEntry struct {
+	widget widget.Widget
+	pane   *widget.Pane
+	height int
+}
+
+// dockPart is the compositor-facing form of a sized entry. The walker owns
+// all pane-vs-widget dispatch; composition only deals with rendered blocks.
+type dockPart struct {
+	view                   string
+	closing                string
+	sharedWithPreviousPane bool
+}
 
 func (m *Model) getLayout() ui.LayoutConfig {
 	if len(m.luaLayout.Top) > 0 || len(m.luaLayout.Bottom) > 0 {
@@ -19,81 +42,126 @@ func (m *Model) getLayout() ui.LayoutConfig {
 	return ui.DefaultLayoutConfig()
 }
 
-// getWidget returns the Widget for a given name.
-func (m *Model) getWidget(name string) widget.Widget {
-	// Check widgets map (input, separator, bars)
-	if w, ok := m.widgets[name]; ok {
-		return w
+// sizeDockEntry resolves and sizes one layout entry. Named widgets take
+// precedence over panes, matching the existing collision policy.
+func (m *Model) sizeDockEntry(entry ui.LayoutEntry) (sizedDockEntry, bool) {
+	if w, ok := m.widgets[entry.Name]; ok {
+		// Options are per-entry but the widget instance is shared, so pass the
+		// bag unconditionally: an entry without options must reset whatever a
+		// previous entry configured in the same layout pass.
+		if c, ok := w.(widget.Configurable); ok {
+			c.SetOptions(entry.Opts)
+		}
+
+		// Width can affect intrinsic height (notably soft-wrapped composer text),
+		// so make the current width available before asking for it. Existing
+		// fixed-height widgets ignore the zero height.
+		w.SetSize(m.width, 0)
+		preferred := w.PreferredHeight()
+		if preferred == 0 {
+			return sizedDockEntry{}, false
+		}
+
+		h := entry.Height
+		if h == 0 {
+			h = preferred
+		}
+		w.SetSize(m.width, h)
+		return sizedDockEntry{widget: w, height: h}, true
 	}
 
-	// Panes (PaneManager returns *Pane which implements Widget)
-	if m.panes.Exists(name) {
-		return m.panes.Get(name)
+	pane, ok := m.panes.Lookup(entry.Name)
+	if !ok || !pane.Visible {
+		return sizedDockEntry{}, false
 	}
-
-	return nil
+	height := entry.Height
+	if height == 0 {
+		height = defaultPaneContentHeight + paneChromeHeight
+	}
+	if height < paneChromeHeight {
+		height = paneChromeHeight
+	}
+	return sizedDockEntry{pane: pane, height: height}, true
 }
 
-// sizeDockEntry applies one layout entry and returns its widget and final
-// height. Measurement and rendering share this path so intrinsic-height
-// policy cannot drift between an Update-time reflow and the next View.
-func (m *Model) sizeDockEntry(entry ui.LayoutEntry) (widget.Widget, int, bool) {
-	w := m.getWidget(entry.Name)
-	if w == nil {
-		return nil, 0, false
-	}
-
-	// Options are per-entry but the widget instance is shared, so pass the
-	// bag unconditionally: an entry without options must reset whatever a
-	// previous entry configured in the same layout pass.
-	if c, ok := w.(widget.Configurable); ok {
-		c.SetOptions(entry.Opts)
-	}
-
-	// Width can affect intrinsic height (notably soft-wrapped composer text),
-	// so make the current width available before asking for it. Existing
-	// fixed-height widgets ignore the zero height.
-	w.SetSize(m.width, 0)
-	preferred := w.PreferredHeight()
-	if preferred == 0 {
-		return nil, 0, false
-	}
-
-	h := entry.Height
-	if h == 0 {
-		h = preferred
-	}
-	w.SetSize(m.width, h)
-	return w, h, true
-}
-
-// layoutDock sizes and renders one dock's widgets, returning the joined
-// view and total height. A zero-height widget is skipped entirely.
-func (m *Model) layoutDock(entries []ui.LayoutEntry) (string, int) {
-	var parts []string
+// walkDock is the single dispatch and geometry path for dock entries. When
+// visit is non-nil it snapshots each entry's rendering before a repeated,
+// shared widget can be resized by the next entry.
+func (m *Model) walkDock(entries []ui.LayoutEntry, visit func(dockPart)) int {
 	totalHeight := 0
+	previousWasPane := false
 	for _, entry := range entries {
-		w, h, ok := m.sizeDockEntry(entry)
+		sized, ok := m.sizeDockEntry(entry)
 		if !ok {
 			continue
 		}
-		parts = append(parts, w.View())
-		totalHeight += h
+
+		isPane := sized.pane != nil
+		shared := previousWasPane && isPane
+		if shared {
+			totalHeight--
+		}
+		totalHeight += sized.height
+
+		if visit != nil {
+			part := dockPart{sharedWithPreviousPane: shared}
+			if isPane {
+				part.view = m.renderPaneBody(sized.pane, sized.height)
+				part.closing = m.renderPaneClosing()
+			} else {
+				part.view = sized.widget.View()
+			}
+			visit(part)
+		}
+		previousWasPane = isPane
+	}
+	return totalHeight
+}
+
+func (m *Model) renderPaneBody(pane *widget.Pane, height int) string {
+	label := ansi.ResetStyle + m.styles.PaneHeader.Render(" "+pane.Title()+" ")
+	if pad := m.width - util.VisibleLen(label); pad > 0 {
+		label += m.styles.PaneBorder.Render(strings.Repeat("─", pad))
+	}
+
+	rows := make([]string, 1, height-1)
+	rows[0] = label
+	rows = append(rows, pane.ContentRows(m.width, height-paneChromeHeight)...)
+	return strings.Join(rows, "\n")
+}
+
+func (m *Model) renderPaneClosing() string {
+	return ansi.ResetStyle + m.styles.PaneBorder.Render(strings.Repeat("─", m.width))
+}
+
+// layoutDock renders one dock. A pane's closing rule stays pending until the
+// next rendered entry determines whether it is a real edge or a shared pane
+// boundary.
+func (m *Model) layoutDock(entries []ui.LayoutEntry) (string, int) {
+	var parts []string
+	pendingClosing := ""
+	totalHeight := m.walkDock(entries, func(part dockPart) {
+		if part.sharedWithPreviousPane {
+			pendingClosing = ""
+		} else if pendingClosing != "" {
+			parts = append(parts, pendingClosing)
+			pendingClosing = ""
+		}
+
+		parts = append(parts, part.view)
+		pendingClosing = part.closing
+	})
+	if pendingClosing != "" {
+		parts = append(parts, pendingClosing)
 	}
 	return strings.Join(parts, "\n"), totalHeight
 }
 
 // dockHeight measures a dock without rendering it. Search uses this during
-// Update so viewport positioning sees the same final geometry as View.
+// Update so viewport positioning sees the same walker and final geometry as
+// View.
 func (m *Model) dockHeight(entries []ui.LayoutEntry) int {
-	totalHeight := 0
-	for _, entry := range entries {
-		_, h, ok := m.sizeDockEntry(entry)
-		if ok {
-			totalHeight += h
-		}
-	}
-	return totalHeight
+	return m.walkDock(entries, nil)
 }
 
 func (m *Model) setViewportSize(topHeight, bottomHeight int) {

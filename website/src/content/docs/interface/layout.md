@@ -63,9 +63,16 @@ instead.
 ## Rules of the layout table
 
 - A table entry (`{ name = ..., height = n }`) sets an explicit height
-  in lines (a pane spends two of those on its header and bottom
-  border). Any other string-valued key is an option for the named
-  component, like the separator's `char`; unknown keys are ignored.
+  in lines. For a pane, omit `height` or set it to `0` to use the default
+  height of 12 lines; any other value below 2 is treated as 2. The value
+  is the pane's standalone height: two rows frame its content with a
+  titled header and bottom border. Adjacent visible panes still show the
+  same number of content rows but share a boundary: the upper pane drops
+  its bottom border, and the lower pane's titled header acts as the
+  divider. Two adjacent panes with `height = 12` therefore occupy 23 rows
+  instead of 24 while each still shows 10 content rows. Any other
+  string-valued key is an option for the named component, like the
+  separator's `char`; unknown keys are ignored.
 - `rune.ui.layout` replaces the whole layout. Always include `"input"`
   in a dock, because nothing re-adds it if you leave it out.
 - A component appears only if a dock names it. Registering a bar or
