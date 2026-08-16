@@ -12,6 +12,7 @@ func (s *Session) OnConfigChange(config lua.Config) {
 	s.ui.UpdateConfig(ui.Config{
 		KeepInput: config.KeepInput,
 		Numpad:    config.Numpad,
+		Mouse:     config.Mouse,
 	})
 }
 

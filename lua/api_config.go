@@ -15,6 +15,7 @@ type Config struct {
 	HistoryCharacter string
 	KeepInput        bool
 	Numpad           bool
+	Mouse            bool
 }
 
 func defaultConfig() Config {
@@ -23,6 +24,7 @@ func defaultConfig() Config {
 		HistoryCharacter: "!",
 		KeepInput:        false,
 		Numpad:           false,
+		Mouse:            false,
 	}
 }
 
@@ -54,6 +56,8 @@ func (e *Engine) registerConfigFuncs() {
 				c.Return(e.config.KeepInput)
 			case "numpad":
 				c.Return(e.config.Numpad)
+			case "mouse":
+				c.Return(e.config.Mouse)
 			default:
 				return c.Errorf("unknown config key %q", key)
 			}
@@ -91,6 +95,8 @@ func (e *Engine) registerConfigFuncs() {
 				e.config.KeepInput = c.Bool(2)
 			case "numpad":
 				e.config.Numpad = c.Bool(2)
+			case "mouse":
+				e.config.Mouse = c.Bool(2)
 			default:
 				return c.Errorf("unknown config key %q", key)
 			}

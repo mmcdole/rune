@@ -95,12 +95,21 @@ in the status bar, with `Shift+Tab` going backward.
 
 `PageUp`/`PageDown` scroll the output viewport; `Ctrl+Home`/`Ctrl+End` jump to
 the top and bottom (`Home`/`End` stay on the input line; rebind them if you
-prefer they scroll). The mouse wheel scrolls too. While you're off the bottom,
-the status bar shows `SCROLL (n new)` so you know what's piling up, and it
-returns to `LIVE` when you catch up.
+prefer they scroll). While you're off the bottom, the status bar shows
+`SCROLL (n new)` so you know what's piling up, and it returns to `LIVE` when
+you catch up.
 
-The mouse is captured for scrolling, so select text with shift+drag, the
-standard convention in terminal apps like tmux.
+Rune leaves the mouse to the terminal by default, so click-drag selects text
+normally. To capture it for wheel scrolling, enable the `mouse` setting:
+
+```lua
+rune.config.set("mouse", true)
+```
+
+The change takes effect immediately and does not require a restart. Put it in
+`init.lua` to enable it on each start. While capture is enabled, each wheel tick
+scrolls three lines and most terminals require holding `Shift` while dragging
+for native text selection.
 
 ## Multiline verbatim composer
 
@@ -131,8 +140,8 @@ or discard the draft.
 
 Composer editing keys are handled locally rather than by Lua binds. `Up`/`Down`
 move through the draft's visual rows, `PageUp`/`PageDown` move by a composer
-page, and the mouse wheel still scrolls output. The ordinary one-line input and
-its bindings return after the composer closes.
+page, and the mouse wheel still scrolls output when mouse capture is enabled.
+The ordinary one-line input and its bindings return after the composer closes.
 
 So that an accidental paste can't flood the connection, a verbatim submission
 is capped at 1,000 physical lines and 256 KiB; over either limit Rune rejects

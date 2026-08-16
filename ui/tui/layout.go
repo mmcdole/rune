@@ -120,7 +120,9 @@ func (m *Model) syncViewportSize() {
 func (m *Model) View() tea.View {
 	view := tea.View{
 		AltScreen: true,
-		MouseMode: tea.MouseModeCellMotion,
+	}
+	if m.mouseEnabled {
+		view.MouseMode = tea.MouseModeCellMotion
 	}
 	if !m.initialized {
 		view.Content = "Loading..."

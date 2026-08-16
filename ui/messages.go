@@ -75,6 +75,9 @@ type Config struct {
 	// Numpad asks terminals with legacy keypad support to report physical
 	// numpad keys separately from their number-row equivalents.
 	Numpad bool
+	// Mouse captures terminal mouse events so the wheel can scroll Rune's
+	// viewport. When disabled, the terminal retains native text selection.
+	Mouse bool
 }
 
 // UpdateConfigMsg pushes UI-facing configuration from Session to UI.
