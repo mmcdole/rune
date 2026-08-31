@@ -489,24 +489,66 @@ func (s *Search) View() string {
 	contentWidth := max(1, frameWidth-overlay.GetHorizontalBorderSize()-overlay.GetHorizontalPadding())
 
 	lines = append(lines, s.headerLine(contentWidth))
-
-	if len(s.matches) == 0 {
-		empty := "  " + "No matches"
-		lines = append(lines, clipRow(s.styles.Muted.Render(empty), contentWidth))
-	} else {
-		start := s.scrollOff
-		end := start + searchMaxVisible
-		if end > len(s.matches) {
-			end = len(s.matches)
-		}
-		for i := start; i < end; i++ {
-			lines = append(lines, s.renderMatch(s.matches[i], contentWidth, i == s.selected))
-		}
-	}
+	lines = append(lines, s.resultLines(contentWidth, searchMaxVisible)...)
 	lines = append(lines, s.footerLine(contentWidth))
 
 	content := strings.Join(lines, "\n")
 	return overlay.Width(frameWidth).Render(content)
+}
+
+// constrainedView preserves the active search field when its layout slot is
+// too short for the complete bordered surface. Results use any middle rows;
+// a help row is retained when at least three rows are available.
+func (s *Search) constrainedView(height int) string {
+	if height <= 0 {
+		return ""
+	}
+	width := max(1, s.width)
+	lines := []string{s.headerLine(width)}
+	bodyRows := height - 1
+	showFooter := height >= 3
+	if showFooter {
+		bodyRows--
+	}
+	lines = append(lines, s.resultLines(width, bodyRows)...)
+	bodyEnd := height
+	if showFooter {
+		bodyEnd--
+	}
+	for len(lines) < bodyEnd {
+		lines = append(lines, "")
+	}
+	if showFooter {
+		lines = append(lines, s.footerLine(width))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (s *Search) resultLines(width, limit int) []string {
+	if limit <= 0 {
+		return nil
+	}
+	if len(s.matches) == 0 {
+		empty := "  " + "No matches"
+		return []string{clipRow(s.styles.Muted.Render(empty), width)}
+	}
+	visible := min(limit, len(s.matches))
+	start := s.scrollOff
+	// scrollOff tracks the normal eight-row window. A constrained layout can
+	// offer fewer rows, so tighten that window around the current selection
+	// instead of rendering a different match from the one being previewed.
+	if s.selected < start {
+		start = s.selected
+	} else if s.selected >= start+visible {
+		start = s.selected - visible + 1
+	}
+	start = max(0, min(start, len(s.matches)-visible))
+	end := min(start+limit, len(s.matches))
+	lines := make([]string, 0, end-start)
+	for i := start; i < end; i++ {
+		lines = append(lines, s.renderMatch(s.matches[i], width, i == s.selected))
+	}
+	return lines
 }
 
 // headerLine renders "Search: query█        cur/total", count right-aligned.

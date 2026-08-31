@@ -32,9 +32,9 @@ type Input struct {
 	height         int
 }
 
-// NewInput creates the input dock with its scrollback-search child. Search is
-// required because the dock delegates its entire surface to that child while
-// search mode is active.
+// NewInput creates the input widget with its scrollback-search child. Search
+// is required because the widget delegates its entire surface to that child
+// while search mode is active.
 func NewInput(styles style.Styles, search *Search) *Input {
 	if search == nil {
 		panic("widget.NewInput requires a search widget")
@@ -129,13 +129,19 @@ func (i *Input) View() string {
 	// replaces the command field while active so the terminal never shows
 	// two apparent cursors competing for keyboard focus.
 	if i.searchActive {
+		if i.height > 0 && i.height < i.search.PreferredHeight() {
+			return i.search.constrainedView(i.height)
+		}
 		return i.search.View()
 	}
 
 	var parts []string
 
-	// Picker overlay (picker and search modes are mutually exclusive).
-	if i.pickerActive {
+	// Picker overlay (picker and search modes are mutually exclusive). If the
+	// assigned slot cannot fit the complete overlay, keep the editable field
+	// visible and temporarily suppress the decoration.
+	showPicker := i.pickerActive && (i.height <= 0 || i.height >= i.PreferredHeight())
+	if showPicker {
 		parts = append(parts, i.picker.View())
 	}
 
@@ -144,7 +150,6 @@ func (i *Input) View() string {
 	} else {
 		// Keep the ordinary one-line input in its compact three-row layout.
 		// Compose chrome exists only around structured text.
-		parts = append(parts, i.borderLine())
 		inputView := i.textinput.View()
 		if i.selected {
 			// Bubbles renders TextStyle across its width padding. Render the
@@ -158,8 +163,15 @@ func (i *Input) View() string {
 				inputView += strings.Repeat(" ", padding)
 			}
 		}
-		parts = append(parts, inputView)
-		parts = append(parts, i.borderLine())
+		if i.height == 1 {
+			// Under terminal pressure, the protected input row must contain
+			// the editable field rather than decorative chrome.
+			parts = append(parts, inputView)
+		} else if i.height == 2 {
+			parts = append(parts, inputView, i.borderLine())
+		} else {
+			parts = append(parts, i.borderLine(), inputView, i.borderLine())
+		}
 	}
 
 	return strings.Join(parts, "\n")
@@ -169,7 +181,7 @@ func (i *Input) View() string {
 func (i *Input) SetSize(width, height int) {
 	i.width = width
 	i.height = height
-	i.textinput.SetWidth(width - 2) // Account for prompt
+	i.textinput.SetWidth(max(0, width-2)) // Account for prompt
 	i.picker.SetWidth(width)
 	i.search.SetWidth(width)
 }
@@ -411,6 +423,12 @@ func (i *Input) composerView() []string {
 		help = "Esc again discards · any key keeps editing"
 	}
 	rows = append(rows, i.composeFooter(help))
+	if i.height == 1 {
+		return rows[1:2]
+	}
+	if i.height == 2 {
+		return rows[:2]
+	}
 	return rows
 }
 

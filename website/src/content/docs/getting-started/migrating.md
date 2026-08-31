@@ -35,7 +35,7 @@ rune.trigger.regex("(\\w+) attacks you", "flee")
 | `#var` | plain Lua variables (`rune.session`/`rune.store` for state that must survive `/reload`/restarts) |
 | `#if`, `#math`, `#loop` | Lua (`if`, arithmetic, `for`) |
 | `#showme` | `rune.echo(text)` |
-| `#split` | `rune.ui.layout{...}` + bars |
+| `#split` | a native `rune.ui.layout({ type = "row", children = ... })` row/column tree |
 | `#session x host port` | `/connect host port`, `/world add` for bookmarks |
 | `#read file.tin` | `/load file.lua` |
 | `#write` | your scripts are already files |
@@ -114,7 +114,7 @@ terminal-client muscle memory expects.
 
 ## Where things live
 
-Everything lives under `~/.config/rune/` — the full path table is in
+Everything lives under `~/.config/rune/`; the full path table is in
 [Installation](/getting-started/installation/#where-things-live). Your
 scripts go in `init.lua`; bookmarks and durable state in `store.json`.
 
@@ -123,5 +123,5 @@ Full signatures for every `rune.*` namespace:
 
 ## Next
 
-[Triggers](/scripting/triggers/) is where most ports start — match
+[Triggers](/scripting/triggers/) is where most ports start: match
 modes, captures, gagging, and rewriting in rune's terms.

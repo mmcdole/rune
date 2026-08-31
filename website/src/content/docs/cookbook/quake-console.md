@@ -1,16 +1,14 @@
 ---
 title: Quake-Style Chat Console
-description: A drop-down pane for tells and channels, toggled with backtick, so nothing scrolls away in combat spam.
+description: A top pane for tells and channels, toggled with backtick, so nothing scrolls away in combat spam.
 ---
 
-Hit `` ` `` and a chat pane drops down over the top of the screen with every
+Hit `` ` `` and a chat pane opens above the output pane with every
 tell and channel message you've received; hit it again and it's gone. Tells
 can't scroll away under combat spam, and they're all in one place when you
 come back to the keyboard.
 
 ```lua
-rune.pane.create("chat")
-
 rune.bind("`", function()
     rune.pane.toggle("chat")
 end)
@@ -34,8 +32,13 @@ rune.trigger.regex("^(\\w+) \\[(\\w+)\\]: (.+)$", function(m)
 end, { group = "chat-console" })
 
 rune.ui.layout({
-    top = { { name = "chat", height = 10 } },
-    bottom = { "input", "status" },
+    type = "column",
+    children = {
+        { type = "pane", name = "chat", size = 10, hidden = true },
+        { type = "pane", name = "output", border = "none" },
+        { type = "input" },
+        { type = "bar", name = "status" },
+    },
 })
 ```
 
@@ -49,8 +52,9 @@ rune.ui.layout({
   pane, restyled compactly. They don't gag, so chat still appears inline
   too. Add `return false` in the handlers to move messages instead of
   copying them.
-- The [layout](/interface/layout/) docks the pane at the top, 10
-  lines tall.
+- The [layout](/interface/layout/) puts the pane first in the root column, 10
+  lines tall, declared `hidden = true` so the console starts closed. While it
+  is hidden, the output pane reclaims that height.
 
 ## Variations
 

@@ -39,7 +39,7 @@ func (b *Bar) View() string {
 	centerLen := util.VisibleLen(center)
 	rightLen := util.VisibleLen(right)
 
-	if center != "" {
+	if centerLen > 0 {
 		// Three-part layout
 		leftPad := (b.width-centerLen)/2 - leftLen
 		if leftPad < 1 {
@@ -68,7 +68,9 @@ func (b *Bar) SetSize(width, height int) {
 
 // PreferredHeight implements Widget.
 func (b *Bar) PreferredHeight() int {
-	if b.content.Left != "" || b.content.Center != "" || b.content.Right != "" {
+	if util.VisibleLen(b.content.Left) > 0 ||
+		util.VisibleLen(b.content.Center) > 0 ||
+		util.VisibleLen(b.content.Right) > 0 {
 		return 1
 	}
 	return 0 // Hidden if no content

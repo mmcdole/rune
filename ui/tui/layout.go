@@ -1,203 +1,925 @@
 package tui
 
 import (
+	"image"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 
+	runetext "github.com/mmcdole/rune/text"
 	"github.com/mmcdole/rune/ui"
-	"github.com/mmcdole/rune/ui/tui/util"
 	"github.com/mmcdole/rune/ui/tui/widget"
 )
 
+const defaultPaneContentHeight = 10
+
+type splitAxis uint8
+
 const (
-	defaultPaneContentHeight = 10
-	paneChromeHeight         = 2 // titled header + closing rule
+	axisHorizontal splitAxis = iota
+	axisVertical
 )
 
-// sizedDockEntry is the walker's private representation of one rendered
-// layout entry. Exactly one of widget or pane is set.
-type sizedDockEntry struct {
-	widget widget.Widget
-	pane   *widget.Pane
-	height int
+// layoutPlan is the complete geometry for one frame. The same plan sizes the
+// output viewport for interaction and places every leaf for rendering.
+// Raw Lua table shape and version fields do not reach this layer; it consumes a
+// LayoutTree that may include private v1 resource references.
+type layoutPlan struct {
+	leaves []placedLeaf
+	frame  frameGrid
+	output image.Rectangle
 }
 
-// dockPart is the compositor-facing form of a sized entry. The walker owns
-// all pane-vs-widget dispatch; composition only deals with rendered blocks.
-type dockPart struct {
-	view                   string
-	closing                string
-	sharedWithPreviousPane bool
+type leafKind uint8
+
+const (
+	leafWidget leafKind = iota
+	leafPane
+)
+
+// placedLeaf snapshots identity and geometry, not rendering. Shared widget
+// instances are configured, sized, and rendered in leaf order so each view is
+// captured before the next occurrence mutates the same instance.
+type placedLeaf struct {
+	node    ui.LayoutNode
+	kind    leafKind
+	widget  widget.Widget
+	pane    paneResource
+	outer   image.Rectangle
+	content image.Rectangle
+	frames  frameEdges
 }
 
-func (m *Model) getLayout() ui.LayoutConfig {
-	if len(m.luaLayout.Top) > 0 || len(m.luaLayout.Bottom) > 0 {
-		return ui.LayoutConfig{
-			Top:    m.luaLayout.Top,
-			Bottom: m.luaLayout.Bottom,
-		}
-	}
-	return ui.DefaultLayoutConfig()
+type resolvedNode struct {
+	node      ui.LayoutNode
+	leaf      *placedLeaf
+	children  []*resolvedNode
+	frames    frameEdges
+	hasOutput bool
+	hasInput  bool
 }
 
-// sizeDockEntry resolves and sizes one layout entry. Named widgets take
-// precedence over panes, matching the existing collision policy.
-func (m *Model) sizeDockEntry(entry ui.LayoutEntry) (sizedDockEntry, bool) {
-	if w, ok := m.widgets[entry.Name]; ok {
-		// Options are per-entry but the widget instance is shared, so pass the
-		// bag unconditionally: an entry without options must reset whatever a
-		// previous entry configured in the same layout pass.
-		if c, ok := w.(widget.Configurable); ok {
-			c.SetOptions(entry.Opts)
-		}
+type frameEdges uint8
 
-		// Width can affect intrinsic height (notably soft-wrapped composer text),
-		// so make the current width available before asking for it. Existing
-		// fixed-height widgets ignore the zero height.
-		w.SetSize(m.width, 0)
-		preferred := w.PreferredHeight()
-		if preferred == 0 {
-			return sizedDockEntry{}, false
-		}
+const (
+	frameLeft frameEdges = 1 << iota
+	frameRight
+	frameTop
+	frameBottom
+	frameAll = frameLeft | frameRight | frameTop | frameBottom
+)
 
-		h := entry.Height
-		if h == 0 {
-			h = preferred
-		}
-		w.SetSize(m.width, h)
-		return sizedDockEntry{widget: w, height: h}, true
-	}
-
-	pane, ok := m.panes.Lookup(entry.Name)
-	if !ok || !pane.Visible {
-		return sizedDockEntry{}, false
-	}
-	height := entry.Height
-	if height == 0 {
-		height = defaultPaneContentHeight + paneChromeHeight
-	}
-	if height < paneChromeHeight {
-		height = paneChromeHeight
-	}
-	return sizedDockEntry{pane: pane, height: height}, true
+func (n *resolvedNode) framesEdge(edge frameEdges) bool {
+	return n != nil && n.frames&edge != 0
 }
 
-// walkDock is the single dispatch and geometry path for dock entries. When
-// visit is non-nil it snapshots each entry's rendering before a repeated,
-// shared widget can be resized by the next entry.
-func (m *Model) walkDock(entries []ui.LayoutEntry, visit func(dockPart)) int {
-	totalHeight := 0
-	previousWasPane := false
-	for _, entry := range entries {
-		sized, ok := m.sizeDockEntry(entry)
-		if !ok {
-			continue
+func containerFrameEdges(node ui.LayoutNode, children []*resolvedNode) frameEdges {
+	if len(children) == 0 {
+		return 0
+	}
+	all := func(edge frameEdges) bool {
+		if node.Gap != 0 {
+			return false
 		}
-
-		isPane := sized.pane != nil
-		shared := previousWasPane && isPane
-		if shared {
-			totalHeight--
-		}
-		totalHeight += sized.height
-
-		if visit != nil {
-			part := dockPart{sharedWithPreviousPane: shared}
-			if isPane {
-				part.view = m.renderPaneBody(sized.pane, sized.height)
-				part.closing = m.renderPaneClosing()
-			} else {
-				part.view = sized.widget.View()
+		for _, child := range children {
+			if !child.framesEdge(edge) {
+				return false
 			}
-			visit(part)
 		}
-		previousWasPane = isPane
+		return true
 	}
-	return totalHeight
-}
-
-func (m *Model) renderPaneBody(pane *widget.Pane, height int) string {
-	label := ansi.ResetStyle + m.styles.PaneHeader.Render(" "+pane.Title()+" ")
-	if pad := m.width - util.VisibleLen(label); pad > 0 {
-		label += m.styles.PaneBorder.Render(strings.Repeat("─", pad))
-	}
-
-	rows := make([]string, 1, height-1)
-	rows[0] = label
-	rows = append(rows, pane.ContentRows(m.width, height-paneChromeHeight)...)
-	return strings.Join(rows, "\n")
-}
-
-func (m *Model) renderPaneClosing() string {
-	return ansi.ResetStyle + m.styles.PaneBorder.Render(strings.Repeat("─", m.width))
-}
-
-// layoutDock renders one dock. A pane's closing rule stays pending until the
-// next rendered entry determines whether it is a real edge or a shared pane
-// boundary.
-func (m *Model) layoutDock(entries []ui.LayoutEntry) (string, int) {
-	var parts []string
-	pendingClosing := ""
-	totalHeight := m.walkDock(entries, func(part dockPart) {
-		if part.sharedWithPreviousPane {
-			pendingClosing = ""
-		} else if pendingClosing != "" {
-			parts = append(parts, pendingClosing)
-			pendingClosing = ""
+	fills := false
+	for _, child := range children {
+		kind := child.node.Size.Kind
+		if (kind == ui.LayoutSizeDefault || kind == ui.LayoutSizeFraction) &&
+			child.node.MaxSize == nil {
+			fills = true
+			break
 		}
-
-		parts = append(parts, part.view)
-		pendingClosing = part.closing
-	})
-	if pendingClosing != "" {
-		parts = append(parts, pendingClosing)
 	}
-	return strings.Join(parts, "\n"), totalHeight
-}
 
-// dockHeight measures a dock without rendering it. Search uses this during
-// Update so viewport positioning sees the same walker and final geometry as
-// View.
-func (m *Model) dockHeight(entries []ui.LayoutEntry) int {
-	return m.walkDock(entries, nil)
-}
-
-func (m *Model) setViewportSize(topHeight, bottomHeight int) {
-	viewportHeight := m.height - topHeight - bottomHeight
-	if viewportHeight < 1 {
-		viewportHeight = 1
+	var edges frameEdges
+	if node.Type == ui.LayoutTypeRow {
+		if children[0].framesEdge(frameLeft) {
+			edges |= frameLeft
+		}
+		if fills && children[len(children)-1].framesEdge(frameRight) {
+			edges |= frameRight
+		}
+		if fills && all(frameTop) {
+			edges |= frameTop
+		}
+		if fills && all(frameBottom) {
+			edges |= frameBottom
+		}
+		return edges
 	}
-	m.viewport.SetSize(m.width, viewportHeight)
+	if children[0].framesEdge(frameTop) {
+		edges |= frameTop
+	}
+	if fills && children[len(children)-1].framesEdge(frameBottom) {
+		edges |= frameBottom
+	}
+	if fills && all(frameLeft) {
+		edges |= frameLeft
+	}
+	if fills && all(frameRight) {
+		edges |= frameRight
+	}
+	return edges
 }
 
-// syncViewportSize makes layout geometry current outside View. Callers that
-// anchor content inside the viewport can then position it against the same
-// dimensions the next render will use.
-func (m *Model) syncViewportSize() {
-	if !m.initialized {
+func nodeAxis(node ui.LayoutNode) splitAxis {
+	if node.Type == ui.LayoutTypeRow {
+		return axisHorizontal
+	}
+	return axisVertical
+}
+
+func axisExtent(rect image.Rectangle, axis splitAxis) int {
+	if axis == axisHorizontal {
+		return rect.Dx()
+	}
+	return rect.Dy()
+}
+
+func crossExtent(rect image.Rectangle, axis splitAxis) int {
+	if axis == axisHorizontal {
+		return rect.Dy()
+	}
+	return rect.Dx()
+}
+
+func childRect(parent image.Rectangle, axis splitAxis, position, size int) image.Rectangle {
+	if axis == axisHorizontal {
+		return image.Rect(position, parent.Min.Y, position+size, parent.Max.Y)
+	}
+	return image.Rect(parent.Min.X, position, parent.Max.X, position+size)
+}
+
+// paneFrames maps the canonical pane border mode to rendered edges.
+func paneFrames(border ui.PaneBorder) frameEdges {
+	if border == "" {
+		return frameAll
+	}
+	switch border {
+	case ui.PaneBorderNone:
+		return 0
+	case ui.PaneBorderHorizontal:
+		return frameTop | frameBottom
+	case ui.PaneBorderFull:
+		return frameAll
+	}
+	return frameAll
+}
+
+func (m *Model) resolveWidget(node ui.LayoutNode, w widget.Widget, availableWidth int) (*resolvedNode, bool) {
+	// Empty bars collapse even when assigned a fixed track. Width-sensitive
+	// widgets receive their current allowance before visibility is measured.
+	w.SetSize(max(1, availableWidth), 0)
+	if w.PreferredHeight() <= 0 {
+		return nil, false
+	}
+	leaf := &placedLeaf{node: node, kind: leafWidget, widget: w}
+	return &resolvedNode{
+		node: node, leaf: leaf,
+		hasInput: w == m.input,
+	}, true
+}
+
+func (m *Model) resolveBar(node ui.LayoutNode, name string, availableWidth int) (*resolvedNode, bool) {
+	bar, ok := m.bars[name]
+	if !ok {
+		return nil, false
+	}
+	return m.resolveWidget(node, bar, availableWidth)
+}
+
+// resolvePane places a named pane buffer, creating it on first placement so a
+// declared pane renders as an empty titled box instead of silently vanishing.
+func (m *Model) resolvePane(node ui.LayoutNode, name string) (*resolvedNode, bool) {
+	pane := m.panes.Create(name)
+	leaf := &placedLeaf{
+		node: node, kind: leafPane, pane: pane,
+		frames: paneFrames(node.Border),
+	}
+	return &resolvedNode{
+		node: node, leaf: leaf, frames: leaf.frames,
+		hasOutput: pane == m.output,
+	}, true
+}
+
+// resolveNode prunes hidden placements and leaves that cannot currently
+// render. Pane and bar leaves select an explicit resource namespace; v1
+// references preserve bar-first, pane-fallback lookup, so their pane gate is
+// deferred to the fallback branch and never hides a registered bar.
+func (m *Model) resolveNode(node ui.LayoutNode, availableWidth int) (*resolvedNode, bool) {
+	if node.Hidden && node.Type != ui.LayoutTypeLegacyReference {
+		return nil, false
+	}
+	if node.IsContainer() {
+		children := make([]*resolvedNode, 0, len(node.Children))
+		for _, child := range node.Children {
+			if resolved, ok := m.resolveNode(child, availableWidth); ok {
+				children = append(children, resolved)
+			}
+		}
+		if len(children) == 0 {
+			return nil, false
+		}
+		resolved := &resolvedNode{node: node, children: children}
+		for _, child := range children {
+			resolved.hasOutput = resolved.hasOutput || child.hasOutput
+			resolved.hasInput = resolved.hasInput || child.hasInput
+		}
+		resolved.frames = containerFrameEdges(node, children)
+		return resolved, true
+	}
+
+	switch node.Type {
+	case ui.LayoutTypeInput:
+		return m.resolveWidget(node, m.input, availableWidth)
+	case ui.LayoutTypeSeparator:
+		separator := widget.NewSeparator()
+		separator.SetChar(node.SeparatorChar)
+		return m.resolveWidget(node, separator, availableWidth)
+	case ui.LayoutTypePane:
+		return m.resolvePane(node, node.Name)
+	case ui.LayoutTypeBar:
+		return m.resolveBar(node, node.Name, availableWidth)
+	case ui.LayoutTypeLegacyReference:
+		// Registry presence owns the v1 name even when the bar is empty. Only an
+		// absent bar permits pane fallback.
+		if _, exists := m.bars[node.Name]; exists {
+			return m.resolveBar(node, node.Name, availableWidth)
+		}
+		if node.Hidden {
+			return nil, false
+		}
+		return m.resolvePane(node, node.Name)
+	default:
+		return nil, false
+	}
+}
+
+func (m *Model) leafPreferred(leaf *placedLeaf, axis splitAxis, cross int) int {
+	switch leaf.kind {
+	case leafPane:
+		if axis == axisVertical {
+			height := defaultPaneContentHeight
+			if leaf.frames&frameTop != 0 {
+				height++
+			}
+			if leaf.frames&frameBottom != 0 {
+				height++
+			}
+			return height
+		}
+		return max(1, lipgloss.Width(leaf.pane.Title())+2)
+	case leafWidget:
+		if axis == axisVertical {
+			leaf.widget.SetSize(max(1, cross), 0)
+			return leaf.widget.PreferredHeight()
+		}
+		// Non-pane widgets expose intrinsic height but no intrinsic width, so
+		// horizontal measurement uses a stable one-cell minimum.
+		return 1
+	}
+	return 1
+}
+
+func (m *Model) preferred(node *resolvedNode, axis splitAxis, cross int) int {
+	if node.leaf != nil {
+		return m.leafPreferred(node.leaf, axis, cross)
+	}
+
+	direction := nodeAxis(node.node)
+	if direction == axis {
+		total := max(0, len(node.children)-1)*node.node.Gap -
+			countTrue(seamOverlaps(node.children, node.node.Gap, direction))
+		for _, child := range node.children {
+			desired := 0
+			switch child.node.Size.Kind {
+			case ui.LayoutSizeCells:
+				desired = child.node.Size.Value
+			default:
+				// An auto container asks every non-fixed child for its
+				// intrinsic preference. Fraction and percent rules take
+				// effect later if the container is assigned a different size.
+				desired = m.preferred(child, axis, cross)
+			}
+			desired = max(desired, m.minimum(child, axis))
+			if maximum := nodeMaximum(child.node); maximum > 0 {
+				desired = min(desired, maximum)
+			}
+			total += desired
+		}
+		return total
+	}
+
+	// A row's preferred height depends on the widths assigned to its children;
+	// wrapped input, search, and multiline widgets are then measurable side by
+	// side.
+	if axis == axisVertical && direction == axisHorizontal {
+		widths := m.allocateChildren(node, max(0, cross), axisHorizontal, 1).sizes
+		preferred := 0
+		for i, child := range node.children {
+			preferred = max(preferred, m.preferred(child, axisVertical, widths[i]))
+		}
+		return preferred
+	}
+
+	// Widgets do not expose a preferred-width contract. Layout validation rejects
+	// auto-sized children of rows, so recursive cross-axis measurement uses only
+	// intrinsic minima.
+	preferred := 0
+	for _, child := range node.children {
+		preferred = max(preferred, m.intrinsicMinimum(child, axis))
+	}
+	return preferred
+}
+
+func (m *Model) minimum(node *resolvedNode, axis splitAxis) int {
+	minimum := 0
+	if node.node.MinSize != nil {
+		minimum = *node.node.MinSize
+	}
+	minimum = max(minimum, m.intrinsicMinimum(node, axis))
+	// max_size is a hard user constraint. If it is smaller than intrinsic
+	// chrome, degrade that chrome inside the capped rectangle instead of making
+	// the parent allocation inconsistent and triggering a global fallback.
+	if maximum := nodeMaximum(node.node); maximum > 0 {
+		minimum = min(minimum, maximum)
+	}
+	return minimum
+}
+
+// intrinsicMinimum is independent of the node's own track constraint. A
+// node's min_size is expressed along its parent's axis and therefore must not
+// leak into cross-axis measurement.
+func (m *Model) intrinsicMinimum(node *resolvedNode, axis splitAxis) int {
+	if node.leaf != nil {
+		if axis == axisVertical && (node.hasOutput || node.hasInput) {
+			return 1
+		}
+		if node.leaf.kind == leafPane {
+			minimum := 0
+			if axis == axisVertical {
+				if node.leaf.frames&frameTop != 0 {
+					minimum++
+				}
+				if node.leaf.frames&frameBottom != 0 {
+					minimum++
+				}
+			} else {
+				if node.leaf.frames&frameLeft != 0 {
+					minimum++
+				}
+				if node.leaf.frames&frameRight != 0 {
+					minimum++
+				}
+			}
+			return minimum
+		}
+		return 0
+	}
+
+	direction := nodeAxis(node.node)
+	if direction == axis {
+		total := max(0, len(node.children)-1)*node.node.Gap -
+			countTrue(seamOverlaps(node.children, node.node.Gap, direction))
+		for _, child := range node.children {
+			total += m.minimum(child, axis)
+		}
+		return max(0, total)
+	}
+	widest := 0
+	for _, child := range node.children {
+		widest = max(widest, m.intrinsicMinimum(child, axis))
+	}
+	return widest
+}
+
+func nodeMaximum(node ui.LayoutNode) int {
+	if node.MaxSize == nil {
+		return 0
+	}
+	return *node.MaxSize
+}
+
+// seamOverlaps reports where resolved geometry lets adjacent framed panes share
+// one boundary cell.
+func seamOverlaps(children []*resolvedNode, gap int, axis splitAxis) []bool {
+	overlaps := make([]bool, max(0, len(children)-1))
+	if gap != 0 {
+		return overlaps
+	}
+	for i := range overlaps {
+		if axis == axisHorizontal {
+			overlaps[i] = children[i].framesEdge(frameRight) && children[i+1].framesEdge(frameLeft)
+		} else {
+			overlaps[i] = children[i].framesEdge(frameBottom) && children[i+1].framesEdge(frameTop)
+		}
+	}
+	return overlaps
+}
+
+func countTrue(values []bool) int {
+	total := 0
+	for _, value := range values {
+		if value {
+			total++
+		}
+	}
+	return total
+}
+
+type childAllocation struct {
+	sizes    []int
+	gap      int
+	overlaps []bool
+}
+
+func fallbackAllocation(
+	children []*resolvedNode,
+	extent int,
+	axis splitAxis,
+	tracks []ui.AxisTrack,
+) childAllocation {
+	count := len(children)
+	result := childAllocation{
+		sizes:    make([]int, count),
+		overlaps: make([]bool, max(0, count-1)),
+	}
+	extent = max(0, extent)
+	if extent == 0 || count == 0 {
+		return result
+	}
+
+	// Retry without gaps or ordinary minima, preserving the original sizing
+	// rules and hard maxima. On a vertical split, reserve the scarce rows for
+	// input first and output second so the user retains a recovery surface.
+	relaxed := append([]ui.AxisTrack(nil), tracks...)
+	for i := range relaxed {
+		relaxed[i].Min = 0
+	}
+	remainingProtected := extent
+	if axis == axisVertical {
+		for _, protected := range []func(*resolvedNode) bool{
+			func(child *resolvedNode) bool { return child.hasInput },
+			func(child *resolvedNode) bool { return child.hasOutput },
+		} {
+			for i, child := range children {
+				if remainingProtected == 0 {
+					break
+				}
+				if protected(child) &&
+					(relaxed[i].Max == 0 || relaxed[i].Min < relaxed[i].Max) {
+					relaxed[i].Min++
+					remainingProtected--
+				}
+			}
+		}
+	}
+
+	if sizes, err := ui.AllocateAxis(extent, 0, relaxed); err == nil {
+		result.sizes = sizes
+		return result
+	}
+
+	// Validated trees cannot reach this branch; it keeps direct, invalid Go
+	// callers bounded and preserves any protected rows without risking a loop.
+	remaining := extent
+	for i, track := range relaxed {
+		grant := min(track.Min, remaining)
+		result.sizes[i] = grant
+		remaining -= grant
+	}
+	for remaining > 0 {
+		grew := false
+		for i, track := range relaxed {
+			if remaining == 0 {
+				break
+			}
+			if track.Max > 0 && result.sizes[i] >= track.Max {
+				continue
+			}
+			result.sizes[i]++
+			remaining--
+			grew = true
+		}
+		if !grew {
+			break
+		}
+	}
+	return result
+}
+
+func (m *Model) allocateChildren(node *resolvedNode, extent int, axis splitAxis, cross int) childAllocation {
+	overlaps := seamOverlaps(node.children, node.node.Gap, axis)
+	effectiveExtent := max(0, extent) + countTrue(overlaps)
+	tracks := make([]ui.AxisTrack, len(node.children))
+	for i, child := range node.children {
+		track := ui.AxisTrack{
+			Size: child.node.Size,
+			Min:  m.minimum(child, axis),
+			Max:  nodeMaximum(child.node),
+		}
+		if track.Size.Kind == ui.LayoutSizeAuto {
+			track.Auto = m.preferred(child, axis, cross)
+		}
+		tracks[i] = track
+	}
+	sizes, err := ui.AllocateAxis(effectiveExtent, node.node.Gap, tracks)
+	if err != nil {
+		return fallbackAllocation(node.children, extent, axis, tracks)
+	}
+
+	used := max(0, len(sizes)-1)*node.node.Gap - countTrue(overlaps)
+	for i, size := range sizes {
+		if size < 0 || (i < len(overlaps) && overlaps[i] && (size == 0 || sizes[i+1] == 0)) {
+			return fallbackAllocation(node.children, extent, axis, tracks)
+		}
+		used += size
+	}
+	if used > extent {
+		return fallbackAllocation(node.children, extent, axis, tracks)
+	}
+	return childAllocation{sizes: sizes, gap: node.node.Gap, overlaps: overlaps}
+}
+
+func (m *Model) placeNode(node *resolvedNode, rect image.Rectangle, plan *layoutPlan) {
+	if rect.Empty() {
 		return
 	}
-	cfg := m.getLayout()
-	m.setViewportSize(m.dockHeight(cfg.Top), m.dockHeight(cfg.Bottom))
+	if node.leaf != nil {
+		leaf := *node.leaf
+		leaf.outer, leaf.content = rect, rect
+		plan.leaves = append(plan.leaves, leaf)
+		return
+	}
+
+	axis := nodeAxis(node.node)
+	allocation := m.allocateChildren(node, axisExtent(rect, axis), axis, crossExtent(rect, axis))
+
+	position := rect.Min.X
+	if axis == axisVertical {
+		position = rect.Min.Y
+	}
+	for i, child := range node.children {
+		size := allocation.sizes[i]
+		childArea := childRect(rect, axis, position, size).Intersect(rect)
+		m.placeNode(child, childArea, plan)
+		position += size
+		if i < len(node.children)-1 {
+			position += allocation.gap
+			if allocation.overlaps[i] {
+				position--
+			}
+		}
+	}
+}
+
+func (m *Model) resolveLayout() layoutPlan {
+	plan := layoutPlan{}
+	if m.width <= 0 || m.height <= 0 {
+		return plan
+	}
+	root, ok := m.resolveNode(m.layout.Root, m.width)
+	if !ok {
+		return plan
+	}
+	m.placeNode(root, image.Rect(0, 0, m.width, m.height), &plan)
+	for i := range plan.leaves {
+		if paneLeaf(&plan.leaves[i]) {
+			plan.frame = newFrameGrid(m.width, m.height)
+			m.planFrames(&plan)
+			break
+		}
+	}
+	for _, leaf := range plan.leaves {
+		if leaf.kind == leafPane && leaf.pane == m.output {
+			plan.output = leaf.content
+			break
+		}
+	}
+	return plan
+}
+
+func (m *Model) invalidateLayout() {
+	m.layoutPlanValid = false
+}
+
+func (m *Model) ensureLayout() layoutPlan {
+	if !m.layoutPlanValid {
+		m.layoutPlan = m.resolveLayout()
+		m.layoutPlanValid = true
+	}
+	return m.layoutPlan
+}
+
+func (m *Model) applyOutputGeometry(plan layoutPlan) (scrollStateChanged bool) {
+	beforeMode := m.output.viewport.Mode()
+	beforeLines := m.output.viewport.NewLineCount()
+	width, height := plan.output.Dx(), plan.output.Dy()
+	if width > 0 && height > 0 {
+		m.output.setGeometry(width, height)
+	} else {
+		m.output.setFallbackGeometry(m.width, m.height)
+	}
+	return beforeMode != m.output.viewport.Mode() ||
+		beforeLines != m.output.viewport.NewLineCount()
+}
+
+// finalizeLayoutPlan applies output geometry before returning the plan. A
+// height change can clamp a scrolled viewport back to live mode; rebuilding in
+// that case refreshes generated pane-title state captured by planFrames.
+func (m *Model) finalizeLayoutPlan() (layoutPlan, bool) {
+	plan := m.ensureLayout()
+	changed := m.applyOutputGeometry(plan)
+	if changed {
+		m.invalidateLayout()
+		plan = m.ensureLayout()
+		m.applyOutputGeometry(plan)
+	}
+	return plan, changed
+}
+
+// syncViewportSize makes geometry current outside View. Search preview,
+// scrolling, and append-time wrapping therefore observe the same output rect as
+// the next rendered frame.
+func (m *Model) syncViewportSize() bool {
+	if !m.initialized {
+		return false
+	}
+	_, changed := m.finalizeLayoutPlan()
+	return changed
+}
+
+// frameGrid records line connectivity independently from content rendering.
+// Titles are painted after the grid, so a shared lower pane header naturally
+// owns a horizontal pane boundary.
+type frameGrid struct {
+	width, height int
+	horizontal    []bool
+	vertical      []bool
+	titles        []frameTitle
+}
+
+type frameTitle struct {
+	point image.Point
+	width int
+	text  string
+}
+
+func newFrameGrid(width, height int) frameGrid {
+	return frameGrid{
+		width: width, height: height,
+		horizontal: make([]bool, max(0, width*height)),
+		vertical:   make([]bool, max(0, width*height)),
+	}
+}
+
+func (f frameGrid) inside(x, y int) bool {
+	return x >= 0 && y >= 0 && x < f.width && y < f.height
+}
+
+func (f frameGrid) at(cells []bool, x, y int) bool {
+	return f.inside(x, y) && cells[y*f.width+x]
+}
+
+func (f frameGrid) markHorizontal(y, left, right int) {
+	if y < 0 || y >= f.height {
+		return
+	}
+	left, right = max(0, left), min(f.width, right)
+	for x := left; x < right; x++ {
+		f.horizontal[y*f.width+x] = true
+	}
+}
+
+func (f frameGrid) markVertical(x, top, bottom int) {
+	if x < 0 || x >= f.width {
+		return
+	}
+	top, bottom = max(0, top), min(f.height, bottom)
+	for y := top; y < bottom; y++ {
+		f.vertical[y*f.width+x] = true
+	}
+}
+
+func (f frameGrid) glyph(x, y int) string {
+	if !f.at(f.vertical, x, y) {
+		if f.at(f.horizontal, x, y) {
+			return "─"
+		}
+		return ""
+	}
+	return junctionGlyph(
+		f.at(f.vertical, x, y-1), f.at(f.vertical, x, y+1),
+		f.at(f.horizontal, x-1, y), f.at(f.horizontal, x+1, y),
+	)
+}
+
+func junctionGlyph(up, down, left, right bool) string {
+	switch {
+	case up && down && left && right:
+		return "┼"
+	case up && down && left:
+		return "┤"
+	case up && down && right:
+		return "├"
+	case up && left && right:
+		return "┴"
+	case down && left && right:
+		return "┬"
+	case up && down:
+		return "│"
+	case left && right:
+		return "─"
+	case down && right:
+		return "┌"
+	case down && left:
+		return "┐"
+	case up && right:
+		return "└"
+	case up && left:
+		return "┘"
+	case up || down:
+		return "│"
+	case left || right:
+		return "─"
+	}
+	return ""
+}
+
+func paneLeaf(leaf *placedLeaf) bool {
+	return leaf.kind == leafPane && leaf.frames != 0
+}
+
+func insetFrame(rect image.Rectangle, frames frameEdges) image.Rectangle {
+	if frames&frameLeft != 0 && rect.Min.X < rect.Max.X {
+		rect.Min.X++
+	}
+	if frames&frameRight != 0 && rect.Min.X < rect.Max.X {
+		rect.Max.X--
+	}
+	if frames&frameTop != 0 && rect.Min.Y < rect.Max.Y {
+		rect.Min.Y++
+	}
+	if frames&frameBottom != 0 && rect.Min.Y < rect.Max.Y {
+		rect.Max.Y--
+	}
+	return rect
+}
+
+// planFrames gives pane chrome one owner: the pane itself. Each framed pane
+// marks its configured edges and insets its content rectangle. Shared pane
+// coordinates merge naturally in frameGrid, including T and cross junctions.
+func (m *Model) planFrames(plan *layoutPlan) {
+	for i := range plan.leaves {
+		leaf := &plan.leaves[i]
+		if !paneLeaf(leaf) {
+			continue
+		}
+		outer := leaf.outer
+		if leaf.frames&frameTop != 0 {
+			plan.frame.markHorizontal(outer.Min.Y, outer.Min.X, outer.Max.X)
+		}
+		if leaf.frames&frameBottom != 0 {
+			plan.frame.markHorizontal(outer.Max.Y-1, outer.Min.X, outer.Max.X)
+		}
+		if leaf.frames&frameLeft != 0 {
+			plan.frame.markVertical(outer.Min.X, outer.Min.Y, outer.Max.Y)
+		}
+		if leaf.frames&frameRight != 0 {
+			plan.frame.markVertical(outer.Max.X-1, outer.Min.Y, outer.Max.Y)
+		}
+		leaf.content = insetFrame(outer, leaf.frames)
+
+		if leaf.frames&frameTop != 0 {
+			title := leaf.pane.Title()
+			if leaf.node.Title != nil {
+				title = *leaf.node.Title
+			}
+			if title == "" {
+				continue
+			}
+			title = " " + runetext.VisualizeTerminalControls(title, false) + " "
+			left := outer.Min.X
+			width := outer.Dx()
+			if leaf.frames&frameLeft != 0 {
+				left++
+				width--
+			}
+			if leaf.frames&frameRight != 0 {
+				width--
+			}
+			width = max(0, width)
+			title = ansi.Truncate(title, width, "")
+			plan.frame.titles = append(plan.frame.titles, frameTitle{
+				point: image.Pt(left, outer.Min.Y), width: lipgloss.Width(title), text: title,
+			})
+		}
+	}
+}
+
+func drawStyled(canvas *lipgloss.Canvas, content string, rect image.Rectangle) {
+	rect = rect.Intersect(canvas.Bounds())
+	if rect.Empty() {
+		return
+	}
+	uv.NewStyledString(content).Draw(canvas, rect)
+}
+
+func styledCell(rendered string) *uv.Cell {
+	canvas := lipgloss.NewCanvas(1, 1)
+	drawStyled(canvas, rendered, canvas.Bounds())
+	return canvas.CellAt(0, 0)
+}
+
+func (m *Model) renderPlan(plan layoutPlan) string {
+	canvas := lipgloss.NewCanvas(m.width, m.height)
+	for i := range plan.leaves {
+		leaf := &plan.leaves[i]
+		if leaf.content.Empty() {
+			continue
+		}
+		var view string
+		switch leaf.kind {
+		case leafWidget:
+			leaf.widget.SetSize(leaf.content.Dx(), leaf.content.Dy())
+			view = leaf.widget.View()
+		case leafPane:
+			view = leaf.pane.View(leaf.content.Dx(), leaf.content.Dy())
+		}
+		drawStyled(canvas, view, leaf.content)
+	}
+
+	frameCells := make(map[string]*uv.Cell)
+	for y := 0; y < plan.frame.height; y++ {
+		for x := 0; x < plan.frame.width; x++ {
+			glyph := plan.frame.glyph(x, y)
+			if glyph == "" {
+				continue
+			}
+			cell := frameCells[glyph]
+			if cell == nil {
+				cell = styledCell(m.styles.PaneBorder.Render(glyph))
+				frameCells[glyph] = cell
+			}
+			canvas.SetCell(x, y, cell)
+		}
+	}
+	for _, title := range plan.frame.titles {
+		if title.width <= 0 {
+			continue
+		}
+		rect := image.Rect(title.point.X, title.point.Y, title.point.X+title.width, title.point.Y+1)
+		drawStyled(canvas, m.styles.PaneHeader.Render(title.text), rect)
+	}
+	return exactCanvasRender(canvas, m.width, m.height)
+}
+
+// exactCanvasRender retains the Canvas cell clipping/compositing semantics
+// while making the returned block exactly width by height. Ultraviolet
+// deliberately trims trailing blanks from each rendered line.
+func exactCanvasRender(canvas *lipgloss.Canvas, width, height int) string {
+	if width <= 0 || height <= 0 {
+		return ""
+	}
+	lines := strings.Split(canvas.Render(), "\n")
+	if len(lines) < height {
+		lines = append(lines, make([]string, height-len(lines))...)
+	} else if len(lines) > height {
+		lines = lines[:height]
+	}
+	for i, line := range lines {
+		visible := ansi.StringWidth(line)
+		if visible > width {
+			line = ansi.Truncate(line, width, "")
+			visible = ansi.StringWidth(line)
+		}
+		if visible < width {
+			line += strings.Repeat(" ", width-visible)
+		}
+		lines[i] = line
+	}
+	return strings.Join(lines, "\n")
 }
 
 // View implements tea.Model.
-// Layout is calculated here to ensure it's always fresh when rendering.
 func (m *Model) View() tea.View {
-	view := tea.View{
-		AltScreen: true,
-	}
+	view := tea.View{AltScreen: true}
 	if m.mouseEnabled {
 		view.MouseMode = tea.MouseModeCellMotion
 	}
 	if m.numpadMode {
 		// The default kitty disambiguation flag reports NumLock-on keypad
 		// digits as plain text, indistinguishable from the number row.
-		// Encoding all keys as escape codes preserves the physical key;
-		// associated text keeps the typed characters coming from the
-		// terminal instead of being reconstructed from key codes.
 		view.KeyboardEnhancements.ReportAllKeysAsEscapeCodes = true
 		view.KeyboardEnhancements.ReportAssociatedText = true
 	}
@@ -205,25 +927,11 @@ func (m *Model) View() tea.View {
 		view.Content = "Loading..."
 		return view
 	}
-
-	// Calculate layout fresh each render - guarantees no stale dimensions
-	cfg := m.getLayout()
-	topView, topHeight := m.layoutDock(cfg.Top)
-	bottomView, bottomHeight := m.layoutDock(cfg.Bottom)
-
-	// The viewport spans the full terminal width; splitRows wraps
-	// appended rows to the same m.width.
-	m.setViewportSize(topHeight, bottomHeight)
-
-	var parts []string
-	if topView != "" {
-		parts = append(parts, topView)
-	}
-	parts = append(parts, m.viewport.View())
-	if bottomView != "" {
-		parts = append(parts, bottomView)
+	if m.width <= 0 || m.height <= 0 {
+		return view
 	}
 
-	view.Content = strings.Join(parts, "\n")
+	plan, _ := m.finalizeLayoutPlan()
+	view.Content = m.renderPlan(plan)
 	return view
 }

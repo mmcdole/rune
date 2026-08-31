@@ -19,9 +19,6 @@ func clipRow(s string, width int) string {
 	return ansi.Truncate(s, width, "")
 }
 
-// Compile-time check that Viewport implements Widget
-var _ Widget = (*Viewport)(nil)
-
 // ScrollMode indicates whether viewport is live or scrolled back.
 type ScrollMode int
 
@@ -68,6 +65,15 @@ func (sb *ScrollbackBuffer) Append(row string) {
 // Count returns the number of rows.
 func (sb *ScrollbackBuffer) Count() int {
 	return sb.count
+}
+
+// Clear removes all buffered rows while keeping sequence numbers monotonic so
+// stale search anchors can never refer to newly appended content.
+func (sb *ScrollbackBuffer) Clear() {
+	clear(sb.lines)
+	sb.head = 0
+	sb.tail = 0
+	sb.count = 0
 }
 
 // At retrieves a row by index (0 = oldest).
@@ -227,14 +233,9 @@ func (v *Viewport) SetSize(width, height int) {
 	if width != v.width || height != v.height {
 		v.width = width
 		v.height = height
+		v.clampOffset()
 		v.cacheValid = false
 	}
-}
-
-// PreferredHeight implements Widget.
-// Viewport is a fill component - it takes whatever space is allocated.
-func (v *Viewport) PreferredHeight() int {
-	return v.height
 }
 
 // OnNewRows is called when rows are appended to the buffer.
@@ -243,7 +244,12 @@ func (v *Viewport) OnNewRows(count int) {
 	case ModeLive:
 		v.cacheValid = false
 	case ModeScrolled:
-		v.offset += count
+		maxOffset := v.maxOffset()
+		if count >= maxOffset-v.offset {
+			v.offset = maxOffset
+		} else {
+			v.offset += count
+		}
 		v.newLines += count
 		// Once the ring buffer is full, appends evict the oldest rows
 		// and Count() stops growing - the rows this offset was anchored
@@ -267,6 +273,21 @@ func (v *Viewport) maxOffset() int {
 	return max
 }
 
+func (v *Viewport) clampOffset() {
+	if v.offset < 0 {
+		v.offset = 0
+	}
+	if maxOffset := v.maxOffset(); v.offset > maxOffset {
+		v.offset = maxOffset
+	}
+	if v.offset == 0 {
+		v.mode = ModeLive
+		v.newLines = 0
+	} else {
+		v.mode = ModeScrolled
+	}
+}
+
 // SetPrompt replaces the prompt overlay.
 func (v *Viewport) SetPrompt(text string) {
 	if v.prompt != text {
@@ -277,49 +298,44 @@ func (v *Viewport) SetPrompt(text string) {
 
 // PageUp scrolls up one page.
 func (v *Viewport) PageUp() {
-	v.offset += v.height - 1
-	if max := v.maxOffset(); v.offset > max {
-		v.offset = max
+	if lines := v.height - 1; lines > 0 {
+		v.ScrollUp(lines)
 	}
-
-	if v.offset > 0 {
-		v.mode = ModeScrolled
-	}
-	v.cacheValid = false
 }
 
 // PageDown scrolls down one page.
 func (v *Viewport) PageDown() {
-	v.offset -= v.height - 1
-	if v.offset <= 0 {
-		v.offset = 0
-		v.mode = ModeLive
-		v.newLines = 0
+	if lines := v.height - 1; lines > 0 {
+		v.ScrollDown(lines)
 	}
-	v.cacheValid = false
 }
 
 // ScrollUp scrolls up by N lines (toward older content).
 func (v *Viewport) ScrollUp(lines int) {
-	v.offset += lines
-	if max := v.maxOffset(); v.offset > max {
-		v.offset = max
+	if lines <= 0 {
+		return
 	}
-
-	if v.offset > 0 {
-		v.mode = ModeScrolled
+	maxOffset := v.maxOffset()
+	if lines >= maxOffset-v.offset {
+		v.offset = maxOffset
+	} else {
+		v.offset += lines
 	}
+	v.clampOffset()
 	v.cacheValid = false
 }
 
 // ScrollDown scrolls down by N lines (toward newer content).
 func (v *Viewport) ScrollDown(lines int) {
-	v.offset -= lines
-	if v.offset <= 0 {
-		v.offset = 0
-		v.mode = ModeLive
-		v.newLines = 0
+	if lines <= 0 {
+		return
 	}
+	if lines >= v.offset {
+		v.offset = 0
+	} else {
+		v.offset -= lines
+	}
+	v.clampOffset()
 	v.cacheValid = false
 }
 
@@ -334,9 +350,7 @@ func (v *Viewport) GotoBottom() {
 // GotoTop scrolls to the oldest line.
 func (v *Viewport) GotoTop() {
 	v.offset = v.maxOffset()
-	if v.offset > 0 {
-		v.mode = ModeScrolled
-	}
+	v.clampOffset()
 	v.cacheValid = false
 }
 
@@ -381,6 +395,17 @@ func (v *Viewport) ClearHighlight() {
 		v.hlRanges = nil
 		v.cacheValid = false
 	}
+}
+
+// Clear resets viewport navigation and highlighting after its buffer has been
+// cleared. The live prompt is intentionally independent and remains visible.
+func (v *Viewport) Clear() {
+	v.offset = 0
+	v.mode = ModeLive
+	v.newLines = 0
+	v.hlSet = false
+	v.hlRanges = nil
+	v.cacheValid = false
 }
 
 // ScrollPos is a sequence-anchored snapshot of the viewport position.

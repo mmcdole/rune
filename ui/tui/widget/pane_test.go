@@ -10,9 +10,7 @@ import (
 
 func newTestPane(t *testing.T) *Pane {
 	t.Helper()
-	p := NewPane("test")
-	p.Visible = true
-	return p
+	return NewPane("test")
 }
 
 func contentRows(t *testing.T, p *Pane, width, height int) []string {
@@ -129,6 +127,24 @@ func TestPaneScrollUpShowsHistoryAndIndicator(t *testing.T) {
 	}
 }
 
+func TestPaneScrollDistancesCannotInvertOrOverflow(t *testing.T) {
+	p := newTestPane(t)
+	for i := 1; i <= 5; i++ {
+		p.Write(fmt.Sprintf("line %d", i))
+	}
+	p.ScrollUp(1)
+	before := p.offset
+	p.ScrollUp(-1)
+	p.ScrollDown(-1)
+	if p.offset != before {
+		t.Fatalf("negative distance changed offset from %d to %d", before, p.offset)
+	}
+	p.ScrollUp(int(^uint(0) >> 1))
+	if want := len(p.Lines) - 1; p.offset != want {
+		t.Fatalf("huge distance offset = %d, want maximum %d", p.offset, want)
+	}
+}
+
 func TestPaneWritesWhileScrolledFreezeViewAndCount(t *testing.T) {
 	p := newTestPane(t)
 	for i := 1; i <= 6; i++ {
@@ -181,62 +197,49 @@ func TestPaneScrollClamps(t *testing.T) {
 	}
 }
 
-// Visibility never touches scroll state. A pane hidden while scrolled
-// reopens on the same history, even as writes land while it is hidden.
-func TestPaneHiddenWhileScrolledKeepsPosition(t *testing.T) {
+// Writes never touch scroll state: a scrolled pane stays anchored on the
+// same history as new lines land, so a placement hidden and later re-shown
+// renders exactly where it was.
+func TestPaneWritesWhileScrolledKeepPosition(t *testing.T) {
 	p := newTestPane(t)
 	for i := 1; i <= 6; i++ {
 		p.Write(fmt.Sprintf("line %d", i))
 	}
 	p.ScrollUp(3)
-	p.SetVisible(false)
 	p.Write("line 7")
-	p.SetVisible(true)
 
 	rows := contentRows(t, p, 40, 2)
 	if rows[0] != "line 2" {
-		t.Errorf("re-shown pane should keep its scroll anchor, got %q", rows)
-	}
-
-	p.Toggle() // hide
-	p.Toggle() // show again
-	rows = contentRows(t, p, 40, 2)
-	if rows[0] != "line 2" {
-		t.Errorf("toggle must not touch scroll state either, got %q", rows)
+		t.Errorf("scrolled pane should keep its anchor across writes, got %q", rows)
 	}
 }
 
-// A pane on the live tail when hidden stays in follow mode, so
-// reopening shows the newest lines.
-func TestPaneHiddenOnTailReopensLive(t *testing.T) {
+// A pane on the live tail stays in follow mode, so writes that land while
+// its placement is hidden show up when it is re-shown.
+func TestPaneOnTailFollowsWrites(t *testing.T) {
 	p := newTestPane(t)
-	for i := 1; i <= 6; i++ {
+	for i := 1; i <= 7; i++ {
 		p.Write(fmt.Sprintf("line %d", i))
 	}
-	p.SetVisible(false)
-	p.Write("line 7")
-	p.SetVisible(true)
 
 	rows := contentRows(t, p, 40, 2)
 	if rows[1] != "line 7" {
-		t.Errorf("pane hidden on the tail should reopen live, got %q", rows)
+		t.Errorf("live pane should follow the tail, got %q", rows)
 	}
 }
 
-// If trimming removes the history a hidden pane was anchored on, the
+// If trimming removes the history a scrolled pane was anchored on, the
 // anchor clamps to the oldest remaining line instead of jumping to
 // the tail.
-func TestPaneHiddenAnchorClampsWhenTrimmed(t *testing.T) {
+func TestPaneAnchorClampsWhenTrimmed(t *testing.T) {
 	p := newTestPane(t)
 	for i := 1; i <= 6; i++ {
 		p.Write(fmt.Sprintf("line %d", i))
 	}
 	p.ScrollUp(5)
-	p.SetVisible(false)
 	for i := 7; i <= 1001; i++ {
 		p.Write(fmt.Sprintf("line %d", i))
 	}
-	p.SetVisible(true)
 
 	rows := contentRows(t, p, 40, 2)
 	if rows[0] != "line 502" {
@@ -284,22 +287,6 @@ func TestPaneContentRowsUseRequestedGeometry(t *testing.T) {
 	}
 	if rows := p.ContentRows(40, 0); rows != nil {
 		t.Fatalf("zero-height content = %q, want nil", rows)
-	}
-}
-
-func TestPaneManagerLookupDoesNotCreate(t *testing.T) {
-	panes := NewPaneManager()
-	if pane, ok := panes.Lookup("missing"); ok || pane != nil {
-		t.Fatalf("missing lookup = (%v, %v), want (nil, false)", pane, ok)
-	}
-	if len(panes.panes) != 0 {
-		t.Fatal("lookup created a missing pane")
-	}
-
-	panes.Create("chat")
-	pane, ok := panes.Lookup("chat")
-	if !ok || pane == nil || pane.Name != "chat" {
-		t.Fatalf("created lookup = (%v, %v), want chat pane", pane, ok)
 	}
 }
 

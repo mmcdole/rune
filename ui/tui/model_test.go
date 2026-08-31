@@ -97,26 +97,26 @@ func TestKeyboardEnhancementsFollowNumpadConfig(t *testing.T) {
 	}
 }
 
-// TestMouseWheelScrollsViewport verifies wheel events scroll the main
+// TestMouseWheelScrollsViewport verifies wheel events scroll the output
 // viewport - the reason the terminal mouse is captured at all.
 func TestMouseWheelScrollsViewport(t *testing.T) {
 	m := newTestModel(t)
 	next, _ := m.Update(ui.UpdateConfigMsg{Mouse: true})
 	m = next.(*Model)
 
-	if m.viewport.Mode() != widget.ModeLive {
+	if m.output.viewport.Mode() != widget.ModeLive {
 		t.Fatal("expected viewport to start at bottom")
 	}
-	liveBottom := m.viewport.SaveScroll().BottomSeq
+	liveBottom := m.output.viewport.SaveScroll().BottomSeq
 
 	wheelUp := tea.MouseWheelMsg{Button: tea.MouseWheelUp}
 	next, _ = m.Update(wheelUp)
 	m = next.(*Model)
 
-	if m.viewport.Mode() == widget.ModeLive {
+	if m.output.viewport.Mode() == widget.ModeLive {
 		t.Fatal("wheel up did not scroll the viewport")
 	}
-	if got := liveBottom - m.viewport.SaveScroll().BottomSeq; got != wheelScrollLines {
+	if got := liveBottom - m.output.viewport.SaveScroll().BottomSeq; got != wheelScrollLines {
 		t.Fatalf("wheel up scrolled %d lines, want %d", got, wheelScrollLines)
 	}
 
@@ -125,7 +125,7 @@ func TestMouseWheelScrollsViewport(t *testing.T) {
 	next, _ = m.Update(wheelDown)
 	m = next.(*Model)
 
-	if m.viewport.Mode() != widget.ModeLive {
+	if m.output.viewport.Mode() != widget.ModeLive {
 		t.Fatal("wheel down did not scroll back to bottom")
 	}
 }
@@ -141,7 +141,7 @@ func TestMouseNonWheelEventsIgnored(t *testing.T) {
 	next, _ = m.Update(click)
 	m = next.(*Model)
 
-	if m.viewport.Mode() != widget.ModeLive {
+	if m.output.viewport.Mode() != widget.ModeLive {
 		t.Fatal("non-wheel mouse event moved the viewport")
 	}
 }
@@ -156,6 +156,396 @@ func newBareModel(t *testing.T) *Model {
 
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	return next.(*Model)
+}
+
+func TestOutputPaneImplementsPaneResourceLifecycle(t *testing.T) {
+	m := newBareModel(t)
+
+	output, ok := m.panes.Lookup(ui.OutputPaneName)
+	if !ok {
+		t.Fatal("output pane was not pre-created")
+	}
+	if output != m.output {
+		t.Fatal("output registry entry does not preserve controller identity")
+	}
+
+	next, _ := m.Update(ui.PaneCreateMsg{Name: ui.OutputPaneName})
+	m = next.(*Model)
+	recreated, _ := m.panes.Lookup(ui.OutputPaneName)
+	if recreated != output {
+		t.Fatal("creating output replaced the reserved pane resource")
+	}
+
+	next, _ = m.Update(ui.PaneWriteMsg{Name: ui.OutputPaneName, Text: "visible"})
+	m = next.(*Model)
+	wantScrollback(t, m, "visible")
+
+	// Visibility is placement state: hiding the output pane node in the
+	// pushed tree unplaces it, while the buffer keeps accepting writes.
+	hidden, found, changed := m.layout.WithPaneVisibility(ui.OutputPaneName, false)
+	if !found || !changed {
+		t.Fatalf("WithPaneVisibility(output, false) = found %v changed %v", found, changed)
+	}
+	next, _ = m.Update(ui.UpdateLayoutMsg(hidden))
+	m = next.(*Model)
+	if !m.ensureLayout().output.Empty() {
+		t.Fatalf("hidden output remains placed: rect=%v", m.ensureLayout().output)
+	}
+	next, _ = m.Update(ui.PaneWriteMsg{Name: ui.OutputPaneName, Text: "hidden"})
+	m = next.(*Model)
+	wantScrollback(t, m, "visible", "hidden")
+
+	shown, _, _ := m.layout.WithPaneVisibility(ui.OutputPaneName, true)
+	next, _ = m.Update(ui.UpdateLayoutMsg(shown))
+	m = next.(*Model)
+	if m.ensureLayout().output.Empty() {
+		t.Fatal("shown output is unplaced")
+	}
+
+	var rows []string
+	for i := 0; i < 40; i++ {
+		rows = append(rows, fmt.Sprintf("row %02d", i))
+	}
+	next, _ = m.Update(ui.PaneWriteMsg{Name: ui.OutputPaneName, Text: strings.Join(rows, "\n")})
+	m = next.(*Model)
+	next, _ = m.Update(ui.PaneScrollToTopMsg{Name: ui.OutputPaneName})
+	m = next.(*Model)
+	if m.output.viewport.Mode() != widget.ModeScrolled {
+		t.Fatal("output pane did not honor pane scroll-to-top")
+	}
+	next, _ = m.Update(ui.PaneScrollToBottomMsg{Name: ui.OutputPaneName})
+	m = next.(*Model)
+	if m.output.viewport.Mode() != widget.ModeLive {
+		t.Fatal("output pane did not honor pane scroll-to-bottom")
+	}
+}
+
+func TestOutputBeforeFirstWindowSizeUsesBoundedStartupWidth(t *testing.T) {
+	m := NewModel(make(chan ui.UIEvent, 16))
+	line := strings.Repeat("x", defaultOutputWrapWidth+7)
+
+	next, _ := m.Update(ui.PrintLineMsg(line))
+	m = next.(*Model)
+	if got := m.output.buffer.Count(); got != 2 {
+		t.Fatalf("pre-size output rows = %d, want 2 at startup width", got)
+	}
+	if got := m.output.buffer.At(0); got != strings.Repeat("x", defaultOutputWrapWidth) {
+		t.Fatalf("pre-size first row width = %d, want %d", len(got), defaultOutputWrapWidth)
+	}
+	if got := m.output.buffer.At(1); got != strings.Repeat("x", 7) {
+		t.Fatalf("pre-size remainder = %q, want seven cells", got)
+	}
+
+	m = resizeModel(t, m, 120, 20)
+	if got := m.output.buffer.Count(); got != 2 {
+		t.Fatalf("first terminal size reflowed startup rows: got %d", got)
+	}
+}
+
+func TestOutputPaneBuffersWhileHiddenOrUnplacedAtRetainedWidth(t *testing.T) {
+	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 64)), 20, 8)
+
+	next, _ := m.Update(ui.PaneCreateMsg{Name: "side"})
+	m = next.(*Model)
+	next, _ = m.Update(ui.UpdateLayoutMsg(ui.LayoutTree{Root: ui.LayoutNode{
+		Type: ui.LayoutTypeRow,
+		Children: []ui.LayoutNode{
+			{Type: ui.LayoutTypePane, Name: ui.OutputPaneName, Size: ui.Cells(12), Border: ui.PaneBorderNone},
+			{Type: ui.LayoutTypePane, Name: "side", Size: ui.Cells(8), Border: ui.PaneBorderNone},
+		},
+	}}))
+	m = next.(*Model)
+	if got := m.ensureLayout().output.Dx(); got != 12 {
+		t.Fatalf("placed output width = %d, want 12", got)
+	}
+	if got := m.output.wrapWidth; got != 12 {
+		t.Fatalf("append width after placement = %d, want 12", got)
+	}
+
+	next, _ = m.Update(ui.PaneClearMsg{Name: ui.OutputPaneName})
+	m = next.(*Model)
+	hiddenOutput, _, _ := m.layout.WithPaneVisibility(ui.OutputPaneName, false)
+	next, _ = m.Update(ui.UpdateLayoutMsg(hiddenOutput))
+	m = next.(*Model)
+	next, _ = m.Update(ui.PaneWriteMsg{Name: ui.OutputPaneName, Text: strings.Repeat("a", 14)})
+	m = next.(*Model)
+	if got := m.output.wrapWidth; got != 12 {
+		t.Fatalf("hidden output changed retained width to %d", got)
+	}
+	wantScrollback(t, m, strings.Repeat("a", 12), "aa")
+
+	next, _ = m.Update(ui.UpdateLayoutMsg(ui.LayoutTree{Root: ui.LayoutNode{
+		Type: ui.LayoutTypeColumn,
+		Children: []ui.LayoutNode{
+			{Type: ui.LayoutTypeInput, Size: ui.AutoSize()},
+		},
+	}}))
+	m = next.(*Model)
+	if !m.ensureLayout().output.Empty() {
+		t.Fatalf("layout without output placed it at %v", m.ensureLayout().output)
+	}
+	next, _ = m.Update(ui.PaneWriteMsg{Name: ui.OutputPaneName, Text: strings.Repeat("b", 14)})
+	m = next.(*Model)
+	if got := m.output.wrapWidth; got != 12 {
+		t.Fatalf("unplaced output changed retained width to %d", got)
+	}
+	wantScrollback(t, m, strings.Repeat("a", 12), "aa", strings.Repeat("b", 12), "bb")
+
+	next, _ = m.Update(ui.UpdateLayoutMsg(ui.LayoutTree{Root: ui.LayoutNode{
+		Type: ui.LayoutTypePane, Name: ui.OutputPaneName, Border: ui.PaneBorderNone,
+	}}))
+	m = next.(*Model)
+	if got := m.output.wrapWidth; got != 20 {
+		t.Fatalf("new output placement retained stale width %d, want 20", got)
+	}
+	next, _ = m.Update(ui.PaneWriteMsg{Name: ui.OutputPaneName, Text: strings.Repeat("c", 18)})
+	m = next.(*Model)
+	wantScrollback(t, m,
+		strings.Repeat("a", 12), "aa", strings.Repeat("b", 12), "bb", strings.Repeat("c", 18))
+}
+
+func TestClearOutputPaneResetsTranscriptSearchAndViewportButPreservesPrompt(t *testing.T) {
+	m := newBareModel(t)
+
+	next, _ := m.Update(ui.SetPromptMsg("HP> "))
+	m = next.(*Model)
+	var rows []string
+	for i := 0; i < 40; i++ {
+		rows = append(rows, fmt.Sprintf("row %02d", i))
+	}
+	rows[8] = "hidden thief"
+	next, _ = m.Update(ui.PaneWriteMsg{Name: ui.OutputPaneName, Text: strings.Join(rows, "\n")})
+	m = next.(*Model)
+	next, _ = m.Update(ui.PaneScrollToTopMsg{Name: ui.OutputPaneName})
+	m = next.(*Model)
+	if m.output.viewport.Mode() != widget.ModeScrolled {
+		t.Fatal("test setup did not scroll output")
+	}
+	next, _ = m.Update(ui.ShowSearchMsg{Query: "thief"})
+	m = next.(*Model)
+	if !m.input.SearchActive() || m.searchView.focus == nil {
+		t.Fatal("test setup did not establish an active output search")
+	}
+
+	next, _ = m.Update(ui.PaneClearMsg{Name: ui.OutputPaneName})
+	m = next.(*Model)
+	if got := m.output.buffer.Count(); got != 0 {
+		t.Fatalf("clear left %d transcript rows", got)
+	}
+	if m.input.SearchActive() || m.searchView.focus != nil || m.searchView.priorFocus != nil {
+		t.Fatalf("clear retained search state: active=%v state=%+v", m.input.SearchActive(), m.searchView)
+	}
+	if mode := m.output.viewport.Mode(); mode != widget.ModeLive {
+		t.Fatalf("clear left viewport mode %v, want live", mode)
+	}
+	if got := m.output.viewport.NewLineCount(); got != 0 {
+		t.Fatalf("clear left new-line count %d", got)
+	}
+	if got := m.output.promptText; got != "HP> " {
+		t.Fatalf("clear changed prompt to %q", got)
+	}
+	if got := runetext.StripANSI(m.output.viewport.View()); !strings.Contains(got, "HP> ") {
+		t.Fatalf("preserved prompt is absent from output view: %q", got)
+	}
+}
+
+func TestGrowingOutputViewportPublishesLiveStateAndRefreshesTitle(t *testing.T) {
+	events := make(chan ui.UIEvent, 128)
+	m := resizeModel(t, NewModel(events), 30, 6)
+	setLayout(m, ui.LayoutNode{
+		Type: ui.LayoutTypeColumn,
+		Children: []ui.LayoutNode{
+			{Type: ui.LayoutTypePane, Name: ui.OutputPaneName},
+			{Type: ui.LayoutTypeInput, Size: ui.AutoSize()},
+		},
+	})
+	for i := 1; i <= 10; i++ {
+		next, _ := m.Update(ui.EchoLineMsg(fmt.Sprintf("line %d", i)))
+		m = next.(*Model)
+	}
+	next, _ := m.Update(ui.PaneScrollToTopMsg{Name: ui.OutputPaneName})
+	m = next.(*Model)
+	if m.output.viewport.Mode() != widget.ModeScrolled {
+		t.Fatal("test setup did not scroll the constrained output pane")
+	}
+	if view := runetext.StripANSI(m.View().Content); !strings.Contains(view, "output · scroll") {
+		t.Fatalf("scrolled output title missing before resize: %q", view)
+	}
+	for len(events) > 0 {
+		<-events
+	}
+
+	next, _ = m.Update(tea.WindowSizeMsg{Width: 30, Height: 20})
+	m = next.(*Model)
+	if m.output.viewport.Mode() != widget.ModeLive || m.output.viewport.NewLineCount() != 0 {
+		t.Fatalf("expanded output remained scrolled: mode=%v new=%d",
+			m.output.viewport.Mode(), m.output.viewport.NewLineCount())
+	}
+	if view := runetext.StripANSI(m.View().Content); strings.Contains(view, "output · scroll") {
+		t.Fatalf("expanded output retained stale scroll title: %q", view)
+	}
+
+	foundLive := false
+	for len(events) > 0 {
+		if state, ok := (<-events).(ui.ScrollStateChangedMsg); ok && state.Mode == "live" && state.NewLines == 0 {
+			foundLive = true
+		}
+	}
+	if !foundLive {
+		t.Fatal("resize did not publish the geometry-induced return to live mode")
+	}
+}
+
+func TestClosingTallSearchPublishesGeometryInducedLiveState(t *testing.T) {
+	events := make(chan ui.UIEvent, 128)
+	m := resizeModel(t, NewModel(events), 30, 12)
+	setLayout(m, ui.LayoutNode{
+		Type: ui.LayoutTypeColumn,
+		Children: []ui.LayoutNode{
+			{Type: ui.LayoutTypePane, Name: ui.OutputPaneName, Border: ui.PaneBorderHorizontal},
+			{Type: ui.LayoutTypeInput, Size: ui.AutoSize()},
+		},
+	})
+	for i := 1; i <= 5; i++ {
+		next, _ := m.Update(ui.EchoLineMsg(fmt.Sprintf("line %d", i)))
+		m = next.(*Model)
+	}
+	next, _ := m.Update(ui.ShowSearchMsg{Query: "line"})
+	m = next.(*Model)
+	if !m.input.SearchActive() || m.ensureLayout().output.Dy() != 1 {
+		t.Fatalf("search setup = active %v output height %d, want true and 1",
+			m.input.SearchActive(), m.ensureLayout().output.Dy())
+	}
+	next, _ = m.Update(ui.PaneScrollToTopMsg{Name: ui.OutputPaneName})
+	m = next.(*Model)
+	if m.output.viewport.Mode() != widget.ModeScrolled {
+		t.Fatal("test setup did not scroll the search-constrained output")
+	}
+	for len(events) > 0 {
+		<-events
+	}
+
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	m = next.(*Model)
+	if m.input.SearchActive() {
+		t.Fatal("Escape did not close search")
+	}
+	if m.output.viewport.Mode() != widget.ModeLive || m.output.viewport.NewLineCount() != 0 {
+		t.Fatalf("post-search output = mode %v new %d, want live zero state",
+			m.output.viewport.Mode(), m.output.viewport.NewLineCount())
+	}
+	if view := runetext.StripANSI(m.View().Content); strings.Contains(view, "output · scroll") {
+		t.Fatalf("post-search output retained stale title: %q", view)
+	}
+
+	foundLive := false
+	for len(events) > 0 {
+		if state, ok := (<-events).(ui.ScrollStateChangedMsg); ok && state.Mode == "live" && state.NewLines == 0 {
+			foundLive = true
+		}
+	}
+	if !foundLive {
+		t.Fatal("closing search did not publish the geometry-induced live state")
+	}
+}
+
+func TestStaleOutputBatchTickCannotDisturbPostClearBatch(t *testing.T) {
+	m := newBareModel(t)
+
+	next, _ := m.Update(ui.PrintLineMsg("old immediate"))
+	m = next.(*Model)
+	next, _ = m.Update(ui.PrintLineMsg("old pending"))
+	m = next.(*Model)
+	staleGeneration := m.output.batchGeneration
+
+	next, _ = m.Update(ui.PaneClearMsg{Name: ui.OutputPaneName})
+	m = next.(*Model)
+	next, _ = m.Update(ui.PrintLineMsg("new immediate"))
+	m = next.(*Model)
+	next, _ = m.Update(ui.PrintLineMsg("new pending"))
+	m = next.(*Model)
+	currentGeneration := m.output.batchGeneration
+	if currentGeneration == staleGeneration {
+		t.Fatal("clear did not invalidate the in-flight batch generation")
+	}
+	wantScrollback(t, m, "new immediate")
+
+	next, cmd := m.Update(tickMsg{generation: staleGeneration})
+	m = next.(*Model)
+	if cmd != nil {
+		t.Fatal("stale tick re-armed output batching")
+	}
+	if !m.output.flushScheduled || len(m.output.pendingRows) != 1 {
+		t.Fatalf("stale tick disturbed current batch: scheduled=%v pending=%v", m.output.flushScheduled, m.output.pendingRows)
+	}
+	wantScrollback(t, m, "new immediate")
+
+	next, cmd = m.Update(tickMsg{generation: currentGeneration})
+	m = next.(*Model)
+	if cmd == nil {
+		t.Fatal("current tick did not re-arm after flushing pending output")
+	}
+	wantScrollback(t, m, "new immediate", "new pending")
+}
+
+func TestOrdinaryPaneLifecycle(t *testing.T) {
+	m := newBareModel(t)
+	next, _ := m.Update(ui.UpdateLayoutMsg(ui.LayoutTree{Root: ui.LayoutNode{
+		Type: ui.LayoutTypeRow,
+		Children: []ui.LayoutNode{
+			{Type: ui.LayoutTypePane, Name: ui.OutputPaneName, Border: ui.PaneBorderNone},
+			{Type: ui.LayoutTypePane, Name: "chat", Border: ui.PaneBorderNone},
+		},
+	}}))
+	m = next.(*Model)
+
+	next, _ = m.Update(ui.PaneCreateMsg{Name: "chat"})
+	m = next.(*Model)
+	chat, ok := m.panes.Lookup("chat")
+	if !ok {
+		t.Fatal("ordinary pane was not created")
+	}
+	findLeaf(t, m.ensureLayout(), leafPane, "chat")
+
+	// A hidden placement is pruned from the plan while the buffer keeps
+	// accepting writes.
+	hiddenChat, found, _ := m.layout.WithPaneVisibility("chat", false)
+	if !found {
+		t.Fatal("chat placement was not found in the installed tree")
+	}
+	next, _ = m.Update(ui.UpdateLayoutMsg(hiddenChat))
+	m = next.(*Model)
+	next, _ = m.Update(ui.PaneWriteMsg{Name: "chat", Text: "oldest\nmiddle\nnewest"})
+	m = next.(*Model)
+	if got := chat.View(20, 3); got != "oldest\nmiddle\nnewest" {
+		t.Fatalf("hidden ordinary pane did not buffer writes: %q", got)
+	}
+	for _, leaf := range m.ensureLayout().leaves {
+		if leaf.kind == leafPane && leaf.pane == chat {
+			t.Fatal("hidden pane placement still resolved")
+		}
+	}
+
+	shownChat, _, _ := m.layout.WithPaneVisibility("chat", true)
+	next, _ = m.Update(ui.UpdateLayoutMsg(shownChat))
+	m = next.(*Model)
+	findLeaf(t, m.ensureLayout(), leafPane, "chat")
+	next, _ = m.Update(ui.PaneScrollToTopMsg{Name: "chat"})
+	m = next.(*Model)
+	if !strings.Contains(chat.Title(), "scroll") {
+		t.Fatalf("ordinary pane title does not expose scrolled state: %q", chat.Title())
+	}
+	next, _ = m.Update(ui.PaneScrollToBottomMsg{Name: "chat"})
+	m = next.(*Model)
+	if got := chat.Title(); got != "chat" {
+		t.Fatalf("ordinary pane did not return to live state: %q", got)
+	}
+
+	next, _ = m.Update(ui.PaneClearMsg{Name: "chat"})
+	m = next.(*Model)
+	if got := chat.View(20, 1); got != "" {
+		t.Fatalf("ordinary pane clear left content %q", got)
+	}
 }
 
 func TestPasteMessageRoutesAtomicallyToComposer(t *testing.T) {
@@ -234,7 +624,7 @@ func TestKeptSubmissionCarriesPostSubmitDraftInOneAcceptedEvent(t *testing.T) {
 	if got := m.input.Value(); got != "north" || !m.input.Selected() {
 		t.Fatalf("local input = %q selected=%v, want kept selection", got, m.input.Selected())
 	}
-	if got := m.scrollback.Count(); got != 0 {
+	if got := m.output.buffer.Count(); got != 0 {
 		t.Fatalf("warning rows = %d, want none", got)
 	}
 	select {
@@ -256,10 +646,10 @@ func TestFullUIEventQueueRejectsSubmissionWithoutLosingDraft(t *testing.T) {
 	if got := m.inputCtl.input.Value(); got != "look" {
 		t.Fatalf("rejected submission changed draft to %q", got)
 	}
-	if got := m.scrollback.Count(); got != 1 {
+	if got := m.output.buffer.Count(); got != 1 {
 		t.Fatalf("warning rows = %d, want exactly one", got)
 	}
-	if warning := runetext.StripANSI(m.scrollback.At(0)); !strings.Contains(warning, "Input not sent - engine lagging") {
+	if warning := runetext.StripANSI(m.output.buffer.At(0)); !strings.Contains(warning, "Input not sent - engine lagging") {
 		t.Fatalf("warning = %q", warning)
 	}
 	if _, ok := (<-events).(ui.InputChangedMsg); !ok {
@@ -275,10 +665,10 @@ func TestFullUIEventQueueReportsDroppedOrdinaryEvent(t *testing.T) {
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = next.(*Model)
 
-	if got := m.scrollback.Count(); got != 1 {
+	if got := m.output.buffer.Count(); got != 1 {
 		t.Fatalf("warning rows = %d, want exactly one", got)
 	}
-	if warning := runetext.StripANSI(m.scrollback.At(0)); !strings.Contains(warning, "UI event dropped - engine lagging") {
+	if warning := runetext.StripANSI(m.output.buffer.At(0)); !strings.Contains(warning, "UI event dropped - engine lagging") {
 		t.Fatalf("warning = %q", warning)
 	}
 }
@@ -292,7 +682,7 @@ func TestFirstLineRendersImmediately(t *testing.T) {
 	next, cmd := m.Update(ui.PrintLineMsg("hello"))
 	m = next.(*Model)
 
-	if got := m.scrollback.Count(); got != 1 {
+	if got := m.output.buffer.Count(); got != 1 {
 		t.Fatalf("expected first line appended immediately, scrollback has %d lines", got)
 	}
 	if cmd == nil {
@@ -312,14 +702,14 @@ func TestBurstCoalescesInBatchWindow(t *testing.T) {
 	next, _ = m.Update(ui.PrintLineMsg("line 3"))
 	m = next.(*Model)
 
-	if got := m.scrollback.Count(); got != 1 {
+	if got := m.output.buffer.Count(); got != 1 {
 		t.Fatalf("expected burst lines batched, scrollback has %d lines", got)
 	}
 
-	next, _ = m.Update(tickMsg{})
+	next, _ = m.Update(tickMsg{generation: m.output.batchGeneration})
 	m = next.(*Model)
 
-	if got := m.scrollback.Count(); got != 3 {
+	if got := m.output.buffer.Count(); got != 3 {
 		t.Fatalf("expected tick to flush the batch, scrollback has %d lines", got)
 	}
 }
@@ -335,13 +725,13 @@ func TestTickStopsWhenOutputGoesQuiet(t *testing.T) {
 	next, _ = m.Update(ui.PrintLineMsg("line 2"))
 	m = next.(*Model)
 
-	next, cmd := m.Update(tickMsg{})
+	next, cmd := m.Update(tickMsg{generation: m.output.batchGeneration})
 	m = next.(*Model)
 	if cmd == nil {
 		t.Fatal("expected tick with pending lines to re-arm the window")
 	}
 
-	_, cmd = m.Update(tickMsg{})
+	_, cmd = m.Update(tickMsg{generation: m.output.batchGeneration})
 	if cmd != nil {
 		t.Fatal("expected tick with nothing pending to stop the chain")
 	}
@@ -361,21 +751,21 @@ func TestEchoFlushesPendingServerLines(t *testing.T) {
 	next, _ = m.Update(ui.EchoLineMsg("> look"))
 	m = next.(*Model)
 
-	if got := m.scrollback.Count(); got != 3 {
+	if got := m.output.buffer.Count(); got != 3 {
 		t.Fatalf("expected 3 scrollback lines, got %d", got)
 	}
 	for i, want := range []string{"line 1", "line 2", "> look"} {
-		if got := m.scrollback.At(i); got != want {
+		if got := m.output.buffer.At(i); got != want {
 			t.Fatalf("scrollback[%d] = %q, want %q (echo reordered?)", i, got, want)
 		}
 	}
 
-	next, cmd := m.Update(tickMsg{})
+	next, cmd := m.Update(tickMsg{generation: m.output.batchGeneration})
 	m = next.(*Model)
 	if cmd != nil {
 		t.Fatal("expected trailing tick after eager echo flush to stop the chain")
 	}
-	if got := m.scrollback.Count(); got != 3 {
+	if got := m.output.buffer.Count(); got != 3 {
 		t.Fatalf("trailing tick changed scrollback, got %d lines", got)
 	}
 }
@@ -395,13 +785,13 @@ func TestPromptCommitPrecedesFollowingRows(t *testing.T) {
 	m = next.(*Model)
 	next, _ = m.Update(ui.PrintLineMsg("login hook sent username"))
 	m = next.(*Model)
-	next, _ = m.Update(tickMsg{})
+	next, _ = m.Update(tickMsg{generation: m.output.batchGeneration})
 	m = next.(*Model)
 
 	wantScrollback(t, m,
 		"line 1", "line 2", "Username:", "> player", "login hook sent username")
-	if m.promptText != "" {
-		t.Fatalf("prompt overlay = %q after commit, want empty", m.promptText)
+	if m.output.promptText != "" {
+		t.Fatalf("prompt overlay = %q after commit, want empty", m.output.promptText)
 	}
 }
 
@@ -418,7 +808,7 @@ func TestOrderedPromptCommitThenLocalSubmissionOutput(t *testing.T) {
 	m = next.(*Model)
 
 	wantScrollback(t, m, "HP>", "> /help", "local help")
-	if got := m.promptText; got != "" {
+	if got := m.output.promptText; got != "" {
 		t.Fatalf("prompt overlay = %q after commit, want empty", got)
 	}
 }
@@ -432,7 +822,7 @@ func TestPromptClearClearsOverlay(t *testing.T) {
 	m = next.(*Model)
 
 	wantScrollback(t, m)
-	if got := m.promptText; got != "Username:" {
+	if got := m.output.promptText; got != "Username:" {
 		t.Fatalf("prompt overlay = %q, want %q", got, "Username:")
 	}
 
@@ -440,18 +830,18 @@ func TestPromptClearClearsOverlay(t *testing.T) {
 	m = next.(*Model)
 
 	wantScrollback(t, m)
-	if m.promptText != "" {
-		t.Fatalf("prompt overlay = %q after clear, want empty", m.promptText)
+	if m.output.promptText != "" {
+		t.Fatalf("prompt overlay = %q after clear, want empty", m.output.promptText)
 	}
 }
 
 func wantScrollback(t *testing.T, m *Model, want ...string) {
 	t.Helper()
-	if got := m.scrollback.Count(); got != len(want) {
+	if got := m.output.buffer.Count(); got != len(want) {
 		t.Fatalf("scrollback has %d rows, want %d", got, len(want))
 	}
 	for i, w := range want {
-		if got := m.scrollback.At(i); got != w {
+		if got := m.output.buffer.At(i); got != w {
 			t.Fatalf("scrollback[%d] = %q, want %q", i, got, w)
 		}
 	}
@@ -479,7 +869,7 @@ func TestMultiLinePrintSplitsInsideBatchWindow(t *testing.T) {
 	m = next.(*Model)
 	next, _ = m.Update(ui.PrintLineMsg("row 1\nrow 2")) // batched
 	m = next.(*Model)
-	next, _ = m.Update(tickMsg{})
+	next, _ = m.Update(tickMsg{generation: m.output.batchGeneration})
 	m = next.(*Model)
 
 	wantScrollback(t, m, "first", "row 1", "row 2")
@@ -528,7 +918,7 @@ func TestEchoExpandsPreservedTabsBeforeScrollback(t *testing.T) {
 	next, _ := m.Update(ui.EchoLineMsg("> a\tb"))
 	m = next.(*Model)
 
-	got := m.scrollback.At(0)
+	got := m.output.buffer.At(0)
 	if strings.ContainsRune(got, '\t') {
 		t.Fatalf("raw tab reached scrollback: %q", got)
 	}
@@ -553,11 +943,11 @@ func TestOversizedVerbatimSubmissionIsRejectedAtomically(t *testing.T) {
 		t.Fatal("over-line-limit bare-CR verbatim submission was accepted")
 	}
 
-	if got := m.scrollback.Count(); got != 3 {
+	if got := m.output.buffer.Count(); got != 3 {
 		t.Fatalf("warning count = %d, want 3", got)
 	}
-	for n := 0; n < m.scrollback.Count(); n++ {
-		if warning := m.scrollback.At(n); !strings.Contains(warning, "Verbatim input not sent") {
+	for n := 0; n < m.output.buffer.Count(); n++ {
+		if warning := m.output.buffer.At(n); !strings.Contains(warning, "Verbatim input not sent") {
 			t.Fatalf("warning %d = %q", n, warning)
 		}
 	}
@@ -582,40 +972,45 @@ func TestVerbatimSubmissionAtLimitsIsAccepted(t *testing.T) {
 	}
 }
 
-// TestBarCannotClobberBuiltinWidget verifies a Lua bar named after a
-// built-in widget ("input", "separator") neither replaces it nor
-// deletes it when the bar is later removed.
-func TestBarCannotClobberBuiltinWidget(t *testing.T) {
+// TestBarNameDoesNotReplaceBuiltinWidget verifies that bar and built-in names
+// belong to independent resource namespaces.
+func TestBarNameDoesNotReplaceBuiltinWidget(t *testing.T) {
 	m := newTestModel(t)
+	inputWidget := m.input
 
 	next, _ := m.Update(ui.UpdateBarsMsg{"input": {Left: "hijack"}})
 	m = next.(*Model)
 
-	if _, isInput := m.widgets["input"].(*widget.Input); !isInput {
+	if m.input != inputWidget {
 		t.Fatal("bar named \"input\" replaced the input widget")
+	}
+	if _, exists := m.bars["input"]; !exists {
+		t.Fatal("bar named \"input\" was not retained in its own namespace")
 	}
 
 	next, _ = m.Update(ui.UpdateBarsMsg{})
 	m = next.(*Model)
 
-	if _, isInput := m.widgets["input"].(*widget.Input); !isInput {
+	if m.input != inputWidget {
 		t.Fatal("removing the colliding bar deleted the input widget")
 	}
 }
 
-// TestLayoutEntryOptsReachWidget verifies layoutDock hands each
-// entry's option bag to Configurable widgets — and that a second
-// separator entry without options resets the shared instance instead
-// of inheriting the first entry's char.
-func TestLayoutEntryOptsReachWidget(t *testing.T) {
+// TestSeparatorLeafCharactersAreIndependent verifies that configured and
+// default separator characters belong to their individual leaves.
+func TestSeparatorLeafCharactersAreIndependent(t *testing.T) {
 	m := newTestModel(t)
 
 	// No "input" entry: the input widget draws its own default rule,
 	// which would mask a separator that failed to reset.
-	next, _ := m.Update(ui.UpdateLayoutMsg{
-		Top:    []ui.LayoutEntry{{Name: "separator", Opts: map[string]string{"char": "═"}}},
-		Bottom: []ui.LayoutEntry{{Name: "separator"}},
-	})
+	next, _ := m.Update(ui.UpdateLayoutMsg(ui.LayoutTree{Root: ui.LayoutNode{
+		Type: ui.LayoutTypeColumn,
+		Children: []ui.LayoutNode{
+			{Type: ui.LayoutTypeSeparator, SeparatorChar: "═", Size: ui.AutoSize()},
+			{Type: ui.LayoutTypePane, Name: ui.OutputPaneName, Border: ui.PaneBorderNone},
+			{Type: ui.LayoutTypeSeparator, Size: ui.AutoSize()},
+		},
+	}}))
 	m = next.(*Model)
 
 	view := m.View().Content
@@ -623,7 +1018,7 @@ func TestLayoutEntryOptsReachWidget(t *testing.T) {
 		t.Error("configured separator rule missing from view")
 	}
 	if !strings.Contains(view, strings.Repeat("─", m.width)) {
-		t.Error("option-less separator entry did not reset to the default rule")
+		t.Error("default separator did not retain its own rule character")
 	}
 }
 
@@ -788,8 +1183,8 @@ func TestPrintedTabsAreExpanded(t *testing.T) {
 	next, _ := m.Update(ui.PrintLineMsg("\tDead-file cleanup"))
 	m = next.(*Model)
 	found := false
-	for i := 0; i < m.scrollback.Count(); i++ {
-		row := m.scrollback.At(i)
+	for i := 0; i < m.output.buffer.Count(); i++ {
+		row := m.output.buffer.At(i)
 		if row == "        Dead-file cleanup" {
 			found = true
 		}
@@ -802,7 +1197,7 @@ func TestPrintedTabsAreExpanded(t *testing.T) {
 	}
 	next, _ = m.Update(ui.SetPromptMsg("HP\t> "))
 	m = next.(*Model)
-	if got := m.promptText; got != "HP      > " {
+	if got := m.output.promptText; got != "HP      > " {
 		t.Errorf("prompt = %q, want tab expanded", got)
 	}
 }
@@ -820,7 +1215,7 @@ func TestHomeEndEditInputWhileCtrlVariantsScroll(t *testing.T) {
 
 	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyHome})
 	m = next.(*Model)
-	if m.viewport.Mode() != widget.ModeLive {
+	if m.output.viewport.Mode() != widget.ModeLive {
 		t.Fatal("Home scrolled the viewport instead of reaching the input")
 	}
 	if pos := m.inputCtl.input.Position(); pos != 0 {
@@ -829,7 +1224,7 @@ func TestHomeEndEditInputWhileCtrlVariantsScroll(t *testing.T) {
 
 	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnd})
 	m = next.(*Model)
-	if m.viewport.Mode() != widget.ModeLive {
+	if m.output.viewport.Mode() != widget.ModeLive {
 		t.Fatal("End scrolled the viewport instead of reaching the input")
 	}
 	if pos := m.inputCtl.input.Position(); pos != len(typed) {
@@ -838,13 +1233,13 @@ func TestHomeEndEditInputWhileCtrlVariantsScroll(t *testing.T) {
 
 	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyHome, Mod: tea.ModCtrl})
 	m = next.(*Model)
-	if m.viewport.Mode() == widget.ModeLive {
+	if m.output.viewport.Mode() == widget.ModeLive {
 		t.Fatal("Ctrl+Home did not scroll the viewport to the top")
 	}
 
 	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnd, Mod: tea.ModCtrl})
 	m = next.(*Model)
-	if m.viewport.Mode() != widget.ModeLive {
+	if m.output.viewport.Mode() != widget.ModeLive {
 		t.Fatal("Ctrl+End did not return the viewport to live")
 	}
 	if got := m.inputCtl.input.Value(); got != typed {
@@ -886,19 +1281,19 @@ func TestSearchFocusUsesFinalLayoutGeometry(t *testing.T) {
 	m = next.(*Model)
 	m.View()
 
-	assertViewportRowCentered(t, m.viewport.View(), "SELECTED thief")
+	assertViewportRowCentered(t, m.output.viewport.View(), "SELECTED thief")
 
 	// Enter removes the overlay and expands the viewport. The accepted row
 	// must be centered again using that post-close height.
 	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = next.(*Model)
 	m.View()
-	assertViewportRowCentered(t, m.viewport.View(), "SELECTED thief")
+	assertViewportRowCentered(t, m.output.viewport.View(), "SELECTED thief")
 	if m.searchView.focus == nil {
 		t.Fatal("accepted search should retain its active-result marker")
 	}
 	committedSeq := m.searchView.focus.Seq
-	assertViewportRowHighlighted(t, m.viewport.View(), "SELECTED thief")
+	assertViewportRowHighlighted(t, m.output.viewport.View(), "SELECTED thief")
 
 	// A replacement search may preview another row, but cancelling it restores
 	// the previously committed focus from the grouped search lifecycle state.
@@ -914,7 +1309,7 @@ func TestSearchFocusUsesFinalLayoutGeometry(t *testing.T) {
 	if m.searchView.focus == nil || m.searchView.focus.Seq != committedSeq {
 		t.Fatal("cancelled replacement search did not restore committed focus")
 	}
-	assertViewportRowHighlighted(t, m.viewport.View(), "SELECTED thief")
+	assertViewportRowHighlighted(t, m.output.viewport.View(), "SELECTED thief")
 
 	// Deliberate viewport navigation retires the accepted marker.
 	next, _ = m.Update(ui.UpdateConfigMsg{Mouse: true})
@@ -965,8 +1360,8 @@ func TestManualViewportEntryPointsClearCommittedSearchFocus(t *testing.T) {
 			mouse: true,
 		},
 		{
-			name: "Lua main-pane navigation",
-			msg:  ui.PaneScrollUpMsg{Name: "main", Lines: 1},
+			name: "Lua output-pane navigation",
+			msg:  ui.PaneScrollUpMsg{Name: ui.OutputPaneName, Lines: 1},
 		},
 	}
 
@@ -977,9 +1372,9 @@ func TestManualViewportEntryPointsClearCommittedSearchFocus(t *testing.T) {
 				next, _ := m.Update(ui.UpdateConfigMsg{Mouse: true})
 				m = next.(*Model)
 			}
-			focus := widget.SearchMatch{Seq: m.scrollback.Seq(50)}
+			focus := widget.SearchMatch{Seq: m.output.buffer.Seq(50)}
 			m.searchView.focus = &focus
-			m.viewport.SetHighlight(focus.Seq, focus.Ranges)
+			m.output.viewport.SetHighlight(focus.Seq, focus.Ranges)
 
 			next, _ := m.Update(tt.msg)
 			m = next.(*Model)

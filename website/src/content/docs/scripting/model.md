@@ -25,7 +25,7 @@ name.
 | Creation function | Name | Because |
 |---|---|---|
 | `rune.bind` | the key, `"ctrl+g"` | Only one binding can use a key |
-| `rune.ui.bar` | the layout name, `"status"` | Only one renderer can use a layout name |
+| `rune.ui.bar` | the bar name, `"status"` | Only one renderer can use a bar name |
 | `rune.command.add` | the command, `"greet"` | Only one handler can use a command name |
 | `rune.alias.exact` | the normalized phrase, `"chat off"` | Only one expansion can use a typed phrase |
 | `rune.trigger.*` | `opts.name` | Several triggers may match the same text |
@@ -35,7 +35,7 @@ name.
 | `rune.gmcp.on` | `opts.name` | Several handlers may listen to the same package |
 
 When only one registration can use a value, that value is already its name.
-A binding is named by its key, a bar by its layout name, a command by its
+A binding is named by its key, a bar by its bar name, a command by its
 command name, and an exact alias by its phrase. When several registrations
 can share the same value, give each one its own name with `opts.name`.
 

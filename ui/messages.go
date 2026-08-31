@@ -30,17 +30,6 @@ type PaneWriteMsg struct {
 	Text string
 }
 
-// PaneToggleMsg toggles visibility of a named pane.
-type PaneToggleMsg struct {
-	Name string
-}
-
-// PaneSetVisibleMsg shows or hides a named pane.
-type PaneSetVisibleMsg struct {
-	Name    string
-	Visible bool
-}
-
 // PaneCreateMsg creates a new named pane.
 type PaneCreateMsg struct {
 	Name string
@@ -61,11 +50,10 @@ type UpdateBindsMsg map[string]bool
 // Session runs Lua bar renderers and sends the result; UI just displays it.
 type UpdateBarsMsg map[string]BarContent
 
-// UpdateLayoutMsg pushes layout configuration from Session to UI.
-type UpdateLayoutMsg struct {
-	Top    []LayoutEntry
-	Bottom []LayoutEntry
-}
+// UpdateLayoutMsg pushes the canonical layout tree from Session to UI.
+// Top/bottom structure and version state are normalized before this boundary.
+// Private legacy references may remain to preserve bar-first resource binding.
+type UpdateLayoutMsg LayoutTree
 
 // Config carries the UI-facing subset of Rune's typed configuration.
 type Config struct {

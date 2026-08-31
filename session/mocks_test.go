@@ -127,10 +127,13 @@ type mockUI struct {
 	prompts       []string // every SetPrompt call, including clears
 	submissions   []input.Submission
 	inputCursor   []int
-	bindsPushed   map[string]bool // last UpdateBinds payload
-	layoutPushes  int             // UpdateLayout call count
-	config        ui.Config       // last UpdateConfig payload
-	configPushes  []ui.Config     // every UpdateConfig payload
+	bars          map[string]ui.BarContent // last UpdateBars payload
+	barPushes     int                      // UpdateBars call count
+	bindsPushed   map[string]bool          // last UpdateBinds payload
+	layoutPushes  int                      // UpdateLayout call count
+	layout        ui.LayoutTree            // last UpdateLayout payload
+	config        ui.Config                // last UpdateConfig payload
+	configPushes  []ui.Config              // every UpdateConfig payload
 	events        chan ui.UIEvent
 	done          chan struct{}
 }
@@ -203,15 +206,21 @@ func (m *mockUI) SetInputSubmission(submission input.Submission) {
 	m.submissions = append(m.submissions, submission)
 }
 
-func (m *mockUI) UpdateBars(content map[string]ui.BarContent) {}
+func (m *mockUI) UpdateBars(content map[string]ui.BarContent) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.bars = content
+	m.barPushes++
+}
 func (m *mockUI) UpdateBinds(keys map[string]bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.bindsPushed = keys
 }
-func (m *mockUI) UpdateLayout(top, bottom []ui.LayoutEntry) {
+func (m *mockUI) UpdateLayout(layout ui.LayoutTree) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.layout = layout
 	m.layoutPushes++
 }
 
@@ -244,6 +253,20 @@ func (m *mockUI) drainLayoutPushes() int {
 	return n
 }
 
+func (m *mockUI) drainBarPushes() (int, map[string]ui.BarContent) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	count, bars := m.barPushes, m.bars
+	m.barPushes = 0
+	return count, bars
+}
+
+func (m *mockUI) pushedLayout() ui.LayoutTree {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.layout
+}
+
 func (m *mockUI) pushedBinds() map[string]bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -255,8 +278,6 @@ func (m *mockUI) ShowSearch(opts ui.ShowSearchMsg)         {}
 func (m *mockUI) SetClipboard(text string)                 {}
 func (m *mockUI) CreatePane(name string)                   {}
 func (m *mockUI) WritePane(name, text string)              {}
-func (m *mockUI) TogglePane(name string)                   {}
-func (m *mockUI) SetPaneVisible(name string, visible bool) {}
 func (m *mockUI) ClearPane(name string)                    {}
 
 func (m *mockUI) InputSetCursor(pos int) {

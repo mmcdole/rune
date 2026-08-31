@@ -160,16 +160,6 @@ func (b *BubbleTeaUI) WritePane(name, text string) {
 	b.send(ui.PaneWriteMsg{Name: name, Text: text})
 }
 
-// TogglePane toggles visibility of a named pane.
-func (b *BubbleTeaUI) TogglePane(name string) {
-	b.send(ui.PaneToggleMsg{Name: name})
-}
-
-// SetPaneVisible shows or hides a named pane.
-func (b *BubbleTeaUI) SetPaneVisible(name string, visible bool) {
-	b.send(ui.PaneSetVisibleMsg{Name: name, Visible: visible})
-}
-
 // ClearPane clears the contents of a named pane.
 func (b *BubbleTeaUI) ClearPane(name string) {
 	b.send(ui.PaneClearMsg{Name: name})
@@ -187,9 +177,9 @@ func (b *BubbleTeaUI) UpdateBinds(keys map[string]bool) {
 	b.send(ui.UpdateBindsMsg(keys))
 }
 
-// UpdateLayout sends layout configuration from Session to UI.
-func (b *BubbleTeaUI) UpdateLayout(top, bottom []ui.LayoutEntry) {
-	b.send(ui.UpdateLayoutMsg{Top: top, Bottom: bottom})
+// UpdateLayout sends the canonical layout tree from Session to UI.
+func (b *BubbleTeaUI) UpdateLayout(layout ui.LayoutTree) {
+	b.send(ui.UpdateLayoutMsg(layout))
 }
 
 // UpdateConfig sends UI-facing configuration from Session to UI.

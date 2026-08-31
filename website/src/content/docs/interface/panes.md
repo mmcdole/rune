@@ -1,86 +1,169 @@
 ---
 title: Panes
-description: Named output buffers you can dock in the layout, write to from triggers, and toggle from binds.
+description: Named output buffers you can place in a layout tree, write to from triggers, and toggle from binds.
 ---
 
-A pane is a named output buffer with its own scrollback, docked beside the main
-output. Nothing routes text into one automatically: a pane shows the lines your
-scripts write to it, which makes it the place to put a category of output you
-want kept separate, such as chat, tells, combat, or auction spam.
+A pane is a named output buffer with its own scrollback. Rune routes server text
+to the reserved `output` pane; every other pane shows only lines your scripts
+write to it. That makes panes useful for chat, tells, combat, maps, or auction
+traffic that should stay separate from normal output.
 
 ```lua
-rune.pane.create("chat")                    -- optional; write auto-creates
-rune.pane.write("chat", styled_text)
-rune.pane.toggle("chat")                    -- flip visibility (panes start hidden)
-rune.pane.show("chat")                      -- or set it outright
+rune.pane.write("chat", styled_text)        -- creates the buffer if needed
+rune.pane.toggle("chat")                    -- flip the pane's layout placement
+rune.pane.show("chat")
 rune.pane.hide("chat")
+rune.pane.is_visible("chat")                -- nil when the layout has no chat pane
 rune.pane.clear("chat")
 ```
 
-Dock a pane via the layout. Since `rune.ui.layout` replaces the whole
-layout, keep the bottom dock in it:
+Place the buffer with a pane leaf:
 
 ```lua
 rune.ui.layout({
-    top    = { { name = "chat", height = 10 } },
-    bottom = { "input", "status" },
+    type = "column",
+    children = {
+        { type = "pane", name = "chat", size = 10 },
+        { type = "pane", name = "output", border = "none" },
+        { type = "input" },
+        { type = "bar", name = "status" },
+    },
 })
 ```
 
-A pane's configured `height` is its standalone height. Omit `height` or set it
-to `0` to use the default height of 12 lines; any other value below 2 is
-treated as 2. The titled header and bottom border use two rows, and the rest
-show content. When visible panes are adjacent in the same dock, Rune omits the
-upper pane's bottom border and uses the lower pane's titled header as their
-shared boundary. Each pane still shows the same number of content rows, so
-each shared boundary saves one row. For example, two adjacent panes with
-`height = 12` each still show 10 content rows apiece but occupy 23 rows
-together instead of 24.
+`name = "chat"` binds the leaf to the buffer used by
+`rune.pane.write("chat", ...)`. The `size = 10` is a height because the pane
+is a child of a column. Put the same pane in a row and its size is a width.
 
-Panes start hidden; `toggle` shows them. A hidden pane keeps accumulating
-writes (the buffer is capped at 1000 lines), so toggling it back shows the
-recent history. Lines longer than the pane width soft-wrap, and re-fit when
-the terminal resizes.
+Placing a pane shows it. The buffer is created on first placement or first
+`write`, whichever comes first, so a declared pane is visible immediately and
+an empty one renders as an empty titled box. Declare a pane that starts hidden
+with `hidden = true` on its leaf; `show`, `hide`, and `toggle` change that
+placement gate at runtime and return `true` only when the layout places the
+pane. Hiding a pane removes its leaf from the resolved layout but does not
+clear its buffer or scroll position, so showing it later reveals recent
+history. Buffers survive layout replacement and `/reload`; visibility returns
+to the declared `hidden` values.
+
+## Borders and titles
+
+A pane is bordered by default. Its assigned rectangle includes a titled top
+rule, closing rule, and vertical sides. Adjacent bordered panes with no gap
+share their boundary, including corners and junctions.
+
+Configure pane presentation directly on its leaf:
+
+```lua
+{
+    type = "pane",
+    name = "map",
+    size = 32,
+    title = "Wilderness",
+    border = "full",
+}
+```
+
+A `title` replaces the entire generated header, including the pane name and
+automatic scroll-state suffix. Set it to `""` to suppress title text, or omit it
+when the generated suffix should remain visible. `border = "full"`, the
+default, draws all four sides. `border = "none"`
+gives the whole assigned rectangle to content. `border = "horizontal"` draws
+only the titled top and closing bottom rules. Lines in user-created panes
+soft-wrap at render time and re-fit when the terminal or layout changes. The
+reserved output transcript retains its append-time wrapping.
+
+During normal allocation, a four-sided pane has an intrinsic minimum of two
+columns and two rows, while a horizontal-only pane has a two-row minimum. A
+borderless pane adds no chrome minimum. On a terminal too small to satisfy all
+minima, Rune may clip below those sizes rather than draw outside the screen.
+
+## Side-by-side panes
+
+Rows and columns can nest around panes and bars:
+
+```lua
+rune.ui.layout({
+    type = "column",
+    children = {
+        {
+            type = "row",
+            children = {
+                { type = "pane", name = "output", size = "3fr", border = "none" },
+                {
+                    type = "column",
+                    size = "1fr",
+                    min_size = 24,
+                    children = {
+                        { type = "pane", name = "chat", size = "2fr" },
+                        { type = "pane", name = "map", size = "1fr" },
+                    },
+                },
+            },
+        },
+        { type = "input" },
+        { type = "bar", name = "status" },
+    },
+})
+```
+
+The output pane receives three shares of the width and the sidebar one. Inside
+the sidebar, chat receives twice the remaining height of the map. A hidden
+chat or map pane is pruned before allocation, so the other pane reclaims the
+available sidebar space.
 
 ## Scrolling
 
-Every pane scrolls its own buffer; the special name `"main"` is the
-output viewport (that's what the default PageUp/PageDown/Ctrl+Home/Ctrl+End
-binds target). Aim a pane with binds of your own:
+Every pane scrolls its own buffer. The default PageUp, PageDown, Ctrl+Home, and
+Ctrl+End bindings target the reserved `output` pane.
 
 ```lua
-rune.bind("shift+pgup",   function() rune.pane.scroll_up("chat", 5) end)
-rune.bind("shift+pgdown", function() rune.pane.scroll_down("chat", 5) end)
+rune.pane.scroll_up("output", 20)
+rune.pane.scroll_up("chat", 5)
+
+rune.bind("shift+pgup", function()
+    rune.pane.scroll_up("chat", 5)
+end)
+rune.bind("shift+pgdown", function()
+    rune.pane.scroll_down("chat", 5)
+end)
 ```
 
-While scrolled, the pane freezes on the history you're reading and its
-header shows `chat · scroll +N` as new lines land; `scroll_down` past
-the end (or `scroll_to_bottom`) returns it to live tailing.
+While scrolled, a pane stays anchored on the history you are reading. New
+writes continue landing in the buffer. With the default generated title, its
+header shows `chat · scroll +N`; a custom `title` replaces that suffix
+along with the pane name. `scroll_down` past the end or `scroll_to_bottom`
+returns the pane to live tailing. User-created panes scroll by logical lines as
+written; the specialized output transcript scrolls its stored physical rows.
 
 ## The mirror pattern
 
-Panes work well when triggers copy (or move) categories of lines into
-them:
+Triggers commonly copy or move categories of output into panes:
 
 ```lua
--- Copy: line stays in the main window AND lands in the pane
+-- Copy: keep the line in output and also write it to chat.
 rune.trigger.regex("^(\\w+) tells you: (.+)$", function(m, ctx)
     rune.pane.write("chat", ctx.line:raw())
 end)
 
--- Move: gag it from the main window, keep it in the pane
+-- Move: gag the line from output after writing it to auctions.
 rune.trigger.regex("^\\[Auction\\]", function(m, ctx)
     rune.pane.write("auctions", ctx.line:raw())
     return false
 end)
 ```
 
-Bind a key to peek, as in the
-[quake console](/cookbook/quake-console/) recipe:
+Bind a key to reveal a pane only when needed:
 
 ```lua
-rune.bind("`", function() rune.pane.toggle("chat") end)
+rune.bind("`", function()
+    rune.pane.toggle("chat")
+end)
 ```
+
+A pane displays only when all conditions are true: the active layout contains
+its pane leaf, that placement is not hidden, and every ancestor region is
+visible. Creating or writing a buffer does not add a placement to the tree.
+Hiding a region does not change any descendant pane placement's own gate.
 
 **Related:** [rune.pane reference](/reference/api/pane/),
 [Layout & UI](/interface/layout/),

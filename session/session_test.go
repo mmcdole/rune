@@ -3,6 +3,7 @@ package session
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -1286,6 +1287,49 @@ func TestResizeHookLayoutChangeAppliesInSameCycle(t *testing.T) {
 
 	if uiMock.drainLayoutPushes() == 0 {
 		t.Error("layout change from a resize handler was not pushed during the resize cycle")
+	}
+	want := ui.LayoutTree{Root: ui.LayoutNode{
+		Type: ui.LayoutTypeColumn,
+		Children: []ui.LayoutNode{
+			{
+				Type: ui.LayoutTypePane, Name: ui.OutputPaneName,
+				Border: ui.PaneBorderNone,
+			},
+			{
+				Type: ui.LayoutTypeInput,
+				Size: ui.AutoSize(),
+			},
+		},
+	}}
+	if got := uiMock.pushedLayout(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("pushed layout = %#v, want canonical v1 translation %#v", got, want)
+	}
+}
+
+func TestBarRefreshPublishesOnlySuccessfulSnapshots(t *testing.T) {
+	s, _, uiMock := newTestSession(t)
+	uiMock.drainBarPushes()
+
+	assertSessionLua(t, s.engine, `rune.bars.clear()`)
+	s.pushBarUpdates()
+
+	count, bars := uiMock.drainBarPushes()
+	if count != 1 {
+		t.Fatalf("UpdateBars calls = %d, want one empty snapshot", count)
+	}
+	if len(bars) != 0 {
+		t.Fatalf("UpdateBars payload = %#v, want no active bars", bars)
+	}
+
+	assertSessionLua(t, s.engine, `
+		rune.bars._render_all = function()
+			error("transient render failure")
+		end
+	`)
+	uiMock.drainBarPushes()
+	s.pushBarUpdates()
+	if count, _ := uiMock.drainBarPushes(); count != 0 {
+		t.Fatalf("failed bar render published %d snapshots, want none", count)
 	}
 }
 

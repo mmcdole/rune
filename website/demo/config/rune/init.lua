@@ -16,11 +16,16 @@ rune.alias.exact("bs", "cast blindstrike at %1")
 rune.alias.exact("tt", "tell tundra %*")
 
 -- Quake-style chat console (the hero's closing beat): channel lines
--- mirror into a dockable pane; backtick toggles it. This is the whole
+-- mirror into a layout pane; backtick toggles it. This is the whole
 -- implementation - the landing page brags about exactly these lines.
 rune.ui.layout({
-    top = { { name = "chat", height = 6 } },
-    bottom = { "input", "status" },
+    type = "column",
+    children = {
+        { type = "pane", name = "chat", size = 6, hidden = true },
+        { type = "pane", name = "output", border = "none" },
+        { type = "input" },
+        { type = "bar", name = "status" },
+    },
 })
 rune.trigger.regex("^\\[(Chat|Trade|Tell)\\]", function(_, ctx)
     rune.pane.write("chat", ctx.line:raw())

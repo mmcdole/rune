@@ -31,8 +31,9 @@ type Engine struct {
 	pickerCallbacks map[string]script.FuncRef
 	pickerNextID    int
 
-	// Layout config, marshaled from rune.ui.layout calls
-	barLayout ui.LayoutConfig
+	// Layout tree, normalized to the canonical representation by
+	// rune._ui.layout before it is published to the UI.
+	layout ui.LayoutTree
 
 	// Application configuration, owned and validated by Go. Init starts a
 	// fresh candidate at the defaults; Session commits it after scripts load.
@@ -64,7 +65,7 @@ func NewEngine(host Host) *Engine {
 		host:            host,
 		vm:              newScriptEngine(),
 		pickerCallbacks: make(map[string]script.FuncRef),
-		barLayout:       ui.DefaultLayoutConfig(),
+		layout:          ui.DefaultLayoutTree(),
 		config:          defaultConfig(),
 		configStaging:   true,
 		CallTimeout:     DefaultCallTimeout,
@@ -146,7 +147,7 @@ func (e *Engine) Init() error {
 	e.pickerCallbacks = make(map[string]script.FuncRef)
 	e.pickerNextID = 0
 
-	e.barLayout = ui.DefaultLayoutConfig()
+	e.layout = ui.DefaultLayoutTree()
 	e.config = defaultConfig()
 	e.configStaging = true
 	e.coreBrokenReported = false
@@ -562,6 +563,7 @@ func (e *Engine) registerAPIs() {
 	e.registerUIFuncs()
 	e.registerStateFuncs()
 	e.registerConfigFuncs()
+	e.registerLayoutFuncs()
 	e.registerBarFuncs()
 	e.registerPickerFuncs()
 	e.registerHistoryFuncs()

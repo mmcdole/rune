@@ -22,12 +22,12 @@ type searchViewState struct {
 // OpenSearch snapshots the viewport and committed highlight for cancel, then
 // returns the temporal origin the Search widget should scan around.
 func (m *Model) OpenSearch() widget.SearchScope {
-	m.searchView.snapshot = m.viewport.SaveScroll()
+	m.searchView.snapshot = m.output.viewport.SaveScroll()
 	m.searchView.priorFocus = m.searchView.focus
 	m.notifySession(ui.SearchStateChangedMsg(true))
 
 	scope := widget.SearchScope{}
-	if m.scrollback.Count() > 0 {
+	if m.output.buffer.Count() > 0 {
 		scope.OriginSeq = m.searchView.snapshot.BottomSeq
 		scope.OriginSet = true
 	}
@@ -45,10 +45,10 @@ func (m *Model) recenterSearchFocus() bool {
 	if !m.input.SearchActive() || m.searchView.focus == nil {
 		return false
 	}
-	beforeMode := m.viewport.Mode()
-	beforeLines := m.viewport.NewLineCount()
-	m.viewport.CenterOn(m.searchView.focus.Seq)
-	return beforeMode != m.viewport.Mode() || beforeLines != m.viewport.NewLineCount()
+	beforeMode := m.output.viewport.Mode()
+	beforeLines := m.output.viewport.NewLineCount()
+	m.output.viewport.CenterOn(m.searchView.focus.Seq)
+	return beforeMode != m.output.viewport.Mode() || beforeLines != m.output.viewport.NewLineCount()
 }
 
 // PreviewSearch centers and highlights the selected match; with no
@@ -58,12 +58,12 @@ func (m *Model) PreviewSearch(match widget.SearchMatch, ok bool) {
 		m.searchView.focus = &match
 		m.syncViewportSize()
 		m.recenterSearchFocus()
-		m.viewport.SetHighlight(match.Seq, match.Ranges)
+		m.output.viewport.SetHighlight(match.Seq, match.Ranges)
 	} else {
 		m.searchView.focus = nil
 		m.syncViewportSize()
-		m.viewport.ClearHighlight()
-		m.viewport.RestoreScroll(m.searchView.snapshot)
+		m.output.viewport.ClearHighlight()
+		m.output.viewport.RestoreScroll(m.searchView.snapshot)
 	}
 	m.updateScrollState()
 }
@@ -73,10 +73,10 @@ func (m *Model) PreviewSearch(match widget.SearchMatch, ok bool) {
 func (m *Model) CommitSearch() {
 	m.syncViewportSize()
 	if m.searchView.focus != nil {
-		m.viewport.CenterOn(m.searchView.focus.Seq)
-		m.viewport.SetHighlight(m.searchView.focus.Seq, m.searchView.focus.Ranges)
+		m.output.viewport.CenterOn(m.searchView.focus.Seq)
+		m.output.viewport.SetHighlight(m.searchView.focus.Seq, m.searchView.focus.Ranges)
 	} else {
-		m.viewport.ClearHighlight()
+		m.output.viewport.ClearHighlight()
 	}
 	m.searchView.priorFocus = nil
 	m.notifySession(ui.SearchStateChangedMsg(false))
@@ -87,13 +87,13 @@ func (m *Model) CommitSearch() {
 // existed when the navigator opened.
 func (m *Model) CancelSearch() {
 	m.syncViewportSize()
-	m.viewport.RestoreScroll(m.searchView.snapshot)
+	m.output.viewport.RestoreScroll(m.searchView.snapshot)
 	if m.searchView.priorFocus != nil {
 		m.searchView.focus = m.searchView.priorFocus
-		m.viewport.SetHighlight(m.searchView.focus.Seq, m.searchView.focus.Ranges)
+		m.output.viewport.SetHighlight(m.searchView.focus.Seq, m.searchView.focus.Ranges)
 	} else {
 		m.searchView.focus = nil
-		m.viewport.ClearHighlight()
+		m.output.viewport.ClearHighlight()
 	}
 	m.searchView.priorFocus = nil
 	m.notifySession(ui.SearchStateChangedMsg(false))
@@ -107,5 +107,5 @@ func (m *Model) clearCommittedSearchFocus() {
 		return
 	}
 	m.searchView.focus = nil
-	m.viewport.ClearHighlight()
+	m.output.viewport.ClearHighlight()
 }

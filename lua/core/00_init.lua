@@ -271,10 +271,29 @@ end
 
 rune.ui = {}
 
--- Set the layout configuration.
--- config = { top = {"bar1", {name="pane", height=10}}, bottom = {"input", "status"} }
+-- Install a layout from a root node; v1 top/bottom dock tables are also accepted.
 function rune.ui.layout(config)
     rune._ui.layout(config)
+end
+
+-- A row or column with an id is a region. Region visibility hides or shows its
+-- subtree without changing the visibility or enabled state of contained resources.
+rune.ui.regions = {}
+
+function rune.ui.regions.show(id)
+    return rune._ui.region_show(id)
+end
+
+function rune.ui.regions.hide(id)
+    return rune._ui.region_hide(id)
+end
+
+function rune.ui.regions.toggle(id)
+    return rune._ui.region_toggle(id)
+end
+
+function rune.ui.regions.is_visible(id)
+    return rune._ui.region_is_visible(id)
 end
 
 -- Force an immediate bar refresh instead of waiting for the ticker.

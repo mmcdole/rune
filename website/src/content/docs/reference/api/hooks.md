@@ -3,7 +3,7 @@ title: rune.hooks
 description: Event handlers with priority ordering, plus the full catalog of data-flow and notification events.
 ---
 
-Hooks attach handlers to client events — input, output, connection
+Hooks attach handlers to client events: input, output, connection
 lifecycle, GMCP, and more. For a task-oriented introduction, see
 [Hooks & Events](/scripting/hooks/).
 
@@ -30,10 +30,10 @@ rune.hooks.remove_group(group)         -- remove all handlers in a group
 rune.hooks.on(event, handler, opts?) -> handle
 ```
 
-- `event` (string) — an event name from the tables below.
-- `handler` (function) — receives the event's arguments; return values
+- `event` (string): an event name from the tables below.
+- `handler` (function): receives the event's arguments; return values
   matter only for data-flow events.
-- `opts` (table, optional) — [common options](/reference/api/#options).
+- `opts` (table, optional): [common options](/reference/api/#options).
   `priority` defaults to 50; lower runs first.
 
 ```lua
@@ -46,7 +46,7 @@ end, {name = "auto-look"})
 
 Handlers run in priority order (lower first, default 50).
 
-For `output`, `prompt`, `echo`, and `input`, a string — including `""` —
+For `output`, `prompt`, `echo`, and `input`, a string, including `""`,
 replaces the text for subsequent handlers, so rewrites chain in priority
 order. `nil` and other values pass the current text through. `false` stops the
 chain: it gags output or a prompt, hides an echo, or cancels an input
@@ -184,20 +184,25 @@ All handlers run; return values are ignored.
 | `gmcp_enabled` | none | GMCP negotiated; the core handler sends `Core.Hello` |
 
 `window_size_changed` receives the terminal columns and rows as numbers,
-so a script can switch layouts at its own breakpoint:
+so a script can adapt an identified layout region at its own breakpoint. This
+example assumes the active layout has a region with `id = "sidebar"`; see
+[Regions and inactive resources](/interface/layout/#regions-and-inactive-resources).
 
 ```lua
-rune.hooks.on("window_size_changed", function(width, height)
+local function fit_sidebar(width)
     if width < 80 then
-        rune.ui.layout({ bottom = { "input" } })
+        rune.ui.regions.hide("sidebar")
     else
-        rune.ui.layout({ bottom = { "input", "status" } })
+        rune.ui.regions.show("sidebar")
     end
-end)
+end
+
+fit_sidebar(rune.state.width)
+rune.hooks.on("window_size_changed", fit_sidebar)
 ```
 
-`/reload` does not fire it; apply your initial layout from
-`rune.state.width` when your script loads, and use the hook for later
+`/reload` does not fire the resize hook. The explicit call using
+`rune.state.width` sets the initial region state; the hook handles later
 changes.
 
 ## Named core handlers
@@ -213,7 +218,7 @@ priority 200).
 
 Standard registry management applies:
 `rune.hooks.get/enable/disable/remove(name)`, `.list()`, `.count()`,
-`.clear()`, `.remove_group(group)` — see
+`.clear()`, `.remove_group(group)`: see
 [Registries](/reference/api/#managing). `/hooks` lists everything.
 
 **Related:** [Hooks & Events guide](/scripting/hooks/) ·

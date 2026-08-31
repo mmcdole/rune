@@ -16,17 +16,19 @@ import (
 	"github.com/mmcdole/rune/ui/tui/widget"
 )
 
-// tickMsg closes a 16ms output batch window: the first server line
+// tickMsg closes one generation of the 16ms output batch window. The first server line
 // after an idle period renders immediately and opens the window; lines
 // arriving inside it are batched to prevent excessive renders on fast
 // MUD output. Ticks are scheduled on demand only - an idle client has
 // no standing timer and zero wakeups.
-type tickMsg time.Time
+type tickMsg struct {
+	generation uint64
+}
 
 // doTick returns a command that closes the batch window after 16ms.
-func doTick() tea.Cmd {
-	return tea.Tick(16*time.Millisecond, func(t time.Time) tea.Msg {
-		return tickMsg(t)
+func doTick(generation uint64) tea.Cmd {
+	return tea.Tick(16*time.Millisecond, func(time.Time) tea.Msg {
+		return tickMsg{generation: generation}
 	})
 }
 
@@ -35,14 +37,13 @@ func doTick() tea.Cmd {
 // inputController, layout and rendering in layout.go.
 type Model struct {
 	// Layout
-	widgets map[string]widget.Widget // all named widgets: input, separator, bars
-	styles  style.Styles
+	bars   map[string]*widget.Bar // bar resource namespace
+	styles style.Styles
 
 	// Widgets
-	scrollback *widget.ScrollbackBuffer
-	viewport   *widget.Viewport
-	input      *widget.Input
-	panes      *widget.PaneManager
+	output *outputController
+	input  *widget.Input
+	panes  *paneRegistry
 
 	// Input-mode state machine (normal / modal picker / inline picker / search)
 	inputCtl *inputController
@@ -52,51 +53,39 @@ type Model struct {
 
 	// Push-based state from Session
 	boundKeys  map[string]bool
-	barContent map[string]ui.BarContent
-	luaLayout  struct {
-		Top    []ui.LayoutEntry
-		Bottom []ui.LayoutEntry
-	}
+	layout     ui.LayoutTree
+	layoutPlan layoutPlan
+	// layoutPlanValid lets interaction paths and View share one resolved
+	// geometry snapshot during an update.
+	layoutPlanValid bool
 
 	// State
-	promptText   string
 	width        int
 	height       int
 	events       chan<- ui.UIEvent
 	mouseEnabled bool
 	numpadMode   bool
 	initialized  bool
-	pendingRows  []string
-	// flushScheduled is true while a batch-window tick is outstanding.
-	// At most one tick is ever in flight: it is armed only on the
-	// idle->hot transition and re-armed only from handleTick while
-	// output is still flowing.
-	flushScheduled bool
 }
 
 // NewModel creates a new TUI model.
 func NewModel(events chan<- ui.UIEvent) *Model {
 	styles := style.DefaultStyles()
-	scrollback := widget.NewScrollbackBuffer(100000)
-	viewport := widget.NewViewport(scrollback, styles)
-	search := widget.NewSearch(scrollback, styles)
+	output := newOutputController(styles)
+	search := widget.NewSearch(output.buffer, styles)
 	input := widget.NewInput(styles, search)
-	panes := widget.NewPaneManager()
+	panes := newPaneRegistry(output)
 
 	m := &Model{
-		scrollback: scrollback,
-		viewport:   viewport,
-		input:      input,
-		panes:      panes,
-		events:     events,
-		widgets:    make(map[string]widget.Widget),
-		styles:     styles,
+		output: output,
+		input:  input,
+		panes:  panes,
+		events: events,
+		bars:   make(map[string]*widget.Bar),
+		styles: styles,
+		layout: ui.DefaultLayoutTree(),
 	}
 	m.inputCtl = newInputController(input, m.notifySession, m.submit, m.isBound, m.handleScrollKey, m)
-
-	// Register static widgets
-	m.widgets["input"] = input
-	m.widgets["separator"] = widget.NewSeparator()
 
 	return m
 }
@@ -109,12 +98,25 @@ func (m *Model) Init() tea.Cmd {
 
 // Update implements tea.Model.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// All layout-affecting state changes enter through Update. Invalidate once
+	// before dispatch so any synchronous geometry query observes the mutation
+	// and the following View can reuse that same plan.
+	m.invalidateLayout()
+	// Input, picker, search, and composer transitions can change intrinsic
+	// height inside their handlers. Finalize geometry for every message so a
+	// newly enlarged output viewport cannot silently clamp from scrolled to
+	// live during View without publishing the corresponding session state.
+	defer func() {
+		if m.syncViewportSize() {
+			m.updateScrollState()
+		}
+	}()
 	switch msg := msg.(type) {
 	// System
 	case tea.WindowSizeMsg:
 		return m.handleWindowSize(msg)
 	case tickMsg:
-		return m.handleTick()
+		return m.handleTick(msg)
 	case tea.KeyPressMsg:
 		m.inputCtl.HandleKey(msg)
 		return m, nil
@@ -133,7 +135,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleDisplayOutput(msg)
 
 	// Pane operations
-	case ui.PaneCreateMsg, ui.PaneWriteMsg, ui.PaneToggleMsg, ui.PaneSetVisibleMsg, ui.PaneClearMsg:
+	case ui.PaneCreateMsg, ui.PaneWriteMsg, ui.PaneClearMsg:
 		return m.handlePaneMsg(msg)
 
 	// Input control
@@ -162,40 +164,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		osc52.New(string(msg)).WriteTo(os.Stderr) //nolint:errcheck // best-effort: no way to report terminal-side failure
 		return m, nil
 
-	// Pane scrolling (from Lua). "main" is the output viewport; any
-	// other name scrolls that pane's own buffer. Unknown panes are
-	// ignored rather than auto-created.
+	// Pane scrolling (from Lua). Every named surface follows the same pane
+	// contract. Output additionally reports its scroll state to Session.
 	case ui.PaneScrollUpMsg:
-		if msg.Name == "main" {
-			m.navigateMainViewport(func() {
-				m.viewport.ScrollUp(msg.Lines)
-			})
-		} else if pane, ok := m.panes.Lookup(msg.Name); ok {
-			pane.ScrollUp(msg.Lines)
-		}
+		m.scrollPane(msg.Name, func(pane paneResource) { pane.ScrollUp(msg.Lines) })
 		return m, nil
 	case ui.PaneScrollDownMsg:
-		if msg.Name == "main" {
-			m.navigateMainViewport(func() {
-				m.viewport.ScrollDown(msg.Lines)
-			})
-		} else if pane, ok := m.panes.Lookup(msg.Name); ok {
-			pane.ScrollDown(msg.Lines)
-		}
+		m.scrollPane(msg.Name, func(pane paneResource) { pane.ScrollDown(msg.Lines) })
 		return m, nil
 	case ui.PaneScrollToTopMsg:
-		if msg.Name == "main" {
-			m.navigateMainViewport(m.viewport.GotoTop)
-		} else if pane, ok := m.panes.Lookup(msg.Name); ok {
-			pane.ScrollToTop()
-		}
+		m.scrollPane(msg.Name, func(pane paneResource) { pane.ScrollToTop() })
 		return m, nil
 	case ui.PaneScrollToBottomMsg:
-		if msg.Name == "main" {
-			m.navigateMainViewport(m.viewport.GotoBottom)
-		} else if pane, ok := m.panes.Lookup(msg.Name); ok {
-			pane.ScrollToBottom()
-		}
+		m.scrollPane(msg.Name, func(pane paneResource) { pane.ScrollToBottom() })
 		return m, nil
 	}
 
@@ -206,8 +187,8 @@ func (m *Model) handleWindowSize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	m.width = msg.Width
 	m.height = msg.Height
 	m.initialized = true
-	m.syncViewportSize()
-	scrollStateChanged := m.recenterSearchFocus()
+	scrollStateChanged := m.syncViewportSize()
+	scrollStateChanged = m.recenterSearchFocus() || scrollStateChanged
 	m.notifySession(ui.WindowSizeChangedMsg{Width: msg.Width, Height: msg.Height})
 	if scrollStateChanged {
 		m.updateScrollState()
@@ -219,23 +200,12 @@ func (m *Model) handleWindowSize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 // arrived inside it and re-arms the window only while output is still
 // flowing. A tick that finds nothing pending (output went quiet, or an
 // echo already flushed eagerly) ends the chain - back to zero wakeups.
-func (m *Model) handleTick() (tea.Model, tea.Cmd) {
-	m.flushScheduled = false
-	if len(m.pendingRows) == 0 {
+func (m *Model) handleTick(msg tickMsg) (tea.Model, tea.Cmd) {
+	if !m.output.tick(msg.generation) {
 		return m, nil
 	}
-	m.flushPending()
-	m.flushScheduled = true
-	return m, doTick()
-}
-
-// flushPending appends all batched server rows to the scrollback.
-func (m *Model) flushPending() {
-	if len(m.pendingRows) == 0 {
-		return
-	}
-	m.appendRows(m.pendingRows...)
-	m.pendingRows = nil
+	m.updateScrollState()
+	return m, doTick(msg.generation)
 }
 
 func (m *Model) handleConfigUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -247,8 +217,7 @@ func (m *Model) handleConfigUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncBars(msg)
 		layoutChanged = true
 	case ui.UpdateLayoutMsg:
-		m.luaLayout.Top = msg.Top
-		m.luaLayout.Bottom = msg.Bottom
+		m.layout = ui.LayoutTree(msg)
 		layoutChanged = true
 	case ui.UpdateConfigMsg:
 		m.inputCtl.SetKeepOnSubmit(msg.KeepInput)
@@ -256,100 +225,99 @@ func (m *Model) handleConfigUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.numpadMode = msg.Numpad
 	}
 	if layoutChanged {
-		m.syncViewportSize()
-		if m.recenterSearchFocus() {
+		scrollStateChanged := m.syncViewportSize()
+		if m.recenterSearchFocus() || scrollStateChanged {
 			m.updateScrollState()
 		}
 	}
 	return m, nil
 }
 
-// syncBars updates the widgets map to match the current bar content.
-// Creates new Bar instances for new names, removes stale ones, updates
-// existing ones. A bar whose name collides with a built-in widget
-// ("input", "separator") is ignored rather than allowed to clobber it.
+// syncBars reconciles the bar registry with the latest successful Lua snapshot.
+// Panes and built-in widgets have separate owners and namespaces.
 func (m *Model) syncBars(content map[string]ui.BarContent) {
-	// Remove bars that no longer exist in content
-	for name := range m.barContent {
+	for name := range m.bars {
 		if _, exists := content[name]; !exists {
-			if _, isBar := m.widgets[name].(*widget.Bar); isBar {
-				delete(m.widgets, name)
-			}
+			delete(m.bars, name)
 		}
 	}
 
-	// Add or update bars
 	for name, barContent := range content {
-		w, exists := m.widgets[name]
+		bar, exists := m.bars[name]
 		if !exists {
-			w = widget.NewBar(name)
-			m.widgets[name] = w
+			bar = widget.NewBar(name)
+			m.bars[name] = bar
 		}
-		if bar, isBar := w.(*widget.Bar); isBar {
-			bar.SetContent(barContent)
-		}
+		bar.SetContent(barContent)
 	}
-
-	m.barContent = content
 }
 
 func (m *Model) handleDisplayOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case ui.PrintLineMsg:
-		rows := splitRows(string(msg), m.width)
-		if m.flushScheduled {
-			// Inside a batch window: coalesce with the burst.
-			m.pendingRows = append(m.pendingRows, rows...)
-			return m, nil
+		if generation, schedule := m.output.printServer(string(msg)); schedule {
+			m.updateScrollState()
+			return m, doTick(generation)
 		}
-		// Idle: render this line now and open a batch window so a
-		// following burst coalesces instead of rendering line-by-line.
-		m.appendRows(rows...)
-		m.flushScheduled = true
-		return m, doTick()
+		return m, nil
 	case ui.EchoLineMsg:
-		// Flush batched server lines first so the echo cannot render
-		// ahead of output that arrived before it.
-		m.flushPending()
-		m.appendMessage(string(msg))
+		m.output.echo(string(msg))
+		m.updateScrollState()
 	case ui.SetPromptMsg:
-		text := util.ExpandTabs(string(msg))
-		if text != m.promptText {
-			m.viewport.SetPrompt(text)
-			m.promptText = text
-		}
+		m.output.setPrompt(string(msg))
 	case ui.CommitPromptMsg:
-		m.flushPending()
-		if text := util.ExpandTabs(string(msg)); text != "" {
-			m.appendMessage(text)
-		}
-		m.viewport.SetPrompt("")
-		m.promptText = ""
+		m.output.commitPrompt(string(msg))
+		m.updateScrollState()
 	}
 	return m, nil
 }
 
+// handlePaneMsg applies buffer content operations. Placement and visibility
+// are layout-tree state and arrive as UpdateLayoutMsg instead.
 func (m *Model) handlePaneMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
+	contentChanged := false
+	var affected paneResource
 	switch msg := msg.(type) {
 	case ui.PaneCreateMsg:
-		m.panes.Create(msg.Name)
+		affected = m.panes.Create(msg.Name)
 	case ui.PaneWriteMsg:
-		m.panes.Write(msg.Name, msg.Text)
-	case ui.PaneToggleMsg:
-		m.panes.Toggle(msg.Name)
-	case ui.PaneSetVisibleMsg:
-		m.panes.SetVisible(msg.Name, msg.Visible)
+		affected = m.panes.Write(msg.Name, msg.Text)
+		contentChanged = true
 	case ui.PaneClearMsg:
-		m.panes.Clear(msg.Name)
+		if msg.Name == ui.OutputPaneName {
+			if m.input.SearchActive() {
+				m.inputCtl.closeSearch(false)
+			}
+			m.searchView = searchViewState{}
+		}
+		affected, _ = m.panes.Clear(msg.Name)
+		contentChanged = true
+	}
+	if affected == m.output && contentChanged {
+		m.updateScrollState()
 	}
 	return m, nil
 }
 
-// wheelScrollLines is how far one mouse-wheel tick scrolls the main
+// scrollPane applies one navigation operation to an existing pane. Output's
+// extra search and session-state effects remain private to the controller.
+func (m *Model) scrollPane(name string, scroll func(paneResource)) {
+	pane, ok := m.panes.Lookup(name)
+	if !ok {
+		return
+	}
+	if pane == m.output {
+		m.navigateOutputPane(func() { scroll(pane) })
+		return
+	}
+	scroll(pane)
+}
+
+// wheelScrollLines is how far one mouse-wheel tick scrolls the output
 // viewport. Matches the common terminal-emulator default.
 const wheelScrollLines = 3
 
-// handleMouse scrolls the main viewport on wheel events when the terminal
+// handleMouse scrolls the output viewport on wheel events when the terminal
 // reports them; everything else is ignored.
 func (m *Model) handleMouse(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 	switch msg.Button {
@@ -357,15 +325,15 @@ func (m *Model) handleMouse(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 		if m.inputCtl.selectOlderSearch() {
 			return m, nil
 		}
-		m.navigateMainViewport(func() {
-			m.viewport.ScrollUp(wheelScrollLines)
+		m.navigateOutputPane(func() {
+			m.output.viewport.ScrollUp(wheelScrollLines)
 		})
 	case tea.MouseWheelDown:
 		if m.inputCtl.selectNewerSearch() {
 			return m, nil
 		}
-		m.navigateMainViewport(func() {
-			m.viewport.ScrollDown(wheelScrollLines)
+		m.navigateOutputPane(func() {
+			m.output.viewport.ScrollDown(wheelScrollLines)
 		})
 	}
 	return m, nil
@@ -373,8 +341,8 @@ func (m *Model) handleMouse(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 
 // splitRows shapes a message into physical scrollback rows: one row
 // per line break, tabs expanded per row so columns restart on every
-// row, rows wider than the terminal word-wrapped. Rows are final at
-// append time; a resize does not rewrap old output.
+// row, and rows wider than the resolved output surface are word-wrapped. Rows
+// are final at append time; a resize does not rewrap old output.
 func splitRows(msg string, width int) []string {
 	if !strings.ContainsAny(msg, "\r\n") {
 		return util.WrapLine(util.ExpandTabs(msg), width)
@@ -386,17 +354,10 @@ func splitRows(msg string, width int) []string {
 	return rows
 }
 
-func (m *Model) appendRows(rows ...string) {
-	for _, row := range rows {
-		m.scrollback.Append(row)
-	}
-	m.viewport.OnNewRows(len(rows))
-	m.updateScrollState()
-}
-
 // appendMessage shapes text into rows and appends them.
 func (m *Model) appendMessage(text string) {
-	m.appendRows(splitRows(text, m.width)...)
+	m.output.Write(text)
+	m.updateScrollState()
 }
 
 // submit offers a submission and its following draft to the session as one
@@ -450,16 +411,12 @@ func (m *Model) notifySession(event ui.UIEvent) {
 // showWarning appends locally without reporting another scroll-state event:
 // this path is reached only when the Session event queue is already full.
 func (m *Model) showWarning(message string) {
-	rows := splitRows(text.Red("[WARNING] "+message), m.width)
-	for _, row := range rows {
-		m.scrollback.Append(row)
-	}
-	m.viewport.OnNewRows(len(rows))
+	m.output.Write(text.Red("[WARNING] " + message))
 }
 
 func (m *Model) updateScrollState() {
-	mode := m.viewport.Mode()
-	newLines := m.viewport.NewLineCount()
+	mode := m.output.viewport.Mode()
+	newLines := m.output.viewport.NewLineCount()
 
 	modeStr := "live"
 	if mode != widget.ModeLive {
@@ -468,10 +425,10 @@ func (m *Model) updateScrollState() {
 	m.notifySession(ui.ScrollStateChangedMsg{Mode: modeStr, NewLines: newLines})
 }
 
-// navigateMainViewport is the single path for deliberate user/script
-// navigation of the main output surface. Search previews position the
+// navigateOutputPane is the single path for deliberate user/script
+// navigation of the output surface. Search previews position the
 // viewport directly so their committed marker remains intact.
-func (m *Model) navigateMainViewport(move func()) {
+func (m *Model) navigateOutputPane(move func()) {
 	m.clearCommittedSearchFocus()
 	move()
 	m.updateScrollState()
@@ -482,13 +439,13 @@ func (m *Model) navigateMainViewport(move func()) {
 func (m *Model) handleScrollKey(msg tea.KeyPressMsg) bool {
 	switch {
 	case matchesKey(msg, tea.KeyPgUp, 0):
-		m.navigateMainViewport(m.viewport.PageUp)
+		m.navigateOutputPane(m.output.viewport.PageUp)
 	case matchesKey(msg, tea.KeyPgDown, 0):
-		m.navigateMainViewport(m.viewport.PageDown)
+		m.navigateOutputPane(m.output.viewport.PageDown)
 	case matchesKey(msg, tea.KeyHome, tea.ModCtrl):
-		m.navigateMainViewport(m.viewport.GotoTop)
+		m.navigateOutputPane(m.output.viewport.GotoTop)
 	case matchesKey(msg, tea.KeyEnd, tea.ModCtrl):
-		m.navigateMainViewport(m.viewport.GotoBottom)
+		m.navigateOutputPane(m.output.viewport.GotoBottom)
 	default:
 		return false
 	}

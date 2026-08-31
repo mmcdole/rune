@@ -524,6 +524,9 @@ func (s *Session) pushBarUpdates() {
 
 	content := s.engine.RenderBars(width)
 	if content != nil {
+		// An empty successful snapshot is still state: it removes bars that
+		// rendered content on the previous tick and lets layout reclaim them.
+		// A failed pass is nil and preserves the last good UI snapshot.
 		s.ui.UpdateBars(content)
 	}
 }
@@ -537,8 +540,5 @@ func (s *Session) pushBindsAndLayout() {
 	}
 	s.ui.UpdateBinds(bindsMap)
 
-	luaLayout := s.engine.GetLayout()
-	if len(luaLayout.Top) > 0 || len(luaLayout.Bottom) > 0 {
-		s.ui.UpdateLayout(luaLayout.Top, luaLayout.Bottom)
-	}
+	s.ui.UpdateLayout(s.engine.GetLayout())
 }

@@ -19,7 +19,7 @@ type UI interface {
 	// Updates
 	UpdateBars(content map[string]BarContent)
 	UpdateBinds(keys map[string]bool)
-	UpdateLayout(top, bottom []LayoutEntry)
+	UpdateLayout(layout LayoutTree)
 	UpdateConfig(cfg Config)
 
 	// Components
@@ -28,8 +28,6 @@ type UI interface {
 	SetClipboard(text string)
 	CreatePane(name string)
 	WritePane(name, text string)
-	TogglePane(name string)
-	SetPaneVisible(name string, visible bool)
 	ClearPane(name string)
 
 	// Input primitives. Cursor positions are zero-based rune offsets.

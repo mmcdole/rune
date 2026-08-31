@@ -49,7 +49,7 @@ graph TD
     Session -->|Process batch| Protocol
     Protocol -->|Ordered effects| Session
     Session --> PartialLine
-    Session -->|Update: Layout/Content| Model
+    Session -->|Update: LayoutTree/Bars/Content| Model
     Session -->|Connection-scoped write| NetWrite
     Session -->|Exec| Lua
 ```
@@ -127,15 +127,94 @@ To solve thread-safety issues between the UI rendering loop and the Lua executio
 
 ### 3.1 Layout and Bars
 
-User scripts define layouts and status bars using Lua functions.
+Layout crosses Engine, Session, and TUI boundaries as `ui.LayoutTree`. Each
+node is a row, column, or leaf. Tree-layout leaves are input, separator, named
+pane, and named bar placements. The server-output surface is not a distinct
+node type: the TUI pre-creates a pane buffer named `output`, and the
+layout places it with the same pane leaf used for any other buffer.
+A node's `LayoutSize` is expressed along its parent's axis as fixed cells,
+percentage, fractional remainder, or automatic height. Omitted native size is
+lowered to `auto` for input, separator, and bar leaves, and remains the default
+`1fr` for panes and containers.
 
-- **Definition:** `rune.ui.bar("status", function(width) ... end)`
-- **Trigger:** A ticker in the Session runs every 250ms (or on state change).
-- **Execution:** The Session executes the Lua function to generate the bar content string.
-- **Push:** The Session sends an `UpdateBarsMsg` map to the UI.
-- **Render:** The UI reads from this map during its `View()` cycle.
+`lua/api_layout.go` is the only ingestion boundary; legacy v1 ingestion is
+isolated in `lua/layout_v1.go`:
 
-This ensures the UI never calls into Lua directly, preventing race conditions.
+1. A legacy top/bottom table, optionally marked `version = 1`, is parsed with
+   the permissive dock reader and lowered into a column with the implicit
+   `output` pane between those entries. Stable `input` and `separator` names
+   become their native leaves; every other name stays late-bound inside the
+   compatibility adapter.
+   Late-bound compatibility leaves express v1's horizontal-only pane chrome
+   through the canonical `border = "horizontal"` pane field.
+2. A native table is the root node itself. It may be any native node and is
+   parsed strictly, subject to application invariants including exactly one
+   input leaf. Output placement is optional.
+3. Both paths call the same structural validator and produce `ui.LayoutTree`.
+   Raw top/bottom structure and version fields do not reach Session or the TUI.
+   The v1 path may retain private late-bound compatibility leaves until the TUI
+   binds them to current bar or pane resources.
+4. One parse call is atomic within its Lua generation. Only a complete valid
+   candidate replaces that generation's current tree; reload begins a fresh
+   generation from the default before evaluating user configuration.
+
+Placement visibility is owned by the installed layout. Non-root rows and
+columns with an ID are runtime regions whose `hidden` bit is changed through
+`rune.ui.regions.show/hide/toggle`; pane leaves carry the same bit addressed
+by name through `rune.pane.show/hide/toggle`; `is_visible` reads a gate
+without ancestors. Layout replacement and reload both reset visibility from
+the new declarative tree. Regions cannot contain input. On a late-bound
+compatibility leaf the gate applies only to its pane fallback, never to a
+registered bar, and v1 pane placements start gated to preserve v1's
+hidden-until-shown behavior.
+
+Session pushes that tree snapshot through `UpdateLayout`. The TUI resolves it
+for each current terminal geometry:
+
+- Hidden regions, hidden pane placements, and empty bars are pruned before
+  allocation. Containers with no active descendants disappear. Placing a pane
+  creates its buffer, so a declared pane renders even before its first write.
+- The resolver measures each active leaf through the widget contract and
+  constructs one-axis `ui.AxisTrack` values. An automatic-height row first
+  allocates its child widths, then measures those children at the assigned
+  widths.
+- `ui.AllocateAxis` reserves gaps, resolves fixed/percentage/automatic tracks,
+  distributes the remainder among fractional tracks with deterministic
+  rounding, and applies minimum and maximum bounds.
+- Recursion turns those track sizes into exact leaf rectangles. The same
+  `layoutPlan` sizes pane viewports for wrapping, search, scrolling, and the
+  subsequent render, so interaction geometry cannot disagree with the frame.
+- Ordinary pane buffers store logical lines and re-wrap at render time. The
+  reserved `output` pane retains the transcript's physical rows at append-time
+  width because prompt composition, search anchors, and scrolling depend on that
+  history model while implementing the same public pane operations.
+- A centralized frame grid owns pane borders, shared seams, titles, and junction
+  glyphs. Leaf content is drawn into its assigned rectangle and clipped there.
+
+Bars retain the Push/Snapshot boundary:
+
+- `rune.ui.bar("status", function(width) ... end)` registers policy in Lua.
+- A layout places it with `type = bar` and `name = status`, keeping
+  registry identity separate from structural node types.
+- Session calls every active renderer on its 250ms ticker, passing the terminal
+  width, and sends the resulting `UpdateBarsMsg` map to the UI.
+- The layout may assign a bar a narrower rectangle. The UI sizes and clips the
+  already-rendered bar to that slot; it never calls Lua to re-render at the slot
+  width.
+
+This keeps Lua on the Session goroutine and geometry/rendering on Bubble Tea's
+goroutine while giving both sides one typed layout contract.
+
+The lifetimes are intentionally different:
+
+- Pane buffers and scroll state belong to the TUI model and survive layout
+  replacement and Lua reload. `clear` leaves an unknown name alone.
+- Bar registration, enabled state, group state, and failure quarantine belong to
+  the Lua registry. They survive layout replacement and reset on reload.
+- Region and pane placement gates belong to one installed layout and reset on
+  replacement/reload. A pane renders only when its placement gate and every
+  ancestor region gate permit it; a bar additionally requires an enabled,
+  non-empty resource snapshot.
 
 ### 3.2 Key Bindings
 

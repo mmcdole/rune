@@ -301,6 +301,26 @@ func TestSearchViewNoMatches(t *testing.T) {
 	}
 }
 
+func TestConstrainedSearchAlwaysRendersSelectedMatch(t *testing.T) {
+	lines := make([]string, 8)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("thief %d", i+1)
+	}
+	s := newTestSearch(lines...)
+	s.SetWidth(40)
+	s.Open("thief", SearchScope{})
+	if selected, ok := s.Selected(); !ok || selected.Stripped != "thief 8" {
+		t.Fatalf("test setup selected %+v, want newest match", selected)
+	}
+
+	for _, height := range []int{2, 3, 4} {
+		view := runetext.StripANSI(s.constrainedView(height))
+		if !strings.Contains(view, "thief 8") {
+			t.Fatalf("height %d hid selected match:\n%s", height, view)
+		}
+	}
+}
+
 func TestSearchViewPartialCount(t *testing.T) {
 	buf := NewScrollbackBuffer(1000)
 	for i := 0; i < 300; i++ {

@@ -212,6 +212,15 @@ function Registry:disable(name)
     return false
 end
 
+function Registry:toggle(name)
+    local handle = self.by_name[name]
+    if handle then
+        handle._data.enabled = not handle._data.enabled
+        return true
+    end
+    return false
+end
+
 function Registry:remove(name)
     local handle = self.by_name[name]
     if handle then

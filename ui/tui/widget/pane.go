@@ -6,7 +6,8 @@ import (
 	"github.com/mmcdole/rune/ui/tui/util"
 )
 
-// Pane represents a named buffer that can be shown/hidden.
+// Pane is a named text buffer. Whether and where it appears on screen is
+// placement state owned by the layout tree, never by the buffer.
 //
 // Lines are stored as written (logical lines) and soft-wrapped to the
 // requested width when ContentRows is called, so a resize re-fits
@@ -16,7 +17,6 @@ import (
 type Pane struct {
 	Name     string
 	Lines    []string
-	Visible  bool
 	offset   int // logical lines scrolled back from the newest (0 = live)
 	newLines int // writes that arrived while scrolled
 }
@@ -24,9 +24,8 @@ type Pane struct {
 // NewPane creates a new pane.
 func NewPane(name string) *Pane {
 	return &Pane{
-		Name:    name,
-		Lines:   make([]string, 0, 100),
-		Visible: false,
+		Name:  name,
+		Lines: make([]string, 0, 100),
 	}
 }
 
@@ -112,14 +111,29 @@ func (p *Pane) clampOffset() {
 
 // ScrollUp scrolls back by n logical lines.
 func (p *Pane) ScrollUp(n int) {
-	p.offset += n
+	if n <= 0 {
+		return
+	}
+	maxOffset := max(0, len(p.Lines)-1)
+	if n >= maxOffset-p.offset {
+		p.offset = maxOffset
+	} else {
+		p.offset += n
+	}
 	p.clampOffset()
 }
 
 // ScrollDown scrolls forward by n logical lines; reaching the newest
 // line returns the pane to live tailing.
 func (p *Pane) ScrollDown(n int) {
-	p.offset -= n
+	if n <= 0 {
+		return
+	}
+	if n >= p.offset {
+		p.offset = 0
+	} else {
+		p.offset -= n
+	}
 	p.clampOffset()
 }
 
@@ -135,83 +149,9 @@ func (p *Pane) ScrollToBottom() {
 	p.newLines = 0
 }
 
-// SetVisible shows or hides the pane. Visibility never touches scroll
-// state: a pane hidden on the live tail reopens live, a scrolled pane
-// reopens anchored where it was (Write keeps the anchor as the buffer
-// grows, and clampOffset pins it to the oldest line if trimming
-// removes the history it pointed at).
-func (p *Pane) SetVisible(visible bool) {
-	p.Visible = visible
-}
-
-// Toggle toggles visibility.
-func (p *Pane) Toggle() {
-	p.Visible = !p.Visible
-}
-
 // Clear empties the pane.
 func (p *Pane) Clear() {
 	p.Lines = p.Lines[:0]
 	p.offset = 0
 	p.newLines = 0
-}
-
-// PaneManager handles multiple named panes.
-type PaneManager struct {
-	panes map[string]*Pane
-}
-
-// NewPaneManager creates a new pane manager.
-func NewPaneManager() *PaneManager {
-	return &PaneManager{
-		panes: make(map[string]*Pane),
-	}
-}
-
-// Create creates a new pane.
-func (pm *PaneManager) Create(name string) {
-	if _, exists := pm.panes[name]; exists {
-		return
-	}
-	pm.panes[name] = NewPane(name)
-}
-
-// Get returns a pane by name, creating it if needed.
-func (pm *PaneManager) Get(name string) *Pane {
-	if _, exists := pm.panes[name]; !exists {
-		pm.Create(name)
-	}
-	return pm.panes[name]
-}
-
-// Lookup returns an existing pane without creating it.
-func (pm *PaneManager) Lookup(name string) (*Pane, bool) {
-	pane, ok := pm.panes[name]
-	return pane, ok
-}
-
-// Write appends a line to a pane (auto-creates if missing).
-func (pm *PaneManager) Write(name, text string) {
-	pm.Get(name).Write(text)
-}
-
-// Toggle toggles pane visibility.
-func (pm *PaneManager) Toggle(name string) {
-	if pane, exists := pm.panes[name]; exists {
-		pane.Toggle()
-	}
-}
-
-// SetVisible shows or hides a pane.
-func (pm *PaneManager) SetVisible(name string, visible bool) {
-	if pane, exists := pm.panes[name]; exists {
-		pane.SetVisible(visible)
-	}
-}
-
-// Clear clears a pane.
-func (pm *PaneManager) Clear(name string) {
-	if pane, exists := pm.panes[name]; exists {
-		pane.Clear()
-	}
 }

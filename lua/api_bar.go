@@ -9,8 +9,8 @@ import (
 // also applies the standard failure quarantine. Go's role is calling
 // rune.bars._render_all on the tick and marshaling the result.
 
-// registerBarFuncs registers layout/refresh primitives on rune._ui.
-// The public rune.ui wrappers are defined in Lua (00_init.lua).
+// registerBarFuncs registers rune._ui.refresh_bars. Its public wrapper is
+// defined in 00_init.lua.
 func (e *Engine) registerBarFuncs() {
 	e.vm.RegisterModule("rune._ui", map[string]script.GoFunc{
 		// rune._ui.refresh_bars() - Force immediate bar refresh
@@ -19,77 +19,12 @@ func (e *Engine) registerBarFuncs() {
 			e.host.RefreshBars()
 			return nil
 		},
-
-		// rune._ui.layout(config) - Set the layout configuration
-		// config = { top = {"bar1", {name="pane", height=10}}, bottom = {"input", "status"} }
-		"layout": func(c *script.Call) error {
-			cfg := c.Table(1)
-
-			if top := cfg.Field("top").Table(); top != nil {
-				e.barLayout.Top = parseLayoutArray(top)
-			} else {
-				e.barLayout.Top = nil
-			}
-			if bottom := cfg.Field("bottom").Table(); bottom != nil {
-				e.barLayout.Bottom = parseLayoutArray(bottom)
-			} else {
-				e.barLayout.Bottom = nil
-			}
-
-			e.host.OnPresentationChange()
-			return nil
-		},
 	}, nil)
 }
 
-// parseLayoutArray converts a script array table to LayoutEntry slice.
-// Supports both strings ("name") and tables ({name="name", height=10}).
-// Layout order is semantic, so read the array part by index (Each
-// visits in engine-defined order). Any other string-valued key on a
-// table entry is carried in Opts without interpretation; the named
-// widget owns its keys' meaning.
-func parseLayoutArray(tbl script.TableView) []ui.LayoutEntry {
-	var result []ui.LayoutEntry
-	for i := 1; i <= tbl.Len(); i++ {
-		v := tbl.Index(i)
-		switch v.Kind() {
-		case script.KindString:
-			// Simple string: "component_name"
-			result = append(result, ui.LayoutEntry{Name: v.Str()})
-		case script.KindTable:
-			// Table: {name="component_name", height=10, ...opts}
-			t := v.Table()
-			entry := ui.LayoutEntry{Name: t.Field("name").Str()}
-			if height := t.Field("height"); height.Kind() == script.KindNumber {
-				entry.Height = int(height.Num())
-			}
-			// Opts are a set, so order does not matter here.
-			t.Each(func(key, option script.Value) bool {
-				if key.Kind() != script.KindString ||
-					option.Kind() != script.KindString {
-					return true
-				}
-				switch name := key.Str(); name {
-				case "name", "height":
-				default:
-					if entry.Opts == nil {
-						entry.Opts = make(map[string]string)
-					}
-					entry.Opts[name] = option.Str()
-				}
-				return true
-			})
-			if entry.Name != "" {
-				result = append(result, entry)
-			}
-		}
-	}
-	return result
-}
-
-// RenderBars asks the Lua bar module to render every active bar at
-// the given width. Returns nil when no bars produced content or the
-// module is unavailable (degraded mode).
+// RenderBars asks the Lua bar module to render every active bar at the given
+// width. A non-nil empty map is a successful empty snapshot; nil means the
+// render pass failed and callers should retain their last good snapshot.
 // Must be called from the Session goroutine (single Lua owner).
 func (e *Engine) RenderBars(width int) map[string]ui.BarContent {
 	result := make(map[string]ui.BarContent)
@@ -123,13 +58,5 @@ func (e *Engine) RenderBars(width int) map[string]ui.BarContent {
 		e.reportError("bar render", err)
 		return nil
 	}
-	if len(result) == 0 {
-		return nil
-	}
 	return result
-}
-
-// GetLayout returns the current Lua-defined layout configuration.
-func (e *Engine) GetLayout() ui.LayoutConfig {
-	return e.barLayout
 }

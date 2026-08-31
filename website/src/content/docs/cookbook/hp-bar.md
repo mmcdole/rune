@@ -4,7 +4,7 @@ description: A block-graph vitals bar that updates the instant the server report
 ---
 
 On a GMCP server, vitals arrive as data, with no prompt parsing. This
-renders them as a block graph docked above the input line:
+renders them as a block graph placed above the input line:
 
 ```lua
 local vitals = {}
@@ -31,7 +31,15 @@ rune.ui.bar("vitals", function(width)
         blocks(sp, msp, 10, rune.style.cyan), sp, msp)
 end)
 
-rune.ui.layout({ bottom = { "vitals", "input", "status" } })
+rune.ui.layout({
+    type = "column",
+    children = {
+        { type = "pane", name = "output", border = "none" },
+        { type = "bar", name = "vitals" },
+        { type = "input" },
+        { type = "bar", name = "status" },
+    },
+})
 ```
 
 ## How it works
@@ -40,8 +48,8 @@ rune.ui.layout({ bottom = { "vitals", "input", "status" } })
   `refresh_bars()`; the render function only formats. Keep that split, since
   renderers run four times a second.
 - `subscribe("Char")` asks the server for the whole `Char` package.
-- The layout line matters: a [bar](/interface/bars/) shows only if a
-  layout dock names it.
+- The layout matters: a [bar](/interface/bars/) shows only if the tree has a
+  `bar` leaf whose `name` is its registered name.
 - The bar turns red under 25% HP by swapping the style function.
 
 ## Variations

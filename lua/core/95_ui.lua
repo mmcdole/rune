@@ -16,16 +16,25 @@ function rune.pane.write(name, text)
     rune._pane.write(name, text)
 end
 
+-- Visibility is placement state on the active layout tree: show, hide, and
+-- toggle flip the pane's placement and return whether the layout places the
+-- pane at all. A new rune.ui.layout() or /reload restores declared state.
 function rune.pane.toggle(name)
-    rune._pane.toggle(name)
+    return rune._pane.toggle(name)
 end
 
 function rune.pane.show(name)
-    rune._pane.set_visible(name, true)
+    return rune._pane.show(name)
 end
 
 function rune.pane.hide(name)
-    rune._pane.set_visible(name, false)
+    return rune._pane.hide(name)
+end
+
+-- Reports the pane placement's own gate (not ancestor regions), or nil when
+-- the layout does not place the pane.
+function rune.pane.is_visible(name)
+    return rune._pane.is_visible(name)
 end
 
 function rune.pane.clear(name)
@@ -33,11 +42,11 @@ function rune.pane.clear(name)
 end
 
 function rune.pane.scroll_up(name, lines)
-    rune._pane.scroll_up(name, lines or 1)
+    rune._pane.scroll_up(name, lines)
 end
 
 function rune.pane.scroll_down(name, lines)
-    rune._pane.scroll_down(name, lines or 1)
+    rune._pane.scroll_down(name, lines)
 end
 
 function rune.pane.scroll_to_top(name)
@@ -64,12 +73,12 @@ end
 -- PANE SCROLLING BINDINGS
 -- ============================================================
 
-rune.bind("pgup", function() rune.pane.scroll_up("main", 20) end)
-rune.bind("pgdown", function() rune.pane.scroll_down("main", 20) end)
+rune.bind("pgup", function() rune.pane.scroll_up("output", 20) end)
+rune.bind("pgdown", function() rune.pane.scroll_down("output", 20) end)
 -- Bare Home/End are deliberately unbound: they fall through to the
 -- input widget as cursor-to-start/end, matching the composer's keymap.
-rune.bind("ctrl+home", function() rune.pane.scroll_to_top("main") end)
-rune.bind("ctrl+end", function() rune.pane.scroll_to_bottom("main") end)
+rune.bind("ctrl+home", function() rune.pane.scroll_to_top("output") end)
+rune.bind("ctrl+end", function() rune.pane.scroll_to_bottom("output") end)
 
 -- ============================================================
 -- STATUS BAR
@@ -157,12 +166,6 @@ rune.ui.bar("status", function(width)
 
     return { left = left, right = right }
 end)
-
--- Set default layout: intrinsic-height input area with status bar below
--- This can be overridden by user's init.lua
-rune.ui.layout({
-    bottom = { "input", "status" }
-})
 
 -- ============================================================
 -- PICKER BINDINGS

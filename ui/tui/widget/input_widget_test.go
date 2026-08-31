@@ -158,6 +158,56 @@ func TestInputPickerOverlayGrowsView(t *testing.T) {
 	}
 }
 
+func TestConstrainedPickerKeepsEditableInputVisible(t *testing.T) {
+	in := newTestInput(20)
+	in.SetValue("nor")
+	in.ShowPicker(ui.ShowPickerMsg{
+		Inline: true,
+		Items:  []ui.PickerItem{{Text: "north", Value: "north"}},
+	})
+
+	for _, height := range []int{1, 2} {
+		in.SetSize(20, height)
+		rows := strings.Split(text.StripANSI(in.View()), "\n")
+		if len(rows) != height {
+			t.Fatalf("height %d rendered %d rows: %q", height, len(rows), rows)
+		}
+		if !strings.Contains(rows[0], "> nor") {
+			t.Fatalf("height %d hid editable input behind picker: %q", height, rows)
+		}
+		if strings.Contains(strings.Join(rows, "\n"), "north") {
+			t.Fatalf("height %d rendered a clipped picker instead of degrading cleanly: %q", height, rows)
+		}
+	}
+}
+
+func TestConstrainedSearchKeepsActiveQueryVisible(t *testing.T) {
+	in := newTestInput(24)
+	in.ShowSearch("thief", SearchScope{})
+
+	for _, height := range []int{1, 2} {
+		in.SetSize(24, height)
+		rows := strings.Split(text.StripANSI(in.View()), "\n")
+		if len(rows) != height {
+			t.Fatalf("height %d rendered %d rows: %q", height, len(rows), rows)
+		}
+		if !strings.Contains(rows[0], "Search: thief") {
+			t.Fatalf("height %d hid active search query: %q", height, rows)
+		}
+	}
+}
+
+func TestConstrainedComposerKeepsEditableBodyVisible(t *testing.T) {
+	in := newTestInput(24)
+	in.BeginCompose("say north\nsay south", 4)
+	in.SetSize(24, 1)
+
+	rows := strings.Split(text.StripANSI(in.View()), "\n")
+	if len(rows) != 1 || !strings.Contains(rows[0], "say north") {
+		t.Fatalf("one-row composer hid editable body: %q", rows)
+	}
+}
+
 func TestInputInlinePickerSeedsFilterFromInput(t *testing.T) {
 	in := newTestInput(40)
 	items := []ui.PickerItem{

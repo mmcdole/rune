@@ -24,16 +24,6 @@ func (s *Session) PaneWrite(name, msg string) {
 	s.ui.WritePane(name, text.SanitizeDisplay(msg))
 }
 
-// PaneToggle implements lua.Host.
-func (s *Session) PaneToggle(name string) {
-	s.ui.TogglePane(name)
-}
-
-// PaneSetVisible implements lua.Host.
-func (s *Session) PaneSetVisible(name string, visible bool) {
-	s.ui.SetPaneVisible(name, visible)
-}
-
 // PaneClear implements lua.Host.
 func (s *Session) PaneClear(name string) {
 	s.ui.ClearPane(name)

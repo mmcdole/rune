@@ -30,8 +30,6 @@ type Host interface {
 	Print(text string)
 	PaneCreate(name string)
 	PaneWrite(name, text string)
-	PaneToggle(name string)
-	PaneSetVisible(name string, visible bool)
 	PaneClear(name string)
 	ShowPicker(opts ui.ShowPickerMsg)
 	ShowSearch(opts ui.ShowSearchMsg)

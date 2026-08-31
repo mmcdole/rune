@@ -24,6 +24,55 @@ func viewRows(v *Viewport) []string {
 	return strings.Split(v.View(), "\n")
 }
 
+func TestViewportResizeClampsScrolledOffsetToVisibleHistory(t *testing.T) {
+	lines := make([]string, 10)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line %d", i+1)
+	}
+	v, buffer := newTestViewport(40, 2, lines...)
+	v.GotoTop()
+	if v.offset != 8 {
+		t.Fatalf("top offset = %d, want 8", v.offset)
+	}
+
+	v.SetSize(40, 5)
+	if v.offset != 5 {
+		t.Fatalf("grown viewport offset = %d, want clamped maximum 5", v.offset)
+	}
+	rows := viewRows(v)
+	for i := 0; i < 5; i++ {
+		if rows[i] != lines[i] {
+			t.Fatalf("grown viewport row %d = %q, want %q (all rows %q)", i, rows[i], lines[i], rows)
+		}
+	}
+
+	buffer.Append("line 11")
+	v.OnNewRows(1)
+	if v.NewLineCount() != 1 {
+		t.Fatalf("new line count = %d, want 1 while scrolled", v.NewLineCount())
+	}
+	v.SetSize(40, 20)
+	if v.Mode() != ModeLive || v.offset != 0 || v.NewLineCount() != 0 {
+		t.Fatalf("fully expanded viewport = mode %v offset %d new %d, want live zero state",
+			v.Mode(), v.offset, v.NewLineCount())
+	}
+}
+
+func TestViewportScrollDistancesCannotInvertOrOverflow(t *testing.T) {
+	v, _ := newTestViewport(40, 2, "one", "two", "three", "four", "five")
+	v.ScrollUp(1)
+	before := v.offset
+	v.ScrollUp(-1)
+	v.ScrollDown(-1)
+	if v.offset != before {
+		t.Fatalf("negative distance changed offset from %d to %d", before, v.offset)
+	}
+	v.ScrollUp(int(^uint(0) >> 1))
+	if v.offset != v.maxOffset() {
+		t.Fatalf("huge distance offset = %d, want maximum %d", v.offset, v.maxOffset())
+	}
+}
+
 func TestViewportLiveShowsNewestLines(t *testing.T) {
 	var lines []string
 	for i := 1; i <= 10; i++ {
@@ -444,5 +493,34 @@ func TestViewportRestoreScrollClampsAfterEviction(t *testing.T) {
 	}
 	if v.Mode() != ModeScrolled {
 		t.Error("clamped restore should remain scrolled")
+	}
+}
+
+func TestScrollbackAndViewportClearResetHistoryButKeepLivePrompt(t *testing.T) {
+	v, buf := newTestViewport(20, 3, "one", "two", "three", "four")
+	lastSeq := buf.Seq(buf.Count() - 1)
+	v.ScrollUp(1)
+	v.SetHighlight(lastSeq, []util.ColRange{{Start: 0, End: 3}})
+	v.SetPrompt("HP> ")
+
+	buf.Clear()
+	v.Clear()
+	if buf.Count() != 0 {
+		t.Fatalf("buffer count after clear = %d, want 0", buf.Count())
+	}
+	if v.Mode() != ModeLive || v.NewLineCount() != 0 {
+		t.Fatalf("viewport after clear = (%v, %d), want live with no unseen rows", v.Mode(), v.NewLineCount())
+	}
+	if got := v.View(); !strings.HasSuffix(got, "HP> ") {
+		t.Fatalf("clear removed prompt: %q", got)
+	}
+
+	buf.Append("new")
+	v.OnNewRows(1)
+	if seq := buf.Seq(0); seq <= lastSeq {
+		t.Fatalf("sequence after clear = %d, want greater than old sequence %d", seq, lastSeq)
+	}
+	if _, ok := buf.IndexOf(lastSeq); ok {
+		t.Fatalf("old sequence %d resolved after clear", lastSeq)
 	}
 }

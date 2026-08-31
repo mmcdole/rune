@@ -63,10 +63,18 @@ rune.trigger.contains("You swing at", function()
 end, { group = "gags" })
 
 rune.ui.bar("swings", function() return "swings: " .. swings end)
-rune.ui.layout({ bottom = { "swings", "input", "status" } })
+rune.ui.layout({
+    type = "column",
+    children = {
+        { type = "pane", name = "output", border = "none" },
+        { type = "bar", name = "swings" },
+        { type = "input" },
+        { type = "bar", name = "status" },
+    },
+})
 ```
 
-The layout line is required: a bar renders only if a
-[layout](/interface/layout/) dock names it.
+The bar placement is required: a bar renders only if a
+[layout](/interface/layout/) `bar` leaf uses its registered `name`.
 
 **Related:** [Triggers](/scripting/triggers/) · [Groups](/scripting/groups/) · [Bars](/interface/bars/)

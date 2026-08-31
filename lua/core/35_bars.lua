@@ -82,6 +82,10 @@ function rune.bars.enable(name)
     return registry:enable(name)
 end
 
+function rune.bars.toggle(name)
+    return registry:toggle(name)
+end
+
 function rune.bars.remove(name)
     return registry:remove(name)
 end

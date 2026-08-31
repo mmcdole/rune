@@ -75,7 +75,7 @@ first:
 | `rune.hooks.on` | the `name` you give it | several handlers per event |
 | `rune.gmcp.on` | the `name` you give it | several handlers per package |
 | `rune.bind` | the key, `"ctrl+g"` | one bind per key |
-| `rune.ui.bar` | the layout name, `"status"` | one renderer per slot |
+| `rune.ui.bar` | the bar name, `"status"` | one renderer per named bar |
 | `rune.command.add` | the command, `"greet"` | one handler per `/command` |
 | `rune.alias.exact` | the phrase, `"chat off"` | one expansion per typed phrase |
 
@@ -124,12 +124,15 @@ item's name:
 | Function | Effect |
 |---|---|
 | `.get(name)` | The item's handle, or nil |
-| `.enable(name)` / `.disable(name)` | Toggle an item |
+| `.enable(name)` / `.disable(name)` | Enable or disable an item |
 | `.remove(name)` | Unregister an item |
 | `.list()` | All items with name, enabled state, group, and source `file:line` |
 | `.count()` | Number of registered items |
 | `.clear()` | Remove everything in the registry |
 | `.remove_group(group)` | Remove all items in a group |
+
+The bar registry also exposes `.toggle(name)`, returning whether that bar
+exists. See [rune.ui](/reference/api/ui/#managing-bars).
 
 The matching slash commands — `/triggers`, `/aliases`, `/timers`,
 `/hooks`, `/binds`, `/bars` — print the same listings.

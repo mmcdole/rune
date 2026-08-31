@@ -113,7 +113,7 @@ rune.trigger.regex("^(\\w+) tells you: follow me$", function(m)
 end)
 ```
 
-Mirror to a pane (gag from the main window, keep it in the pane):
+Mirror to a pane (gag from the output pane, keep it in the named pane):
 
 ```lua
 rune.trigger.regex("^\\[Auction\\] (.+)$", function(m, ctx)

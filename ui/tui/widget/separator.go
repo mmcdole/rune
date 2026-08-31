@@ -6,11 +6,8 @@ import (
 	"github.com/mmcdole/rune/ui/tui/style"
 )
 
-// Compile-time checks that Separator implements Widget and Configurable
-var (
-	_ Widget       = (*Separator)(nil)
-	_ Configurable = (*Separator)(nil)
-)
+// Compile-time check that Separator implements Widget.
+var _ Widget = (*Separator)(nil)
 
 // Separator renders a horizontal line.
 type Separator struct {
@@ -23,11 +20,9 @@ func NewSeparator() *Separator {
 	return &Separator{}
 }
 
-// SetOptions implements Configurable. "char" sets the rule character;
-// anything but a single-cell value is dropped so the rule can never
-// break the width math.
-func (s *Separator) SetOptions(opts map[string]string) {
-	char := opts["char"]
+// SetChar selects the rule character. Anything but a single-cell value is
+// dropped defensively so direct Go callers cannot break the width math.
+func (s *Separator) SetChar(char string) {
 	if runewidth.StringWidth(char) != 1 {
 		char = ""
 	}

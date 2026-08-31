@@ -82,6 +82,9 @@ func TestCoreRegistrationsAreAddressable(t *testing.T) {
 	assertLua(t, engine, `
 		assert(rune.bars.get("status"), "the core status bar must be addressable")
 		assert(rune.bars.disable("status"), "the core status bar must be manageable")
+		assert(rune.bars.toggle("status"), "the core status bar must be toggleable")
+		assert(rune.bars.toggle("status"), "the core status bar must toggle back")
+		assert(rune.bars.toggle("missing") == false, "an unknown bar must not be created")
 		assert(rune.binds.get("pgup"), "a default keymap bind must be addressable")
 		assert(rune.command.get("quit"), "a built-in command must be addressable")
 	`)

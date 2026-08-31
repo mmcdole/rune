@@ -1,7 +1,6 @@
 package lua
 
 import (
-	"strconv"
 	"sync"
 	"time"
 
@@ -153,18 +152,6 @@ func (m *MockHost) PaneWrite(name, text string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.PaneCalls = append(m.PaneCalls, struct{ Op, Name, Data string }{"write", name, text})
-}
-
-func (m *MockHost) PaneToggle(name string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.PaneCalls = append(m.PaneCalls, struct{ Op, Name, Data string }{"toggle", name, ""})
-}
-
-func (m *MockHost) PaneSetVisible(name string, visible bool) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.PaneCalls = append(m.PaneCalls, struct{ Op, Name, Data string }{"set_visible", name, strconv.FormatBool(visible)})
 }
 
 func (m *MockHost) PaneClear(name string) {
