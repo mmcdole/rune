@@ -12,6 +12,7 @@ Panes are named, scrollable text buffers. A tree layout places one with
 ```lua
 rune.pane.create(name)                 -- pre-create the named buffer
 rune.pane.write(name, text)            -- append text to the named buffer
+rune.pane.replace(name, text)          -- empty the buffer and write text in one update
 rune.pane.show(name)                   -- show the pane's placement in the layout
 rune.pane.hide(name)                   -- hide the pane's placement in the layout
 rune.pane.toggle(name)                 -- flip the placement's visibility
@@ -37,6 +38,26 @@ shows it; an empty declared pane renders as an empty titled box. `write`
 auto-creates a missing buffer, so content written before the layout exists is
 kept. `create` pre-creates a buffer explicitly; `clear` is a no-op for an
 unknown name. Rune pre-creates the reserved `output` buffer.
+
+## Replacing contents
+
+`replace` empties the buffer and writes `text` as one UI update. Use it for
+panes that are redrawn as a block, such as a status form or a group roster:
+`clear` followed by `write` calls sends each step to the terminal separately,
+and a frame can land between them and show the pane empty. `replace` creates
+a missing buffer like `write` does, and a scrolled pane returns to live
+tailing so the new content is what shows. On the `output` pane it also drops an
+active search and resets the viewport, exactly like `clear`, and keeps the
+live prompt.
+
+```lua
+rune.gmcp.on("char.vitals", function(v)
+    rune.pane.replace("vitals", table.concat({
+        "HP " .. v.hp .. "/" .. v.maxhp,
+        "MP " .. v.mp .. "/" .. v.maxmp,
+    }, "\n"))
+end)
+```
 
 ## Placement and visibility
 

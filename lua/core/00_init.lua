@@ -271,9 +271,30 @@ end
 
 rune.ui = {}
 
--- Install a layout from a root node; v1 top/bottom dock tables are also accepted.
+-- Install a layout from a root node. Returns true once the tree replaces the
+-- active layout; an invalid tree raises. The retired top/bottom table form is
+-- rejected with a notice and returns false instead of raising, because raising
+-- would abort the rest of the script that carried it.
 function rune.ui.layout(config)
+    if type(config) == "table" and config.type == nil
+        and (config.top ~= nil or config.bottom ~= nil or config.version ~= nil
+            or next(config) == nil) then
+        local source = rune.caller_source(1)
+        rune.echo(rune.style.red("[Error]") .. " rune.ui.layout: top/bottom layout tables are no longer supported"
+            .. (source and (" (" .. source .. ")") or ""))
+        rune.echo("  Pass a root node instead. Top entries become children before the output pane, bottom entries after it:")
+        rune.echo("    { type = \"column\", children = {")
+        rune.echo("        { type = \"pane\", name = \"chat\", size = 10, border = \"horizontal\", hidden = true },  -- { name = \"chat\", height = 10 }")
+        rune.echo("        { type = \"pane\", name = \"output\", border = \"none\" },")
+        rune.echo("        { type = \"input\" },                       -- \"input\"")
+        rune.echo("        { type = \"bar\", name = \"status\" },           -- a bar name")
+        rune.echo("        { type = \"separator\", char = \"=\" },        -- { name = \"separator\", char = \"=\" }")
+        rune.echo("    } }")
+        rune.echo("  A tree needs exactly one input. See https://runemud.com/interface/layout/#migrating-from-topbottom-tables")
+        return false
+    end
     rune._ui.layout(config)
+    return true
 end
 
 -- A row or column with an id is a region. Region visibility hides or shows its

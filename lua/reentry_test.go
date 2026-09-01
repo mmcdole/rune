@@ -55,32 +55,30 @@ func TestLoadCanReenterLuaAndReuseOuterExecution(t *testing.T) {
 	}
 }
 
-// presentationChangeReentryHost mirrors Session.OnPresentationChange: a
-// Lua-side presentation mutation synchronously asks the same engine for updated
-// binds and bars before returning to the script that made the mutation.
-type presentationChangeReentryHost struct {
+// refreshBarsReentryHost mirrors Session.RefreshBars: rune.ui.refresh_bars()
+// synchronously renders bars through the same engine before returning to the
+// script that requested the refresh.
+type refreshBarsReentryHost struct {
 	*MockHost
 	engine *Engine
 	active bool
 
-	boundKeys []string
-	bars      map[string]ui.BarContent
+	bars map[string]ui.BarContent
 }
 
-func (h *presentationChangeReentryHost) OnPresentationChange() {
+func (h *refreshBarsReentryHost) RefreshBars() {
 	if !h.active {
 		return
 	}
-	h.boundKeys = h.engine.GetBoundKeys()
 	h.bars = h.engine.RenderBars(80)
 }
 
-// TestPresentationChangeCanReenterLuaAndResume verifies the real Session call
-// path: Lua -> Go OnPresentationChange -> Lua bind/bar queries -> outer Lua
-// invocation. The nested calls must observe the mutation, and the outer script
-// must resume after the host callback returns.
-func TestPresentationChangeCanReenterLuaAndResume(t *testing.T) {
-	engine, host := newPresentationChangeReentryEngine(t)
+// TestRefreshBarsCanReenterLuaAndResume verifies the real Session call path:
+// Lua -> Go RefreshBars -> Lua bar render -> outer Lua invocation. The nested
+// render must run, and the outer script must resume after the host callback
+// returns.
+func TestRefreshBarsCanReenterLuaAndResume(t *testing.T) {
+	engine, host := newRefreshBarsReentryEngine(t)
 
 	if err := engine.DoString("reentry setup", `
 		rune.ui.bar("reentry", function(width)
@@ -93,15 +91,12 @@ func TestPresentationChangeCanReenterLuaAndResume(t *testing.T) {
 	host.active = true
 
 	if err := engine.DoString("reentry", `
-		rune.bind("ctrl+shift+r", function() end)
+		rune.ui.refresh_bars()
 		rune.send_raw("outer resumed")
 	`); err != nil {
-		t.Fatalf("presentation mutation: %v", err)
+		t.Fatalf("bar refresh: %v", err)
 	}
 
-	if !containsString(host.boundKeys, "ctrl+shift+r") {
-		t.Errorf("nested bind query did not observe new binding: %q", host.boundKeys)
-	}
 	if got := host.bars["reentry"].Left; got != "width=80" {
 		t.Errorf("nested bar render = %q, want %q", got, "width=80")
 	}
@@ -113,11 +108,11 @@ func TestPresentationChangeCanReenterLuaAndResume(t *testing.T) {
 	}
 }
 
-// TestPresentationChangeCanReenterFromCoroutine verifies that ordinary Engine calls
+// TestRefreshBarsCanReenterFromCoroutine verifies that ordinary Engine calls
 // made by the host remain bound to the Lua thread that entered Go rather than
 // silently using the VM's main thread.
-func TestPresentationChangeCanReenterFromCoroutine(t *testing.T) {
-	engine, host := newPresentationChangeReentryEngine(t)
+func TestRefreshBarsCanReenterFromCoroutine(t *testing.T) {
+	engine, host := newRefreshBarsReentryEngine(t)
 	if err := engine.DoString("coroutine setup", `
 		worker = false
 		rune.ui.bar("thread", function()
@@ -132,20 +127,17 @@ func TestPresentationChangeCanReenterFromCoroutine(t *testing.T) {
 	host.active = true
 
 	if err := engine.DoString("coroutine reentry", `
-			worker = coroutine.create(function()
-				rune.bind("ctrl+shift+c", function() end)
+		worker = coroutine.create(function()
+			rune.ui.refresh_bars()
 			rune.send_raw("coroutine resumed")
 		end)
 		local ok, err = coroutine.resume(worker)
 		assert(ok, err)
 		assert(coroutine.status(worker) == "dead")
 	`); err != nil {
-		t.Fatalf("presentation mutation from coroutine: %v", err)
+		t.Fatalf("bar refresh from coroutine: %v", err)
 	}
 
-	if !containsString(host.boundKeys, "ctrl+shift+c") {
-		t.Errorf("nested bind query used the wrong thread: %q", host.boundKeys)
-	}
 	if got := host.bars["thread"].Left; got != "worker" {
 		t.Errorf("nested bar render ran on %q, want worker coroutine", got)
 	}
@@ -164,7 +156,7 @@ func TestPresentationChangeCanReenterFromCoroutine(t *testing.T) {
 // nested call reaches the error hook through the active callback frame instead
 // of trying to start a second outer execution.
 func TestReentryFailureUsesActiveFrame(t *testing.T) {
-	engine, host := newPresentationChangeReentryEngine(t)
+	engine, host := newRefreshBarsReentryEngine(t)
 	if err := engine.DoString("failure setup", `
 		rune.hooks.on("error", function(message)
 			rune.send_raw("reported:" .. message)
@@ -179,7 +171,7 @@ func TestReentryFailureUsesActiveFrame(t *testing.T) {
 	host.active = true
 
 	if err := engine.DoString("failed reentry", `
-		rune.bind("ctrl+shift+e", function() end)
+		rune.ui.refresh_bars()
 		rune.send_raw("outer resumed")
 	`); err != nil {
 		t.Fatalf("outer execution failed: %v", err)
@@ -210,11 +202,11 @@ func TestReentryFailureUsesActiveFrame(t *testing.T) {
 	}
 }
 
-func newPresentationChangeReentryEngine(
+func newRefreshBarsReentryEngine(
 	t *testing.T,
-) (*Engine, *presentationChangeReentryHost) {
+) (*Engine, *refreshBarsReentryHost) {
 	t.Helper()
-	host := &presentationChangeReentryHost{MockHost: NewMockHost()}
+	host := &refreshBarsReentryHost{MockHost: NewMockHost()}
 	engine := NewEngine(host)
 	host.engine = engine
 	t.Cleanup(engine.Close)
@@ -249,13 +241,4 @@ func loadCoreScriptsForReentryTest(t *testing.T, engine *Engine) {
 			t.Fatalf("execute %s: %v", file, err)
 		}
 	}
-}
-
-func containsString(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
 }

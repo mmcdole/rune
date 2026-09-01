@@ -154,6 +154,12 @@ func (m *MockHost) PaneWrite(name, text string) {
 	m.PaneCalls = append(m.PaneCalls, struct{ Op, Name, Data string }{"write", name, text})
 }
 
+func (m *MockHost) PaneReplace(name, text string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.PaneCalls = append(m.PaneCalls, struct{ Op, Name, Data string }{"replace", name, text})
+}
+
 func (m *MockHost) PaneClear(name string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

@@ -45,7 +45,7 @@ func findLeaf(t *testing.T, plan layoutPlan, kind leafKind, name string) placedL
 			}
 		} else {
 			leafName := leaf.node.Type
-			if leaf.node.Type == ui.LayoutTypeBar || leaf.node.Type == ui.LayoutTypeLegacyReference {
+			if leaf.node.Type == ui.LayoutTypeBar {
 				leafName = leaf.node.Name
 			}
 			if leafName == name {
@@ -91,58 +91,14 @@ func TestDefaultTreeProducesOneExactTerminalBlock(t *testing.T) {
 	assertExactBlock(t, m.View().Content, 32, 12)
 }
 
-func TestLegacyReferencesAreExplicitLateBoundResources(t *testing.T) {
-	t.Run("bar wins over same-named pane", func(t *testing.T) {
-		m := resizeModel(t, NewModel(make(chan ui.UIEvent, 8)), 20, 4)
-		const alias = "prompt"
-		m.syncBars(map[string]ui.BarContent{alias: {Left: "bar"}})
-		addPane(t, m, alias)
-		setLayout(m, ui.LayoutNode{Type: ui.LayoutTypeLegacyReference, Name: alias})
-
-		plan := m.ensureLayout()
-		bar := findLeaf(t, plan, leafWidget, alias)
-		if bar.outer != image.Rect(0, 0, 20, 4) {
-			t.Fatalf("legacy bar rect = %v, want full terminal", bar.outer)
-		}
-		for _, leaf := range plan.leaves {
-			if leaf.kind == leafPane && leaf.pane.Name() == alias {
-				t.Fatal("same-named pane won over registered bar")
-			}
-		}
-	})
-
-	t.Run("reserved structural name can identify a pane", func(t *testing.T) {
-		m := resizeModel(t, NewModel(make(chan ui.UIEvent, 8)), 20, 4)
-		addPane(t, m, ui.LayoutTypeRow)
-		setLayout(m, ui.LayoutNode{Type: ui.LayoutTypeLegacyReference, Name: ui.LayoutTypeRow})
-
-		pane := findLeaf(t, m.ensureLayout(), leafPane, ui.LayoutTypeRow)
-		if pane.outer != image.Rect(0, 0, 20, 4) {
-			t.Fatalf("reserved-name pane rect = %v, want full terminal", pane.outer)
-		}
-	})
-
-	t.Run("empty bar owns a colliding v1 resource name", func(t *testing.T) {
-		m := resizeModel(t, NewModel(make(chan ui.UIEvent, 8)), 20, 4)
-		const alias = "quiet"
-		m.syncBars(map[string]ui.BarContent{alias: {}})
-		addPane(t, m, alias, "must not render")
-		setLayout(m, ui.LayoutNode{Type: ui.LayoutTypeLegacyReference, Name: alias})
-
-		if got := len(m.ensureLayout().leaves); got != 0 {
-			t.Fatalf("empty colliding widget resolved %d leaves, want none", got)
-		}
-	})
-
-	t.Run("arbitrary type is not a registry lookup", func(t *testing.T) {
-		m := resizeModel(t, NewModel(make(chan ui.UIEvent, 8)), 20, 4)
-		m.syncBars(map[string]ui.BarContent{"vitals": {Left: "HP"}})
-		addPane(t, m, "vitals")
-		setLayout(m, ui.LayoutNode{Type: "vitals"})
-		if got := len(m.ensureLayout().leaves); got != 0 {
-			t.Fatalf("invalid arbitrary type resolved %d leaves, want none", got)
-		}
-	})
+func TestArbitraryTypeIsNotARegistryLookup(t *testing.T) {
+	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 8)), 20, 4)
+	m.syncBars(map[string]ui.BarContent{"vitals": {Left: "HP"}})
+	addPane(t, m, "vitals")
+	setLayout(m, ui.LayoutNode{Type: "vitals"})
+	if got := len(m.ensureLayout().leaves); got != 0 {
+		t.Fatalf("invalid arbitrary type resolved %d leaves, want none", got)
+	}
 }
 
 func TestOutputPaneAndSameNamedBarRemainSeparateResources(t *testing.T) {
@@ -285,7 +241,7 @@ func TestAutoRowMeasuresChildrenAtAllocatedWidths(t *testing.T) {
 		t.Fatalf("auto row preferred height = %d, want 3", got)
 	}
 	plan := layoutPlan{}
-	m.placeNode(row, image.Rect(0, 0, 20, 3), &plan)
+	m.placeNode(row, image.Rect(0, 0, 20, 3), axisVertical, &plan)
 	measured := findLeaf(t, plan, leafWidget, "wrapped")
 	input := findLeaf(t, plan, leafWidget, ui.LayoutTypeInput)
 	if got, want := measured.outer, image.Rect(0, 0, 10, 3); got != want {
@@ -520,7 +476,7 @@ func TestFallbackDropsOversizedGapsInsideParent(t *testing.T) {
 	assertExactBlock(t, m.View().Content, 16, 2)
 }
 
-func TestHorizontalPaneFramePreservesLegacyContentWidth(t *testing.T) {
+func TestHorizontalPaneFrameKeepsFullContentWidth(t *testing.T) {
 	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 8)), 20, 4)
 	addPane(t, m, "chat", "12345678901234567890", "second")
 	setLayout(m, ui.LayoutNode{
@@ -892,5 +848,104 @@ func TestDividerContainerPropagatesItsContinuousFrame(t *testing.T) {
 	seam := ansi.Strip(rows[bottom.outer.Min.Y])
 	if strings.Count(seam, "─") < 17 {
 		t.Fatalf("nested seam is not continuous: %q", seam)
+	}
+}
+
+// TestDividerJoinsBordersAndSeparatorsAboveAndBelow covers the user-visible
+// gap where a row divider stopped one cell short of the pane border above it
+// and the separator below it instead of meeting them with tees.
+func TestDividerJoinsBordersAndSeparatorsAboveAndBelow(t *testing.T) {
+	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 8)), 21, 12)
+	addPane(t, m, "chat")
+	addPane(t, m, "group")
+	setLayout(m, ui.LayoutNode{
+		Type: ui.LayoutTypeColumn,
+		Children: []ui.LayoutNode{
+			{Type: ui.LayoutTypePane, Name: "chat", Size: ui.Cells(4)},
+			{
+				Type:     ui.LayoutTypeRow,
+				Dividers: true,
+				Children: []ui.LayoutNode{
+					{Type: ui.LayoutTypePane, Name: ui.OutputPaneName, Border: ui.PaneBorderNone},
+					{Type: ui.LayoutTypePane, Name: "group", Border: ui.PaneBorderNone},
+				},
+			},
+			{Type: ui.LayoutTypeSeparator, Size: ui.AutoSize()},
+			{Type: ui.LayoutTypeInput, Size: ui.AutoSize()},
+		},
+	})
+
+	plan := m.ensureLayout()
+	if got := plan.dividers; len(got) != 1 || !got[0].vertical || got[0].at != 10 {
+		t.Fatalf("dividers = %+v, want one vertical rule at x=10", got)
+	}
+	separator := findLeaf(t, plan, leafWidget, ui.LayoutTypeSeparator)
+	if separator.outer != image.Rect(0, 8, 21, 9) || !separator.content.Empty() {
+		t.Fatalf("separator outer=%v content=%v, want row 8 drawn by the frame grid", separator.outer, separator.content)
+	}
+
+	rows := assertExactBlock(t, m.View().Content, 21, 12)
+	plain := make([][]rune, len(rows))
+	for i, row := range rows {
+		plain[i] = []rune(ansi.Strip(row))
+	}
+	if plain[3][0] != '└' || plain[3][10] != '┬' || plain[3][20] != '┘' {
+		t.Fatalf("chat bottom border = %q, want the divider to meet it with a tee", string(plain[3]))
+	}
+	for y := 4; y < 8; y++ {
+		if plain[y][10] != '│' {
+			t.Fatalf("row %d = %q, want the divider bar at x=10", y, string(plain[y]))
+		}
+	}
+	if plain[8][0] != '─' || plain[8][10] != '┴' || plain[8][20] != '─' {
+		t.Fatalf("separator row = %q, want the divider to meet it with a tee", string(plain[8]))
+	}
+}
+
+// TestSeparatorDoesNotTeeIntoPaneCornersBelow keeps a rule that merely
+// touches a pane corner from joining it: the corner belongs to the pane.
+func TestSeparatorDoesNotTeeIntoPaneCornersBelow(t *testing.T) {
+	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 8)), 12, 8)
+	addPane(t, m, "map")
+	setLayout(m, ui.LayoutNode{
+		Type: ui.LayoutTypeColumn,
+		Children: []ui.LayoutNode{
+			{Type: ui.LayoutTypeSeparator, Size: ui.AutoSize()},
+			{Type: ui.LayoutTypePane, Name: "map", Size: ui.Cells(4)},
+			{Type: ui.LayoutTypeInput, Size: ui.AutoSize()},
+		},
+	})
+
+	rows := assertExactBlock(t, m.View().Content, 12, 8)
+	top := []rune(ansi.Strip(rows[0]))
+	paneTop := []rune(ansi.Strip(rows[1]))
+	if string(top) != strings.Repeat("─", 12) {
+		t.Fatalf("separator row = %q, want a plain rule with no tees", string(top))
+	}
+	if paneTop[0] != '┌' || paneTop[11] != '┐' {
+		t.Fatalf("pane top border = %q, want its own corners", string(paneTop))
+	}
+}
+
+// TestSeparatorInsideRowKeepsWidgetRendering: a separator placed by a row
+// has no horizontal rule to contribute, so it stays a widget.
+func TestSeparatorInsideRowKeepsWidgetRendering(t *testing.T) {
+	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 8)), 12, 4)
+	setLayout(m, ui.LayoutNode{
+		Type: ui.LayoutTypeColumn,
+		Children: []ui.LayoutNode{
+			{
+				Type: ui.LayoutTypeRow,
+				Children: []ui.LayoutNode{
+					{Type: ui.LayoutTypePane, Name: ui.OutputPaneName, Border: ui.PaneBorderNone},
+					{Type: ui.LayoutTypeSeparator, Size: ui.Cells(1)},
+				},
+			},
+			{Type: ui.LayoutTypeInput, Size: ui.AutoSize()},
+		},
+	})
+	separator := findLeaf(t, m.ensureLayout(), leafWidget, ui.LayoutTypeSeparator)
+	if separator.parentAxis != axisHorizontal || separator.content.Empty() {
+		t.Fatalf("row separator parentAxis=%v content=%v, want widget rendering", separator.parentAxis, separator.content)
 	}
 }

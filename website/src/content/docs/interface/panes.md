@@ -10,6 +10,7 @@ traffic that should stay separate from normal output.
 
 ```lua
 rune.pane.write("chat", styled_text)        -- creates the buffer if needed
+rune.pane.replace("vitals", block)          -- redraw a whole pane in one update
 rune.pane.toggle("chat")                    -- flip the pane's layout placement
 rune.pane.show("chat")
 rune.pane.hide("chat")
@@ -44,6 +45,45 @@ pane. Hiding a pane removes its leaf from the resolved layout but does not
 clear its buffer or scroll position, so showing it later reveals recent
 history. Buffers survive layout replacement and `/reload`; visibility returns
 to the declared `hidden` values.
+
+Scripts that rebuild the layout at runtime, for example to swap a set of top
+panes, therefore see every pane return to its declared state. Declare a pane
+that should normally stay out of the way with `hidden = true`, and when the
+current visibility should carry across the rebuild, snapshot it first and
+restore both directions afterwards:
+
+```lua
+local was_visible = rune.pane.is_visible("group")
+rune.ui.layout(build_layout(tab))
+if was_visible == true then
+    rune.pane.show("group")
+elseif was_visible == false then
+    rune.pane.hide("group")
+end
+```
+
+Rune publishes the layout once per script entry, after the callback returns,
+so the screen never shows the state between the rebuild and the restore.
+
+## Status panes
+
+A pane that shows current state rather than a log, such as vitals, a group
+roster, or an enemy list, is redrawn as a whole block. Build the block as one
+string and hand it to `rune.pane.replace`, which empties and refills the pane
+in one update. Clearing and then writing line by line sends each step to the
+terminal separately, so a frame can land while the pane is empty and the pane
+appears to flicker. With `replace` no debounce is needed; redraw as often as
+the data changes.
+
+```lua
+rune.gmcp.on("group", function(group)
+    local lines = { "Group: " .. group.groupname .. "  Leader: " .. group.leader }
+    for _, member in ipairs(group.members) do
+        lines[#lines + 1] = string.format("%-12s %6d/%-6d", member.name, member.info.hp, member.info.mhp)
+    end
+    rune.pane.replace("group", table.concat(lines, "\n"))
+end)
+```
 
 ## Borders and titles
 

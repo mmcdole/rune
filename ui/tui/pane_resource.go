@@ -78,6 +78,15 @@ func (r *paneRegistry) Write(name, text string) paneResource {
 	return resource
 }
 
+// Replace empties the named pane and writes text within one update. It
+// creates a missing pane like Write does.
+func (r *paneRegistry) Replace(name, text string) paneResource {
+	resource := r.Create(name)
+	resource.Clear()
+	resource.Write(text)
+	return resource
+}
+
 func (r *paneRegistry) Clear(name string) (paneResource, bool) {
 	resource, ok := r.Lookup(name)
 	if ok {

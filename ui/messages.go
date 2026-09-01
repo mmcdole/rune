@@ -30,6 +30,13 @@ type PaneWriteMsg struct {
 	Text string
 }
 
+// PaneReplaceMsg empties a named pane and writes Text in one update, so a
+// redrawn status pane never renders an intermediate empty frame.
+type PaneReplaceMsg struct {
+	Name string
+	Text string
+}
+
 // PaneCreateMsg creates a new named pane.
 type PaneCreateMsg struct {
 	Name string
@@ -51,8 +58,6 @@ type UpdateBindsMsg map[string]bool
 type UpdateBarsMsg map[string]BarContent
 
 // UpdateLayoutMsg pushes the canonical layout tree from Session to UI.
-// Top/bottom structure and version state are normalized before this boundary.
-// Private legacy references may remain to preserve bar-first resource binding.
 type UpdateLayoutMsg LayoutTree
 
 // Config carries the UI-facing subset of Rune's typed configuration.

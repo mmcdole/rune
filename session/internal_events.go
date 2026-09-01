@@ -35,6 +35,7 @@ type reloadRequested struct{}
 func (reloadRequested) isInternalEvent() {}
 
 func (s *Session) handleInternalEvent(event internalEvent) {
+	defer s.flushPresentation()
 	switch event := event.(type) {
 	case connectFinished:
 		s.handleConnectFinished(event)

@@ -19,16 +19,14 @@ const (
 )
 
 // Node type names in the canonical layout tree. Pane and bar leaves reference
-// resources by name. LegacyReference is emitted only by the v1 dock adapter to
-// preserve its bar-first, pane-fallback name resolution.
+// resources by name.
 const (
-	LayoutTypeRow             = "row"
-	LayoutTypeColumn          = "column"
-	LayoutTypeInput           = "input"
-	LayoutTypeSeparator       = "separator"
-	LayoutTypePane            = "pane"
-	LayoutTypeBar             = "bar"
-	LayoutTypeLegacyReference = "_legacy_reference"
+	LayoutTypeRow       = "row"
+	LayoutTypeColumn    = "column"
+	LayoutTypeInput     = "input"
+	LayoutTypeSeparator = "separator"
+	LayoutTypePane      = "pane"
+	LayoutTypeBar       = "bar"
 
 	// OutputPaneName is the pre-created system pane that receives the MUD
 	// transcript, local echo, and prompts.
@@ -119,26 +117,23 @@ func ParseLayoutSize(raw string) (LayoutSize, error) {
 }
 
 // LayoutTree is the representation shared across the layout pipeline. Raw Lua
-// table shape and version fields are normalized before construction; v1 trees
-// may retain private legacy resource references.
+// table shape is normalized before construction.
 type LayoutTree struct {
 	Root LayoutNode
 }
 
-// LayoutNode is either a row/column container or a leaf. Pane, bar, and private
-// legacy-reference leaves use Name to select a resource. ID identifies a hideable
-// structural region and is valid only on non-root containers. Size, MinSize,
-// and MaxSize apply along the parent's axis. The root has no parent and cannot
-// carry those constraints or visibility state. Gap and Dividers are
-// container-only: Gap reserves cells between active children, and Dividers
-// draws a rule between them when their frames do not already provide one.
-// Hidden is the placement's
-// visibility gate: valid on identified regions and pane placements (name is
-// the runtime handle for the latter). On a legacy reference it gates only the
-// pane fallback, never a registered bar. Title and Border are pane-only;
-// SeparatorChar is separator-only. A non-nil empty Title deliberately
-// suppresses title text, while nil requests the pane resource's generated
-// title.
+// LayoutNode is either a row/column container or a leaf. Pane and bar leaves
+// use Name to select a resource. ID identifies a hideable structural region
+// and is valid only on non-root containers. Size, MinSize, and MaxSize apply
+// along the parent's axis. The root has no parent and cannot carry those
+// constraints or visibility state. Gap and Dividers are container-only: Gap
+// reserves cells between active children, and Dividers draws a rule between
+// them when their frames do not already provide one. Hidden is the
+// placement's visibility gate: valid on identified regions and pane
+// placements (name is the runtime handle for the latter). Title and Border
+// are pane-only; SeparatorChar is separator-only. A non-nil empty Title
+// deliberately suppresses title text, while nil requests the pane resource's
+// generated title.
 type LayoutNode struct {
 	Type          string
 	Name          string
@@ -265,21 +260,15 @@ func (t LayoutTree) WithRegionVisibility(id string, visible bool) (updated Layou
 }
 
 func nodeHideable(node LayoutNode) bool {
-	return (node.IsContainer() && node.ID != "") ||
-		node.Type == LayoutTypePane || node.Type == LayoutTypeLegacyReference
+	return (node.IsContainer() && node.ID != "") || node.Type == LayoutTypePane
 }
 
-// paneLeafMatch reports whether node is a placement of the named pane. Legacy
-// references share the pane gate: their bar-first resolution is unaffected,
-// but the pane fallback honors it.
+// paneLeafMatch reports whether node is the placement of the named pane.
 func paneLeafMatch(node LayoutNode, name string) bool {
-	return (node.Type == LayoutTypePane || node.Type == LayoutTypeLegacyReference) &&
-		node.Name == name
+	return node.Type == LayoutTypePane && node.Name == name
 }
 
-// PaneVisible reports the placement gate for a named pane. V1 legacy trees may
-// place one name more than once; the pane counts as visible when any placement
-// is.
+// PaneVisible reports the placement gate for a named pane.
 func (t LayoutTree) PaneVisible(name string) (visible, found bool) {
 	if name == "" {
 		return false, false
@@ -287,8 +276,8 @@ func (t LayoutTree) PaneVisible(name string) (visible, found bool) {
 	return t.gateVisible(paneMatch(name))
 }
 
-// WithPaneVisibility returns a tree with every placement of the named pane
-// updated, so multi-placement legacy trees stay in sync.
+// WithPaneVisibility returns a tree with the named pane's placement gate
+// updated.
 func (t LayoutTree) WithPaneVisibility(name string, visible bool) (updated LayoutTree, found, changed bool) {
 	if name == "" {
 		return t, false, false
@@ -348,29 +337,23 @@ func (v *layoutValidation) node(node LayoutNode, path string, depth int, root bo
 	}
 	switch node.Type {
 	case LayoutTypeRow, LayoutTypeColumn, LayoutTypeInput,
-		LayoutTypeSeparator, LayoutTypePane, LayoutTypeBar, LayoutTypeLegacyReference:
+		LayoutTypeSeparator, LayoutTypePane, LayoutTypeBar:
 	default:
 		return fmt.Errorf("%s: unknown type %q", path, node.Type)
 	}
 	switch node.Type {
-	case LayoutTypePane, LayoutTypeBar, LayoutTypeLegacyReference:
+	case LayoutTypePane, LayoutTypeBar:
 		if node.Name == "" {
 			return fmt.Errorf("%s: %s requires a non-empty name", path, node.Type)
 		}
-		if node.Type == LayoutTypeLegacyReference &&
-			(node.Name == LayoutTypeInput || node.Name == LayoutTypeSeparator) {
-			return fmt.Errorf("%s: legacy reference name %q is reserved; use type = %q", path, node.Name, node.Name)
+		key := layoutResourceKey{typeName: node.Type, name: node.Name}
+		if previous, exists := v.resources[key]; exists {
+			return fmt.Errorf("%s: duplicate %s name %q (already used at %s)", path, node.Type, node.Name, previous)
 		}
-		if node.Type != LayoutTypeLegacyReference {
-			key := layoutResourceKey{typeName: node.Type, name: node.Name}
-			if previous, exists := v.resources[key]; exists {
-				return fmt.Errorf("%s: duplicate %s name %q (already used at %s)", path, node.Type, node.Name, previous)
-			}
-			v.resources[key] = path
-		}
+		v.resources[key] = path
 	default:
 		if node.Name != "" {
-			return fmt.Errorf("%s: name is only valid on pane, bar, and legacy-reference leaves", path)
+			return fmt.Errorf("%s: name is only valid on pane and bar leaves", path)
 		}
 	}
 	if node.ID != "" {
@@ -458,13 +441,6 @@ func validateLeafFields(node LayoutNode, path string) error {
 	case LayoutTypeInput, LayoutTypeBar:
 		if node.Title != nil || node.Border != "" || node.SeparatorChar != "" {
 			return fmt.Errorf("%s: %s does not accept presentation fields", path, node.Type)
-		}
-	case LayoutTypeLegacyReference:
-		if node.Title != nil || node.SeparatorChar != "" {
-			return fmt.Errorf("%s: legacy references do not accept title or separator fields", path)
-		}
-		if !validBorder(node.Border) {
-			return fmt.Errorf("%s.border must be %q, %q, or %q", path, PaneBorderFull, PaneBorderHorizontal, PaneBorderNone)
 		}
 	default:
 		return fmt.Errorf("%s: unknown leaf type %q", path, node.Type)

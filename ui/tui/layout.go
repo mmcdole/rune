@@ -25,8 +25,6 @@ const (
 
 // layoutPlan is the complete geometry for one frame. The same plan sizes the
 // output viewport for interaction and places every leaf for rendering.
-// Raw Lua table shape and version fields do not reach this layer; it consumes a
-// LayoutTree that may include private v1 resource references.
 type layoutPlan struct {
 	leaves   []placedLeaf
 	dividers []dividerRule
@@ -51,17 +49,18 @@ const (
 	leafPane
 )
 
-// placedLeaf snapshots identity and geometry, not rendering. Shared widget
-// instances are configured, sized, and rendered in leaf order so each view is
-// captured before the next occurrence mutates the same instance.
+// placedLeaf snapshots identity and geometry, not rendering. parentAxis is
+// the axis of the container that placed the leaf; the root leaf reports
+// vertical.
 type placedLeaf struct {
-	node    ui.LayoutNode
-	kind    leafKind
-	widget  widget.Widget
-	pane    paneResource
-	outer   image.Rectangle
-	content image.Rectangle
-	frames  frameEdges
+	node       ui.LayoutNode
+	kind       leafKind
+	widget     widget.Widget
+	pane       paneResource
+	outer      image.Rectangle
+	content    image.Rectangle
+	frames     frameEdges
+	parentAxis splitAxis
 }
 
 type resolvedNode struct {
@@ -259,11 +258,9 @@ func (m *Model) resolvePane(node ui.LayoutNode, name string) (*resolvedNode, boo
 }
 
 // resolveNode prunes hidden placements and leaves that cannot currently
-// render. Pane and bar leaves select an explicit resource namespace; v1
-// references preserve bar-first, pane-fallback lookup, so their pane gate is
-// deferred to the fallback branch and never hides a registered bar.
+// render. Pane and bar leaves each select their own resource namespace.
 func (m *Model) resolveNode(node ui.LayoutNode, availableWidth int) (*resolvedNode, bool) {
-	if node.Hidden && node.Type != ui.LayoutTypeLegacyReference {
+	if node.Hidden {
 		return nil, false
 	}
 	if node.IsContainer() {
@@ -296,16 +293,6 @@ func (m *Model) resolveNode(node ui.LayoutNode, availableWidth int) (*resolvedNo
 		return m.resolvePane(node, node.Name)
 	case ui.LayoutTypeBar:
 		return m.resolveBar(node, node.Name, availableWidth)
-	case ui.LayoutTypeLegacyReference:
-		// Registry presence owns the v1 name even when the bar is empty. Only an
-		// absent bar permits pane fallback.
-		if _, exists := m.bars[node.Name]; exists {
-			return m.resolveBar(node, node.Name, availableWidth)
-		}
-		if node.Hidden {
-			return nil, false
-		}
-		return m.resolvePane(node, node.Name)
 	default:
 		return nil, false
 	}
@@ -324,7 +311,9 @@ func (m *Model) leafPreferred(leaf *placedLeaf, axis splitAxis, cross int) int {
 			}
 			return height
 		}
-		return max(1, lipgloss.Width(leaf.pane.Title())+2)
+		// Validation rejects intrinsic widths, so this is reached only by
+		// direct Go callers; keep the measurement deterministic.
+		return 1
 	case leafWidget:
 		if axis == axisVertical {
 			leaf.widget.SetSize(max(1, cross), 0)
@@ -595,13 +584,14 @@ func (m *Model) allocateChildren(node *resolvedNode, extent int, axis splitAxis,
 	return childAllocation{sizes: sizes, gaps: gaps, overlaps: overlaps}
 }
 
-func (m *Model) placeNode(node *resolvedNode, rect image.Rectangle, plan *layoutPlan) {
+func (m *Model) placeNode(node *resolvedNode, rect image.Rectangle, parentAxis splitAxis, plan *layoutPlan) {
 	if rect.Empty() {
 		return
 	}
 	if node.leaf != nil {
 		leaf := *node.leaf
 		leaf.outer, leaf.content = rect, rect
+		leaf.parentAxis = parentAxis
 		plan.leaves = append(plan.leaves, leaf)
 		return
 	}
@@ -616,7 +606,7 @@ func (m *Model) placeNode(node *resolvedNode, rect image.Rectangle, plan *layout
 	for i, child := range node.children {
 		size := allocation.sizes[i]
 		childArea := childRect(rect, axis, position, size).Intersect(rect)
-		m.placeNode(child, childArea, plan)
+		m.placeNode(child, childArea, axis, plan)
 		position += size
 		if i < len(node.children)-1 {
 			gap := allocation.gaps[i]
@@ -649,10 +639,10 @@ func (m *Model) resolveLayout() layoutPlan {
 	if !ok {
 		return plan
 	}
-	m.placeNode(root, image.Rect(0, 0, m.width, m.height), &plan)
+	m.placeNode(root, image.Rect(0, 0, m.width, m.height), axisVertical, &plan)
 	needsFrame := len(plan.dividers) > 0
 	for i := range plan.leaves {
-		if needsFrame || paneLeaf(&plan.leaves[i]) {
+		if needsFrame || paneLeaf(&plan.leaves[i]) || separatorLeaf(&plan.leaves[i]) {
 			needsFrame = true
 			break
 		}
@@ -772,17 +762,37 @@ func (f frameGrid) markVertical(x, top, bottom int) {
 	}
 }
 
+// glyph selects the box-drawing character for one cell from the lines that
+// meet there. Every marked cell looks at all four neighbors, so a rule that
+// ends against a border produces a tee on the border side as well as its own.
 func (f frameGrid) glyph(x, y int) string {
-	if !f.at(f.vertical, x, y) {
-		if f.at(f.horizontal, x, y) {
-			return "─"
-		}
+	ownVertical := f.at(f.vertical, x, y)
+	ownHorizontal := f.at(f.horizontal, x, y)
+	if !ownVertical && !ownHorizontal {
 		return ""
 	}
-	return junctionGlyph(
-		f.at(f.vertical, x, y-1), f.at(f.vertical, x, y+1),
-		f.at(f.horizontal, x-1, y), f.at(f.horizontal, x+1, y),
+	glyph := junctionGlyph(
+		f.connects(x, y-1, f.vertical, f.horizontal, ownVertical),
+		f.connects(x, y+1, f.vertical, f.horizontal, ownVertical),
+		f.connects(x-1, y, f.horizontal, f.vertical, ownHorizontal),
+		f.connects(x+1, y, f.horizontal, f.vertical, ownHorizontal),
 	)
+	if glyph != "" {
+		return glyph
+	}
+	if ownVertical {
+		return "│"
+	}
+	return "─"
+}
+
+// connects reports whether the neighbor at (x, y) continues a line along the
+// given axis into the current cell. A neighbor that also carries the other
+// axis, such as a pane corner beside the end of a separator, only connects
+// when the current cell runs along that axis itself; otherwise the rule stops
+// short instead of sprouting a tee into the corner.
+func (f frameGrid) connects(x, y int, along, across []bool, ownAlong bool) bool {
+	return f.at(along, x, y) && (ownAlong || !f.at(across, x, y))
 }
 
 func junctionGlyph(up, down, left, right bool) string {
@@ -821,6 +831,14 @@ func paneLeaf(leaf *placedLeaf) bool {
 	return leaf.kind == leafPane && leaf.frames != 0
 }
 
+// separatorLeaf reports a default-character separator placed by a column. It
+// draws through the frame grid so it joins dividers and pane borders. A custom
+// character, or a separator placed by a row, keeps the widget rendering.
+func separatorLeaf(leaf *placedLeaf) bool {
+	return leaf.kind == leafWidget && leaf.node.Type == ui.LayoutTypeSeparator &&
+		leaf.node.SeparatorChar == "" && leaf.parentAxis == axisVertical
+}
+
 func insetFrame(rect image.Rectangle, frames frameEdges) image.Rectangle {
 	if frames&frameLeft != 0 && rect.Min.X < rect.Max.X {
 		rect.Min.X++
@@ -839,8 +857,9 @@ func insetFrame(rect image.Rectangle, frames frameEdges) image.Rectangle {
 
 // planFrames gives every piece of chrome one owner. Each framed pane marks
 // its configured edges and insets its content rectangle; each container with
-// dividers marks the rules between its active children. Shared coordinates
-// merge naturally in frameGrid, including T and cross junctions.
+// dividers marks the rules between its active children; each default
+// separator marks its row and gives up its content rectangle. Shared
+// coordinates merge naturally in frameGrid, including T and cross junctions.
 func (m *Model) planFrames(plan *layoutPlan) {
 	for _, rule := range plan.dividers {
 		if rule.vertical {
@@ -851,6 +870,11 @@ func (m *Model) planFrames(plan *layoutPlan) {
 	}
 	for i := range plan.leaves {
 		leaf := &plan.leaves[i]
+		if separatorLeaf(leaf) {
+			plan.frame.markHorizontal(leaf.outer.Min.Y, leaf.outer.Min.X, leaf.outer.Max.X)
+			leaf.content = image.Rectangle{}
+			continue
+		}
 		if !paneLeaf(leaf) {
 			continue
 		}

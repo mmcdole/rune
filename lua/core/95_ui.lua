@@ -16,6 +16,14 @@ function rune.pane.write(name, text)
     rune._pane.write(name, text)
 end
 
+-- Replace the whole buffer in one UI update. Use this for panes redrawn as a
+-- block (status forms, group lists) instead of clear followed by writes, which
+-- can show an empty frame in between. Creates the pane like write does; a
+-- scrolled pane returns to live.
+function rune.pane.replace(name, text)
+    rune._pane.replace(name, text)
+end
+
 -- Visibility is placement state on the active layout tree: show, hide, and
 -- toggle flip the pane's placement and return whether the layout places the
 -- pane at all. A new rune.ui.layout() or /reload restores declared state.

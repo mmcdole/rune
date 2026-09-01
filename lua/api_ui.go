@@ -70,6 +70,17 @@ func (e *Engine) registerPaneFuncs() {
 			return nil
 		},
 
+		// rune._pane.replace(name, text): Replace the pane's contents in one
+		// UI update.
+		"replace": func(c *script.Call) error {
+			name, err := paneName(c, "replace")
+			if err != nil {
+				return err
+			}
+			e.host.PaneReplace(name, c.Str(2))
+			return nil
+		},
+
 		// rune._pane.toggle(name): Toggle the pane's placement in the active
 		// layout. Returns whether the layout places the pane at all.
 		"toggle": func(c *script.Call) error {

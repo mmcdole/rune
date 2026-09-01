@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"github.com/charmbracelet/x/ansi"
 	"strings"
 	"testing"
 
@@ -1012,7 +1013,7 @@ func TestSeparatorLeafCharactersAreIndependent(t *testing.T) {
 	}}))
 	m = next.(*Model)
 
-	view := m.View().Content
+	view := ansi.Strip(m.View().Content)
 	if !strings.Contains(view, strings.Repeat("═", m.width)) {
 		t.Error("configured separator rule missing from view")
 	}
@@ -1445,4 +1446,87 @@ func assertViewportRowHighlighted(t *testing.T, view, want string) {
 		return
 	}
 	t.Fatalf("row %q is outside the viewport:\n%s", want, runetext.StripANSI(view))
+}
+
+// TestReplaceOutputPaneIsOneClearAndWrite: a replace behaves like clear
+// (search dropped, viewport live, prompt kept, stale batch tick ignored) and
+// then holds only the new rows, all within one Update.
+func TestReplaceOutputPaneIsOneClearAndWrite(t *testing.T) {
+	m := newBareModel(t)
+
+	next, _ := m.Update(ui.SetPromptMsg("HP> "))
+	m = next.(*Model)
+	var rows []string
+	for i := 0; i < 40; i++ {
+		rows = append(rows, fmt.Sprintf("row %02d", i))
+	}
+	rows[8] = "hidden thief"
+	next, _ = m.Update(ui.PaneWriteMsg{Name: ui.OutputPaneName, Text: strings.Join(rows, "\n")})
+	m = next.(*Model)
+	next, _ = m.Update(ui.PaneScrollToTopMsg{Name: ui.OutputPaneName})
+	m = next.(*Model)
+	next, _ = m.Update(ui.ShowSearchMsg{Query: "thief"})
+	m = next.(*Model)
+	if !m.input.SearchActive() || m.output.viewport.Mode() != widget.ModeScrolled {
+		t.Fatal("test setup did not scroll and search output")
+	}
+	generation, scheduled := m.output.printServer("batched")
+	if !scheduled {
+		t.Fatal("test setup did not open a batch window")
+	}
+
+	next, _ = m.Update(ui.PaneReplaceMsg{Name: ui.OutputPaneName, Text: "first\nsecond"})
+	m = next.(*Model)
+	if got := m.output.buffer.Count(); got != 2 {
+		t.Fatalf("replace left %d transcript rows, want the two new rows", got)
+	}
+	if got := m.output.buffer.At(0) + "|" + m.output.buffer.At(1); got != "first|second" {
+		t.Fatalf("replace rows = %q", got)
+	}
+	if m.input.SearchActive() || m.searchView.focus != nil {
+		t.Fatal("replace retained search state")
+	}
+	if mode := m.output.viewport.Mode(); mode != widget.ModeLive {
+		t.Fatalf("replace left viewport mode %v, want live", mode)
+	}
+	if got := m.output.promptText; got != "HP> " {
+		t.Fatalf("replace dropped the live prompt: %q", got)
+	}
+	next, _ = m.Update(tickMsg{generation: generation})
+	m = next.(*Model)
+	if got := m.output.buffer.Count(); got != 2 {
+		t.Fatalf("stale batch tick changed the transcript after replace: %d rows", got)
+	}
+}
+
+// TestReplaceOrdinaryPaneCreatesAndSnapsToLive covers the non-output pane
+// contract: replace creates a missing buffer like write and returns a
+// scrolled pane to live tailing with only the new content.
+func TestReplaceOrdinaryPaneCreatesAndSnapsToLive(t *testing.T) {
+	m := newBareModel(t)
+	next, _ := m.Update(ui.PaneReplaceMsg{Name: "status", Text: "HP 10"})
+	m = next.(*Model)
+	status, ok := m.panes.Lookup("status")
+	if !ok {
+		t.Fatal("replace did not create the pane")
+	}
+	if got := status.View(20, 1); got != "HP 10" {
+		t.Fatalf("created pane content = %q", got)
+	}
+
+	next, _ = m.Update(ui.PaneWriteMsg{Name: "status", Text: "a\nb\nc"})
+	m = next.(*Model)
+	next, _ = m.Update(ui.PaneScrollToTopMsg{Name: "status"})
+	m = next.(*Model)
+	if !strings.Contains(status.Title(), "scroll") {
+		t.Fatal("test setup did not scroll the pane")
+	}
+	next, _ = m.Update(ui.PaneReplaceMsg{Name: "status", Text: "HP 11\nMP 5"})
+	m = next.(*Model)
+	if got := status.Title(); got != "status" {
+		t.Fatalf("replace left the pane scrolled: %q", got)
+	}
+	if got := status.View(20, 2); got != "HP 11\nMP 5" {
+		t.Fatalf("replaced pane content = %q", got)
+	}
 }

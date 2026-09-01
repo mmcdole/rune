@@ -18,193 +18,58 @@ func outputPane() ui.LayoutNode {
 	}
 }
 
-func TestLegacyLayoutTranslatesToCanonicalTree(t *testing.T) {
-	engine, _, cleanup := setupTest(t)
+func TestLegacyLayoutTableIsRejectedWithoutRaising(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
 	defer cleanup()
+	baseline := engine.GetLayout()
+	host.DrainPresentationChanges()
+	host.DrainPrintCalls()
 
-	if err := engine.DoString("legacy layout", `
-		rune.ui.layout({
-			top = {
-				{ name = "chat", height = 10, border = "ignored", title = "also ignored" },
-				"vitals",
-				false,
-			},
-			bottom = {
-				"input",
-				{ name = "separator", char = "=" },
-				"status",
-			},
+	cases := []struct{ name, body string }{
+		{name: "top and bottom", body: `{ top = { { name = "chat", height = 10 } }, bottom = { "input", "status" } }`},
+		{name: "bottom only", body: `{ bottom = { "input" } }`},
+		{name: "explicit version", body: `{ version = 1, top = { "chat" } }`},
+		{name: "empty table", body: `{}`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			host.DrainPrintCalls()
+			// A rejected table must not abort the rest of the script that
+			// carried it, so the marker after the call still runs.
+			if err := engine.DoString("legacy layout", `
+				legacy_marker = nil
+				legacy_result = rune.ui.layout(`+c.body+`)
+				legacy_marker = true
+			`); err != nil {
+				t.Fatalf("legacy layout raised: %v", err)
+			}
+			assertLua(t, engine, `assert(legacy_marker == true, "script did not continue after the rejected layout")`)
+			assertLua(t, engine, `assert(legacy_result == false, "rune.ui.layout must return false for a rejected table")`)
+			if got := engine.GetLayout(); !reflect.DeepEqual(got, baseline) {
+				t.Fatalf("rejected layout replaced the active tree: %#v", got)
+			}
+			if n := host.DrainPresentationChanges(); n != 0 {
+				t.Fatalf("rejected layout published %d presentation changes, want none", n)
+			}
+			printed := strings.Join(host.DrainPrintCalls(), "\n")
+			for _, want := range []string{
+				"rune.ui.layout: top/bottom layout tables are no longer supported",
+				"legacy layout:",
+				`{ type = "input" }`,
+				"#migrating-from-topbottom-tables",
+			} {
+				if !strings.Contains(printed, want) {
+					t.Fatalf("notice missing %q:\n%s", want, printed)
+				}
+			}
 		})
-	`); err != nil {
-		t.Fatal(err)
 	}
 
-	want := ui.LayoutTree{Root: ui.LayoutNode{
-		Type: ui.LayoutTypeColumn,
-		Children: []ui.LayoutNode{
-			{Type: ui.LayoutTypeLegacyReference, Name: "chat", Size: ui.Cells(10), Border: ui.PaneBorderHorizontal, Hidden: true},
-			{Type: ui.LayoutTypeLegacyReference, Name: "vitals", Size: ui.AutoSize(), Border: ui.PaneBorderHorizontal, Hidden: true},
-			outputPane(),
-			{Type: ui.LayoutTypeInput, Size: ui.AutoSize()},
-			{Type: ui.LayoutTypeSeparator, Size: ui.AutoSize(), SeparatorChar: "="},
-			{Type: ui.LayoutTypeLegacyReference, Name: "status", Size: ui.AutoSize(), Border: ui.PaneBorderHorizontal, Hidden: true},
-		},
-	}}
-	if got := engine.GetLayout(); !reflect.DeepEqual(got, want) {
-		t.Fatalf("canonical legacy layout =\n%#v\nwant\n%#v", got, want)
-	}
-}
-
-func TestExplicitVersionOneMatchesImplicitLegacyLayout(t *testing.T) {
-	engine, _, cleanup := setupTest(t)
-	defer cleanup()
-
-	if err := engine.DoString("implicit v1", `
-		rune.ui.layout({ top = { "vitals" }, bottom = { "input", "status" } })
-	`); err != nil {
-		t.Fatal(err)
-	}
-	implicit := engine.GetLayout()
-
-	if err := engine.DoString("explicit v1", `
-		rune.ui.layout({ version = 1, top = { "vitals" }, bottom = { "input", "status" } })
-	`); err != nil {
-		t.Fatal(err)
-	}
-	if got := engine.GetLayout(); !reflect.DeepEqual(got, implicit) {
-		t.Fatalf("explicit v1 tree =\n%#v\nwant implicit v1 tree\n%#v", got, implicit)
-	}
-}
-
-func TestLegacyTranslationKeepsRepeatedNamesAndDoesNotRequireInput(t *testing.T) {
-	engine, _, cleanup := setupTest(t)
-	defer cleanup()
-
-	if err := engine.DoString("legacy compatibility", `
-		rune.ui.layout({
-			version = 1,
-			top = {
-				{ name = "shared", height = 4.9 },
-				"shared",
-			},
-			bottom = {},
-		})
-	`); err != nil {
-		t.Fatal(err)
-	}
-	want := ui.LayoutTree{Root: ui.LayoutNode{
-		Type: ui.LayoutTypeColumn,
-		Children: []ui.LayoutNode{
-			{Type: ui.LayoutTypeLegacyReference, Name: "shared", Size: ui.Cells(4), Border: ui.PaneBorderHorizontal, Hidden: true},
-			{Type: ui.LayoutTypeLegacyReference, Name: "shared", Size: ui.AutoSize(), Border: ui.PaneBorderHorizontal, Hidden: true},
-			outputPane(),
-		},
-	}}
-	if got := engine.GetLayout(); !reflect.DeepEqual(got, want) {
-		t.Fatalf("legacy repeated layout = %#v, want %#v", got, want)
-	}
-}
-
-func TestLegacyNamesRemainLateBoundAroundCanonicalTypes(t *testing.T) {
-	engine, _, cleanup := setupTest(t)
-	defer cleanup()
-
-	if err := engine.DoString("legacy names", `
-		rune.ui.layout({
-			top = { "row", "column", "pane", "bar", "output", "component" },
-			bottom = { "input", "separator" },
-		})
-	`); err != nil {
-		t.Fatal(err)
-	}
-
-	got := engine.GetLayout()
-	wantNames := []string{"row", "column", "pane", "bar"}
-	if len(got.Root.Children) != len(wantNames)+5 {
-		t.Fatalf("legacy tree has %d children, want %d", len(got.Root.Children), len(wantNames)+5)
-	}
-	for i, wantName := range wantNames {
-		node := got.Root.Children[i]
-		if node.Type != ui.LayoutTypeLegacyReference || node.Name != wantName {
-			t.Fatalf("legacy child %d = %#v, want late-bound reference named %q", i+1, node, wantName)
-		}
-	}
-	if node := got.Root.Children[len(wantNames)]; node.Type != ui.LayoutTypeBar || node.Name != ui.OutputPaneName {
-		t.Fatalf("legacy output name = %#v, want explicit bar resource", node)
-	}
-	if node := got.Root.Children[len(wantNames)+1]; node.Type != ui.LayoutTypeLegacyReference || node.Name != "component" {
-		t.Fatalf("legacy resource named component = %#v, want late-bound reference", node)
-	}
-	if node := got.Root.Children[len(wantNames)+2]; !reflect.DeepEqual(node, outputPane()) {
-		t.Fatalf("injected output = %#v, want %#v", node, outputPane())
-	}
-	for i, wantType := range []string{ui.LayoutTypeInput, ui.LayoutTypeSeparator} {
-		node := got.Root.Children[len(wantNames)+3+i]
-		if node.Type != wantType || node.Name != "" {
-			t.Fatalf("legacy bottom child %d = %#v, want structural %q", i+1, node, wantType)
-		}
-	}
-}
-
-func TestLegacyOutputNameSeparatesBarFromReservedPane(t *testing.T) {
-	engine, _, cleanup := setupTest(t)
-	defer cleanup()
-
-	if err := engine.DoString("legacy output only", `
-		rune.ui.layout({ top = { "output", "output" } })
-	`); err != nil {
-		t.Fatal(err)
-	}
-
-	want := ui.LayoutTree{Root: ui.LayoutNode{
-		Type: ui.LayoutTypeColumn,
-		Children: []ui.LayoutNode{
-			{Type: ui.LayoutTypeBar, Name: ui.OutputPaneName, Size: ui.AutoSize()},
-			outputPane(),
-		},
-	}}
-	if got := engine.GetLayout(); !reflect.DeepEqual(got, want) {
-		t.Fatalf("legacy output-only layout = %#v, want one bar reference and one reserved pane %#v", got, want)
-	}
-}
-
-func TestLegacyEmptyDocksRetainTheDefaultLayout(t *testing.T) {
-	engine, _, cleanup := setupTest(t)
-	defer cleanup()
-
-	for _, body := range []string{
-		`{}`,
-		`{ version = 1, top = {}, bottom = {} }`,
-		`{ version = 1, top = { false, {}, 42 }, bottom = "not a dock" }`,
-	} {
-		if err := engine.DoString("empty legacy layout", `rune.ui.layout(`+body+`)`); err != nil {
-			t.Fatalf("rune.ui.layout(%s): %v", body, err)
-		}
-		if got := engine.GetLayout(); !reflect.DeepEqual(got, ui.DefaultLayoutTree()) {
-			t.Fatalf("empty legacy layout %s = %#v, want default %#v", body, got, ui.DefaultLayoutTree())
-		}
-	}
-}
-
-func TestLegacyBottomOnlyLayoutReplacesTheDefault(t *testing.T) {
-	engine, _, cleanup := setupTest(t)
-	defer cleanup()
-
-	if err := engine.DoString("bottom-only legacy layout", `
-		rune.ui.layout({ bottom = { "status" } })
-	`); err != nil {
-		t.Fatal(err)
-	}
-	want := ui.LayoutTree{Root: ui.LayoutNode{
-		Type: ui.LayoutTypeColumn,
-		Children: []ui.LayoutNode{
-			outputPane(),
-			{Type: ui.LayoutTypeLegacyReference, Name: "status", Size: ui.AutoSize(), Border: ui.PaneBorderHorizontal, Hidden: true},
-		},
-	}}
-	if got := engine.GetLayout(); !reflect.DeepEqual(got, want) {
-		t.Fatalf("bottom-only legacy layout = %#v, want %#v", got, want)
-	}
+	assertLua(t, engine, `
+		assert(rune.ui.layout({ type = "column", children = {
+			{ type = "pane", name = "output" }, { type = "input" },
+		} }) == true, "a valid tree must return true")
+	`)
 }
 
 func TestNativeLayoutParsesDirectStrictTreeWithFlatLeafFields(t *testing.T) {
@@ -396,9 +261,6 @@ func TestNativeLayoutValidationIsStrictAndAtomic(t *testing.T) {
 		body string
 		want string
 	}{
-		{name: "unsupported legacy version", body: `{ version = 2 }`, want: "legacy layout version must be 1"},
-		{name: "fractional legacy version", body: `{ version = 1.5 }`, want: "legacy layout version must be 1"},
-		{name: "string legacy version", body: `{ version = "1" }`, want: "legacy layout version must be 1"},
 		{name: "native version wrapper", body: `{ type="column", version=2, children={{type="pane",name="output"},{type="input"}} }`, want: `unknown field "version"`},
 		{name: "native root wrapper", body: `{ type="column", root={type="input"}, children={{type="pane",name="output"},{type="input"}} }`, want: `unknown field "root"`},
 		{name: "missing type", body: `{ typo = 1 }`, want: "root.type must be a non-empty string"},

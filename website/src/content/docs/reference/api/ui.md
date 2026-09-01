@@ -46,8 +46,12 @@ rune.ui.layout({
 ```
 
 The accepted table is parsed and validated before it replaces the active tree.
-Within a Lua generation, each call is atomic: an error raises
+Within a Lua generation, each call is atomic: an invalid tree raises
 `rune.ui.layout: ...` and leaves that generation's current layout in place.
+A successful call returns `true`. A top/bottom table from before the tree
+layout is rejected with a printed migration notice and returns `false` without
+raising, so the rest of the script still loads; see
+[Migrating from top/bottom tables](#migrating-from-topbottom-tables).
 `/reload` starts a fresh generation at the default layout before re-evaluating
 `init.lua`; an invalid layout during reload therefore leaves the default active,
 not the pre-reload tree. Replacing or reloading a layout resets region and
@@ -238,42 +242,29 @@ its own gate and all ancestor region gates permit it. Pane buffers and
 scrolling survive layout replacement and `/reload`. Bar registry state
 survives layout replacement but is rebuilt on `/reload`.
 
-### Version 1 tables
+### Migrating from top/bottom tables
 
-Version 1 uses a top/bottom table and accepts an optional explicit
-`version = 1`:
+Releases before the tree layout accepted `rune.ui.layout({ top = {...}, bottom = {...} })`.
+That form is no longer supported. Passing it prints a notice with the mapping
+below and returns `false`; the active layout is unchanged and the rest of the
+script continues. The mapping is mechanical:
 
-```lua
-rune.ui.layout({
-    top = { { name = "chat", height = 10 } },
-    bottom = { "input", "status" },
-})
-```
+| Top/bottom entry | Tree node |
+|---|---|
+| top entries | children placed before the `output` pane |
+| bottom entries | children placed after the `output` pane |
+| `"input"` | `{ type = "input" }` |
+| `"separator"` | `{ type = "separator" }` |
+| `{ name = "separator", char = "=" }` | `{ type = "separator", char = "=" }` |
+| a bar name | `{ type = "bar", name = ... }` |
+| `{ name = "chat", height = 10 }` (a pane) | `{ type = "pane", name = "chat", size = 10, border = "horizontal", hidden = true }` |
 
-The resulting layout places the top entries first, the reserved `output` pane
-next, and the bottom entries last. An entry named `input` or `separator`
-selects that built-in. For every other name, a bar result takes precedence;
-without one, a pane of the same name fills the slot. Version 1 pane
-placements start hidden until `rune.pane.show` or `toggle`. An empty string
-counts as a bar result and prevents pane fallback, even though the slot takes
-no space. Pane entries use horizontal borders.
-
-The reserved name has one extra rule: a legacy entry named `output` may select
-a bar of that name, but it never selects the transcript pane. Rune inserts the
-transcript separately, and repeated legacy `output` entries collapse to one bar
-placement. Other legacy names are not interpreted as tree node types.
-
-Version 1 keeps its permissive entry rules. Unusable entries are ignored. A
-finite numeric `height` is truncated to cells; a result of zero behaves as an
-omitted height, while a negative result or one beyond the layout-cell limit is
-rejected. A separator retains a string `char` only when it occupies one terminal
-cell. Other option fields are ignored, including user-supplied pane borders.
-
-When neither dock has a usable entry, including for `rune.ui.layout({})`, Rune
-restores the default output, input, and status tree. Once either dock has a
-usable entry, the table replaces that default and may omit input. Version 1
-cannot express nested rows, percentages, fractions, bounds, gaps, regions, or
-typed pane fields.
+The tree must contain exactly one `input`; a top/bottom table could omit or
+repeat it. Panes in the old form started hidden until `rune.pane.show` or
+`toggle`, so a pane that scripts reveal on demand needs `hidden = true` on its
+node. A pane that should be visible from the start omits it. The full
+example on the [Layout & UI](/interface/layout/#migrating-from-topbottom-tables)
+page shows the before and after side by side.
 
 ## rune.ui.bar
 

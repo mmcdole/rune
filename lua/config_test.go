@@ -260,7 +260,10 @@ func TestPresentationChangesDoNotRepublishConfig(t *testing.T) {
 
 	if err := engine.DoString("presentation changes", `
 		rune.bind("f2", function() end)
-		rune.ui.layout({ top = {}, bottom = {} })
+		rune.ui.layout({ type = "column", children = {
+			{ type = "pane", name = "output", border = "none" },
+			{ type = "input" },
+		} })
 	`); err != nil {
 		t.Fatal(err)
 	}

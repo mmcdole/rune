@@ -135,7 +135,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleDisplayOutput(msg)
 
 	// Pane operations
-	case ui.PaneCreateMsg, ui.PaneWriteMsg, ui.PaneClearMsg:
+	case ui.PaneCreateMsg, ui.PaneWriteMsg, ui.PaneReplaceMsg, ui.PaneClearMsg:
 		return m.handlePaneMsg(msg)
 
 	// Input control
@@ -283,13 +283,12 @@ func (m *Model) handlePaneMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ui.PaneWriteMsg:
 		affected = m.panes.Write(msg.Name, msg.Text)
 		contentChanged = true
+	case ui.PaneReplaceMsg:
+		m.dropOutputSearch(msg.Name)
+		affected = m.panes.Replace(msg.Name, msg.Text)
+		contentChanged = true
 	case ui.PaneClearMsg:
-		if msg.Name == ui.OutputPaneName {
-			if m.input.SearchActive() {
-				m.inputCtl.closeSearch(false)
-			}
-			m.searchView = searchViewState{}
-		}
+		m.dropOutputSearch(msg.Name)
 		affected, _ = m.panes.Clear(msg.Name)
 		contentChanged = true
 	}
@@ -297,6 +296,18 @@ func (m *Model) handlePaneMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateScrollState()
 	}
 	return m, nil
+}
+
+// dropOutputSearch abandons an active transcript search before the output
+// buffer it anchors to is emptied.
+func (m *Model) dropOutputSearch(name string) {
+	if name != ui.OutputPaneName {
+		return
+	}
+	if m.input.SearchActive() {
+		m.inputCtl.closeSearch(false)
+	}
+	m.searchView = searchViewState{}
 }
 
 // scrollPane applies one navigation operation to an existing pane. Output's

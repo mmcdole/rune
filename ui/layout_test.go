@@ -165,7 +165,7 @@ func TestValidateLayoutTreeRejectsInvalidStructure(t *testing.T) {
 		{
 			name: "name belongs only to resources",
 			tree: LayoutTree{Root: LayoutNode{Type: LayoutTypeInput, Name: "other"}},
-			want: "name is only valid on pane, bar, and legacy-reference leaves",
+			want: "name is only valid on pane and bar leaves",
 		},
 		{
 			name: "dividers on a leaf",
@@ -389,7 +389,7 @@ func TestRegionVisibilityIsCopyOnWrite(t *testing.T) {
 	}
 }
 
-func TestPaneVisibilityIsCopyOnWriteAndUpdatesEveryPlacement(t *testing.T) {
+func TestPaneVisibilityIsCopyOnWrite(t *testing.T) {
 	t.Parallel()
 
 	original := LayoutTree{Root: LayoutNode{
@@ -431,27 +431,6 @@ func TestPaneVisibilityIsCopyOnWriteAndUpdatesEveryPlacement(t *testing.T) {
 	}
 	if _, found := updated.PaneVisible(""); found {
 		t.Fatal("empty pane name unexpectedly resolved")
-	}
-
-	// Legacy trees may place one name repeatedly; one update flips every
-	// placement so they cannot drift apart.
-	legacy := LayoutTree{Root: LayoutNode{
-		Type: LayoutTypeColumn,
-		Children: []LayoutNode{
-			{Type: LayoutTypeLegacyReference, Name: "shared", Hidden: true},
-			{Type: LayoutTypePane, Name: OutputPaneName},
-			{Type: LayoutTypeLegacyReference, Name: "shared", Hidden: true},
-		},
-	}}
-	shown, found, changed := legacy.WithPaneVisibility("shared", true)
-	if !found || !changed {
-		t.Fatalf("legacy WithPaneVisibility found=%v changed=%v", found, changed)
-	}
-	if shown.Root.Children[0].Hidden || shown.Root.Children[2].Hidden {
-		t.Fatal("legacy update did not flip every placement of the name")
-	}
-	if visible, found := shown.PaneVisible("shared"); !found || !visible {
-		t.Fatalf("legacy PaneVisible(shared) = %v, %v; want true, true", visible, found)
 	}
 }
 

@@ -86,3 +86,17 @@ func TestNormalizeEditorTextPreservesWhitespace(t *testing.T) {
 		})
 	}
 }
+
+// TestReplacePaneQueuesOneMessage is the structural guarantee behind
+// rune.pane.replace: the clear and the write cannot be split by a frame
+// because they travel as one message.
+func TestReplacePaneQueuesOneMessage(t *testing.T) {
+	b := NewBubbleTeaUI()
+	b.ReplacePane("status", "HP 10\nMP 5")
+	if msg := <-b.msgQueue; msg != (ui.PaneReplaceMsg{Name: "status", Text: "HP 10\nMP 5"}) {
+		t.Fatalf("queued %#v, want one PaneReplaceMsg", msg)
+	}
+	if got := len(b.msgQueue); got != 0 {
+		t.Fatalf("ReplacePane queued %d extra messages", got+1)
+	}
+}

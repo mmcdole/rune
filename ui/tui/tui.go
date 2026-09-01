@@ -160,6 +160,11 @@ func (b *BubbleTeaUI) WritePane(name, text string) {
 	b.send(ui.PaneWriteMsg{Name: name, Text: text})
 }
 
+// ReplacePane empties a named pane and writes text as one update.
+func (b *BubbleTeaUI) ReplacePane(name, text string) {
+	b.send(ui.PaneReplaceMsg{Name: name, Text: text})
+}
+
 // ClearPane clears the contents of a named pane.
 func (b *BubbleTeaUI) ClearPane(name string) {
 	b.send(ui.PaneClearMsg{Name: name})

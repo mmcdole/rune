@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mmcdole/rune/input"
 	"github.com/mmcdole/rune/lua"
@@ -1277,7 +1278,10 @@ func TestResizeHookLayoutChangeAppliesInSameCycle(t *testing.T) {
 	assertSessionLua(t, s.engine, `
 		rune.hooks.on("window_size_changed", function(w)
 			if w < 80 then
-				rune.ui.layout({ bottom = { "input" } })
+				rune.ui.layout({ type = "column", children = {
+					{ type = "pane", name = "output", border = "none" },
+					{ type = "input" },
+				} })
 			end
 		end)
 	`)
@@ -1302,7 +1306,7 @@ func TestResizeHookLayoutChangeAppliesInSameCycle(t *testing.T) {
 		},
 	}}
 	if got := uiMock.pushedLayout(); !reflect.DeepEqual(got, want) {
-		t.Fatalf("pushed layout = %#v, want canonical v1 translation %#v", got, want)
+		t.Fatalf("pushed layout = %#v, want %#v", got, want)
 	}
 }
 
@@ -1716,5 +1720,80 @@ func TestDisconnectingHookSendsOnTheLiveConnection(t *testing.T) {
 
 	if sent := net.drainSent(); !slices.Equal(sent, []string{"farewell"}) {
 		t.Fatalf("disconnecting hook sent %q, want farewell on the live connection", sent)
+	}
+}
+
+// TestPresentationChangesCoalesceIntoOnePushPerEvent: a bind that installs a
+// layout and then flips a pane several times must reach the UI as one layout
+// snapshot carrying the final gate, never as a sequence of intermediate
+// snapshots.
+func TestPresentationChangesCoalesceIntoOnePushPerEvent(t *testing.T) {
+	s, _, uiMock := newTestSession(t)
+	assertSessionLua(t, s.engine, `
+		rune.bind("f9", function()
+			rune.ui.layout({ type = "column", children = {
+				{ type = "pane", name = "group", size = 5 },
+				{ type = "pane", name = "output", border = "none" },
+				{ type = "input" },
+			} })
+			rune.pane.hide("group")
+			rune.pane.show("group")
+			rune.pane.hide("group")
+		end)
+	`)
+	// Registering the bind outside a handler leaves the flag set. Start the
+	// tested event clean so the count below is the callback's own doing.
+	s.flushPresentation()
+	uiMock.drainLayoutPushes()
+	uiMock.drainBarPushes()
+
+	s.handleUIEvent(ui.ExecuteBindMsg("f9"))
+
+	if n := uiMock.drainLayoutPushes(); n != 1 {
+		t.Fatalf("layout pushes during one bind = %d, want exactly one", n)
+	}
+	if n, _ := uiMock.drainBarPushes(); n != 1 {
+		t.Fatalf("bar pushes during one bind = %d, want exactly one", n)
+	}
+	got := uiMock.pushedLayout()
+	if len(got.Root.Children) != 3 || got.Root.Children[0].Name != "group" || !got.Root.Children[0].Hidden {
+		t.Fatalf("pushed layout = %#v, want the group pane hidden", got)
+	}
+}
+
+// TestBootPublishesOnePresentationSnapshot locks in the boot cost: core
+// scripts register many binds, and none of them may push on its own.
+func TestBootPublishesOnePresentationSnapshot(t *testing.T) {
+	_, _, uiMock := newTestSession(t)
+	if n := uiMock.drainLayoutPushes(); n != 1 {
+		t.Fatalf("layout pushes during boot = %d, want exactly one", n)
+	}
+}
+
+// TestTimerCallbacksFlushPresentationOnce covers the timer lane of the
+// event loop: presentation changes made by a timer callback publish once when
+// the timer handler returns.
+func TestTimerCallbacksFlushPresentationOnce(t *testing.T) {
+	s, _, uiMock := newTestSession(t)
+	assertSessionLua(t, s.engine, `
+		rune.timer.after(0.01, function()
+			rune.pane.hide("output")
+			rune.pane.show("output")
+		end)
+	`)
+	s.flushPresentation()
+	uiMock.drainLayoutPushes()
+
+	select {
+	case evt := <-s.timerEvents:
+		s.handleTimer(evt)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timer did not fire")
+	}
+	if n := uiMock.drainLayoutPushes(); n != 1 {
+		t.Fatalf("layout pushes from one timer callback = %d, want exactly one", n)
+	}
+	if visible, found := uiMock.pushedLayout().PaneVisible(ui.OutputPaneName); !found || !visible {
+		t.Fatalf("pushed layout output gate = %v, %v; want visible", visible, found)
 	}
 }

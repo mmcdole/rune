@@ -30,6 +30,7 @@ type Host interface {
 	Print(text string)
 	PaneCreate(name string)
 	PaneWrite(name, text string)
+	PaneReplace(name, text string)
 	PaneClear(name string)
 	ShowPicker(opts ui.ShowPickerMsg)
 	ShowSearch(opts ui.ShowSearchMsg)
@@ -103,6 +104,9 @@ type Host interface {
 	// generation. It is separate from presentation invalidation so changing a
 	// setting cannot trigger Lua re-entry to rebuild binds, layout, and bars.
 	OnConfigChange(Config)
+	// OnPresentationChange notes that binds, layout, or placement visibility
+	// changed. The host may defer the resulting push until the current event
+	// finishes, so several changes from one callback publish one snapshot.
 	OnPresentationChange()
 }
 

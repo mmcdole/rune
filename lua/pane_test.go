@@ -92,6 +92,7 @@ func TestReservedOutputUsesTheOrdinaryPaneAPI(t *testing.T) {
 		assert(rune.pane.show("output") == true)
 		assert(rune.pane.toggle("output") == true)
 		assert(rune.pane.is_visible("output") == false)
+		rune.pane.replace("output", "fresh")
 		rune.pane.clear("output")
 	`); err != nil {
 		t.Fatal(err)
@@ -100,6 +101,7 @@ func TestReservedOutputUsesTheOrdinaryPaneAPI(t *testing.T) {
 	want := []struct{ Op, Name, Data string }{
 		{"create", "output", ""},
 		{"write", "output", "line"},
+		{"replace", "output", "fresh"},
 		{"clear", "output", ""},
 	}
 	if len(host.PaneCalls) != len(want) {

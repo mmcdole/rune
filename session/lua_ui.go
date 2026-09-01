@@ -24,6 +24,11 @@ func (s *Session) PaneWrite(name, msg string) {
 	s.ui.WritePane(name, text.SanitizeDisplay(msg))
 }
 
+// PaneReplace implements lua.Host.
+func (s *Session) PaneReplace(name, msg string) {
+	s.ui.ReplacePane(name, text.SanitizeDisplay(msg))
+}
+
 // PaneClear implements lua.Host.
 func (s *Session) PaneClear(name string) {
 	s.ui.ClearPane(name)

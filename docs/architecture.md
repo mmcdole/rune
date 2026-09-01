@@ -137,39 +137,35 @@ percentage, fractional remainder, or automatic height. Omitted native size is
 lowered to `auto` for input, separator, and bar leaves, and remains the default
 `1fr` for panes and containers.
 
-`lua/api_layout.go` is the only ingestion boundary; legacy v1 ingestion is
-isolated in `lua/layout_v1.go`:
+`lua/api_layout.go` is the only ingestion boundary:
 
-1. A legacy top/bottom table, optionally marked `version = 1`, is parsed with
-   the permissive dock reader and lowered into a column with the implicit
-   `output` pane between those entries. Stable `input` and `separator` names
-   become their native leaves; every other name stays late-bound inside the
-   compatibility adapter.
-   Late-bound compatibility leaves express v1's horizontal-only pane chrome
-   through the canonical `border = "horizontal"` pane field.
-2. A native table is the root node itself. It may be any native node and is
-   parsed strictly, subject to application invariants including exactly one
-   input leaf. Output placement is optional.
-3. Both paths call the same structural validator and produce `ui.LayoutTree`.
-   Raw top/bottom structure and version fields do not reach Session or the TUI.
-   The v1 path may retain private late-bound compatibility leaves until the TUI
-   binds them to current bar or pane resources.
-4. One parse call is atomic within its Lua generation. Only a complete valid
+1. The table passed to `rune.ui.layout` is the root node itself. It may be any
+   node type and is parsed strictly, subject to application invariants
+   including exactly one input leaf. Output placement is optional.
+2. The parser checks Lua types; `ui.ValidateLayoutTree` checks structure,
+   closed-set values, and limits once for every caller and produces
+   `ui.LayoutTree`.
+3. One parse call is atomic within its Lua generation. Only a complete valid
    candidate replaces that generation's current tree; reload begins a fresh
    generation from the default before evaluating user configuration.
+4. The retired top/bottom table form is recognized in the Lua wrapper and
+   rejected with a migration notice rather than an error, so a stale
+   `init.lua` keeps loading the registrations below it.
 
 Placement visibility is owned by the installed layout. Non-root rows and
 columns with an ID are runtime regions whose `hidden` bit is changed through
 `rune.ui.regions.show/hide/toggle`; pane leaves carry the same bit addressed
 by name through `rune.pane.show/hide/toggle`; `is_visible` reads a gate
 without ancestors. Layout replacement and reload both reset visibility from
-the new declarative tree. Regions cannot contain input. On a late-bound
-compatibility leaf the gate applies only to its pane fallback, never to a
-registered bar, and v1 pane placements start gated to preserve v1's
-hidden-until-shown behavior.
+the new declarative tree. Regions cannot contain input.
 
-Session pushes that tree snapshot through `UpdateLayout`. The TUI resolves it
-for each current terminal geometry:
+Session pushes that tree snapshot through `UpdateLayout`. `Host.OnPresentationChange`
+only marks the Session dirty; each event handler (UI event, network batch,
+timer, bar tick, internal event) flushes once when it returns, so a callback
+that installs a layout and then hides a pane publishes one layout snapshot
+carrying the final gates, never an intermediate one. Binds, layout, and bars
+still travel as separate messages. The TUI resolves that snapshot for each
+current terminal geometry:
 
 - Hidden regions, hidden pane placements, and empty bars are pruned before
   allocation. Containers with no active descendants disappear. Placing a pane

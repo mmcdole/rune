@@ -28,6 +28,7 @@ type UI interface {
 	SetClipboard(text string)
 	CreatePane(name string)
 	WritePane(name, text string)
+	ReplacePane(name, text string)
 	ClearPane(name string)
 
 	// Input primitives. Cursor positions are zero-based rune offsets.

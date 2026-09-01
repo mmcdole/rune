@@ -62,9 +62,12 @@ type Session struct {
 	// internalEvents carries typed outcomes from Session-owned asynchronous
 	// work back to the event loop. Only the event loop applies them to Session
 	// or Lua state.
-	internalEvents       chan internalEvent
-	timerEvents          chan timer.Event
-	barTicker            *time.Ticker
+	internalEvents chan internalEvent
+	timerEvents    chan timer.Event
+	barTicker      *time.Ticker
+	// presentationDirty records that binds, layout, or placement visibility
+	// changed during the current event; flushPresentation publishes once.
+	presentationDirty    bool
 	backgroundCtx        context.Context
 	cancelBackgroundWork context.CancelFunc
 
@@ -190,18 +193,35 @@ func (s *Session) processEvents(ctx context.Context) {
 		case inbound := <-s.net.Inbound():
 			s.handleInbound(inbound)
 		case evt := <-s.timerEvents:
-			s.engine.OnTimer(evt.ID)
+			s.handleTimer(evt)
 		case <-s.barTicker.C:
-			s.pushBarUpdates()
+			s.handleBarTick()
 		case event := <-s.ui.Events():
 			s.handleUIEvent(event)
 		}
 	}
 }
 
+// Every handler below is one presentation transaction: Lua may change binds,
+// layout, or visibility any number of times inside it, and the deferred flush
+// publishes the result once when the handler returns.
+
+func (s *Session) handleTimer(evt timer.Event) {
+	defer s.flushPresentation()
+	s.engine.OnTimer(evt.ID)
+}
+
+// handleBarTick renders bars on the ticker. Renderers run user Lua, so they
+// too may leave presentation changes to flush.
+func (s *Session) handleBarTick() {
+	defer s.flushPresentation()
+	s.pushBarUpdates()
+}
+
 // handleInbound rejects stale network work and routes the current connection's
 // messages.
 func (s *Session) handleInbound(inbound network.Inbound) {
+	defer s.flushPresentation()
 	if inbound.ConnectionID != s.connectionID {
 		return
 	}
@@ -349,6 +369,7 @@ func (s *Session) finishPartialLine() {
 
 // handleUIEvent applies one accepted UI action or state observation.
 func (s *Session) handleUIEvent(event ui.UIEvent) {
+	defer s.flushPresentation()
 	switch event := event.(type) {
 	case ui.InputSubmittedMsg:
 		// The accepted event carries both the immutable submission and the
@@ -444,6 +465,10 @@ func (s *Session) boot() error {
 	s.loadUserScript()
 	s.engine.NotifyReady()
 	s.engine.CommitConfig()
+	// Script loading marks presentation dirty on every bind registration.
+	// Clear that before the one explicit boot push so it is the only push,
+	// and clear it first so a change made while rendering bars survives.
+	s.presentationDirty = false
 	s.pushBindsAndLayout()
 	s.pushBarUpdates()
 
@@ -455,6 +480,7 @@ func (s *Session) boot() error {
 		s.connectTarget = ""
 		s.engine.DispatchSubmission(input.Command("/connect " + target))
 	}
+	s.flushPresentation()
 	return nil
 }
 

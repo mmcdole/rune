@@ -313,6 +313,11 @@ Use `rune.pane.*` for writes and visibility. See [Panes](/interface/panes/).
 Omit `char` to use `─`. A supplied character must occupy exactly one terminal
 cell or layout validation fails.
 
+A default separator placed by a column is drawn by the same frame that draws
+pane borders and dividers, so a divider ending on it meets it with a tee. A
+separator with a custom `char`, or one placed by a row, renders on its own and
+does not join.
+
 ## Regions and inactive resources
 
 A non-root `row` or `column` becomes an addressable region when it has an `id`.
@@ -363,27 +368,47 @@ Rune removes inactive nodes before allocating space:
 
 The remaining siblings reclaim the space. A container that is left with one
 active child continues resolving that child normally. Pane buffers and scroll
-position survive layout replacement and `/reload`.
+position survive layout replacement and `/reload`; visibility does not. A
+script that rebuilds the layout at runtime and wants to keep a pane's current
+visibility snapshots and restores it, as shown under
+[Panes](/interface/panes/).
 
-## Legacy top/bottom tables
+## Migrating from top/bottom tables
 
-Existing configurations may use a `top`/`bottom` table, with an optional
-`version = 1`:
+Releases before the tree layout took a `top`/`bottom` table. That form is no
+longer accepted: Rune prints a notice with the mapping, keeps the current
+layout, and continues loading the rest of the script. Rewrite it as a column
+with the top entries first, the `output` pane, then the bottom entries. Before:
 
 ```lua
 rune.ui.layout({
-    version = 1,
-    top = { { name = "chat", height = 10 } },
+    top = { { name = "chat", height = 10 }, "separator" },
     bottom = { "input", "status" },
 })
 ```
 
-Rune places top entries first, inserts the reserved `output` pane, and then
-places bottom entries. A non-empty legacy table replaces the complete default
-and may omit input, so include `"input"` deliberately. Use the tree form for
-nested splits, regions, typed pane presentation, and flexible sizing. See the
-[API reference](/reference/api/ui/#version-1-tables) for the exact legacy entry
-and name-resolution rules.
+After:
+
+```lua
+rune.ui.layout({
+    type = "column",
+    children = {
+        { type = "pane", name = "chat", size = 10, border = "horizontal", hidden = true },
+        { type = "separator" },
+        { type = "pane", name = "output", border = "none" },
+        { type = "input" },
+        { type = "bar", name = "status" },
+    },
+})
+```
+
+Two rules changed along the way. A tree must contain exactly one `input`,
+where the old form could omit or repeat it. Old-form panes started hidden and
+were revealed with `rune.pane.toggle`; a tree pane is visible as soon as it is
+placed, so keep `hidden = true` on panes your binds reveal on demand and drop
+it on panes that should show immediately. The
+[API reference](/reference/api/ui/#migrating-from-topbottom-tables) lists the
+complete entry-by-entry mapping.
 
 ## Validation
 

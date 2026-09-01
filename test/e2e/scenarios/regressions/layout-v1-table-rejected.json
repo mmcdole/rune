@@ -1,0 +1,16 @@
+{
+  "description": "Layout v2 retired the top/bottom table form of rune.ui.layout. A stale table must be rejected with a migration notice that leaves the default layout active and never aborts the rest of init.lua, so every registration below the old call still loads.",
+  "scenarios": [
+    {
+      "name": "a v1 layout table prints a migration notice and the script continues",
+      "init_lua": [
+        "rune.ui.layout({ top = { { name = 'chat', height = 10 } }, bottom = { 'input', 'status' } })",
+        "rune.echo('E2E-AFTER-LAYOUT')"
+      ],
+      "steps": [
+        { "expect_printed": "top/bottom layout tables are no longer supported", "note": "the notice reaches the scrollback" },
+        { "expect_printed": "E2E-AFTER-LAYOUT", "note": "the statement after the rejected call still ran" }
+      ]
+    }
+  ]
+}

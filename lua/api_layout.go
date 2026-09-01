@@ -4,16 +4,13 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/mattn/go-runewidth"
 	"github.com/mmcdole/rune/script"
 	"github.com/mmcdole/rune/ui"
 )
 
-const legacyLayoutVersion = 1
-
 // registerLayoutFuncs owns layout installation and structural-region state.
-// Legacy dock tables are translated here, native trees are parsed here, and
-// every downstream consumer receives the same canonical LayoutTree.
+// Root-node trees are parsed and validated here, and every downstream consumer
+// receives the same canonical LayoutTree.
 func (e *Engine) registerLayoutFuncs() {
 	e.vm.RegisterModule("rune._ui", map[string]script.GoFunc{
 		"layout": func(c *script.Call) error {
@@ -108,48 +105,9 @@ func (e *Engine) GetLayout() ui.LayoutTree {
 	return e.layout
 }
 
+// parseLayout reads a root-node table and validates the complete tree. Any
+// failure leaves the caller's active layout untouched.
 func parseLayout(tbl script.TableView) (ui.LayoutTree, error) {
-	// Top/bottom fields, an explicit version, or an empty table select the v1
-	// compatibility form. A type field identifies a direct root-node tree.
-	if tbl.Field("type").Kind() == script.KindNil &&
-		(tbl.Field("top").Kind() != script.KindNil ||
-			tbl.Field("bottom").Kind() != script.KindNil ||
-			tbl.Field("version").Kind() != script.KindNil || layoutTableEmpty(tbl)) {
-		if err := validateLegacyLayoutVersion(tbl.Field("version")); err != nil {
-			return ui.LayoutTree{}, err
-		}
-		return parseLegacyLayout(tbl)
-	}
-	return parseNativeLayout(tbl)
-}
-
-func layoutTableEmpty(tbl script.TableView) bool {
-	empty := true
-	tbl.Each(func(_, _ script.Value) bool {
-		empty = false
-		return false
-	})
-	return empty
-}
-
-// version = 1 is accepted only for v1 dock configuration. Root-node trees are
-// passed directly and do not accept a version field.
-func validateLegacyLayoutVersion(value script.Value) error {
-	if value.Kind() == script.KindNil {
-		return nil
-	}
-	if value.Kind() != script.KindNumber {
-		return fmt.Errorf("legacy layout version must be 1, got %s", value.Kind())
-	}
-	n := value.Num()
-	if math.IsNaN(n) || math.IsInf(n, 0) || math.Trunc(n) != n ||
-		n != legacyLayoutVersion {
-		return fmt.Errorf("legacy layout version must be 1, got %s; pass a root-node tree directly", value.String())
-	}
-	return nil
-}
-
-func parseNativeLayout(tbl script.TableView) (ui.LayoutTree, error) {
 	state := layoutNodeParser{active: make(map[uintptr]bool)}
 	root, err := state.parseTable(tbl, "root", 0, true)
 	if err != nil {
@@ -335,6 +293,9 @@ func nativeLayoutFields(typeName string) (map[string]bool, bool) {
 	return fields, true
 }
 
+// parseNativeLeafFields reads leaf presentation fields. It checks Lua types
+// only; closed-set values and cell widths are validated once by
+// ui.ValidateLayoutTree.
 func parseNativeLeafFields(tbl script.TableView, node *ui.LayoutNode, path string) error {
 	switch node.Type {
 	case ui.LayoutTypePane:
@@ -346,9 +307,8 @@ func parseNativeLeafFields(tbl script.TableView, node *ui.LayoutNode, path strin
 			node.Title = &value
 		}
 		if border := tbl.Field("border"); border.Kind() != script.KindNil {
-			if border.Kind() != script.KindString ||
-				(border.Str() != string(ui.PaneBorderFull) && border.Str() != string(ui.PaneBorderHorizontal) && border.Str() != string(ui.PaneBorderNone)) {
-				return fmt.Errorf("%s.border must be %q, %q, or %q", path, ui.PaneBorderFull, ui.PaneBorderHorizontal, ui.PaneBorderNone)
+			if border.Kind() != script.KindString {
+				return fmt.Errorf("%s.border must be a string, got %s", path, border.Kind())
 			}
 			node.Border = ui.PaneBorder(border.Str())
 		}
@@ -356,9 +316,6 @@ func parseNativeLeafFields(tbl script.TableView, node *ui.LayoutNode, path strin
 		if char := tbl.Field("char"); char.Kind() != script.KindNil {
 			if char.Kind() != script.KindString {
 				return fmt.Errorf("%s.char must be a string, got %s", path, char.Kind())
-			}
-			if runewidth.StringWidth(char.Str()) != 1 {
-				return fmt.Errorf("%s.char must occupy exactly one terminal cell", path)
 			}
 			node.SeparatorChar = char.Str()
 		}
