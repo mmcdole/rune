@@ -67,13 +67,15 @@ replacement but are rebuilt with the Lua VM on reload.
 | `min_size` | non-root nodes | Minimum cells along the parent's axis |
 | `max_size` | non-root nodes | Maximum cells along the parent's axis |
 | `gap` | `row`, `column` | Blank cells between active children; default `0` |
+| `dividers` | `row`, `column` | Draw a rule between adjacent active children, reusing framed seams when possible; default `false` |
 | `hidden` | `pane`, identified non-root `row`, `column` | Initial placement visibility gate; default `false` |
 | `title` | `pane` | Optional string replacing the generated pane title; `""` suppresses title text |
 | `border` | `pane` | `"full"`, `"horizontal"`, or `"none"`; default `"full"` |
 | `char` | `separator` | One-cell separator character |
 
 Unknown fields are errors. The root cannot set `id`, `hidden`, `size`,
-`min_size`, or `max_size`. Leaves cannot set `children` or `gap`. `name` is
+`min_size`, or `max_size`. Leaves cannot set `children`, `gap`, or
+`dividers`. `name` is
 rejected outside pane and bar leaves. Pane names and bar names are each unique
 within the tree. `output` names Rune's reserved, pre-created pane. IDs are
 unique, valid only on non-root containers, and identify the regions managed by

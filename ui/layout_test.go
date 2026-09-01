@@ -168,6 +168,14 @@ func TestValidateLayoutTreeRejectsInvalidStructure(t *testing.T) {
 			want: "name is only valid on pane, bar, and legacy-reference leaves",
 		},
 		{
+			name: "dividers on a leaf",
+			tree: LayoutTree{Root: LayoutNode{Type: LayoutTypeRow, Children: []LayoutNode{
+				{Type: LayoutTypeBar, Name: "vitals", Dividers: true},
+				testBar("b"),
+			}}},
+			want: "dividers are only valid on row and column containers",
+		},
+		{
 			name: "root id",
 			tree: LayoutTree{Root: LayoutNode{Type: LayoutTypeRow, ID: "screen", Children: validChildren}},
 			want: "root cannot have an id",
@@ -680,5 +688,18 @@ func TestAllocateAxisDeterministicProperties(t *testing.T) {
 		if hasUncappedFraction && used != extent {
 			t.Fatalf("iteration %d: uncapped fraction left %d of %d cells unused: %v", iteration, extent-used, extent, got)
 		}
+	}
+}
+
+func TestDividersValidateOnContainers(t *testing.T) {
+	t.Parallel()
+
+	tree := LayoutTree{Root: LayoutNode{
+		Type:     LayoutTypeRow,
+		Dividers: true,
+		Children: []LayoutNode{testBar("a"), testBar("b")},
+	}}
+	if err := ValidateLayoutTree(tree); err != nil {
+		t.Fatalf("dividers on a container should validate: %v", err)
 	}
 }

@@ -743,3 +743,154 @@ func TestSearchUsesTheSameResolvedOutputRectangleAsView(t *testing.T) {
 	}
 	assertExactBlock(t, m.View().Content, 40, 16)
 }
+
+func TestContainerDividersDrawBetweenActiveChildren(t *testing.T) {
+	noTitle := ""
+	band := func(hideSocial bool) ui.LayoutNode {
+		return ui.LayoutNode{
+			Type: ui.LayoutTypeColumn,
+			Children: []ui.LayoutNode{
+				{
+					Type: ui.LayoutTypeRow, Dividers: true, Size: ui.Cells(4),
+					Children: []ui.LayoutNode{
+						{Type: ui.LayoutTypePane, Name: "social", Size: ui.Fraction(2),
+							Border: ui.PaneBorderHorizontal, Title: &noTitle, Hidden: hideSocial},
+						{Type: ui.LayoutTypePane, Name: "map", Size: ui.Fraction(1),
+							Border: ui.PaneBorderHorizontal, Title: &noTitle},
+					},
+				},
+				{Type: ui.LayoutTypePane, Name: ui.OutputPaneName, Border: ui.PaneBorderNone},
+			},
+		}
+	}
+
+	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 8)), 21, 8)
+	addPane(t, m, "social")
+	addPane(t, m, "map")
+	setLayout(m, band(false))
+
+	plan := m.ensureLayout()
+	social := findLeaf(t, plan, leafPane, "social")
+	mapLeaf := findLeaf(t, plan, leafPane, "map")
+	if social.outer != image.Rect(0, 0, 13, 4) || mapLeaf.outer != image.Rect(14, 0, 21, 4) {
+		t.Fatalf("band rects = %v and %v, want the divider cell between x=13 and x=14",
+			social.outer, mapLeaf.outer)
+	}
+
+	rows := assertExactBlock(t, m.View().Content, 21, 8)
+	plain := make([][]rune, len(rows))
+	for i, row := range rows {
+		plain[i] = []rune(ansi.Strip(row))
+	}
+	if plain[0][0] != '─' || plain[0][20] != '─' {
+		t.Fatalf("horizontal panes grew outer walls: %q", string(plain[0]))
+	}
+	if plain[0][13] != '┬' || plain[1][13] != '│' || plain[2][13] != '│' || plain[3][13] != '┴' {
+		t.Fatalf("divider column = %q and %q, want tee, bar, bar, tee at x=13",
+			string(plain[0]), string(plain[3]))
+	}
+
+	setLayout(m, band(true))
+	rows = assertExactBlock(t, m.View().Content, 21, 8)
+	for i, row := range rows {
+		if strings.ContainsRune(ansi.Strip(row), '│') {
+			t.Fatalf("row %d still draws a divider with one active child: %q", i, row)
+		}
+	}
+}
+
+func TestContainerDividersReuseFramedPaneSeams(t *testing.T) {
+	noTitle := ""
+	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 8)), 20, 6)
+	addPane(t, m, "left")
+	addPane(t, m, "right")
+	setLayout(m, ui.LayoutNode{
+		Type: ui.LayoutTypeRow, Dividers: true,
+		Children: []ui.LayoutNode{
+			{Type: ui.LayoutTypePane, Name: "left", Title: &noTitle},
+			{Type: ui.LayoutTypePane, Name: "right", Title: &noTitle},
+		},
+	})
+
+	plan := m.ensureLayout()
+	left := findLeaf(t, plan, leafPane, "left")
+	right := findLeaf(t, plan, leafPane, "right")
+	if left.outer != image.Rect(0, 0, 11, 6) || right.outer != image.Rect(10, 0, 20, 6) {
+		t.Fatalf("pane rects = %v and %v, want one shared boundary at x=10", left.outer, right.outer)
+	}
+
+	rows := assertExactBlock(t, m.View().Content, 20, 6)
+	middle := []rune(ansi.Strip(rows[2]))
+	for _, x := range []int{0, 10, 19} {
+		if middle[x] != '│' {
+			t.Fatalf("middle row = %q, want vertical rule at x=%d", string(middle), x)
+		}
+	}
+	if middle[9] == '│' || middle[11] == '│' {
+		t.Fatalf("divider added walls beside the shared seam: %q", string(middle))
+	}
+}
+
+func TestColumnDividerDrawsInsideDeclaredGap(t *testing.T) {
+	noTitle := ""
+	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 8)), 15, 9)
+	addPane(t, m, "north")
+	addPane(t, m, "south")
+	setLayout(m, ui.LayoutNode{
+		Type: ui.LayoutTypeColumn, Dividers: true, Gap: 3,
+		Children: []ui.LayoutNode{
+			{Type: ui.LayoutTypePane, Name: "north", Border: ui.PaneBorderNone, Title: &noTitle},
+			{Type: ui.LayoutTypePane, Name: "south", Border: ui.PaneBorderNone, Title: &noTitle},
+		},
+	})
+
+	plan := m.ensureLayout()
+	north := findLeaf(t, plan, leafPane, "north")
+	south := findLeaf(t, plan, leafPane, "south")
+	if north.outer != image.Rect(0, 0, 15, 3) || south.outer != image.Rect(0, 6, 15, 9) {
+		t.Fatalf("pane rects = %v and %v, want a three-row gap", north.outer, south.outer)
+	}
+
+	rows := assertExactBlock(t, m.View().Content, 15, 9)
+	if got := ansi.Strip(rows[4]); got != strings.Repeat("─", 15) {
+		t.Fatalf("middle gap row = %q, want divider", got)
+	}
+	if strings.ContainsRune(ansi.Strip(rows[3]), '─') || strings.ContainsRune(ansi.Strip(rows[5]), '─') {
+		t.Fatalf("divider escaped the center of its gap: %q / %q", rows[3], rows[5])
+	}
+}
+
+func TestDividerContainerPropagatesItsContinuousFrame(t *testing.T) {
+	noTitle := ""
+	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 8)), 20, 8)
+	for _, name := range []string{"left", "right", "bottom"} {
+		addPane(t, m, name)
+	}
+	setLayout(m, ui.LayoutNode{
+		Type: ui.LayoutTypeColumn,
+		Children: []ui.LayoutNode{
+			{
+				Type: ui.LayoutTypeRow, Dividers: true,
+				Children: []ui.LayoutNode{
+					{Type: ui.LayoutTypePane, Name: "left", Border: ui.PaneBorderHorizontal, Title: &noTitle},
+					{Type: ui.LayoutTypePane, Name: "right", Border: ui.PaneBorderHorizontal, Title: &noTitle},
+				},
+			},
+			{Type: ui.LayoutTypePane, Name: "bottom", Title: &noTitle},
+		},
+	})
+
+	plan := m.ensureLayout()
+	left := findLeaf(t, plan, leafPane, "left")
+	bottom := findLeaf(t, plan, leafPane, "bottom")
+	if left.outer.Max.Y != bottom.outer.Min.Y+1 {
+		t.Fatalf("nested seam does not overlap: top ends at %d, bottom starts at %d",
+			left.outer.Max.Y, bottom.outer.Min.Y)
+	}
+
+	rows := assertExactBlock(t, m.View().Content, 20, 8)
+	seam := ansi.Strip(rows[bottom.outer.Min.Y])
+	if strings.Count(seam, "─") < 17 {
+		t.Fatalf("nested seam is not continuous: %q", seam)
+	}
+}

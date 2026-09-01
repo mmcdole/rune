@@ -176,7 +176,7 @@ not reflow after a resize or layout change. Named panes re-wrap their lines at
 the current width. The [API reference](/reference/api/ui/#leaf-types) covers
 output behavior before its first placement and while it is hidden.
 
-## Gaps and pane borders
+## Gaps, dividers, and pane borders
 
 Set `gap` on a container to reserve blank cells between its active children:
 
@@ -195,6 +195,31 @@ The gap is subtracted before child sizes are resolved. With `gap = 0`, adjacent
 bordered panes share one boundary instead of drawing two borders. Rune owns
 the shared frame and draws the correct corners and junctions for nested rows
 and columns.
+
+Set `dividers = true` on a container to draw a rule between adjacent active
+children instead of leaving the gap blank. A row draws vertical rules and a
+column draws horizontal rules. With `gap = 0`, Rune reuses an existing framed
+seam or reserves one cell when the children do not provide one. A positive gap
+keeps its declared width and draws the rule near its middle.
+
+```lua
+{
+    type = "row",
+    dividers = true,
+    children = {
+        { type = "pane", name = "social", size = "2fr", border = "horizontal" },
+        { type = "pane", name = "map", size = "1fr", border = "horizontal" },
+    },
+}
+```
+
+That band has top and bottom rules from the panes, one vertical rule between
+them, and no outer side walls. Dividers pair naturally with `"horizontal"` and
+`"none"` pane borders: the container separates siblings, so no pane needs its
+own walls. Full pane borders already provide their shared seam, so enabling
+dividers does not add another rule beside it. Because rules sit only between
+active children, hiding a pane removes its neighboring divider with it, and
+the divider meets pane borders with the correct tee and cross junctions.
 
 A pane uses a full border by default. The default output placement opts out
 with `border = "none"`. Its assigned rectangle includes any border, and the

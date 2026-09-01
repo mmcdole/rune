@@ -541,8 +541,7 @@ func TestOrdinaryPaneLifecycle(t *testing.T) {
 		t.Fatalf("ordinary pane did not return to live state: %q", got)
 	}
 
-	next, _ = m.Update(ui.PaneClearMsg{Name: "chat"})
-	m = next.(*Model)
+	_, _ = m.Update(ui.PaneClearMsg{Name: "chat"})
 	if got := chat.View(20, 1); got != "" {
 		t.Fatalf("ordinary pane clear left content %q", got)
 	}

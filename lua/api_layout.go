@@ -272,6 +272,12 @@ func (p *layoutNodeParser) parseTable(
 			return ui.LayoutNode{}, err
 		}
 		node.Gap = gap
+		if dividers := tbl.Field("dividers"); dividers.Kind() != script.KindNil {
+			if dividers.Kind() != script.KindBool {
+				return ui.LayoutNode{}, fmt.Errorf("%s.dividers must be a boolean, got %s", path, dividers.Kind())
+			}
+			node.Dividers = dividers.Bool()
+		}
 
 		children := tbl.Field("children")
 		if children.Kind() != script.KindTable {
@@ -311,6 +317,7 @@ func nativeLayoutFields(typeName string) (map[string]bool, bool) {
 		fields["id"] = true
 		fields["children"] = true
 		fields["gap"] = true
+		fields["dividers"] = true
 		fields["hidden"] = true
 	case ui.LayoutTypePane:
 		fields["name"] = true

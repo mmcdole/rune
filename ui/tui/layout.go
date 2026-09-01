@@ -28,9 +28,20 @@ const (
 // Raw Lua table shape and version fields do not reach this layer; it consumes a
 // LayoutTree that may include private v1 resource references.
 type layoutPlan struct {
-	leaves []placedLeaf
-	frame  frameGrid
-	output image.Rectangle
+	leaves   []placedLeaf
+	dividers []dividerRule
+	frame    frameGrid
+	output   image.Rectangle
+}
+
+// dividerRule is one container-owned rule drawn between two adjacent active
+// children. A row draws vertical rules; a column draws horizontal rules. The
+// resolver prunes inactive children first, so a rule never borders a hidden or
+// empty sibling.
+type dividerRule struct {
+	vertical bool
+	at       int
+	from, to int
 }
 
 type leafKind uint8
@@ -76,13 +87,48 @@ func (n *resolvedNode) framesEdge(edge frameEdges) bool {
 	return n != nil && n.frames&edge != 0
 }
 
+func seamFrames(children []*resolvedNode, index int, axis splitAxis) (before, after bool) {
+	if axis == axisHorizontal {
+		return children[index].framesEdge(frameRight), children[index+1].framesEdge(frameLeft)
+	}
+	return children[index].framesEdge(frameBottom), children[index+1].framesEdge(frameTop)
+}
+
+// boundaryGaps returns the space between each pair of active children. With
+// no declared gap, a divider reuses an existing framed seam; otherwise it
+// reserves one cell for a rule.
+func boundaryGaps(node ui.LayoutNode, children []*resolvedNode, axis splitAxis) []int {
+	gaps := make([]int, max(0, len(children)-1))
+	for i := range gaps {
+		gaps[i] = node.Gap
+		before, after := seamFrames(children, i, axis)
+		if node.Dividers && gaps[i] == 0 && !before && !after {
+			gaps[i] = 1
+		}
+	}
+	return gaps
+}
+
+func gapCells(gaps []int) int {
+	total := 0
+	for _, gap := range gaps {
+		total += gap
+	}
+	return total
+}
+
 func containerFrameEdges(node ui.LayoutNode, children []*resolvedNode) frameEdges {
 	if len(children) == 0 {
 		return 0
 	}
+	gaps := boundaryGaps(node, children, nodeAxis(node))
 	all := func(edge frameEdges) bool {
-		if node.Gap != 0 {
-			return false
+		for _, gap := range gaps {
+			// A one-cell divider connects the children's cross-axis frames.
+			// Wider gaps and undrawn gaps break the composite perimeter.
+			if gap > 0 && (!node.Dividers || gap > 1) {
+				return false
+			}
 		}
 		for _, child := range children {
 			if !child.framesEdge(edge) {
@@ -298,8 +344,8 @@ func (m *Model) preferred(node *resolvedNode, axis splitAxis, cross int) int {
 
 	direction := nodeAxis(node.node)
 	if direction == axis {
-		total := max(0, len(node.children)-1)*node.node.Gap -
-			countTrue(seamOverlaps(node.children, node.node.Gap, direction))
+		gaps := boundaryGaps(node.node, node.children, direction)
+		total := gapCells(gaps) - countTrue(seamOverlaps(node.children, gaps, direction))
 		for _, child := range node.children {
 			desired := 0
 			switch child.node.Size.Kind {
@@ -389,8 +435,8 @@ func (m *Model) intrinsicMinimum(node *resolvedNode, axis splitAxis) int {
 
 	direction := nodeAxis(node.node)
 	if direction == axis {
-		total := max(0, len(node.children)-1)*node.node.Gap -
-			countTrue(seamOverlaps(node.children, node.node.Gap, direction))
+		gaps := boundaryGaps(node.node, node.children, direction)
+		total := gapCells(gaps) - countTrue(seamOverlaps(node.children, gaps, direction))
 		for _, child := range node.children {
 			total += m.minimum(child, axis)
 		}
@@ -412,16 +458,12 @@ func nodeMaximum(node ui.LayoutNode) int {
 
 // seamOverlaps reports where resolved geometry lets adjacent framed panes share
 // one boundary cell.
-func seamOverlaps(children []*resolvedNode, gap int, axis splitAxis) []bool {
+func seamOverlaps(children []*resolvedNode, gaps []int, axis splitAxis) []bool {
 	overlaps := make([]bool, max(0, len(children)-1))
-	if gap != 0 {
-		return overlaps
-	}
 	for i := range overlaps {
-		if axis == axisHorizontal {
-			overlaps[i] = children[i].framesEdge(frameRight) && children[i+1].framesEdge(frameLeft)
-		} else {
-			overlaps[i] = children[i].framesEdge(frameBottom) && children[i+1].framesEdge(frameTop)
+		if gaps[i] == 0 {
+			before, after := seamFrames(children, i, axis)
+			overlaps[i] = before && after
 		}
 	}
 	return overlaps
@@ -439,7 +481,7 @@ func countTrue(values []bool) int {
 
 type childAllocation struct {
 	sizes    []int
-	gap      int
+	gaps     []int
 	overlaps []bool
 }
 
@@ -452,6 +494,7 @@ func fallbackAllocation(
 	count := len(children)
 	result := childAllocation{
 		sizes:    make([]int, count),
+		gaps:     make([]int, max(0, count-1)),
 		overlaps: make([]bool, max(0, count-1)),
 	}
 	extent = max(0, extent)
@@ -519,8 +562,9 @@ func fallbackAllocation(
 }
 
 func (m *Model) allocateChildren(node *resolvedNode, extent int, axis splitAxis, cross int) childAllocation {
-	overlaps := seamOverlaps(node.children, node.node.Gap, axis)
-	effectiveExtent := max(0, extent) + countTrue(overlaps)
+	gaps := boundaryGaps(node.node, node.children, axis)
+	overlaps := seamOverlaps(node.children, gaps, axis)
+	effectiveExtent := max(0, extent) - gapCells(gaps) + countTrue(overlaps)
 	tracks := make([]ui.AxisTrack, len(node.children))
 	for i, child := range node.children {
 		track := ui.AxisTrack{
@@ -533,12 +577,12 @@ func (m *Model) allocateChildren(node *resolvedNode, extent int, axis splitAxis,
 		}
 		tracks[i] = track
 	}
-	sizes, err := ui.AllocateAxis(effectiveExtent, node.node.Gap, tracks)
+	sizes, err := ui.AllocateAxis(effectiveExtent, 0, tracks)
 	if err != nil {
 		return fallbackAllocation(node.children, extent, axis, tracks)
 	}
 
-	used := max(0, len(sizes)-1)*node.node.Gap - countTrue(overlaps)
+	used := gapCells(gaps) - countTrue(overlaps)
 	for i, size := range sizes {
 		if size < 0 || (i < len(overlaps) && overlaps[i] && (size == 0 || sizes[i+1] == 0)) {
 			return fallbackAllocation(node.children, extent, axis, tracks)
@@ -548,7 +592,7 @@ func (m *Model) allocateChildren(node *resolvedNode, extent int, axis splitAxis,
 	if used > extent {
 		return fallbackAllocation(node.children, extent, axis, tracks)
 	}
-	return childAllocation{sizes: sizes, gap: node.node.Gap, overlaps: overlaps}
+	return childAllocation{sizes: sizes, gaps: gaps, overlaps: overlaps}
 }
 
 func (m *Model) placeNode(node *resolvedNode, rect image.Rectangle, plan *layoutPlan) {
@@ -575,7 +619,20 @@ func (m *Model) placeNode(node *resolvedNode, rect image.Rectangle, plan *layout
 		m.placeNode(child, childArea, plan)
 		position += size
 		if i < len(node.children)-1 {
-			position += allocation.gap
+			gap := allocation.gaps[i]
+			// The tiny-terminal fallback drops gaps, and with them the cell a
+			// divider draws in, so dividers degrade away with their gap.
+			if node.node.Dividers && gap >= 1 {
+				rule := dividerRule{vertical: axis == axisHorizontal,
+					at: position + (gap-1)/2}
+				if rule.vertical {
+					rule.from, rule.to = rect.Min.Y, rect.Max.Y
+				} else {
+					rule.from, rule.to = rect.Min.X, rect.Max.X
+				}
+				plan.dividers = append(plan.dividers, rule)
+			}
+			position += gap
 			if allocation.overlaps[i] {
 				position--
 			}
@@ -593,12 +650,16 @@ func (m *Model) resolveLayout() layoutPlan {
 		return plan
 	}
 	m.placeNode(root, image.Rect(0, 0, m.width, m.height), &plan)
+	needsFrame := len(plan.dividers) > 0
 	for i := range plan.leaves {
-		if paneLeaf(&plan.leaves[i]) {
-			plan.frame = newFrameGrid(m.width, m.height)
-			m.planFrames(&plan)
+		if needsFrame || paneLeaf(&plan.leaves[i]) {
+			needsFrame = true
 			break
 		}
+	}
+	if needsFrame {
+		plan.frame = newFrameGrid(m.width, m.height)
+		m.planFrames(&plan)
 	}
 	for _, leaf := range plan.leaves {
 		if leaf.kind == leafPane && leaf.pane == m.output {
@@ -776,10 +837,18 @@ func insetFrame(rect image.Rectangle, frames frameEdges) image.Rectangle {
 	return rect
 }
 
-// planFrames gives pane chrome one owner: the pane itself. Each framed pane
-// marks its configured edges and insets its content rectangle. Shared pane
-// coordinates merge naturally in frameGrid, including T and cross junctions.
+// planFrames gives every piece of chrome one owner. Each framed pane marks
+// its configured edges and insets its content rectangle; each container with
+// dividers marks the rules between its active children. Shared coordinates
+// merge naturally in frameGrid, including T and cross junctions.
 func (m *Model) planFrames(plan *layoutPlan) {
+	for _, rule := range plan.dividers {
+		if rule.vertical {
+			plan.frame.markVertical(rule.at, rule.from, rule.to)
+		} else {
+			plan.frame.markHorizontal(rule.at, rule.from, rule.to)
+		}
+	}
 	for i := range plan.leaves {
 		leaf := &plan.leaves[i]
 		if !paneLeaf(leaf) {

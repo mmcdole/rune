@@ -273,12 +273,12 @@ func (m *mockUI) pushedBinds() map[string]bool {
 	return m.bindsPushed
 }
 
-func (m *mockUI) ShowPicker(opts ui.ShowPickerMsg)         {}
-func (m *mockUI) ShowSearch(opts ui.ShowSearchMsg)         {}
-func (m *mockUI) SetClipboard(text string)                 {}
-func (m *mockUI) CreatePane(name string)                   {}
-func (m *mockUI) WritePane(name, text string)              {}
-func (m *mockUI) ClearPane(name string)                    {}
+func (m *mockUI) ShowPicker(opts ui.ShowPickerMsg) {}
+func (m *mockUI) ShowSearch(opts ui.ShowSearchMsg) {}
+func (m *mockUI) SetClipboard(text string)         {}
+func (m *mockUI) CreatePane(name string)           {}
+func (m *mockUI) WritePane(name, text string)      {}
+func (m *mockUI) ClearPane(name string)            {}
 
 func (m *mockUI) InputSetCursor(pos int) {
 	m.mu.Lock()

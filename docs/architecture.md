@@ -188,8 +188,9 @@ for each current terminal geometry:
   reserved `output` pane retains the transcript's physical rows at append-time
   width because prompt composition, search anchors, and scrolling depend on that
   history model while implementing the same public pane operations.
-- A centralized frame grid owns pane borders, shared seams, titles, and junction
-  glyphs. Leaf content is drawn into its assigned rectangle and clipped there.
+- A centralized frame grid owns pane borders, container dividers, shared seams,
+  titles, and junction glyphs. Leaf content is drawn into its assigned rectangle
+  and clipped there.
 
 Bars retain the Push/Snapshot boundary:
 

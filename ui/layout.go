@@ -129,7 +129,10 @@ type LayoutTree struct {
 // legacy-reference leaves use Name to select a resource. ID identifies a hideable
 // structural region and is valid only on non-root containers. Size, MinSize,
 // and MaxSize apply along the parent's axis. The root has no parent and cannot
-// carry those constraints or visibility state. Hidden is the placement's
+// carry those constraints or visibility state. Gap and Dividers are
+// container-only: Gap reserves cells between active children, and Dividers
+// draws a rule between them when their frames do not already provide one.
+// Hidden is the placement's
 // visibility gate: valid on identified regions and pane placements (name is
 // the runtime handle for the latter). On a legacy reference it gates only the
 // pane fallback, never a registered bar. Title and Border are pane-only;
@@ -145,6 +148,7 @@ type LayoutNode struct {
 	MinSize       *int
 	MaxSize       *int
 	Gap           int
+	Dividers      bool
 	Hidden        bool
 	Title         *string
 	Border        PaneBorder
@@ -423,6 +427,9 @@ func (v *layoutValidation) node(node LayoutNode, path string, depth int, root bo
 	}
 	if node.Gap != 0 {
 		return fmt.Errorf("%s: gap is only valid on row and column containers", path)
+	}
+	if node.Dividers {
+		return fmt.Errorf("%s: dividers are only valid on row and column containers", path)
 	}
 	return validateLeafFields(node, path)
 }

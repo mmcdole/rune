@@ -219,6 +219,7 @@ func TestNativeLayoutParsesDirectStrictTreeWithFlatLeafFields(t *testing.T) {
 				{
 					type = "row",
 					size = "2fr",
+					dividers = true,
 					children = {
 						{ type = "pane", name = "output", size = "2fr", border = "none" },
 						{
@@ -244,8 +245,9 @@ func TestNativeLayoutParsesDirectStrictTreeWithFlatLeafFields(t *testing.T) {
 		Gap:  1,
 		Children: []ui.LayoutNode{
 			{
-				Type: ui.LayoutTypeRow,
-				Size: ui.Fraction(2),
+				Type:     ui.LayoutTypeRow,
+				Size:     ui.Fraction(2),
+				Dividers: true,
 				Children: []ui.LayoutNode{
 					{Type: ui.LayoutTypePane, Name: ui.OutputPaneName, Size: ui.Fraction(2), Border: ui.PaneBorderNone},
 					{
@@ -418,6 +420,8 @@ func TestNativeLayoutValidationIsStrictAndAtomic(t *testing.T) {
 		{name: "container options table", body: `{ type="column",options={},children={{type="pane",name="output"},{type="input"}} }`, want: `unknown field "options"`},
 		{name: "leaf options table", body: `{ type="column",children={{type="pane",name="output",options={}},{type="input"}} }`, want: `unknown field "options"`},
 		{name: "leaf gap", body: `{ type="column",children={{type="pane",name="output",gap=1},{type="input"}} }`, want: `unknown field "gap"`},
+		{name: "leaf dividers", body: `{ type="column",children={{type="pane",name="output",dividers=true},{type="input"}} }`, want: `unknown field "dividers"`},
+		{name: "non-boolean dividers", body: `{ type="column",dividers=1,children={{type="pane",name="output"},{type="input"}} }`, want: "dividers must be a boolean"},
 		{name: "zero fixed size", body: `{ type="column",children={{type="pane",name="output"},{type="input",size=0}} }`, want: "between 1"},
 		{name: "fractional fixed size", body: `{ type="column",children={{type="pane",name="output"},{type="input",size=1.5}} }`, want: "finite integer"},
 		{name: "numeric size string", body: `{ type="column",children={{type="pane",name="output"},{type="input",size="5"}} }`, want: "expected auto, Nfr, or P%"},
