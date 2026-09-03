@@ -41,6 +41,9 @@ func (e *Engine) registerLayoutFuncs() {
 				c.Return(false)
 				return nil
 			}
+			if visible && e.refuseHidingInput(c, "toggle", id) {
+				return nil
+			}
 			updated, _, _ := e.layout.WithRegionVisibility(id, !visible)
 			e.layout = updated
 			c.Return(true)
@@ -89,6 +92,9 @@ func (e *Engine) setRegionVisible(c *script.Call, operation string, visible bool
 	id, err := layoutRegionID(c, operation)
 	if err != nil {
 		return err
+	}
+	if !visible && e.refuseHidingInput(c, operation, id) {
+		return nil
 	}
 	updated, found, changed := e.layout.WithRegionVisibility(id, visible)
 	c.Return(found)
@@ -426,4 +432,16 @@ func countInputNodes(root ui.LayoutNode) (input int) {
 	}
 	walk(root)
 	return input
+}
+
+// refuseHidingInput returns nil, err to the caller when hiding the region
+// would remove the input composer from the layout. Unknown regions are left
+// to the caller's own not-found handling.
+func (e *Engine) refuseHidingInput(c *script.Call, operation, id string) bool {
+	containsInput, found := e.layout.RegionContainsInput(id)
+	if !found || !containsInput {
+		return false
+	}
+	c.Return(nil, fmt.Sprintf("rune.ui.regions.%s: region %q contains input and cannot be hidden", operation, id))
+	return true
 }

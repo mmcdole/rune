@@ -448,8 +448,10 @@ func validateLeafFields(node LayoutNode, path string) error {
 	return nil
 }
 
-// validateRegionContents keeps the input composer reachable. Pane resources,
-// including output, may be hidden directly or as part of a region.
+// validateRegionContents keeps the input composer reachable. A region may
+// carry an id while it contains input, so ids stay usable as plain handles,
+// but it cannot be declared hidden while it does. The region API refuses to
+// hide such a region at runtime for the same reason.
 func validateRegionContents(node LayoutNode, path string) (containsInput bool, err error) {
 	containsInput = node.Type == LayoutTypeInput
 	for i, child := range node.Children {
@@ -460,10 +462,44 @@ func validateRegionContents(node LayoutNode, path string) (containsInput bool, e
 		}
 		containsInput = containsInput || childContainsInput
 	}
-	if node.ID != "" && containsInput {
-		return false, fmt.Errorf("%s: region %q cannot contain input", path, node.ID)
+	if node.ID != "" && node.Hidden && containsInput {
+		return false, fmt.Errorf("%s: region %q contains input and cannot be hidden", path, node.ID)
 	}
 	return containsInput, nil
+}
+
+// RegionContainsInput reports whether the identified region holds the input
+// composer at any depth. Such a region exists and may be shown or queried,
+// but hiding it would make the composer unreachable.
+func (t LayoutTree) RegionContainsInput(id string) (containsInput, found bool) {
+	if id == "" {
+		return false, false
+	}
+	var find func(LayoutNode)
+	find = func(node LayoutNode) {
+		if node.ID == id {
+			found = true
+			containsInput = containsInput || subtreeContainsInput(node)
+			return
+		}
+		for _, child := range node.Children {
+			find(child)
+		}
+	}
+	find(t.Root)
+	return containsInput, found
+}
+
+func subtreeContainsInput(node LayoutNode) bool {
+	if node.Type == LayoutTypeInput {
+		return true
+	}
+	for _, child := range node.Children {
+		if subtreeContainsInput(child) {
+			return true
+		}
+	}
+	return false
 }
 
 func validateNodeSize(node LayoutNode, path string) error {

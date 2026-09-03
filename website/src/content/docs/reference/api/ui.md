@@ -65,7 +65,7 @@ replacement but are rebuilt with the Lua VM on reload.
 |---|---|---|
 | `type` | every node | Required node kind: `row`, `column`, `input`, `pane`, `bar`, or `separator` |
 | `name` | `pane`, `bar` | Required non-empty resource name |
-| `id` | non-root `row`, `column` | Optional unique region identity |
+| `id` | non-root `row`, `column` | Optional unique region identity; a region containing `input` cannot be hidden |
 | `children` | `row`, `column` | Dense array of at least two declared child nodes |
 | `size` | non-root nodes | Main-axis cells, percentage, fraction, or automatic height |
 | `min_size` | non-root nodes | Minimum cells along the parent's axis |
@@ -84,7 +84,7 @@ rejected outside pane and bar leaves. Pane names and bar names are each unique
 within the tree. `output` names Rune's reserved, pre-created pane. IDs are
 unique, valid only on non-root containers, and identify the regions managed by
 `rune.ui.regions`.
-An identified region cannot contain `input` at any depth.
+A region may contain `input`, but it cannot be declared `hidden` while it does.
 
 ### Containers
 
@@ -165,8 +165,8 @@ operation applies to it. Other pane buffers are created on first placement or
 first `write`, or explicitly with `create`. Placing a pane shows it; declare
 `hidden = true` on the leaf for a pane that starts hidden.
 
-Input can appear anywhere except inside an identified region. As a child of a
-column, its omitted size defaults to `auto`.
+Input can appear anywhere, including inside an identified region. As a child
+of a column, its omitted size defaults to `auto`.
 
 Ordinary pane buffers store logical lines and re-wrap at their current width.
 The `output` pane keeps transcript rows at their append-time width, so existing
@@ -218,16 +218,19 @@ initial gate of a region or a pane placement. Use the region API at runtime:
 
 ```lua
 rune.ui.regions.show("sidebar")        -- true if found
-rune.ui.regions.hide("sidebar")        -- true if found
-rune.ui.regions.toggle("sidebar")      -- true if found
+rune.ui.regions.hide("sidebar")        -- true if found; nil, err if it contains input
+rune.ui.regions.toggle("sidebar")      -- true if found; nil, err if hiding would remove input
 rune.ui.regions.is_visible("sidebar")  -- true/false, or nil if unknown
 ```
 
 The first three return whether the region exists. `is_visible` reports the
 region's own gate, not whether an ancestor is hidden or a descendant resource
 is active. Replacing the layout and `/reload` both reset region state from the
-new layout declaration. A region may contain panes and bars, including the
-`output` pane, but it cannot contain input at any depth.
+new layout declaration. A region may contain panes, bars, and the input, so an
+id works as a plain handle for any container. Because the input must stay
+reachable, a region that contains it at any depth cannot be hidden: `hidden =
+true` on such a region is a layout error, and `hide` or `toggle` on it returns
+`nil` and an error message instead of changing the layout.
 
 Before allocating space, Rune omits hidden regions, hidden pane placements,
 bars with no active visible content, and containers left with no active

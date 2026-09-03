@@ -157,7 +157,9 @@ columns with an ID are runtime regions whose `hidden` bit is changed through
 `rune.ui.regions.show/hide/toggle`; pane leaves carry the same bit addressed
 by name through `rune.pane.show/hide/toggle`; `is_visible` reads a gate
 without ancestors. Layout replacement and reload both reset visibility from
-the new declarative tree. Regions cannot contain input.
+the new declarative tree. A region may contain input, but hiding it is refused
+at declaration (`hidden = true`) and at runtime (`hide`/`toggle` return
+`nil, err`) so the composer stays reachable.
 
 Session pushes that tree snapshot through `UpdateLayout`. `Host.OnPresentationChange`
 only marks the Session dirty; each event handler (UI event, network batch,

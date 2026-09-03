@@ -273,14 +273,27 @@ func TestValidateLayoutTreeRejectsInvalidStructure(t *testing.T) {
 			want: "hidden is only valid on a pane or an identified row or column region",
 		},
 		{
-			name: "region contains input",
+			name: "hidden region contains input",
 			tree: LayoutTree{Root: LayoutNode{Type: LayoutTypeColumn, Children: []LayoutNode{
-				{Type: LayoutTypeRow, ID: "composer", Children: []LayoutNode{
+				{Type: LayoutTypeRow, ID: "composer", Hidden: true, Children: []LayoutNode{
 					{Type: LayoutTypePane, Name: OutputPaneName}, {Type: LayoutTypeInput},
 				}},
 				testBar("status"),
 			}}},
-			want: `region "composer" cannot contain input`,
+			want: `region "composer" contains input and cannot be hidden`,
+		},
+		{
+			name: "hidden ancestor region contains nested input",
+			tree: LayoutTree{Root: LayoutNode{Type: LayoutTypeColumn, Children: []LayoutNode{
+				{Type: LayoutTypeRow, ID: "workspace", Hidden: true, Children: []LayoutNode{
+					{Type: LayoutTypePane, Name: "chat"},
+					{Type: LayoutTypeColumn, ID: "io", Children: []LayoutNode{
+						{Type: LayoutTypePane, Name: OutputPaneName}, {Type: LayoutTypeInput},
+					}},
+				}},
+				testBar("status"),
+			}}},
+			want: `region "workspace" contains input and cannot be hidden`,
 		},
 		{
 			name: "duplicate pane names",

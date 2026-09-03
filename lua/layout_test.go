@@ -301,7 +301,7 @@ func TestNativeLayoutValidationIsStrictAndAtomic(t *testing.T) {
 		{name: "hidden input leaf", body: `{ type="column",children={{type="pane",name="output"},{type="input",hidden=true}} }`, want: `unknown field "hidden"`},
 		{name: "id on leaf", body: `{ type="column",children={{type="pane",name="output",id="leaf"},{type="input"}} }`, want: `unknown field "id"`},
 		{name: "duplicate id", body: `{ type="column",children={{type="row",id="same",children={{type="pane",name="one"},{type="bar",name="one",size=1}}},{type="row",id="same",children={{type="pane",name="two"},{type="bar",name="two",size=1}}},{type="input"}} }`, want: "duplicate id"},
-		{name: "region contains input", body: `{ type="column",children={{type="row",id="composer",children={{type="pane",name="output"},{type="input",size="1fr"}}},{type="bar",name="status"}} }`, want: `region "composer" cannot contain input`},
+		{name: "hidden region contains input", body: `{ type="column",children={{type="row",id="composer",hidden=true,children={{type="pane",name="output"},{type="input",size="1fr"}}},{type="bar",name="status"}} }`, want: `region "composer" contains input and cannot be hidden`},
 		{name: "duplicate pane name", body: `{ type="column",children={{type="pane",name="chat"},{type="pane",name="chat"},{type="input"}} }`, want: `duplicate pane name "chat"`},
 		{name: "duplicate bar name", body: `{ type="column",children={{type="bar",name="status"},{type="bar",name="status"},{type="input"}} }`, want: `duplicate bar name "status"`},
 		{name: "pane title type", body: `{ type="column",children={{type="pane",name="output",title=1},{type="input"}} }`, want: "title must be a string"},
@@ -422,6 +422,59 @@ func TestRegionVisibilityPreservesPriorSnapshotsAndPublishesChanges(t *testing.T
 	assertLua(t, engine, `assert(rune.ui.regions.hide("workspace") == true)`)
 	if got := host.DrainPresentationChanges(); got != 0 {
 		t.Fatalf("idempotent hide published %d presentation changes", got)
+	}
+}
+
+func TestRegionContainingInputCanBeIdentifiedButNotHidden(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	if err := engine.DoString("region layout", `
+		rune.ui.layout({
+			type = "column",
+			children = {
+				{
+					type = "row", id = "workspace",
+					children = {
+						{ type = "pane", name = "chat", size = 20 },
+						{
+							type = "column", id = "io",
+							children = {
+								{ type = "pane", name = "output", border = "none" },
+								{ type = "input" },
+							},
+						},
+					},
+				},
+				{ type = "bar", name = "status" },
+			},
+		})
+	`); err != nil {
+		t.Fatal(err)
+	}
+	host.DrainPresentationChanges()
+	before := engine.GetLayout()
+
+	assertLua(t, engine, `
+		assert(rune.ui.regions.is_visible("io") == true)
+		assert(rune.ui.regions.is_visible("workspace") == true)
+		assert(rune.ui.regions.show("io") == true)
+		assert(rune.ui.regions.show("workspace") == true)
+		for _, id in ipairs({ "io", "workspace" }) do
+			for _, op in ipairs({ "hide", "toggle" }) do
+				local ok, err = rune.ui.regions[op](id)
+				assert(ok == nil, op .. " " .. id .. " returned " .. tostring(ok))
+				assert(err == "rune.ui.regions." .. op .. ": region \"" .. id .. "\" contains input and cannot be hidden", err)
+			end
+		end
+		assert(rune.ui.regions.is_visible("io") == true)
+		assert(rune.ui.regions.is_visible("workspace") == true)
+	`)
+	if got := host.DrainPresentationChanges(); got != 0 {
+		t.Fatalf("refused region operations published %d presentation changes", got)
+	}
+	if got := engine.GetLayout(); !reflect.DeepEqual(got, before) {
+		t.Fatalf("refused region operations mutated layout:\n got  %#v\n want %#v", got, before)
 	}
 }
 
