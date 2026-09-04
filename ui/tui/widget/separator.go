@@ -1,8 +1,9 @@
 package widget
 
 import (
-	"github.com/mattn/go-runewidth"
+	"image"
 
+	"github.com/mattn/go-runewidth"
 	"github.com/mmcdole/rune/ui/tui/style"
 )
 
@@ -39,7 +40,6 @@ func (s *Separator) SetSize(width, height int) {
 	s.width = width
 }
 
-// PreferredHeight implements Widget.
-func (s *Separator) PreferredHeight() int {
-	return 1
-}
+func (s *Separator) MeasureHeight(width, limit int) int { return min(1, limit) }
+
+func (s *Separator) MinimumSize() image.Point { return image.Point{} }

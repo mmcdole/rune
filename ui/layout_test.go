@@ -13,6 +13,47 @@ func testBar(name string) LayoutNode {
 	return LayoutNode{Type: LayoutTypeBar, Name: name}
 }
 
+func TestNormalizeLayoutUsesParentAxisAndCopiesDeclaration(t *testing.T) {
+	for _, axis := range []string{LayoutTypeRow, LayoutTypeColumn} {
+		minimum, maximum, title := 0, 20, "Chat"
+		tree := LayoutTree{Root: LayoutNode{Type: axis, Children: []LayoutNode{
+			{Type: LayoutTypeInput},
+			{Type: LayoutTypeBar, Name: "status"},
+			{Type: LayoutTypeSeparator},
+			{Type: LayoutTypePane, Name: "chat", MinSize: &minimum, MaxSize: &maximum, Title: &title},
+			{Type: LayoutTypeColumn, ID: "empty", Children: []LayoutNode{}},
+			{Type: LayoutTypeRow, ID: "single", Children: []LayoutNode{{Type: LayoutTypePane, Name: "map"}}},
+		}}}
+		normalized, err := NormalizeLayoutTree(tree)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, child := range normalized.Root.Children {
+			want := Fraction(1)
+			if axis == LayoutTypeColumn && i < 3 {
+				want = AutoSize()
+			}
+			if child.Size != want {
+				t.Errorf("%s child %d size = %v, want %v", axis, i, child.Size, want)
+			}
+		}
+		if tree.Root.Children[0].Size.Kind != LayoutSizeDefault {
+			t.Fatal("normalization changed the declaration")
+		}
+		minimum, maximum, title = 10, 30, "Changed"
+		tree.Root.Children[5].Children[0].Name = "changed"
+		pane := normalized.Root.Children[3]
+		if *pane.MinSize != 0 || *pane.MaxSize != 20 || *pane.Title != "Chat" ||
+			normalized.Root.Children[5].Children[0].Name != "map" {
+			t.Fatal("normalized tree aliases mutable declaration fields")
+		}
+		again, err := NormalizeLayoutTree(normalized)
+		if err != nil || !reflect.DeepEqual(again, normalized) {
+			t.Fatal("normalization is not idempotent")
+		}
+	}
+}
+
 func TestParseLayoutSize(t *testing.T) {
 	t.Parallel()
 
@@ -65,9 +106,8 @@ func TestDefaultLayoutTreeIsCanonical(t *testing.T) {
 	want := LayoutTree{Root: LayoutNode{
 		Type: LayoutTypeColumn,
 		Children: []LayoutNode{
-			{Type: LayoutTypePane, Name: OutputPaneName, Border: PaneBorderNone},
+			{Type: LayoutTypePane, Name: OutputPaneName, Border: PaneBorderNone, Size: Fraction(1)},
 			{Type: LayoutTypeInput, Size: AutoSize()},
-			{Type: LayoutTypeBar, Name: "status", Size: AutoSize()},
 		},
 	}}
 	if !reflect.DeepEqual(tree, want) {
@@ -194,11 +234,6 @@ func TestValidateLayoutTreeRejectsInvalidStructure(t *testing.T) {
 			name: "hidden root",
 			tree: LayoutTree{Root: LayoutNode{Type: LayoutTypeRow, Hidden: true, Children: validChildren}},
 			want: "root cannot be hidden",
-		},
-		{
-			name: "container needs two children",
-			tree: LayoutTree{Root: LayoutNode{Type: LayoutTypeRow, Children: []LayoutNode{testBar("only")}}},
-			want: "row needs at least two children",
 		},
 		{
 			name: "leaf cannot have children",
@@ -374,8 +409,8 @@ func TestRegionVisibilityIsCopyOnWrite(t *testing.T) {
 	if err := ValidateLayoutTree(original); err != nil {
 		t.Fatalf("ValidateLayoutTree: %v", err)
 	}
-	if visible, found := original.RegionVisible("sidebar"); !found || visible {
-		t.Fatalf("initial RegionVisible(sidebar) = %v, %v; want false, true", visible, found)
+	if hidden, found := original.RegionHidden("sidebar"); !found || !hidden {
+		t.Fatalf("initial RegionHidden(sidebar) = %v, %v; want true, true", hidden, found)
 	}
 
 	updated, found, changed := original.WithRegionVisibility("sidebar", true)
@@ -397,7 +432,7 @@ func TestRegionVisibilityIsCopyOnWrite(t *testing.T) {
 	if found || changed || !reflect.DeepEqual(missing, updated) {
 		t.Fatalf("unknown update found=%v changed=%v tree changed=%v", found, changed, !reflect.DeepEqual(missing, updated))
 	}
-	if _, found := updated.RegionVisible(""); found {
+	if _, found := updated.RegionHidden(""); found {
 		t.Fatal("empty region id unexpectedly resolved")
 	}
 }
@@ -416,11 +451,11 @@ func TestPaneVisibilityIsCopyOnWrite(t *testing.T) {
 	if err := ValidateLayoutTree(original); err != nil {
 		t.Fatalf("ValidateLayoutTree: %v", err)
 	}
-	if visible, found := original.PaneVisible("chat"); !found || visible {
-		t.Fatalf("initial PaneVisible(chat) = %v, %v; want false, true", visible, found)
+	if hidden, found := original.PaneHidden("chat"); !found || !hidden {
+		t.Fatalf("initial PaneHidden(chat) = %v, %v; want true, true", hidden, found)
 	}
-	if visible, found := original.PaneVisible(OutputPaneName); !found || !visible {
-		t.Fatalf("initial PaneVisible(output) = %v, %v; want true, true", visible, found)
+	if hidden, found := original.PaneHidden(OutputPaneName); !found || hidden {
+		t.Fatalf("initial PaneHidden(output) = %v, %v; want false, true", hidden, found)
 	}
 
 	updated, found, changed := original.WithPaneVisibility("chat", true)
@@ -442,7 +477,7 @@ func TestPaneVisibilityIsCopyOnWrite(t *testing.T) {
 	if found || changed || !reflect.DeepEqual(missing, updated) {
 		t.Fatalf("unknown update found=%v changed=%v tree changed=%v", found, changed, !reflect.DeepEqual(missing, updated))
 	}
-	if _, found := updated.PaneVisible(""); found {
+	if _, found := updated.PaneHidden(""); found {
 		t.Fatal("empty pane name unexpectedly resolved")
 	}
 }

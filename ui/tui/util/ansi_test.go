@@ -1,9 +1,26 @@
 package util
 
 import (
+	"github.com/charmbracelet/x/ansi"
 	"slices"
 	"testing"
 )
+
+func TestTerminalCellWidths(t *testing.T) {
+	for _, value := range []string{"❤️", "1️⃣", "👩‍💻", "🇺🇸", "界", "\x1b[31m❤️\x1b[0m"} {
+		if got := VisibleLen(value); got != 2 {
+			t.Errorf("VisibleLen(%q) = %d, want 2", value, got)
+		}
+		if got := ExpandTabs(value + "\tx"); got != value+"      x" {
+			t.Errorf("tab after %q: %q", value, got)
+		}
+		for _, row := range WrapLine(value+value+"x", 3) {
+			if ansi.StringWidth(row) > 3 {
+				t.Errorf("wrapped row exceeds compositor width: %q", row)
+			}
+		}
+	}
+}
 
 func TestExpandTabs(t *testing.T) {
 	tests := []struct {

@@ -70,6 +70,19 @@ func newControllerHarness() *controllerHarness {
 	return h
 }
 
+func TestReplacingPickerSettlesBothCallbacks(t *testing.T) {
+	for _, inline := range []bool{false, true} {
+		h := newControllerHarness()
+		h.ctl.ShowPicker(ui.ShowPickerMsg{Items: pickerTestItems, CallbackID: "first", Inline: inline})
+		h.ctl.ShowPicker(ui.ShowPickerMsg{Items: pickerTestItems, CallbackID: "second"})
+		h.ctl.HandleKey(keyPress(tea.KeyEsc))
+		got := h.pickerSelects()
+		if len(got) != 2 || got[0].CallbackID != "first" || got[1].CallbackID != "second" || got[0].Accepted || got[1].Accepted {
+			t.Fatalf("replacement must settle both callbacks exactly once: %+v", got)
+		}
+	}
+}
+
 func keyPress(code rune) tea.KeyPressMsg {
 	return tea.KeyPressMsg{Code: code}
 }
@@ -165,7 +178,7 @@ func TestPickerCallbackSettledOnEveryExit(t *testing.T) {
 		{
 			name: "modal enter with no match cancels",
 			setup: func(h *controllerHarness) {
-				h.ctl.input.PickerFilter("zzz")
+				h.ctl.input.Picker().Filter("zzz")
 			},
 			key:      keyPress(tea.KeyEnter),
 			accepted: false,
@@ -233,8 +246,8 @@ func TestPickerCallbackSettledOnEveryExit(t *testing.T) {
 				t.Fatalf("got %+v, want {CallbackID: cb, Accepted: %v, Value: %q}",
 					sel, tc.accepted, tc.value)
 			}
-			if h.ctl.mode != ModeNormal {
-				t.Fatalf("expected ModeNormal after exit, got %v", h.ctl.mode)
+			if h.ctl.mode() != modeNormal {
+				t.Fatalf("expected modeNormal after exit, got %v", h.ctl.mode())
 			}
 		})
 	}
@@ -506,7 +519,7 @@ func TestPickerKpNavigationFollowsModePolicy(t *testing.T) {
 		if binds := h.executeBinds(); len(binds) != 1 || binds[0] != ui.ExecuteBindMsg("numpad2") {
 			t.Fatalf("inline keypad binds = %v, want [numpad2]", binds)
 		}
-		selected, ok := h.ctl.input.PickerSelected()
+		selected, ok := h.ctl.input.Picker().Selected()
 		if !ok || selected.Value != "/connect" {
 			t.Fatalf("inline physical bind moved selection to %+v", selected)
 		}
@@ -523,7 +536,7 @@ func TestPickerKpNavigationFollowsModePolicy(t *testing.T) {
 		if binds := h.executeBinds(); len(binds) != 0 {
 			t.Fatalf("inline picker dispatched base bind: %v", binds)
 		}
-		selected, ok := h.ctl.input.PickerSelected()
+		selected, ok := h.ctl.input.Picker().Selected()
 		if !ok || selected.Value != "/disconnect" {
 			t.Fatalf("inline keypad Down selected %+v, want /disconnect", selected)
 		}
@@ -541,7 +554,7 @@ func TestPickerKpNavigationFollowsModePolicy(t *testing.T) {
 		if binds := h.executeBinds(); len(binds) != 0 {
 			t.Fatalf("modal picker dispatched keypad bind: %v", binds)
 		}
-		selected, ok := h.ctl.input.PickerSelected()
+		selected, ok := h.ctl.input.Picker().Selected()
 		if !ok || selected.Value != "/disconnect" {
 			t.Fatalf("modal keypad Down selected %+v, want /disconnect", selected)
 		}
@@ -562,19 +575,19 @@ func TestSearchModeTreatsKpNavigationAsNavigation(t *testing.T) {
 	h.ctl.ShowSearch(ui.ShowSearchMsg{Query: "thief"})
 	h.events = nil
 
-	selected, ok := h.ctl.input.SearchSelected()
+	selected, ok := h.ctl.input.Search().Selected()
 	if !ok || selected.Stripped != "thief two" {
 		t.Fatalf("initial search selection = %+v, want thief two", selected)
 	}
 
 	h.ctl.HandleKey(keyPress(tea.KeyKpUp))
-	selected, ok = h.ctl.input.SearchSelected()
+	selected, ok = h.ctl.input.Search().Selected()
 	if !ok || selected.Stripped != "thief one" {
 		t.Fatalf("keypad Up selected %+v, want thief one", selected)
 	}
 
 	h.ctl.HandleKey(keyPress(tea.KeyKpDown))
-	selected, ok = h.ctl.input.SearchSelected()
+	selected, ok = h.ctl.input.Search().Selected()
 	if !ok || selected.Stripped != "thief two" {
 		t.Fatalf("keypad Down selected %+v, want thief two", selected)
 	}
@@ -718,14 +731,14 @@ func TestPasteMsgFiltersModalPickerWithoutChangingDraft(t *testing.T) {
 
 	h.ctl.HandlePaste("dis")
 
-	if got := h.ctl.input.PickerQuery(); got != "dis" {
+	if got := h.ctl.input.Picker().Query(); got != "dis" {
 		t.Fatalf("picker query after paste = %q, want %q", got, "dis")
 	}
 	if got := h.ctl.input.Value(); got != "" {
 		t.Fatalf("modal paste changed hidden draft to %q", got)
 	}
-	if h.ctl.mode != ModePickerModal {
-		t.Fatalf("modal paste changed mode to %v", h.ctl.mode)
+	if h.ctl.mode() != modePickerModal {
+		t.Fatalf("modal paste changed mode to %v", h.ctl.mode())
 	}
 }
 
@@ -748,8 +761,8 @@ func TestPasteMsgEditsSearchQueryWithoutChangingDraft(t *testing.T) {
 	if got := h.ctl.input.Value(); got != "" {
 		t.Fatalf("search paste changed hidden draft to %q", got)
 	}
-	if h.ctl.mode != ModeSearch {
-		t.Fatalf("search paste changed mode to %v", h.ctl.mode)
+	if h.ctl.mode() != modeSearch {
+		t.Fatalf("search paste changed mode to %v", h.ctl.mode())
 	}
 }
 
@@ -791,7 +804,7 @@ func TestAltGrTextIsTypedInEveryInputMode(t *testing.T) {
 
 		h.ctl.HandleKey(msg)
 
-		if got := h.ctl.input.PickerQuery(); got != "@" {
+		if got := h.ctl.input.Picker().Query(); got != "@" {
 			t.Fatalf("modal AltGr query = %q, want %q", got, "@")
 		}
 	})
@@ -898,8 +911,8 @@ func TestCtrlJLeavesInlinePickerForComposer(t *testing.T) {
 	if got := h.ctl.input.Value(); got != "/con\n" {
 		t.Fatalf("input after Ctrl+J = %q, want %q", got, "/con\n")
 	}
-	if h.ctl.mode != ModeCompose || !h.ctl.input.IsComposing() {
-		t.Fatalf("Ctrl+J left mode %v, composing %v", h.ctl.mode, h.ctl.input.IsComposing())
+	if h.ctl.mode() != modeCompose || !h.ctl.input.IsComposing() {
+		t.Fatalf("Ctrl+J left mode %v, composing %v", h.ctl.mode(), h.ctl.input.IsComposing())
 	}
 	selects := h.pickerSelects()
 	if len(selects) != 1 || selects[0].CallbackID != "cb" || selects[0].Accepted {
@@ -994,8 +1007,12 @@ func TestComposerEscapeRequiresConfirmation(t *testing.T) {
 	if got := h.ctl.input.Value(); got != draft || !h.ctl.input.IsComposing() {
 		t.Fatalf("first Escape discarded draft: value=%q composing=%v", got, h.ctl.input.IsComposing())
 	}
-	if !strings.Contains(runetext.StripANSI(h.ctl.input.View()), "Esc again discard") {
-		t.Fatalf("discard confirmation is not visible: %q", h.ctl.input.View())
+	var labels string
+	for _, rule := range h.ctl.input.Rules(80, h.ctl.input.MeasureHeight(80, 100)) {
+		labels += rule.Label
+	}
+	if !strings.Contains(labels, "Esc again discard") {
+		t.Fatalf("discard confirmation is not visible: %q", labels)
 	}
 	if len(h.events) != 0 {
 		t.Fatalf("arming discard emitted state changes: %+v", h.events)
@@ -1015,35 +1032,35 @@ func TestModifiedEscapeDoesNotCancelInternalModes(t *testing.T) {
 	tests := []struct {
 		name  string
 		setup func(*controllerHarness)
-		mode  InputMode
+		mode  inputMode
 	}{
 		{
 			name: "composer",
 			setup: func(h *controllerHarness) {
 				h.ctl.SetText("first\nsecond")
 			},
-			mode: ModeCompose,
+			mode: modeCompose,
 		},
 		{
 			name: "modal picker",
 			setup: func(h *controllerHarness) {
 				h.ctl.ShowPicker(ui.ShowPickerMsg{Items: pickerTestItems, CallbackID: "cb"})
 			},
-			mode: ModePickerModal,
+			mode: modePickerModal,
 		},
 		{
 			name: "inline picker",
 			setup: func(h *controllerHarness) {
 				h.ctl.ShowPicker(ui.ShowPickerMsg{Items: pickerTestItems, CallbackID: "cb", Inline: true})
 			},
-			mode: ModePickerInline,
+			mode: modePickerInline,
 		},
 		{
 			name: "search",
 			setup: func(h *controllerHarness) {
 				h.ctl.ShowSearch(ui.ShowSearchMsg{})
 			},
-			mode: ModeSearch,
+			mode: modeSearch,
 		},
 	}
 
@@ -1056,8 +1073,8 @@ func TestModifiedEscapeDoesNotCancelInternalModes(t *testing.T) {
 
 			h.ctl.HandleKey(tea.KeyPressMsg{Code: tea.KeyEsc, Mod: tea.ModShift})
 
-			if h.ctl.mode != tt.mode {
-				t.Fatalf("modified Escape changed mode to %v, want %v", h.ctl.mode, tt.mode)
+			if h.ctl.mode() != tt.mode {
+				t.Fatalf("modified Escape changed mode to %v, want %v", h.ctl.mode(), tt.mode)
 			}
 			if selects := h.pickerSelects(); len(selects) != 0 {
 				t.Fatalf("modified Escape settled picker: %v", selects)
@@ -1096,7 +1113,7 @@ func TestSetSubmissionForcesOneLineVerbatimComposer(t *testing.T) {
 	h := newControllerHarness()
 	h.ctl.SetSubmission(input.Verbatim("say hello;look"))
 
-	if h.ctl.mode != ModeCompose || !h.ctl.input.IsComposing() {
+	if h.ctl.mode() != modeCompose || !h.ctl.input.IsComposing() {
 		t.Fatal("one-line verbatim history entry did not force compose mode")
 	}
 	if got := h.ctl.input.Value(); got != "say hello;look" {
@@ -1105,7 +1122,7 @@ func TestSetSubmissionForcesOneLineVerbatimComposer(t *testing.T) {
 
 	// Ordinary script replacement while composing keeps interpretation sticky.
 	h.ctl.SetText("edited;still verbatim")
-	if h.ctl.mode != ModeCompose || !h.ctl.input.IsComposing() {
+	if h.ctl.mode() != modeCompose || !h.ctl.input.IsComposing() {
 		t.Fatal("ordinary SetText discarded restored verbatim mode")
 	}
 	h.submitted = nil
@@ -1172,7 +1189,7 @@ func TestSetSubmissionCommandOverridesStickyComposer(t *testing.T) {
 	h.ctl.SetSubmission(input.Verbatim("same"))
 	h.ctl.SetSubmission(input.Command("same"))
 
-	if h.ctl.mode != ModeNormal || h.ctl.input.IsComposing() {
+	if h.ctl.mode() != modeNormal || h.ctl.input.IsComposing() {
 		t.Fatal("explicit command recall did not leave sticky composer")
 	}
 	h.submitted = nil
@@ -1246,7 +1263,7 @@ func TestReboundHomeOverridesInputCursor(t *testing.T) {
 }
 
 // TestSearchSettledOnEveryExit mirrors the picker invariant for search:
-// every path out of ModeSearch resets the mode and settles the
+// every path out of modeSearch resets the mode and settles the
 // viewport exactly once - one CommitSearch or one CancelSearch.
 func TestSearchSettledOnEveryExit(t *testing.T) {
 	cases := []struct {
@@ -1294,8 +1311,8 @@ func TestSearchSettledOnEveryExit(t *testing.T) {
 			h := newControllerHarness()
 			h.buf.Append("a thief passes")
 			h.ctl.ShowSearch(ui.ShowSearchMsg{Query: "thief"})
-			if h.ctl.mode != ModeSearch {
-				t.Fatalf("expected ModeSearch after ShowSearch, got %v", h.ctl.mode)
+			if h.ctl.mode() != modeSearch {
+				t.Fatalf("expected modeSearch after ShowSearch, got %v", h.ctl.mode())
 			}
 			if h.fx.opens != 1 {
 				t.Fatalf("expected one OpenSearch, got %d", h.fx.opens)
@@ -1308,11 +1325,11 @@ func TestSearchSettledOnEveryExit(t *testing.T) {
 					h.fx.commits, h.fx.cancels, tc.commits, tc.cancels)
 			}
 			if tc.name == "opening a picker cancels the search" {
-				if h.ctl.mode != ModePickerModal {
-					t.Fatalf("expected ModePickerModal after picker-over-search, got %v", h.ctl.mode)
+				if h.ctl.mode() != modePickerModal {
+					t.Fatalf("expected modePickerModal after picker-over-search, got %v", h.ctl.mode())
 				}
-			} else if h.ctl.mode != ModeNormal {
-				t.Fatalf("expected ModeNormal after exit, got %v", h.ctl.mode)
+			} else if h.ctl.mode() != modeNormal {
+				t.Fatalf("expected modeNormal after exit, got %v", h.ctl.mode())
 			}
 		})
 	}
@@ -1346,7 +1363,7 @@ func TestSearchOpensWithPreviewAndSteps(t *testing.T) {
 	}
 }
 
-// TestSearchTrapsBoundKeys verifies ModeSearch behaves like the modal
+// TestSearchTrapsBoundKeys verifies modeSearch behaves like the modal
 // picker: bound keys edit the query instead of dispatching to Lua.
 func TestSearchTrapsBoundKeys(t *testing.T) {
 	h := newControllerHarness()
@@ -1361,8 +1378,8 @@ func TestSearchTrapsBoundKeys(t *testing.T) {
 	if binds := h.executeBinds(); len(binds) != 0 {
 		t.Fatalf("search mode must not dispatch binds, got %v", binds)
 	}
-	if h.ctl.mode != ModeSearch {
-		t.Fatalf("unhandled chords must not exit search mode, got %v", h.ctl.mode)
+	if h.ctl.mode() != modeSearch {
+		t.Fatalf("unhandled chords must not exit search mode, got %v", h.ctl.mode())
 	}
 }
 
@@ -1371,14 +1388,14 @@ func TestSearchTrapsBoundKeys(t *testing.T) {
 func TestSearchIgnoredWhileComposing(t *testing.T) {
 	h := newControllerHarness()
 	h.ctl.SetText("line one\nline two")
-	if h.ctl.mode != ModeCompose {
-		t.Fatalf("expected ModeCompose, got %v", h.ctl.mode)
+	if h.ctl.mode() != modeCompose {
+		t.Fatalf("expected modeCompose, got %v", h.ctl.mode())
 	}
 
 	h.ctl.ShowSearch(ui.ShowSearchMsg{Query: "thief"})
 
-	if h.ctl.mode != ModeCompose {
-		t.Fatalf("search must not open over a composer, got %v", h.ctl.mode)
+	if h.ctl.mode() != modeCompose {
+		t.Fatalf("search must not open over a composer, got %v", h.ctl.mode())
 	}
 	if h.fx.opens != 0 || len(h.fx.previews) != 0 {
 		t.Fatal("refused ShowSearch must produce zero effects")
@@ -1398,8 +1415,8 @@ func TestSearchOverPickerSettlesPickerFirst(t *testing.T) {
 	if len(selects) != 1 || selects[0].Accepted {
 		t.Fatalf("picker must settle cancelled exactly once, got %v", selects)
 	}
-	if h.ctl.mode != ModeSearch {
-		t.Fatalf("expected ModeSearch, got %v", h.ctl.mode)
+	if h.ctl.mode() != modeSearch {
+		t.Fatalf("expected modeSearch, got %v", h.ctl.mode())
 	}
 }
 

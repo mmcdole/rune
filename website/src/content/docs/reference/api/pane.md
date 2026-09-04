@@ -16,7 +16,7 @@ rune.pane.replace(name, text)          -- empty the buffer and write text in one
 rune.pane.show(name)                   -- show the pane's placement in the layout
 rune.pane.hide(name)                   -- hide the pane's placement in the layout
 rune.pane.toggle(name)                 -- flip the placement's visibility
-rune.pane.is_visible(name)             -- placement gate; nil when not placed
+rune.pane.is_hidden(name)             -- local hidden value; nil when not placed
 rune.pane.clear(name)                  -- empty the buffer; unknown is a no-op
 rune.pane.scroll_up(name, lines?)      -- scroll back; default 1
 rune.pane.scroll_down(name, lines?)    -- scroll forward; default 1
@@ -63,55 +63,20 @@ end)
 
 Visibility belongs to the placement, not the buffer. `show`, `hide`, and
 `toggle` flip the pane's placement in the active layout tree and return `true`
-when the layout places the pane, `false` otherwise. `is_visible` reports the
-placement's own gate, or `nil` when the layout does not place the pane.
-Declare a pane that starts hidden with `hidden = true` on its node:
-
-```lua
-rune.ui.layout({
-    type = "column",
-    children = {
-        {
-            type = "pane",
-            name = "combat",
-            size = 8,
-            title = "Combat",
-            border = "full",
-            hidden = true,
-        },
-        { type = "pane", name = "output", border = "none" },
-        { type = "input" },
-    },
-})
-
-rune.trigger.regex("^You hit (.+) for (\\d+)", function(m)
-    rune.pane.write("combat", "Hit " .. m[1] .. " for " .. m[2])
-end)
-
-rune.bind("f5", function()
-    rune.pane.toggle("combat")
-end)
-```
+when the layout places the pane, `false` otherwise. `is_hidden` reports the
+placement's local hidden state, or `nil` when the layout does not place the pane.
+Declare `hidden = true` on a pane node to start it hidden; see the
+[layout guide](/interface/layout/#visibility-and-regions).
 
 The pane displays only while its own placement is visible and every ancestor
 region is visible. A hidden placement is pruned before space is allocated.
-Hiding a region does not alter the pane placement's own gate. Buffer contents
+Hiding a region does not alter the pane placement's hidden state. Buffer contents
 and scroll position survive layout replacement and `/reload`; runtime
 visibility changes last until the next `rune.ui.layout` or `/reload`, which
 restore the declared `hidden` values.
 
-The pane's assigned rectangle includes its border. A `title` replaces the
-entire generated header, including the pane name and automatic scroll-state
-suffix. Set it to `""` to suppress title text, or omit it for the generated
-header. `border = "full"`, the default, draws all four
-sides; `"none"` removes pane chrome; `"horizontal"` draws titled top and closing
-bottom rules only. Adjacent bordered panes with no container gap share their
-boundary.
-
-Pane chrome supplies an intrinsic minimum during normal allocation: two
-columns and two rows for a full border, two rows for `"horizontal"`, and no
-extra minimum for a borderless pane. If terminal geometry cannot satisfy all
-minima, the tiny-terminal fallback may clip below those sizes.
+Borders and titles belong to the layout declaration; see
+[node fields](/reference/api/ui/#node-fields).
 
 ## Scrolling
 

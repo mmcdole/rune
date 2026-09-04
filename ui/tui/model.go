@@ -2,7 +2,6 @@ package tui
 
 import (
 	"os"
-	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -12,7 +11,6 @@ import (
 	"github.com/mmcdole/rune/text"
 	"github.com/mmcdole/rune/ui"
 	"github.com/mmcdole/rune/ui/tui/style"
-	"github.com/mmcdole/rune/ui/tui/util"
 	"github.com/mmcdole/rune/ui/tui/widget"
 )
 
@@ -34,7 +32,7 @@ func doTick(generation uint64) tea.Cmd {
 
 // Model is the main Bubble Tea model for the TUI. It routes messages
 // between the session and the widgets; input-mode policy lives in the
-// inputController, layout and rendering in layout.go.
+// inputController; layout planning and canvas rendering are separate.
 type Model struct {
 	// Layout
 	bars   map[string]*widget.Bar // bar resource namespace
@@ -55,9 +53,6 @@ type Model struct {
 	boundKeys  map[string]bool
 	layout     ui.LayoutTree
 	layoutPlan layoutPlan
-	// layoutPlanValid lets interaction paths and View share one resolved
-	// geometry snapshot during an update.
-	layoutPlanValid bool
 
 	// State
 	width        int
@@ -98,16 +93,12 @@ func (m *Model) Init() tea.Cmd {
 
 // Update implements tea.Model.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// All layout-affecting state changes enter through Update. Invalidate once
-	// before dispatch so any synchronous geometry query observes the mutation
-	// and the following View can reuse that same plan.
-	m.invalidateLayout()
-	// Input, picker, search, and composer transitions can change intrinsic
-	// height inside their handlers. Finalize geometry for every message so a
-	// newly enlarged output viewport cannot silently clamp from scrolled to
-	// live during View without publishing the corresponding session state.
+	// Finalize geometry once, then apply navigation that depends on it.
+	// View only paints; it never changes session-visible scroll state.
 	defer func() {
-		if m.syncViewportSize() {
+		previousOutput := m.layoutPlan.output
+		changed := m.applyLayout()
+		if m.applySearchPosition(previousOutput != m.layoutPlan.output) || changed {
 			m.updateScrollState()
 		}
 	}()
@@ -187,12 +178,7 @@ func (m *Model) handleWindowSize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	m.width = msg.Width
 	m.height = msg.Height
 	m.initialized = true
-	scrollStateChanged := m.syncViewportSize()
-	scrollStateChanged = m.recenterSearchFocus() || scrollStateChanged
 	m.notifySession(ui.WindowSizeChangedMsg{Width: msg.Width, Height: msg.Height})
-	if scrollStateChanged {
-		m.updateScrollState()
-	}
 	return m, nil
 }
 
@@ -209,26 +195,17 @@ func (m *Model) handleTick(msg tickMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleConfigUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
-	layoutChanged := false
 	switch msg := msg.(type) {
 	case ui.UpdateBindsMsg:
 		m.boundKeys = msg
 	case ui.UpdateBarsMsg:
 		m.syncBars(msg)
-		layoutChanged = true
 	case ui.UpdateLayoutMsg:
 		m.layout = ui.LayoutTree(msg)
-		layoutChanged = true
 	case ui.UpdateConfigMsg:
 		m.inputCtl.SetKeepOnSubmit(msg.KeepInput)
 		m.mouseEnabled = msg.Mouse
 		m.numpadMode = msg.Numpad
-	}
-	if layoutChanged {
-		scrollStateChanged := m.syncViewportSize()
-		if m.recenterSearchFocus() || scrollStateChanged {
-			m.updateScrollState()
-		}
 	}
 	return m, nil
 }
@@ -245,7 +222,7 @@ func (m *Model) syncBars(content map[string]ui.BarContent) {
 	for name, barContent := range content {
 		bar, exists := m.bars[name]
 		if !exists {
-			bar = widget.NewBar(name)
+			bar = widget.NewBar()
 			m.bars[name] = bar
 		}
 		bar.SetContent(barContent)
@@ -348,21 +325,6 @@ func (m *Model) handleMouse(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 		})
 	}
 	return m, nil
-}
-
-// splitRows shapes a message into physical scrollback rows: one row
-// per line break, tabs expanded per row so columns restart on every
-// row, and rows wider than the resolved output surface are word-wrapped. Rows
-// are final at append time; a resize does not rewrap old output.
-func splitRows(msg string, width int) []string {
-	if !strings.ContainsAny(msg, "\r\n") {
-		return util.WrapLine(util.ExpandTabs(msg), width)
-	}
-	var rows []string
-	for _, line := range util.SplitLines(msg) {
-		rows = append(rows, util.WrapLine(util.ExpandTabs(line), width)...)
-	}
-	return rows
 }
 
 // appendMessage shapes text into rows and appends them.

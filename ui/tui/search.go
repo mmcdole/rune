@@ -11,6 +11,9 @@ type searchViewState struct {
 	snapshot   widget.ScrollPos
 	focus      *widget.SearchMatch
 	priorFocus *widget.SearchMatch
+	// Navigation waits until Update has applied the final viewport size.
+	positionPending bool
+	restore         *widget.ScrollPos
 }
 
 // Model implements searchEffects: the viewport half of scrollback
@@ -38,56 +41,60 @@ func (m *Model) OpenSearch() widget.SearchScope {
 	return scope
 }
 
-// recenterSearchFocus reapplies the active preview after layout geometry
-// changes. Search owns the anchor; layout owns only viewport dimensions.
-// The return value reports whether session-visible scroll state changed.
-func (m *Model) recenterSearchFocus() bool {
-	if !m.input.SearchActive() || m.searchView.focus == nil {
+// applySearchPosition runs after layout, keeping active previews centered and
+// settling a close against the final viewport rather than an intermediate one.
+func (m *Model) applySearchPosition(geometryChanged bool) bool {
+	state := &m.searchView
+	if !state.positionPending && !(m.input.SearchActive() && geometryChanged) {
 		return false
 	}
 	beforeMode := m.output.viewport.Mode()
 	beforeLines := m.output.viewport.NewLineCount()
-	m.output.viewport.CenterOn(m.searchView.focus.Seq)
-	return beforeMode != m.output.viewport.Mode() || beforeLines != m.output.viewport.NewLineCount()
+	if state.restore != nil {
+		m.output.viewport.RestoreScroll(*state.restore)
+	} else if state.focus != nil {
+		m.output.viewport.CenterOn(state.focus.Seq)
+	}
+	pending := state.positionPending
+	state.positionPending, state.restore = false, nil
+	return pending || beforeMode != m.output.viewport.Mode() || beforeLines != m.output.viewport.NewLineCount()
 }
 
 // PreviewSearch centers and highlights the selected match; with no
 // match it returns the viewport to the pre-search position.
 func (m *Model) PreviewSearch(match widget.SearchMatch, ok bool) {
+	m.searchView.positionPending = true
+	m.searchView.restore = nil
 	if ok {
 		m.searchView.focus = &match
-		m.syncViewportSize()
-		m.recenterSearchFocus()
 		m.output.viewport.SetHighlight(match.Seq, match.Ranges)
 	} else {
 		m.searchView.focus = nil
-		m.syncViewportSize()
 		m.output.viewport.ClearHighlight()
-		m.output.viewport.RestoreScroll(m.searchView.snapshot)
+		snapshot := m.searchView.snapshot
+		m.searchView.restore = &snapshot
 	}
-	m.updateScrollState()
 }
 
 // CommitSearch keeps the accepted match centered and highlighted after the
 // navigator closes. Manual viewport navigation clears the marker.
 func (m *Model) CommitSearch() {
-	m.syncViewportSize()
+	m.searchView.positionPending = true
 	if m.searchView.focus != nil {
-		m.output.viewport.CenterOn(m.searchView.focus.Seq)
 		m.output.viewport.SetHighlight(m.searchView.focus.Seq, m.searchView.focus.Ranges)
 	} else {
 		m.output.viewport.ClearHighlight()
 	}
 	m.searchView.priorFocus = nil
 	m.notifySession(ui.SearchStateChangedMsg(false))
-	m.updateScrollState()
 }
 
 // CancelSearch restores both the position and any committed highlight that
 // existed when the navigator opened.
 func (m *Model) CancelSearch() {
-	m.syncViewportSize()
-	m.output.viewport.RestoreScroll(m.searchView.snapshot)
+	m.searchView.positionPending = true
+	snapshot := m.searchView.snapshot
+	m.searchView.restore = &snapshot
 	if m.searchView.priorFocus != nil {
 		m.searchView.focus = m.searchView.priorFocus
 		m.output.viewport.SetHighlight(m.searchView.focus.Seq, m.searchView.focus.Ranges)
@@ -97,7 +104,6 @@ func (m *Model) CancelSearch() {
 	}
 	m.searchView.priorFocus = nil
 	m.notifySession(ui.SearchStateChangedMsg(false))
-	m.updateScrollState()
 }
 
 // clearCommittedSearchFocus retires the accepted marker before deliberate

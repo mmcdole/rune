@@ -29,7 +29,8 @@ func TestPaneRegistryAppliesLifecycleToReservedOutput(t *testing.T) {
 	}
 
 	written := panes.Write("log", "one\ntwo")
-	if got := written.View(20, 2); got != "one\ntwo" {
+	written.SetSize(20, 2)
+	if got := written.View(); got != "one\ntwo" {
 		t.Fatalf("written pane view = %q, want two stored rows", got)
 	}
 }
@@ -64,7 +65,8 @@ func TestOutputClearInvalidatesOldBatchAndPreservesPrompt(t *testing.T) {
 	if output.buffer.Count() != 2 || output.buffer.At(0) != "new one" || output.buffer.At(1) != "new two" {
 		t.Fatalf("post-clear buffer = [%q, %q], want only new rows", output.buffer.At(0), output.buffer.At(1))
 	}
-	if got := output.View(20, 4); !strings.HasSuffix(got, "HP> ") {
+	output.SetSize(20, 4)
+	if got := output.View(); !strings.HasSuffix(got, "HP> ") {
 		t.Fatalf("clear removed live prompt: %q", got)
 	}
 }

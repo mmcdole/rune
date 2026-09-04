@@ -19,6 +19,78 @@ func newTestInput(width int) *Input {
 	return in
 }
 
+func TestPickerKeepsItsFrameAboveCommandField(t *testing.T) {
+	in := newTestInput(40)
+	in.ShowPicker(ui.ShowPickerMsg{Title: "Aliases", Items: []ui.PickerItem{{Text: "north"}, {Text: "south"}}})
+	in.SetSize(40, in.MeasureHeight(in.width, 1<<14)+2)
+	plan := in.layout(40, in.height)
+	rows := strings.Split(text.StripANSI(in.View()), "\n")
+	if len(rows) != in.height || !strings.Contains(rows[1], "Aliases") {
+		t.Fatalf("picker placement changed: %q", rows)
+	}
+	horizontal := make(map[int]bool)
+	for _, rule := range in.Rules(40, in.height) {
+		if !rule.Vertical && rule.From == 0 && rule.To == 40 {
+			horizontal[rule.At] = true
+		}
+	}
+	if !horizontal[plan.pickerHeight-1] || !horizontal[plan.pickerHeight] || !horizontal[in.height-1] ||
+		!strings.HasPrefix(rows[plan.pickerHeight+1], "> ") {
+		t.Fatalf("picker/field boundaries disagree with assigned geometry:\n%s", strings.Join(rows, "\n"))
+	}
+	if strings.Contains(in.View(), "─") {
+		t.Fatal("content painted compositor-owned rules")
+	}
+}
+
+func inputLabels(in *Input) string {
+	var labels []string
+	for _, rule := range in.Rules(in.width, in.MeasureHeight(in.width, 1<<14)) {
+		labels = append(labels, rule.Label)
+	}
+	return strings.Join(labels, "\n")
+}
+
+func TestComposerMeasurementAndViewDoNotChangeNavigation(t *testing.T) {
+	in := newTestInput(40)
+	in.SetValue(strings.Repeat("a\nb\n", 12))
+	in.SetSize(40, 7)
+	before := in.composer.topRow
+	in.MeasureHeight(5, 24)
+	in.Rules(5, 24)
+	in.View()
+	if in.composer.topRow != before || in.width != 40 || in.height != 7 {
+		t.Fatal("measurement or rendering changed applied geometry")
+	}
+	in.composer.SetCursor(0)
+	in.View()
+	if in.composer.topRow != before {
+		t.Fatal("View applied a navigation change")
+	}
+	in.SetSize(40, 7)
+	if in.composer.topRow != 0 {
+		t.Fatal("SetSize did not bring the cursor into view")
+	}
+}
+
+func TestSearchKeepsCursorVisibleAtNarrowWidths(t *testing.T) {
+	for _, width := range []int{1, 3, 4, 5, 10, 40} {
+		in := newTestInput(width)
+		in.search.Open(strings.Repeat("query", 20), SearchScope{})
+		in.overlay = overlaySearch
+		in.SetSize(width, in.MeasureHeight(in.width, 1<<14))
+		view := text.StripANSI(in.View())
+		if !strings.Contains(view, "█") {
+			t.Errorf("width %d lost search cursor: %q", width, view)
+		}
+		for _, row := range strings.Split(view, "\n") {
+			if lipgloss.Width(row) > width {
+				t.Errorf("width %d overflows: %q", width, row)
+			}
+		}
+	}
+}
+
 func TestInputViewIsBorderedField(t *testing.T) {
 	in := newTestInput(40)
 	in.SetValue("kill goblin")
@@ -30,8 +102,8 @@ func TestInputViewIsBorderedField(t *testing.T) {
 	if !strings.Contains(rows[1], "kill goblin") {
 		t.Errorf("input row should show the typed text, got %q", rows[1])
 	}
-	if in.PreferredHeight() != 3 {
-		t.Errorf("PreferredHeight = %d, want 3", in.PreferredHeight())
+	if in.MeasureHeight(in.width, 1<<14) != 3 {
+		t.Errorf("PreferredHeight = %d, want 3", in.MeasureHeight(in.width, 1<<14))
 	}
 }
 
@@ -138,7 +210,7 @@ func TestInputPickerOverlayGrowsView(t *testing.T) {
 	}
 
 	in.ShowPicker(ui.ShowPickerMsg{Title: "Worlds", Items: items})
-	if in.PreferredHeight() <= 3 {
+	if in.MeasureHeight(in.width, 1<<14) <= 3 {
 		t.Error("active picker must add to the preferred height")
 	}
 	view := text.StripANSI(in.View())
@@ -150,8 +222,8 @@ func TestInputPickerOverlayGrowsView(t *testing.T) {
 	}
 
 	in.HidePicker()
-	if in.PreferredHeight() != 3 {
-		t.Errorf("PreferredHeight after hide = %d, want 3", in.PreferredHeight())
+	if in.MeasureHeight(in.width, 1<<14) != 3 {
+		t.Errorf("PreferredHeight after hide = %d, want 3", in.MeasureHeight(in.width, 1<<14))
 	}
 	if strings.Contains(text.StripANSI(in.View()), "midgaard") {
 		t.Error("hidden picker must not render")
@@ -172,11 +244,33 @@ func TestConstrainedPickerKeepsEditableInputVisible(t *testing.T) {
 		if len(rows) != height {
 			t.Fatalf("height %d rendered %d rows: %q", height, len(rows), rows)
 		}
-		if !strings.Contains(rows[0], "> nor") {
+		if !strings.Contains(rows[len(rows)-1], "> nor") {
 			t.Fatalf("height %d hid editable input behind picker: %q", height, rows)
 		}
-		if strings.Contains(strings.Join(rows, "\n"), "north") {
-			t.Fatalf("height %d rendered a clipped picker instead of degrading cleanly: %q", height, rows)
+		if height == 2 && !strings.Contains(rows[0], "north") {
+			t.Fatalf("spare row should show selected completion: %q", rows)
+		}
+	}
+}
+
+func TestConstrainedModalPickerPreservesFocus(t *testing.T) {
+	for _, title := range []string{"", "Aliases"} {
+		in := newTestInput(30)
+		items := make([]ui.PickerItem, 10)
+		for n := range items {
+			items[n].Text = strings.Repeat("x", n+1)
+		}
+		in.ShowPicker(ui.ShowPickerMsg{Title: title, Items: items})
+		in.Picker().SelectUp() // wrap to the last result, outside the initial window
+		for _, height := range []int{1, 2, 3, 5, 8} {
+			in.SetSize(30, height)
+			rows := strings.Split(text.StripANSI(in.View()), "\n")
+			if len(rows) != height || !strings.Contains(strings.Join(rows, "\n"), "█") {
+				t.Fatalf("height %d lost focused query: %q", height, rows)
+			}
+			if height >= 2 && !strings.Contains(strings.Join(rows, "\n"), "xxxxxxxxxx") {
+				t.Fatalf("height %d lost selected result: %q", height, rows)
+			}
 		}
 	}
 }
@@ -219,10 +313,10 @@ func TestInputInlinePickerSeedsFilterFromInput(t *testing.T) {
 	in.SetValue("rel")
 	in.ShowPicker(ui.ShowPickerMsg{Items: items, Inline: true})
 
-	if got := in.PickerQuery(); got != "rel" {
+	if got := in.Picker().Query(); got != "rel" {
 		t.Errorf("inline picker query = %q, want %q", got, "rel")
 	}
-	sel, ok := in.PickerSelected()
+	sel, ok := in.Picker().Selected()
 	if !ok || sel.Text != "reload" {
 		t.Errorf("inline selection = %v (%v), want reload", sel, ok)
 	}
@@ -232,7 +326,7 @@ func TestInputInlinePickerSeedsFilterFromInput(t *testing.T) {
 
 	// Typing more re-filters from the input value.
 	in.SetValue("re")
-	in.UpdatePickerFilter()
+	in.Picker().Filter(in.Value())
 	view := text.StripANSI(in.View())
 	if !strings.Contains(view, "reload") {
 		t.Errorf("re-filtered view should keep matches, got %q", view)
@@ -255,7 +349,7 @@ func TestInputSearchReplacesInactiveCommandField(t *testing.T) {
 	if strings.Contains(view, "COMMAND-DRAFT") {
 		t.Fatalf("inactive command field remained visible during search:\n%s", view)
 	}
-	if got, want := in.PreferredHeight(), search.PreferredHeight(); got != want {
+	if got, want := in.MeasureHeight(in.width, 1<<14), search.PreferredHeight(); got != want {
 		t.Fatalf("PreferredHeight = %d, want search-only height %d", got, want)
 	}
 

@@ -47,7 +47,8 @@ const (
 type LayoutSizeKind uint8
 
 const (
-	// LayoutSizeDefault is the zero value and means Fraction(1).
+	// LayoutSizeDefault marks an omitted declaration size. Normalization chooses
+	// the axis-aware default; the standalone allocator treats it as Fraction(1).
 	LayoutSizeDefault LayoutSizeKind = iota
 	LayoutSizeCells
 	LayoutSizeFraction
@@ -122,6 +123,47 @@ type LayoutTree struct {
 	Root LayoutNode
 }
 
+// NormalizeLayoutTree validates and copies a declaration, resolving omitted
+// sizes along each parent's axis. Lua and Go callers use the same defaults.
+func NormalizeLayoutTree(tree LayoutTree) (LayoutTree, error) {
+	if err := ValidateLayoutTree(tree); err != nil {
+		return LayoutTree{}, err
+	}
+	var normalize func(LayoutNode, string) LayoutNode
+	normalize = func(node LayoutNode, parent string) LayoutNode {
+		if parent != "" && node.Size.Kind == LayoutSizeDefault {
+			node.Size = Fraction(1)
+			if parent == LayoutTypeColumn {
+				switch node.Type {
+				case LayoutTypeInput, LayoutTypeBar, LayoutTypeSeparator:
+					node.Size = AutoSize()
+				}
+			}
+		}
+		if node.MinSize != nil {
+			value := *node.MinSize
+			node.MinSize = &value
+		}
+		if node.MaxSize != nil {
+			value := *node.MaxSize
+			node.MaxSize = &value
+		}
+		if node.Title != nil {
+			value := *node.Title
+			node.Title = &value
+		}
+		if node.Children != nil {
+			children := make([]LayoutNode, len(node.Children))
+			for i, child := range node.Children {
+				children[i] = normalize(child, node.Type)
+			}
+			node.Children = children
+		}
+		return node
+	}
+	return LayoutTree{Root: normalize(tree.Root, "")}, nil
+}
+
 // LayoutNode is either a row/column container or a leaf. Pane and bar leaves
 // use Name to select a resource. ID identifies a hideable structural region
 // and is valid only on non-root containers. Size, MinSize, and MaxSize apply
@@ -129,7 +171,7 @@ type LayoutTree struct {
 // constraints or visibility state. Gap and Dividers are container-only: Gap
 // reserves cells between active children, and Dividers draws a rule between
 // them when their frames do not already provide one. Hidden is the
-// placement's visibility gate: valid on identified regions and pane
+// local hidden state: valid on identified regions and pane
 // placements (name is the runtime handle for the latter). Title and Border
 // are pane-only; SeparatorChar is separator-only. A non-nil empty Title
 // deliberately suppresses title text, while nil requests the pane resource's
@@ -155,58 +197,51 @@ func (n LayoutNode) IsContainer() bool {
 	return n.Type == LayoutTypeRow || n.Type == LayoutTypeColumn
 }
 
-// DefaultLayoutTree returns a fresh canonical default layout.
+// DefaultLayoutTree is the recovery layout, usable before Lua core is loaded.
+// Core scripts install the normal arrangement, including the status bar.
 func DefaultLayoutTree() LayoutTree {
 	return LayoutTree{Root: LayoutNode{
 		Type: LayoutTypeColumn,
 		Children: []LayoutNode{
-			{Type: LayoutTypePane, Name: OutputPaneName, Border: PaneBorderNone},
+			{Type: LayoutTypePane, Name: OutputPaneName, Border: PaneBorderNone, Size: Fraction(1)},
 			{Type: LayoutTypeInput, Size: AutoSize()},
-			{Type: LayoutTypeBar, Name: "status", Size: AutoSize()},
 		},
 	}}
 }
 
-// Every hideable placement carries the same gate: the node's Hidden bit,
-// pruned by the resolver, reset by layout installation. Regions and panes
-// differ only in how a placement is addressed, so both APIs are matchers over
-// one pair of tree walks.
-
-// gateMatch selects the placements one visibility operation addresses.
-type gateMatch func(LayoutNode) bool
-
-func regionMatch(id string) gateMatch {
+func regionMatch(id string) func(LayoutNode) bool {
 	return func(node LayoutNode) bool { return node.ID == id }
 }
 
-func paneMatch(name string) gateMatch {
-	return func(node LayoutNode) bool { return paneLeafMatch(node, name) }
+func paneMatch(name string) func(LayoutNode) bool {
+	return func(node LayoutNode) bool { return node.Type == LayoutTypePane && node.Name == name }
 }
 
-// gateVisible reports the matched placements' own gate, without ancestor
-// gates or the activity of resources below them. The gate counts as visible
-// when any matched placement is visible.
-func (t LayoutTree) gateVisible(match gateMatch) (visible, found bool) {
-	var find func(LayoutNode)
-	find = func(node LayoutNode) {
+// find returns the uniquely identified placement without folding ancestor state.
+func (t LayoutTree) find(match func(LayoutNode) bool) (LayoutNode, bool) {
+	var walk func(LayoutNode) (LayoutNode, bool)
+	walk = func(node LayoutNode) (LayoutNode, bool) {
 		if match(node) {
-			found = true
-			visible = visible || !node.Hidden
-			return
+			return node, true
 		}
 		for _, child := range node.Children {
-			find(child)
+			if found, ok := walk(child); ok {
+				return found, true
+			}
 		}
+		return LayoutNode{}, false
 	}
-	find(t.Root)
-	return visible, found
+	return walk(t.Root)
 }
 
-// withGateVisibility returns a tree with every matched placement's gate
-// updated. Nodes along matching paths are copied so an already-published
-// LayoutTree remains an immutable snapshot. Found distinguishes an unknown
-// handle; Changed lets callers avoid publishing an idempotent update.
-func (t LayoutTree) withGateVisibility(match gateMatch, visible bool) (updated LayoutTree, found, changed bool) {
+func (t LayoutTree) hidden(match func(LayoutNode) bool) (hidden, found bool) {
+	node, found := t.find(match)
+	return node.Hidden, found
+}
+
+// withVisibility copies only the path to the matched placement. Published
+// trees remain immutable; unchanged or unknown placements need no new snapshot.
+func (t LayoutTree) withVisibility(match func(LayoutNode) bool, visible bool) (updated LayoutTree, found, changed bool) {
 	var update func(LayoutNode) (LayoutNode, bool, bool)
 	update = func(node LayoutNode) (LayoutNode, bool, bool) {
 		if match(node) {
@@ -217,23 +252,18 @@ func (t LayoutTree) withGateVisibility(match gateMatch, visible bool) (updated L
 			node.Hidden = hidden
 			return node, true, true
 		}
-		found, changed := false, false
-		var copied []LayoutNode
 		for i, child := range node.Children {
-			updatedChild, childFound, childChanged := update(child)
-			found = found || childFound
-			if childChanged {
-				if copied == nil {
-					copied = append([]LayoutNode(nil), node.Children...)
-				}
-				copied[i] = updatedChild
-				changed = true
+			updated, found, changed := update(child)
+			if !found {
+				continue
 			}
+			if changed {
+				node.Children = append([]LayoutNode(nil), node.Children...)
+				node.Children[i] = updated
+			}
+			return node, true, changed
 		}
-		if copied != nil {
-			node.Children = copied
-		}
-		return node, found, changed
+		return node, false, false
 	}
 
 	root, found, changed := update(t.Root)
@@ -243,46 +273,41 @@ func (t LayoutTree) withGateVisibility(match gateMatch, visible bool) (updated L
 	return t, found, changed
 }
 
-// RegionVisible reports the placement gate for a structural region.
-func (t LayoutTree) RegionVisible(id string) (visible, found bool) {
+// RegionHidden reports the local hidden state of a structural region.
+func (t LayoutTree) RegionHidden(id string) (hidden, found bool) {
 	if id == "" {
 		return false, false
 	}
-	return t.gateVisible(regionMatch(id))
+	return t.hidden(regionMatch(id))
 }
 
-// WithRegionVisibility returns a tree with one region gate updated.
+// WithRegionVisibility returns a tree with one region’s hidden state updated.
 func (t LayoutTree) WithRegionVisibility(id string, visible bool) (updated LayoutTree, found, changed bool) {
 	if id == "" {
 		return t, false, false
 	}
-	return t.withGateVisibility(regionMatch(id), visible)
+	return t.withVisibility(regionMatch(id), visible)
 }
 
 func nodeHideable(node LayoutNode) bool {
 	return (node.IsContainer() && node.ID != "") || node.Type == LayoutTypePane
 }
 
-// paneLeafMatch reports whether node is the placement of the named pane.
-func paneLeafMatch(node LayoutNode, name string) bool {
-	return node.Type == LayoutTypePane && node.Name == name
-}
-
-// PaneVisible reports the placement gate for a named pane.
-func (t LayoutTree) PaneVisible(name string) (visible, found bool) {
+// PaneHidden reports the local hidden state of a named pane.
+func (t LayoutTree) PaneHidden(name string) (hidden, found bool) {
 	if name == "" {
 		return false, false
 	}
-	return t.gateVisible(paneMatch(name))
+	return t.hidden(paneMatch(name))
 }
 
-// WithPaneVisibility returns a tree with the named pane's placement gate
+// WithPaneVisibility returns a tree with the named pane's hidden state
 // updated.
 func (t LayoutTree) WithPaneVisibility(name string, visible bool) (updated LayoutTree, found, changed bool) {
 	if name == "" {
 		return t, false, false
 	}
-	return t.withGateVisibility(paneMatch(name), visible)
+	return t.withVisibility(paneMatch(name), visible)
 }
 
 // AxisTrack is the measured, main-axis input to AllocateAxis. Min is zero
@@ -387,9 +412,6 @@ func (v *layoutValidation) node(node LayoutNode, path string, depth int, root bo
 	}
 
 	if node.IsContainer() {
-		if len(node.Children) < 2 {
-			return fmt.Errorf("%s: %s needs at least two children", path, node.Type)
-		}
 		if node.Gap < 0 || node.Gap > MaxLayoutCells {
 			return fmt.Errorf("%s: gap must be between 0 and %d cells", path, MaxLayoutCells)
 		}
@@ -475,19 +497,8 @@ func (t LayoutTree) RegionContainsInput(id string) (containsInput, found bool) {
 	if id == "" {
 		return false, false
 	}
-	var find func(LayoutNode)
-	find = func(node LayoutNode) {
-		if node.ID == id {
-			found = true
-			containsInput = containsInput || subtreeContainsInput(node)
-			return
-		}
-		for _, child := range node.Children {
-			find(child)
-		}
-	}
-	find(t.Root)
-	return containsInput, found
+	node, found := t.find(regionMatch(id))
+	return found && subtreeContainsInput(node), found
 }
 
 func subtreeContainsInput(node LayoutNode) bool {

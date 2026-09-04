@@ -1298,6 +1298,7 @@ func TestResizeHookLayoutChangeAppliesInSameCycle(t *testing.T) {
 			{
 				Type: ui.LayoutTypePane, Name: ui.OutputPaneName,
 				Border: ui.PaneBorderNone,
+				Size:   ui.Fraction(1),
 			},
 			{
 				Type: ui.LayoutTypeInput,
@@ -1793,7 +1794,7 @@ func TestTimerCallbacksFlushPresentationOnce(t *testing.T) {
 	if n := uiMock.drainLayoutPushes(); n != 1 {
 		t.Fatalf("layout pushes from one timer callback = %d, want exactly one", n)
 	}
-	if visible, found := uiMock.pushedLayout().PaneVisible(ui.OutputPaneName); !found || !visible {
-		t.Fatalf("pushed layout output gate = %v, %v; want visible", visible, found)
+	if hidden, found := uiMock.pushedLayout().PaneHidden(ui.OutputPaneName); !found || hidden {
+		t.Fatalf("pushed layout output hidden = %v, found = %v; want false, true", hidden, found)
 	}
 }

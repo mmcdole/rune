@@ -1,14 +1,11 @@
 package tui
 
-import (
-	"strings"
-
-	"github.com/mmcdole/rune/ui/tui/widget"
-)
+import "github.com/mmcdole/rune/ui/tui/widget"
 
 // paneResource is the internal contract shared by named text surfaces. Output
 // adds transcript and search capabilities outside this interface.
 type paneResource interface {
+	widget.Widget
 	Name() string
 	Write(string)
 	Clear()
@@ -17,33 +14,12 @@ type paneResource interface {
 	ScrollToTop()
 	ScrollToBottom()
 	Title() string
-	View(width, height int) string
 }
 
 var (
 	_ paneResource = (*outputController)(nil)
-	_ paneResource = (*textPaneResource)(nil)
+	_ paneResource = (*widget.Pane)(nil)
 )
-
-type textPaneResource struct {
-	pane *widget.Pane
-}
-
-func newTextPaneResource(name string) *textPaneResource {
-	return &textPaneResource{pane: widget.NewPane(name)}
-}
-
-func (r *textPaneResource) Name() string         { return r.pane.Name }
-func (r *textPaneResource) Write(text string)    { r.pane.Write(text) }
-func (r *textPaneResource) Clear()               { r.pane.Clear() }
-func (r *textPaneResource) ScrollUp(lines int)   { r.pane.ScrollUp(lines) }
-func (r *textPaneResource) ScrollDown(lines int) { r.pane.ScrollDown(lines) }
-func (r *textPaneResource) ScrollToTop()         { r.pane.ScrollToTop() }
-func (r *textPaneResource) ScrollToBottom()      { r.pane.ScrollToBottom() }
-func (r *textPaneResource) Title() string        { return r.pane.Title() }
-func (r *textPaneResource) View(width, height int) string {
-	return strings.Join(r.pane.ContentRows(width, height), "\n")
-}
 
 // paneRegistry owns pane-resource identity and lifecycle: buffer content,
 // never placement. Output is installed before Lua starts and cannot be
@@ -62,7 +38,7 @@ func (r *paneRegistry) Create(name string) paneResource {
 	if existing, ok := r.byName[name]; ok {
 		return existing
 	}
-	created := newTextPaneResource(name)
+	created := widget.NewPane(name)
 	r.byName[name] = created
 	return created
 }

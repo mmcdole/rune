@@ -1,6 +1,16 @@
 -- UI: Panes, Status Bar, and Keybindings
 -- Everything visual: pane management, status rendering, picker bindings
 
+-- Normal layout policy. Go keeps output and input usable before core loads.
+rune.ui.layout({
+    type = "column",
+    children = {
+        { type = "pane", name = "output", border = "none" },
+        { type = "input" },
+        { type = "bar", name = "status" },
+    },
+})
+
 -- ============================================================
 -- PANE PRIMITIVES
 -- Wrappers around Go pane API
@@ -39,10 +49,10 @@ function rune.pane.hide(name)
     return rune._pane.hide(name)
 end
 
--- Reports the pane placement's own gate (not ancestor regions), or nil when
+-- Reports the pane's local hidden state (not ancestors), or nil when
 -- the layout does not place the pane.
-function rune.pane.is_visible(name)
-    return rune._pane.is_visible(name)
+function rune.pane.is_hidden(name)
+    return rune._pane.is_hidden(name)
 end
 
 function rune.pane.clear(name)

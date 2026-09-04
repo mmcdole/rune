@@ -18,7 +18,7 @@ func addPane(t *testing.T, m *Model, name string, lines ...string) {
 	for _, line := range lines {
 		pane.Write(line)
 	}
-	m.invalidateLayout()
+	m.applyLayout()
 }
 
 func resizeModel(t *testing.T, m *Model, width, height int) *Model {
@@ -29,18 +29,17 @@ func resizeModel(t *testing.T, m *Model, width, height int) *Model {
 
 func setLayout(m *Model, root ui.LayoutNode) {
 	m.layout = ui.LayoutTree{Root: root}
-	m.invalidateLayout()
-	m.syncViewportSize()
+	m.applyLayout()
 }
 
-func findLeaf(t *testing.T, plan layoutPlan, kind leafKind, name string) placedLeaf {
+func findLeaf(t *testing.T, plan layoutPlan, kind string, name string) *layoutNode {
 	t.Helper()
 	for _, leaf := range plan.leaves {
-		if leaf.kind != kind {
+		if (leaf.node.Type == ui.LayoutTypePane) != (kind == ui.LayoutTypePane) {
 			continue
 		}
-		if kind == leafPane {
-			if leaf.pane.Name() == name {
+		if kind == ui.LayoutTypePane {
+			if leaf.node.Name == name {
 				return leaf
 			}
 		} else {
@@ -54,7 +53,7 @@ func findLeaf(t *testing.T, plan layoutPlan, kind leafKind, name string) placedL
 		}
 	}
 	t.Fatalf("leaf %q was not placed", name)
-	return placedLeaf{}
+	return nil
 }
 
 func assertExactBlock(t *testing.T, rendered string, width, height int) []string {
@@ -71,17 +70,21 @@ func assertExactBlock(t *testing.T, rendered string, width, height int) []string
 	return rows
 }
 
-func TestDefaultTreeProducesOneExactTerminalBlock(t *testing.T) {
+func TestCoreTreeProducesOneExactTerminalBlock(t *testing.T) {
 	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 8)), 32, 12)
 	m.syncBars(map[string]ui.BarContent{"status": {Left: "ready"}})
-	m.invalidateLayout()
+	setLayout(m, ui.LayoutNode{Type: ui.LayoutTypeColumn, Children: []ui.LayoutNode{
+		{Type: ui.LayoutTypePane, Name: ui.OutputPaneName, Border: ui.PaneBorderNone},
+		{Type: ui.LayoutTypeInput, Size: ui.AutoSize()},
+		{Type: ui.LayoutTypeBar, Name: "status", Size: ui.AutoSize()},
+	}})
 
-	plan := m.ensureLayout()
+	plan := m.layoutPlan
 	if got, want := plan.output, image.Rect(0, 0, 32, 8); got != want {
 		t.Fatalf("output rect = %v, want %v", got, want)
 	}
-	input := findLeaf(t, plan, leafWidget, ui.LayoutTypeInput)
-	status := findLeaf(t, plan, leafWidget, "status")
+	input := findLeaf(t, plan, "", ui.LayoutTypeInput)
+	status := findLeaf(t, plan, "", "status")
 	if input.outer != image.Rect(0, 8, 32, 11) {
 		t.Fatalf("input rect = %v, want (0,8)-(32,11)", input.outer)
 	}
@@ -96,7 +99,7 @@ func TestArbitraryTypeIsNotARegistryLookup(t *testing.T) {
 	m.syncBars(map[string]ui.BarContent{"vitals": {Left: "HP"}})
 	addPane(t, m, "vitals")
 	setLayout(m, ui.LayoutNode{Type: "vitals"})
-	if got := len(m.ensureLayout().leaves); got != 0 {
+	if got := len(m.layoutPlan.leaves); got != 0 {
 		t.Fatalf("invalid arbitrary type resolved %d leaves, want none", got)
 	}
 }
@@ -112,8 +115,8 @@ func TestOutputPaneAndSameNamedBarRemainSeparateResources(t *testing.T) {
 		},
 	})
 
-	plan := m.ensureLayout()
-	bar := findLeaf(t, plan, leafWidget, ui.OutputPaneName)
+	plan := m.layoutPlan
+	bar := findLeaf(t, plan, "", ui.OutputPaneName)
 	if got, want := bar.outer, image.Rect(0, 0, 20, 1); got != want {
 		t.Fatalf("same-named bar rect = %v, want %v", got, want)
 	}
@@ -147,22 +150,22 @@ func TestRecursiveRowAndColumnGeometry(t *testing.T) {
 		},
 	})
 
-	plan := m.ensureLayout()
+	plan := m.layoutPlan
 	if got, want := plan.output, image.Rect(0, 0, 70, 27); got != want {
 		t.Fatalf("output rect = %v, want %v", got, want)
 	}
-	chat := findLeaf(t, plan, leafPane, "chat")
-	mapPane := findLeaf(t, plan, leafPane, "map")
+	chat := findLeaf(t, plan, ui.LayoutTypePane, "chat")
+	mapPane := findLeaf(t, plan, ui.LayoutTypePane, "map")
 	if got, want := chat.outer, image.Rect(70, 0, 100, 19); got != want {
 		t.Fatalf("chat outer = %v, want %v", got, want)
 	}
-	if got, want := mapPane.outer, image.Rect(70, 18, 100, 27); got != want {
+	if got, want := mapPane.outer, image.Rect(70, 18, 100, 28); got != want {
 		t.Fatalf("map outer = %v, want %v", got, want)
 	}
 	if got, want := chat.content, image.Rect(71, 1, 99, 18); got != want {
 		t.Fatalf("chat content = %v, want %v", got, want)
 	}
-	if got, want := mapPane.content, image.Rect(71, 19, 99, 26); got != want {
+	if got, want := mapPane.content, image.Rect(71, 19, 99, 27); got != want {
 		t.Fatalf("map content = %v, want %v", got, want)
 	}
 	assertExactBlock(t, m.View().Content, 100, 30)
@@ -177,10 +180,12 @@ type measuringWidget struct {
 
 var _ widget.Widget = (*measuringWidget)(nil)
 
+func (w *measuringWidget) MinimumSize() image.Point { return image.Point{} }
+
 func (w *measuringWidget) SetSize(width, height int) { w.width, w.height = width, height }
-func (w *measuringWidget) PreferredHeight() int {
+func (w *measuringWidget) MeasureHeight(width, limit int) int {
 	w.preferredCalls++
-	return w.preferred(max(1, w.width))
+	return min(limit, w.preferred(max(1, width)))
 }
 func (w *measuringWidget) View() string { return w.text }
 
@@ -204,9 +209,9 @@ func TestOnlyAutoTracksRequestIntrinsicMeasurement(t *testing.T) {
 			if !ok {
 				t.Fatal("measuring widget did not resolve")
 			}
-			root := &resolvedNode{
+			root := &layoutNode{
 				node:     ui.LayoutNode{Type: ui.LayoutTypeColumn},
-				children: []*resolvedNode{child},
+				children: []*layoutNode{child},
 			}
 			m.allocateChildren(root, 12, axisVertical, 20)
 			if measured.preferredCalls != test.calls {
@@ -232,18 +237,18 @@ func TestAutoRowMeasuresChildrenAtAllocatedWidths(t *testing.T) {
 	if !ok {
 		t.Fatal("input widget did not resolve")
 	}
-	row := &resolvedNode{
+	row := &layoutNode{
 		node:     ui.LayoutNode{Type: ui.LayoutTypeRow},
-		children: []*resolvedNode{wrappedResolved, inputResolved},
+		children: []*layoutNode{wrappedResolved, inputResolved},
 		hasInput: true,
 	}
 	if got := m.preferred(row, axisVertical, 20); got != 3 {
 		t.Fatalf("auto row preferred height = %d, want 3", got)
 	}
 	plan := layoutPlan{}
-	m.placeNode(row, image.Rect(0, 0, 20, 3), axisVertical, &plan)
-	measured := findLeaf(t, plan, leafWidget, "wrapped")
-	input := findLeaf(t, plan, leafWidget, ui.LayoutTypeInput)
+	m.placeNode(row, image.Rect(0, 0, 20, 3), axisVertical, 0, &plan)
+	measured := findLeaf(t, plan, "", "wrapped")
+	input := findLeaf(t, plan, "", ui.LayoutTypeInput)
 	if got, want := measured.outer, image.Rect(0, 0, 10, 3); got != want {
 		t.Fatalf("wrapped rect = %v, want %v", got, want)
 	}
@@ -265,9 +270,9 @@ func TestAutoColumnSumsNestedPreferredHeights(t *testing.T) {
 	if !ok {
 		t.Fatal("input widget did not resolve")
 	}
-	column := &resolvedNode{
+	column := &layoutNode{
 		node:     ui.LayoutNode{Type: ui.LayoutTypeColumn},
-		children: []*resolvedNode{twoResolved, inputResolved},
+		children: []*layoutNode{twoResolved, inputResolved},
 		hasInput: true,
 	}
 	if got := m.preferred(column, axisVertical, 30); got != 5 {
@@ -317,7 +322,7 @@ func TestResizeReallocatesTreeWithoutReflowingExistingOutputRows(t *testing.T) {
 	}
 
 	m = resizeModel(t, m, 80, 8)
-	if got := m.ensureLayout().output.Dx(); got != 60 {
+	if got := m.layoutPlan.output.Dx(); got != 60 {
 		t.Fatalf("resized output width = %d, want 60", got)
 	}
 	if got := m.output.buffer.Count(); got != 2 {
@@ -333,7 +338,7 @@ func TestResizeReallocatesTreeWithoutReflowingExistingOutputRows(t *testing.T) {
 func TestConstrainedBarAndInputRenderInTheirOwnRowSlots(t *testing.T) {
 	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 8)), 20, 12)
 	m.syncBars(map[string]ui.BarContent{"vitals": {Left: "abcdefghijklmnop"}})
-	m.invalidateLayout()
+	m.applyLayout()
 	setLayout(m, ui.LayoutNode{
 		Type: ui.LayoutTypeColumn,
 		Children: []ui.LayoutNode{
@@ -349,9 +354,9 @@ func TestConstrainedBarAndInputRenderInTheirOwnRowSlots(t *testing.T) {
 		},
 	})
 
-	plan := m.ensureLayout()
-	bar := findLeaf(t, plan, leafWidget, "vitals")
-	input := findLeaf(t, plan, leafWidget, ui.LayoutTypeInput)
+	plan := m.layoutPlan
+	bar := findLeaf(t, plan, "", "vitals")
+	input := findLeaf(t, plan, "", ui.LayoutTypeInput)
 	if bar.outer != image.Rect(0, 9, 10, 12) || input.outer != image.Rect(10, 9, 20, 12) {
 		t.Fatalf("row slots = bar %v input %v", bar.outer, input.outer)
 	}
@@ -372,7 +377,7 @@ func TestHiddenPaneIsPrunedAndOutputReclaimsItsTrack(t *testing.T) {
 			{Type: ui.LayoutTypePane, Name: "map"},
 		},
 	})
-	if got := m.ensureLayout().output.Dx(); got != 20 {
+	if got := m.layoutPlan.output.Dx(); got != 20 {
 		t.Fatalf("output width with map = %d, want 20", got)
 	}
 
@@ -382,7 +387,7 @@ func TestHiddenPaneIsPrunedAndOutputReclaimsItsTrack(t *testing.T) {
 	}
 	next, _ := m.Update(ui.UpdateLayoutMsg(hidden))
 	m = next.(*Model)
-	if got := m.ensureLayout().output.Dx(); got != 40 {
+	if got := m.layoutPlan.output.Dx(); got != 40 {
 		t.Fatalf("output width without map = %d, want 40", got)
 	}
 }
@@ -400,11 +405,11 @@ func TestSmallTerminalProtectsInputThenOutputWithoutOverflow(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			m := resizeModel(t, NewModel(make(chan ui.UIEvent, 8)), 12, test.height)
-			plan := m.ensureLayout()
+			plan := m.layoutPlan
 			if got := plan.output.Dy(); got != test.outputHeight {
 				t.Fatalf("output height = %d, want %d", got, test.outputHeight)
 			}
-			input := findLeaf(t, plan, leafWidget, ui.LayoutTypeInput)
+			input := findLeaf(t, plan, "", ui.LayoutTypeInput)
 			if input.outer != image.Rect(0, test.inputTop, 12, test.height) {
 				t.Fatalf("input rect = %v, want y=%d..%d", input.outer, test.inputTop, test.height)
 			}
@@ -439,16 +444,16 @@ func TestTinyFallbackProtectsNestedInputAndOutputInTheSameTrack(t *testing.T) {
 		},
 	})
 
-	plan := m.ensureLayout()
+	plan := m.layoutPlan
 	if got, want := plan.output, image.Rect(0, 0, 12, 1); got != want {
 		t.Fatalf("nested output rect = %v, want %v", got, want)
 	}
-	input := findLeaf(t, plan, leafWidget, ui.LayoutTypeInput)
+	input := findLeaf(t, plan, "", ui.LayoutTypeInput)
 	if got, want := input.outer, image.Rect(0, 1, 12, 2); got != want {
 		t.Fatalf("nested input rect = %v, want %v", got, want)
 	}
 	for _, leaf := range plan.leaves {
-		if leaf.kind == leafPane && leaf.pane.Name() == "extra" {
+		if leaf.node.Type == ui.LayoutTypePane && leaf.node.Name == "extra" {
 			t.Fatalf("ordinary pane received a protected row: %v", leaf.outer)
 		}
 	}
@@ -465,11 +470,11 @@ func TestFallbackDropsOversizedGapsInsideParent(t *testing.T) {
 		},
 	})
 
-	plan := m.ensureLayout()
+	plan := m.layoutPlan
 	if got, want := plan.output, image.Rect(0, 0, 16, 1); got != want {
 		t.Fatalf("output rect = %v, want %v", got, want)
 	}
-	if got, want := findLeaf(t, plan, leafWidget, ui.LayoutTypeInput).outer,
+	if got, want := findLeaf(t, plan, "", ui.LayoutTypeInput).outer,
 		image.Rect(0, 1, 16, 2); got != want {
 		t.Fatalf("input rect = %v, want %v", got, want)
 	}
@@ -485,8 +490,8 @@ func TestHorizontalPaneFrameKeepsFullContentWidth(t *testing.T) {
 		Border: ui.PaneBorderHorizontal,
 	})
 
-	plan := m.ensureLayout()
-	pane := findLeaf(t, plan, leafPane, "chat")
+	plan := m.layoutPlan
+	pane := findLeaf(t, plan, ui.LayoutTypePane, "chat")
 	if got, want := pane.content, image.Rect(0, 1, 20, 3); got != want {
 		t.Fatalf("horizontal-frame content = %v, want %v", got, want)
 	}
@@ -530,7 +535,7 @@ func TestPaneFrameEdgesAreLogicalTrackMinima(t *testing.T) {
 				},
 			})
 
-			pane := findLeaf(t, m.ensureLayout(), leafPane, "chat")
+			pane := findLeaf(t, m.layoutPlan, ui.LayoutTypePane, "chat")
 			got := pane.outer.Dy()
 			if test.root == ui.LayoutTypeRow {
 				got = pane.outer.Dx()
@@ -554,8 +559,8 @@ func TestExplicitMaximumCanClipPaneChromeWithoutFallingBackParent(t *testing.T) 
 		},
 	})
 
-	plan := m.ensureLayout()
-	pane := findLeaf(t, plan, leafPane, "chat")
+	plan := m.layoutPlan
+	pane := findLeaf(t, plan, ui.LayoutTypePane, "chat")
 	if pane.outer.Dy() != 1 {
 		t.Fatalf("pane height = %d, want explicit maximum 1", pane.outer.Dy())
 	}
@@ -577,8 +582,8 @@ func TestTinyFallbackStillRespectsHardMaximum(t *testing.T) {
 		},
 	})
 
-	plan := m.ensureLayout()
-	pane := findLeaf(t, plan, leafPane, "chat")
+	plan := m.layoutPlan
+	pane := findLeaf(t, plan, ui.LayoutTypePane, "chat")
 	if pane.outer.Dy() != 1 {
 		t.Fatalf("fallback pane height = %d, want hard maximum 1", pane.outer.Dy())
 	}
@@ -616,7 +621,7 @@ func TestNestedMinimumIncludesGapsAndSharedFrameSeams(t *testing.T) {
 				},
 			})
 
-			if got := m.ensureLayout().output.Min.Y; got != test.want {
+			if got := m.layoutPlan.output.Min.Y; got != test.want {
 				t.Fatalf("output starts at row %d, want nested minimum %d", got, test.want)
 			}
 		})
@@ -656,7 +661,7 @@ func TestPaneBordersOwnFourEdgesAndMergeNestedJunctions(t *testing.T) {
 	if plain[7][0] != '└' || plain[7][10] != '┴' || plain[7][19] != '┘' {
 		t.Fatalf("bottom border junctions = %q", string(plain[7]))
 	}
-	west := findLeaf(t, m.ensureLayout(), leafPane, "west")
+	west := findLeaf(t, m.layoutPlan, ui.LayoutTypePane, "west")
 	if got, want := west.content, image.Rect(1, 1, 10, 7); got != want {
 		t.Fatalf("west content = %v, want %v", got, want)
 	}
@@ -684,13 +689,13 @@ func TestPaneTitleClipsWideTextAndVisualizesControlsInsideCorners(t *testing.T) 
 
 func TestSearchUsesTheSameResolvedOutputRectangleAsView(t *testing.T) {
 	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 16)), 40, 16)
-	if got := m.ensureLayout().output.Dy(); got != 13 {
+	if got := m.layoutPlan.output.Dy(); got != 13 {
 		t.Fatalf("normal output height = %d, want 13", got)
 	}
 
 	next, _ := m.Update(ui.ShowSearchMsg{})
 	m = next.(*Model)
-	plan := m.ensureLayout()
+	plan := m.layoutPlan
 	if got := plan.output.Dy(); got != 11 {
 		t.Fatalf("search output height = %d, want 11", got)
 	}
@@ -725,9 +730,9 @@ func TestContainerDividersDrawBetweenActiveChildren(t *testing.T) {
 	addPane(t, m, "map")
 	setLayout(m, band(false))
 
-	plan := m.ensureLayout()
-	social := findLeaf(t, plan, leafPane, "social")
-	mapLeaf := findLeaf(t, plan, leafPane, "map")
+	plan := m.layoutPlan
+	social := findLeaf(t, plan, ui.LayoutTypePane, "social")
+	mapLeaf := findLeaf(t, plan, ui.LayoutTypePane, "map")
 	if social.outer != image.Rect(0, 0, 13, 4) || mapLeaf.outer != image.Rect(14, 0, 21, 4) {
 		t.Fatalf("band rects = %v and %v, want the divider cell between x=13 and x=14",
 			social.outer, mapLeaf.outer)
@@ -768,9 +773,9 @@ func TestContainerDividersReuseFramedPaneSeams(t *testing.T) {
 		},
 	})
 
-	plan := m.ensureLayout()
-	left := findLeaf(t, plan, leafPane, "left")
-	right := findLeaf(t, plan, leafPane, "right")
+	plan := m.layoutPlan
+	left := findLeaf(t, plan, ui.LayoutTypePane, "left")
+	right := findLeaf(t, plan, ui.LayoutTypePane, "right")
 	if left.outer != image.Rect(0, 0, 11, 6) || right.outer != image.Rect(10, 0, 20, 6) {
 		t.Fatalf("pane rects = %v and %v, want one shared boundary at x=10", left.outer, right.outer)
 	}
@@ -800,9 +805,9 @@ func TestColumnDividerDrawsInsideDeclaredGap(t *testing.T) {
 		},
 	})
 
-	plan := m.ensureLayout()
-	north := findLeaf(t, plan, leafPane, "north")
-	south := findLeaf(t, plan, leafPane, "south")
+	plan := m.layoutPlan
+	north := findLeaf(t, plan, ui.LayoutTypePane, "north")
+	south := findLeaf(t, plan, ui.LayoutTypePane, "south")
 	if north.outer != image.Rect(0, 0, 15, 3) || south.outer != image.Rect(0, 6, 15, 9) {
 		t.Fatalf("pane rects = %v and %v, want a three-row gap", north.outer, south.outer)
 	}
@@ -836,9 +841,9 @@ func TestDividerContainerPropagatesItsContinuousFrame(t *testing.T) {
 		},
 	})
 
-	plan := m.ensureLayout()
-	left := findLeaf(t, plan, leafPane, "left")
-	bottom := findLeaf(t, plan, leafPane, "bottom")
+	plan := m.layoutPlan
+	left := findLeaf(t, plan, ui.LayoutTypePane, "left")
+	bottom := findLeaf(t, plan, ui.LayoutTypePane, "bottom")
 	if left.outer.Max.Y != bottom.outer.Min.Y+1 {
 		t.Fatalf("nested seam does not overlap: top ends at %d, bottom starts at %d",
 			left.outer.Max.Y, bottom.outer.Min.Y)
@@ -875,11 +880,17 @@ func TestDividerJoinsBordersAndSeparatorsAboveAndBelow(t *testing.T) {
 		},
 	})
 
-	plan := m.ensureLayout()
-	if got := plan.dividers; len(got) != 1 || !got[0].vertical || got[0].at != 10 {
-		t.Fatalf("dividers = %+v, want one vertical rule at x=10", got)
+	plan := m.layoutPlan
+	vertical := []widget.Rule{}
+	for _, rule := range plan.rules {
+		if rule.Vertical {
+			vertical = append(vertical, rule)
+		}
 	}
-	separator := findLeaf(t, plan, leafWidget, ui.LayoutTypeSeparator)
+	if len(vertical) != 1 || vertical[0].At != 10 {
+		t.Fatalf("vertical rules = %+v, want one at x=10", vertical)
+	}
+	separator := findLeaf(t, plan, "", ui.LayoutTypeSeparator)
 	if separator.outer != image.Rect(0, 8, 21, 9) || !separator.content.Empty() {
 		t.Fatalf("separator outer=%v content=%v, want row 8 drawn by the frame grid", separator.outer, separator.content)
 	}
@@ -944,7 +955,7 @@ func TestSeparatorInsideRowKeepsWidgetRendering(t *testing.T) {
 			{Type: ui.LayoutTypeInput, Size: ui.AutoSize()},
 		},
 	})
-	separator := findLeaf(t, m.ensureLayout(), leafWidget, ui.LayoutTypeSeparator)
+	separator := findLeaf(t, m.layoutPlan, "", ui.LayoutTypeSeparator)
 	if separator.parentAxis != axisHorizontal || separator.content.Empty() {
 		t.Fatalf("row separator parentAxis=%v content=%v, want widget rendering", separator.parentAxis, separator.content)
 	}

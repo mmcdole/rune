@@ -3,13 +3,10 @@ package widget
 import (
 	"strings"
 	"unicode"
-	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/mattn/go-runewidth"
 
 	"github.com/mmcdole/rune/input"
-	"github.com/mmcdole/rune/text"
 )
 
 // maxComposerBodyRows keeps a pasted document useful without allowing the
@@ -17,18 +14,18 @@ import (
 // and footer to these content rows.
 const maxComposerBodyRows = 8
 
-// Composer is the lossless editing model used only while the input contains
+// composer is the lossless editing model used for verbatim drafts, including
 // physical structure that bubbles/textinput cannot represent (LF or TAB).
 // Cursor positions are rune offsets, matching the existing Rune input API.
-type Composer struct {
+type composer struct {
 	text    []rune
 	cursor  int
 	goalCol int // retained display column during vertical movement; -1 = unset
 	topRow  int // first visual row shown by the input viewport
 }
 
-func newComposer(text string, cursor int) *Composer {
-	c := &Composer{goalCol: -1}
+func newComposer(text string, cursor int) *composer {
+	c := &composer{goalCol: -1}
 	c.Set(text, cursor)
 	return c
 }
@@ -47,38 +44,31 @@ func RequiresComposer(value string) bool {
 	return input.RequiresVerbatim(value)
 }
 
-func (c *Composer) Value() string {
+func (c *composer) Value() string {
 	return string(c.text)
 }
 
-func (c *Composer) Position() int {
+func (c *composer) Position() int {
 	return c.cursor
 }
 
-func (c *Composer) Set(text string, cursor int) {
+func (c *composer) Set(text string, cursor int) {
 	c.text = []rune(normalizeComposerText(text))
 	c.SetCursor(cursor)
 	c.goalCol = -1
 	c.topRow = 0
 }
 
-func (c *Composer) SetCursor(cursor int) {
+func (c *composer) SetCursor(cursor int) {
 	c.cursor = clampInt(cursor, 0, len(c.text))
 	c.goalCol = -1
 }
 
-func (c *Composer) CursorEnd() {
+func (c *composer) CursorEnd() {
 	c.SetCursor(len(c.text))
 }
 
-func (c *Composer) Reset() {
-	c.text = nil
-	c.cursor = 0
-	c.goalCol = -1
-	c.topRow = 0
-}
-
-func (c *Composer) Insert(text string) {
+func (c *composer) Insert(text string) {
 	runes := []rune(normalizeComposerText(text))
 	if len(runes) == 0 {
 		return
@@ -91,7 +81,7 @@ func (c *Composer) Insert(text string) {
 	c.goalCol = -1
 }
 
-func (c *Composer) Backspace() {
+func (c *composer) Backspace() {
 	if c.cursor == 0 {
 		return
 	}
@@ -100,7 +90,7 @@ func (c *Composer) Backspace() {
 	c.goalCol = -1
 }
 
-func (c *Composer) Delete() {
+func (c *composer) Delete() {
 	if c.cursor >= len(c.text) {
 		return
 	}
@@ -108,45 +98,45 @@ func (c *Composer) Delete() {
 	c.goalCol = -1
 }
 
-func (c *Composer) Left() {
+func (c *composer) Left() {
 	if c.cursor > 0 {
 		c.cursor--
 	}
 	c.goalCol = -1
 }
 
-func (c *Composer) Right() {
+func (c *composer) Right() {
 	if c.cursor < len(c.text) {
 		c.cursor++
 	}
 	c.goalCol = -1
 }
 
-func (c *Composer) LineStart() {
+func (c *composer) LineStart() {
 	for c.cursor > 0 && c.text[c.cursor-1] != '\n' {
 		c.cursor--
 	}
 	c.goalCol = -1
 }
 
-func (c *Composer) LineEnd() {
+func (c *composer) LineEnd() {
 	for c.cursor < len(c.text) && c.text[c.cursor] != '\n' {
 		c.cursor++
 	}
 	c.goalCol = -1
 }
 
-func (c *Composer) DocStart() {
+func (c *composer) DocStart() {
 	c.cursor = 0
 	c.goalCol = -1
 }
 
-func (c *Composer) DocEnd() {
+func (c *composer) DocEnd() {
 	c.cursor = len(c.text)
 	c.goalCol = -1
 }
 
-func (c *Composer) WordLeft() {
+func (c *composer) WordLeft() {
 	for c.cursor > 0 && unicode.IsSpace(c.text[c.cursor-1]) {
 		c.cursor--
 	}
@@ -156,7 +146,7 @@ func (c *Composer) WordLeft() {
 	c.goalCol = -1
 }
 
-func (c *Composer) WordRight() {
+func (c *composer) WordRight() {
 	for c.cursor < len(c.text) && !unicode.IsSpace(c.text[c.cursor]) {
 		c.cursor++
 	}
@@ -166,7 +156,7 @@ func (c *Composer) WordRight() {
 	c.goalCol = -1
 }
 
-func (c *Composer) DeleteWordBack() {
+func (c *composer) DeleteWordBack() {
 	end := c.cursor
 	c.WordLeft()
 	if c.cursor == end {
@@ -176,7 +166,7 @@ func (c *Composer) DeleteWordBack() {
 	c.goalCol = -1
 }
 
-func (c *Composer) DeleteToLineStart() {
+func (c *composer) DeleteToLineStart() {
 	end := c.cursor
 	c.LineStart()
 	if c.cursor == end {
@@ -186,7 +176,7 @@ func (c *Composer) DeleteToLineStart() {
 	c.goalCol = -1
 }
 
-func (c *Composer) DeleteToLineEnd() {
+func (c *composer) DeleteToLineEnd() {
 	start := c.cursor
 	c.LineEnd()
 	end := c.cursor
@@ -207,7 +197,7 @@ func (c *Composer) DeleteToLineEnd() {
 // Update applies keys that have local editing meaning in compose mode. It
 // deliberately leaves plain Enter, Escape, Ctrl+C, and Ctrl+E unhandled so
 // the controller can submit/cancel/delegate to the external-editor binding.
-func (c *Composer) Update(msg tea.KeyPressMsg, widgetWidth int) bool {
+func (c *composer) Update(msg tea.KeyPressMsg, widgetWidth int) bool {
 	if msg.Text != "" {
 		c.Insert(msg.Text)
 		return true
@@ -298,7 +288,7 @@ func matchesEnterKey(msg tea.KeyPressMsg, modifiers tea.KeyMod) bool {
 		msg.Mod&keyModifiers == modifiers
 }
 
-func (c *Composer) moveVertical(delta, widgetWidth int) {
+func (c *composer) moveVertical(delta, widgetWidth int) {
 	layout := buildComposerLayout(c.text, c.cursor, widgetWidth)
 	if len(layout.rows) == 0 {
 		return
@@ -322,181 +312,6 @@ func (c *Composer) moveVertical(delta, widgetWidth int) {
 		}
 	}
 	c.cursor = best.offset
-}
-
-type composerGlyph struct {
-	text  string
-	width int
-}
-
-type composerPoint struct {
-	offset int
-	col    int
-}
-
-type composerRow struct {
-	line         int
-	continuation bool
-	glyphs       []composerGlyph
-	points       []composerPoint
-}
-
-type composerLayout struct {
-	rows       []composerRow
-	cursorRow  int
-	cursorCol  int
-	lineCount  int
-	gutterSize int
-}
-
-// buildComposerLayout derives safe terminal rows from the canonical buffer.
-// Source tabs remain one rune but expand to cells at classic 8-column stops.
-// Every source insertion offset is retained on exactly one visual row so
-// vertical movement and cursor rendering never need to reverse-map strings.
-func buildComposerLayout(content []rune, cursor, width int) composerLayout {
-	lineCount := 1
-	for _, r := range content {
-		if r == '\n' {
-			lineCount++
-		}
-	}
-
-	gutter := composerGutterSize(lineCount, width)
-	contentWidth := width - gutter
-	if contentWidth < 1 {
-		contentWidth = 1
-	}
-
-	layout := composerLayout{
-		lineCount:  lineCount,
-		gutterSize: gutter,
-		cursorRow:  -1,
-	}
-
-	line := 0
-	lineStart := 0
-	for {
-		lineEnd := lineStart
-		for lineEnd < len(content) && content[lineEnd] != '\n' {
-			lineEnd++
-		}
-
-		layout.rows = append(layout.rows, composerRow{line: line})
-		rowIndex := len(layout.rows) - 1
-		col := 0
-		logicalCol := 0
-
-		newContinuation := func() {
-			layout.rows = append(layout.rows, composerRow{line: line, continuation: true})
-			rowIndex = len(layout.rows) - 1
-			col = 0
-		}
-		addPoint := func(offset int) {
-			layout.rows[rowIndex].points = append(layout.rows[rowIndex].points, composerPoint{offset: offset, col: col})
-			if offset == cursor {
-				layout.cursorRow = rowIndex
-				layout.cursorCol = col
-			}
-		}
-		appendGlyph := func(g composerGlyph) {
-			if g.width > contentWidth {
-				g = composerGlyph{text: "�", width: 1}
-			}
-			if col > 0 && col+g.width > contentWidth {
-				newContinuation()
-			}
-			if g.width == 0 && len(layout.rows[rowIndex].glyphs) > 0 {
-				last := len(layout.rows[rowIndex].glyphs) - 1
-				layout.rows[rowIndex].glyphs[last].text += g.text
-				return
-			}
-			layout.rows[rowIndex].glyphs = append(layout.rows[rowIndex].glyphs, g)
-			col += g.width
-			logicalCol += g.width
-		}
-
-		for offset := lineStart; offset < lineEnd; offset++ {
-			if col >= contentWidth {
-				newContinuation()
-			}
-			r := content[offset]
-			if r == '\t' {
-				addPoint(offset)
-				padding := 8 - logicalCol%8
-				for n := 0; n < padding; n++ {
-					if col >= contentWidth {
-						newContinuation()
-					}
-					appendGlyph(composerGlyph{text: " ", width: 1})
-				}
-				continue
-			}
-
-			glyph := safeComposerGlyph(r)
-			// A wide glyph that does not fit belongs wholly to the next
-			// visual row; its source cursor point must move with it.
-			if col > 0 && col+glyph.width > contentWidth {
-				newContinuation()
-			}
-			addPoint(offset)
-			appendGlyph(glyph)
-		}
-
-		if col >= contentWidth {
-			newContinuation()
-		}
-		addPoint(lineEnd)
-
-		if lineEnd == len(content) {
-			break
-		}
-		line++
-		lineStart = lineEnd + 1
-	}
-
-	if layout.cursorRow < 0 {
-		layout.cursorRow = len(layout.rows) - 1
-		layout.cursorCol = 0
-	}
-	return layout
-}
-
-func safeComposerGlyph(r rune) composerGlyph {
-	if r == utf8.RuneError {
-		return composerGlyph{text: "�", width: 1}
-	}
-	displayRune := text.VisualizeTerminalRune(r, false)
-	if displayRune != r {
-		display := string(displayRune)
-		return composerGlyph{text: display, width: runewidth.RuneWidth(displayRune)}
-	}
-
-	width := runewidth.RuneWidth(r)
-	if width < 0 {
-		width = 1
-	}
-	return composerGlyph{text: string(r), width: width}
-}
-
-func composerGutterSize(lineCount, width int) int {
-	digits := lenInt(lineCount)
-	size := digits + 3 // number + space + marker + space
-	if width-size < 1 {
-		return 0
-	}
-	return size
-}
-
-func lenInt(n int) int {
-	if n < 10 {
-		return 1
-	}
-	digits := 0
-	for n > 0 {
-		n /= 10
-		digits++
-	}
-	return digits
 }
 
 func clampInt(value, low, high int) int {

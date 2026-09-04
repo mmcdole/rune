@@ -14,7 +14,7 @@ rune.pane.replace("vitals", block)          -- redraw a whole pane in one update
 rune.pane.toggle("chat")                    -- flip the pane's layout placement
 rune.pane.show("chat")
 rune.pane.hide("chat")
-rune.pane.is_visible("chat")                -- nil when the layout has no chat pane
+rune.pane.is_hidden("chat")                -- nil when the layout has no chat pane
 rune.pane.clear("chat")
 ```
 
@@ -40,40 +40,20 @@ Placing a pane shows it. The buffer is created on first placement or first
 `write`, whichever comes first, so a declared pane is visible immediately and
 an empty one renders as an empty titled box. Declare a pane that starts hidden
 with `hidden = true` on its leaf; `show`, `hide`, and `toggle` change that
-placement gate at runtime and return `true` only when the layout places the
+local hidden state at runtime and return `true` only when the layout places the
 pane. Hiding a pane removes its leaf from the resolved layout but does not
 clear its buffer or scroll position, so showing it later reveals recent
 history. Buffers survive layout replacement and `/reload`; visibility returns
 to the declared `hidden` values.
 
-Scripts that rebuild the layout at runtime, for example to swap a set of top
-panes, therefore see every pane return to its declared state. Declare a pane
-that should normally stay out of the way with `hidden = true`, and when the
-current visibility should carry across the rebuild, snapshot it first and
-restore both directions afterwards:
-
-```lua
-local was_visible = rune.pane.is_visible("group")
-rune.ui.layout(build_layout(tab))
-if was_visible == true then
-    rune.pane.show("group")
-elseif was_visible == false then
-    rune.pane.hide("group")
-end
-```
-
-Rune publishes the layout once per script entry, after the callback returns,
-so the screen never shows the state between the rebuild and the restore.
+To preserve visibility while rebuilding a layout, use
+`hidden = rune.pane.is_hidden("group") or false` in the new pane declaration.
 
 ## Status panes
 
-A pane that shows current state rather than a log, such as vitals, a group
-roster, or an enemy list, is redrawn as a whole block. Build the block as one
-string and hand it to `rune.pane.replace`, which empties and refills the pane
-in one update. Clearing and then writing line by line sends each step to the
-terminal separately, so a frame can land while the pane is empty and the pane
-appears to flicker. With `replace` no debounce is needed; redraw as often as
-the data changes.
+For vitals, a roster, or another state display, build one string and call
+`replace`. It clears and writes in a single UI update, avoiding an empty
+frame between separate calls.
 
 ```lua
 rune.gmcp.on("group", function(group)
@@ -112,44 +92,7 @@ only the titled top and closing bottom rules. Lines in user-created panes
 soft-wrap at render time and re-fit when the terminal or layout changes. The
 reserved output transcript retains its append-time wrapping.
 
-During normal allocation, a four-sided pane has an intrinsic minimum of two
-columns and two rows, while a horizontal-only pane has a two-row minimum. A
-borderless pane adds no chrome minimum. On a terminal too small to satisfy all
-minima, Rune may clip below those sizes rather than draw outside the screen.
-
-## Side-by-side panes
-
-Rows and columns can nest around panes and bars:
-
-```lua
-rune.ui.layout({
-    type = "column",
-    children = {
-        {
-            type = "row",
-            children = {
-                { type = "pane", name = "output", size = "3fr", border = "none" },
-                {
-                    type = "column",
-                    size = "1fr",
-                    min_size = 24,
-                    children = {
-                        { type = "pane", name = "chat", size = "2fr" },
-                        { type = "pane", name = "map", size = "1fr" },
-                    },
-                },
-            },
-        },
-        { type = "input" },
-        { type = "bar", name = "status" },
-    },
-})
-```
-
-The output pane receives three shares of the width and the sidebar one. Inside
-the sidebar, chat receives twice the remaining height of the map. A hidden
-chat or map pane is pruned before allocation, so the other pane reclaims the
-available sidebar space.
+See [Layout & UI](/interface/layout/) for nested sidebars and size constraints.
 
 ## Scrolling
 
@@ -203,7 +146,7 @@ end)
 A pane displays only when all conditions are true: the active layout contains
 its pane leaf, that placement is not hidden, and every ancestor region is
 visible. Creating or writing a buffer does not add a placement to the tree.
-Hiding a region does not change any descendant pane placement's own gate.
+Hiding a region does not change any descendant pane placement's hidden state.
 
 **Related:** [rune.pane reference](/reference/api/pane/),
 [Layout & UI](/interface/layout/),

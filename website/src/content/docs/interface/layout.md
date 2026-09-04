@@ -3,16 +3,11 @@ title: Layout & UI
 description: Arrange Rune's output, input, bars, and panes with nested rows and columns.
 ---
 
-A layout describes the whole terminal as one tree. Every node is either a
-container or a leaf:
+A layout describes the terminal as a tree. A `row` places children left to
+right; a `column` places them top to bottom. Leaves display a named pane,
+a registered bar, input, or a separator.
 
-- A `row` lays its children out from left to right.
-- A `column` lays its children out from top to bottom.
-- A leaf renders `input`, `separator`, a named `bar`, or a named `pane` buffer.
-  Server output is the reserved pane named `output`.
-
-The default is a full-width column containing the server output, input, and
-status bar:
+Lua core installs this default:
 
 ```lua
 rune.ui.layout({
@@ -25,15 +20,13 @@ rune.ui.layout({
 })
 ```
 
-The output pane defaults to `1fr` and takes the height left after the input and
-status bar, which default to their intrinsic `auto` heights. Because the root
-is a column, all three children inherit its full width. You only need to set a
-layout when you want a different arrangement.
+The output takes the height left after input and status. You only need to
+declare a layout when you want a different arrangement. Every layout must
+contain exactly one input; output is optional.
 
 ## Splitting the screen
 
-Rows and columns can nest. This layout puts the server output beside a
-40-column sidebar, then keeps the status and input full-width below both:
+Nest containers to keep input beneath output while a sidebar spans both:
 
 ```lua
 rune.ui.layout({
@@ -41,344 +34,136 @@ rune.ui.layout({
     children = {
         {
             type = "row",
+            dividers = true,
             children = {
-                { type = "pane", name = "output", border = "none" },
+                {
+                    type = "column",
+                    children = {
+                        { type = "pane", name = "output", border = "none" },
+                        { type = "input" },
+                    },
+                },
                 {
                     type = "column",
                     id = "sidebar",
-                    size = 40,
-                    min_size = 24,
+                    size = 32,
                     children = {
-                        {
-                            type = "pane",
-                            name = "chat",
-                            size = "2fr",
-                            title = "Chat",
-                            border = "full",
-                        },
-                        {
-                            type = "pane",
-                            name = "map",
-                            size = "1fr",
-                            title = "Map",
-                            border = "full",
-                        },
+                        { type = "pane", name = "chat", size = "2fr", border = "horizontal" },
+                        { type = "pane", name = "map", border = "horizontal" },
                     },
                 },
             },
         },
         { type = "bar", name = "status" },
-        { type = "input", max_size = 5 },
     },
 })
 ```
 
-Declaring a pane places it: the buffer is created if it does not exist yet,
-and an empty pane renders as an empty titled box until a script writes to it.
-No setup calls are needed. Only the two pane leaves draw layout frames in this
-example.
-Containers partition space; they do not add borders around `output`, bars,
-input, or themselves.
-
-The container decides which dimension a child's size controls. Inside a row,
-`size`, `min_size`, and `max_size` mean width. Inside a column, they mean
-height. The root has no parent axis, so it cannot set any of those fields.
+Declaring a pane creates its buffer if needed. An empty pane displays its
+frame; scripts fill it with `rune.pane.write` or `rune.pane.replace`.
+Containers may have zero, one, or many children. Empty containers take no space.
 
 ## Sizing
 
-Each non-root node accepts one `size`:
+A child's size follows its parent's axis: width in a row, height in a column.
+The root fills the terminal and has no size constraints.
 
-| Value | Meaning |
+| `size` | Meaning |
 |---|---|
-| `40` | Fixed at 40 cells along the parent's axis |
+| `40` | 40 cells |
 | `"30%"` | 30 percent of the parent's allocatable extent |
-| `"2fr"` | Two weighted shares of the space left after fixed, percentage, and automatic tracks |
-| `"auto"` | Use the node's preferred height |
-| omitted on `pane`, `row`, or `column` | `"1fr"` |
-| omitted on `input`, `separator`, or `bar` | `"auto"` |
+| `"2fr"` | Two shares of the space remaining after other sizes |
+| `"auto"` | Measured height; only valid in a column |
+| omitted | `"1fr"`, except input, bars, and separators in a column use `"auto"` |
 
-Cell counts, percentages, and `fr` weights are positive integers.
-Percentages are calculated after the container's gaps are removed. Fixed and
-automatic tracks take their preferred sizes, percentage tracks take their
-share of the parent, and `fr` tracks divide the remainder. Integer rounding is
-deterministic, so allocated tracks never overrun the container.
+Use `fr` for ratios that compose with fixed siblings. For example, `3fr`
+and `1fr` divide the remaining space 75:25. Percentages refer to the whole
+allocatable extent, not the remainder.
 
-Use `fr` for ratios that should compose with fixed siblings:
+`min_size` and `max_size` bound the same dimension:
 
 ```lua
-{
-    type = "row",
-    children = {
-        { type = "pane", name = "output", size = "7fr", border = "none" },
-        { type = "pane", name = "map", size = "3fr" },
-    },
-}
+{ type = "pane", name = "map", size = "30%", min_size = 24, max_size = 50 }
 ```
 
-That is a 70:30 split of the available width. `"70%"` and `"30%"` produce
-the same result when those are the only children, but percentages refer to the
-whole parent extent. `fr` refers to whatever remains after fixed children.
-
-`min_size` and `max_size` clamp the node along the same parent axis:
-
-```lua
-{
-    type = "pane",
-    name = "map",
-    size = "30%",
-    min_size = 24,
-    max_size = 50,
-}
-```
-
-When declared sizes do not fit, Rune preserves minimums whenever the terminal
-allows and keeps every child inside the available rectangle. The
-[API reference](/reference/api/ui/#size-grammar) describes the exact allocation
-order.
-
-If fixed, automatic, or capped tracks do not consume the whole parent and no
-uncapped `fr` child remains, the unused tail stays blank. Add an unsized pane
-or container, or an explicit `fr` child, when the split should fill its axis.
+When sizes cannot fit, Rune shrinks tracks within their bounds. If even
+minimums cannot fit, it drops gaps and relaxes minimums while protecting input.
+An explicit maximum remains a hard cap. Fixed or capped children may leave
+unused space at the end; include an uncapped `fr` child to fill it.
 
 ### Automatic height
 
-`"auto"` is supported for a child of a `column`, where size means height. It
-is the default for `input`, `separator`, and `bar`. It is not supported for a
-child of a `row`; give those leaves an explicit cell, percentage, or `fr` width
-there.
+Input measures its current editing mode, a non-empty bar uses one row, and
+a separator uses one row. A pane measures its content at the assigned width,
+plus frame rows, bounded by the terminal height and `max_size`. Use a fixed
+or fractional height for a log that should not grow as lines arrive.
 
-An automatic-height row is valid. Rune first assigns widths to the row's
-children, measures each child at its assigned width, and uses the tallest
-preferred height. This allows wrapped input, search, and other height-aware
-leaves to sit beside each other:
+An auto-height row first assigns its children's widths, then uses their tallest
+preferred height. Explicit `auto` widths are unsupported; omitted widths
+use `1fr`.
 
-```lua
-{
-    type = "column",
-    children = {
-        { type = "pane", name = "output", border = "none" },
-        {
-            type = "row",
-            size = "auto",
-            children = {
-                { type = "input", size = "3fr" },
-                { type = "bar", name = "status", size = "1fr" },
-            },
-        },
-    },
-}
-```
+## Borders and dividers
 
-### Output scrollback and width changes
+Pane rectangles include their borders. Choose `border = "full"` (default),
+`"horizontal"` (top and bottom only), or `"none"`. A `title` replaces the
+complete generated header, including its scroll-state suffix; `title = ""`
+removes the text. Omit it to retain the generated title.
 
-Server output wraps to the `output` pane's width, and existing output rows do
-not reflow after a resize or layout change. Named panes re-wrap their lines at
-the current width. The [API reference](/reference/api/ui/#leaf-types) covers
-output behavior before its first placement and while it is hidden.
+Containers do not draw outer borders. `dividers = true` draws between active
+children: vertical rules in a row, horizontal rules in a column. With no gap,
+adjacent pane frames share a cell; a divider uses that seam or reserves a cell
+when no frame provides one.
 
-## Gaps, dividers, and pane borders
+A positive `gap` reserves that many cells between children. With dividers
+enabled, the rule sits near the middle of that gap. Shared pane frames,
+dividers, default separators, and input rules join at tees and crosses.
 
-Set `gap` on a container to reserve blank cells between its active children:
+A separator is `{ type = "separator" }`. Set `char = "═"` or another
+single-cell character for a standalone rule that does not join the frame grid.
+
+## Visibility and regions
+
+Give a non-root container an `id` to address the whole subtree:
 
 ```lua
-{
-    type = "row",
-    gap = 1,
-    children = {
-        { type = "pane", name = "output", border = "none" },
-        { type = "pane", name = "map", size = 32 },
-    },
-}
+rune.ui.regions.hide("sidebar")
+rune.ui.regions.show("sidebar")
+rune.ui.regions.toggle("sidebar")
+rune.ui.regions.is_hidden("sidebar") -- local hidden value; nil if absent
 ```
 
-The gap is subtracted before child sizes are resolved. With `gap = 0`, adjacent
-bordered panes share one boundary instead of drawing two borders. Rune owns
-the shared frame and draws the correct corners and junctions for nested rows
-and columns.
+Pane placements use the same operations by name: `rune.pane.hide("chat")`,
+`show`, `toggle`, and `is_hidden`. Declare `hidden = true` on a pane or
+identified container to start it hidden.
 
-Set `dividers = true` on a container to draw a rule between adjacent active
-children instead of leaving the gap blank. A row draws vertical rules and a
-column draws horizontal rules. With `gap = 0`, Rune reuses an existing framed
-seam or reserves one cell when the children do not provide one. A positive gap
-keeps its declared width and draws the rule near its middle.
+`is_hidden` reports only that node's state. A hidden ancestor does not change
+its descendants' flags. A region may contain input, but cannot be hidden while
+it does: runtime hide/toggle returns `nil, err`, and a hidden declaration is
+rejected.
 
-```lua
-{
-    type = "row",
-    dividers = true,
-    children = {
-        { type = "pane", name = "social", size = "2fr", border = "horizontal" },
-        { type = "pane", name = "map", size = "1fr", border = "horizontal" },
-    },
-}
-```
+Hidden nodes, empty/disabled bars, and containers without active children take
+no space. Their siblings reclaim it. Installing another layout or running
+`/reload` restores the declaration's hidden values; pane buffers and scroll
+positions survive.
 
-That band has top and bottom rules from the panes, one vertical rule between
-them, and no outer side walls. Dividers pair naturally with `"horizontal"` and
-`"none"` pane borders: the container separates siblings, so no pane needs its
-own walls. Full pane borders already provide their shared seam, so enabling
-dividers does not add another rule beside it. Because rules sit only between
-active children, hiding a pane removes its neighboring divider with it, and
-the divider meets pane borders with the correct tee and cross junctions.
+## Bars and output
 
-A pane uses a full border by default. The default output placement opts out
-with `border = "none"`. Its assigned rectangle includes any border, and the
-remaining cells display content. Pane presentation fields are set directly on
-the leaf:
+A `bar` leaf names a renderer registered with `rune.ui.bar`. Its callback
+receives the terminal width, even in a narrower slot. Returning
+`{ left = ..., center = ..., right = ... }` lets Rune align fields within the
+assigned slot; strings are clipped there. Empty bars collapse. See [Bars](/interface/bars/).
 
-```lua
-{
-    type = "pane",
-    name = "map",
-    title = "Wilderness",
-    border = "full",
-}
-```
-
-A `title` replaces the pane's entire generated header, including its name and
-the automatic `· scroll +N` suffix. Set it to `""` to suppress title text, or
-omit it when the generated scroll-state indicator should remain visible. Pane
-border values are:
-
-- `"full"`, the default: all four sides.
-- `"none"`: no border; the full rectangle belongs to content.
-- `"horizontal"`: titled top and closing bottom rules, with no side walls.
-
-Pane borders count toward the leaf's assigned size. A restrictive `max_size` or
-a very small terminal may clip them; the
-[API reference](/reference/api/ui/#leaf-types) lists their normal minimums.
-
-## Leaves
-
-### Output and input
-
-Rune pre-creates a visible pane resource named `output`; place it like any other
-pane with `{ type = "pane", name = "output" }`. Output placement is optional,
-so a focused interface may omit it while the buffer continues accumulating.
-Like every pane name, `output` may be placed at most once in a tree layout.
-Every `rune.pane.*` operation also applies to it.
-
-Every tree layout must contain exactly one `{ type = "input" }`. `input` is
-the command line, multiline composer, and picker/search surface. Its omitted
-size defaults to `auto`, so wrapped text and the composer can grow vertically
-when it is a child of a column.
-
-### Bars
-
-A registered bar is placed through a `bar` leaf. Its `name` is the bar's
-registry name:
-
-```lua
-rune.ui.bar("vitals", function(width)
-    return "HP 312/340"
-end)
-
--- As a child of a column, the default auto size gives a non-empty bar one row:
-{ type = "bar", name = "vitals" }
-
--- As a child of a row, use a fixed, percentage, or fractional width:
-{ type = "bar", name = "vitals", size = "1fr" }
-```
-
-A `bar` leaf selects only a bar resource. An absent, disabled, or empty bar
-never turns into a same-named pane. A pane and a bar may share a name because
-their leaf types select different resource namespaces.
-
-The render callback receives the full terminal width even when the tree gives
-the bar a narrower slot. Rune clips the result to that slot. A bar that returns
-`""` or `nil`, is disabled, or is removed takes no space, and its siblings
-reclaim the room.
-
-### Panes
-
-A pane leaf uses `type = "pane"` and names its buffer:
-
-```lua
-{ type = "pane", name = "chat", size = 12 }
-```
-
-Use `rune.pane.*` for writes and visibility. See [Panes](/interface/panes/).
-
-### Separator
-
-`separator` is a one-line built-in. Set its character directly on the leaf:
-
-```lua
-{
-    type = "separator",
-    char = "═",
-}
-```
-
-Omit `char` to use `─`. A supplied character must occupy exactly one terminal
-cell or layout validation fails.
-
-A default separator placed by a column is drawn by the same frame that draws
-pane borders and dividers, so a divider ending on it meets it with a tee. A
-separator with a custom `char`, or one placed by a row, renders on its own and
-does not join.
-
-## Regions and inactive resources
-
-A non-root `row` or `column` becomes an addressable region when it has an `id`.
-Regions are the only nodes that accept `id`; `hidden` is valid on regions and
-on pane placements:
-
-```lua
-{
-    type = "column",
-    id = "sidebar",
-    hidden = true,
-    size = 32,
-    children = {
-        { type = "pane", name = "chat", size = "2fr" },
-        { type = "pane", name = "map", size = "1fr" },
-    },
-}
-```
-
-Use the region API to change that placement gate at runtime:
-
-```lua
-rune.ui.regions.show("sidebar")        -- true when the region exists
-rune.ui.regions.hide("sidebar")        -- true when the region exists
-rune.ui.regions.toggle("sidebar")      -- true when the region exists
-rune.ui.regions.is_visible("sidebar")  -- true/false, or nil when unknown
-```
-
-`is_visible` reports that region's own gate. It does not include a hidden
-ancestor or the visibility/activity of panes and bars below it. Visibility
-state belongs to the installed layout: replacing the layout or running
-`/reload` restores the new declaration's `hidden` values. A region cannot
-contain `input`, directly or through nested containers. The output pane may be
-placed in a region; its own placement gate and the ancestor region gate both
-have to be on for it to render.
-
-Pane placements carry the same gate, addressed by name instead of id:
-`hidden = true` on a pane node declares it hidden, and `rune.pane.show`,
-`hide`, and `toggle` change it at runtime. See
-[Panes](/interface/panes/) for the pane-side view of this.
-
-Rune removes inactive nodes before allocating space:
-
-- A hidden region removes that container and all descendants.
-- A hidden pane placement is removed.
-- An inactive bar or a bar with no visible content is removed.
-- A container with no active descendants is removed.
-
-The remaining siblings reclaim the space. A container that is left with one
-active child continues resolving that child normally. Pane buffers and scroll
-position survive layout replacement and `/reload`; visibility does not. A
-script that rebuilds the layout at runtime and wants to keep a pane's current
-visibility snapshots and restores it, as shown under
-[Panes](/interface/panes/).
+Ordinary panes re-wrap logical lines at their current width. The reserved
+`output` pane retains rows wrapped at append time. While hidden or omitted,
+new output uses its last placement width. See [Panes](/interface/panes/).
 
 ## Migrating from top/bottom tables
 
-Releases before the tree layout took a `top`/`bottom` table. That form is no
-longer accepted: Rune prints a notice with the mapping, keeps the current
-layout, and continues loading the rest of the script. Rewrite it as a column
-with the top entries first, the `output` pane, then the bottom entries. Before:
+The old form prints a short migration notice, returns `false`, and leaves the
+current layout unchanged. Convert it to a column: top entries, output, then
+bottom entries.
+
+Before:
 
 ```lua
 rune.ui.layout({
@@ -402,34 +187,9 @@ rune.ui.layout({
 })
 ```
 
-Two rules changed along the way. A tree must contain exactly one `input`,
-where the old form could omit or repeat it. Old-form panes started hidden and
-were revealed with `rune.pane.toggle`; a tree pane is visible as soon as it is
-placed, so keep `hidden = true` on panes your binds reveal on demand and drop
-it on panes that should show immediately. The
-[API reference](/reference/api/ui/#migrating-from-topbottom-tables) lists the
-complete entry-by-entry mapping.
+Tree layouts require exactly one input. Old panes started hidden; keep
+`hidden = true` on those your binds reveal on demand. New panes are visible
+unless declared hidden.
 
-## Validation
-
-Rune validates the complete tree before replacing the active layout. If
-validation fails, the active layout is unchanged. The key rules are:
-
-- The table passed to `rune.ui.layout` is the root node itself.
-- Every node has a `type`; pane and bar names are unique within their own
-  resource type.
-- Rows and columns have a dense `children` array with at least two declared
-  children.
-- `input` occurs exactly once. Output is the optional reserved pane named
-  `output`.
-- Region IDs belong only to non-root rows and columns, and a region cannot
-  contain input.
-- Unknown fields and invalid or contradictory sizing rules are errors.
-
-The [API reference](/reference/api/ui/#runeuilayout) lists every field, limit,
-and validation rule, including reload behavior.
-
-**Related:** [rune.ui reference](/reference/api/ui/),
-[Bars](/interface/bars/),
-[Panes](/interface/panes/),
-[Pickers](/interface/pickers/)
+The [API reference](/reference/api/ui/) covers all fields, validation limits,
+and reload behavior.

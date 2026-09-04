@@ -282,15 +282,7 @@ function rune.ui.layout(config)
         local source = rune.caller_source(1)
         rune.echo(rune.style.red("[Error]") .. " rune.ui.layout: top/bottom layout tables are no longer supported"
             .. (source and (" (" .. source .. ")") or ""))
-        rune.echo("  Pass a root node instead. Top entries become children before the output pane, bottom entries after it:")
-        rune.echo("    { type = \"column\", children = {")
-        rune.echo("        { type = \"pane\", name = \"chat\", size = 10, border = \"horizontal\", hidden = true },  -- { name = \"chat\", height = 10 }")
-        rune.echo("        { type = \"pane\", name = \"output\", border = \"none\" },")
-        rune.echo("        { type = \"input\" },                       -- \"input\"")
-        rune.echo("        { type = \"bar\", name = \"status\" },           -- a bar name")
-        rune.echo("        { type = \"separator\", char = \"=\" },        -- { name = \"separator\", char = \"=\" }")
-        rune.echo("    } }")
-        rune.echo("  A tree needs exactly one input. See https://runemud.com/interface/layout/#migrating-from-topbottom-tables")
+        rune.echo("  Pass a root node. See https://runemud.com/interface/layout/#migrating-from-topbottom-tables")
         return false
     end
     rune._ui.layout(config)
@@ -313,8 +305,8 @@ function rune.ui.regions.toggle(id)
     return rune._ui.region_toggle(id)
 end
 
-function rune.ui.regions.is_visible(id)
-    return rune._ui.region_is_visible(id)
+function rune.ui.regions.is_hidden(id)
+    return rune._ui.region_is_hidden(id)
 end
 
 -- Force an immediate bar refresh instead of waiting for the ticker.

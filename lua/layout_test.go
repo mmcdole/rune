@@ -55,7 +55,7 @@ func TestLegacyLayoutTableIsRejectedWithoutRaising(t *testing.T) {
 			for _, want := range []string{
 				"rune.ui.layout: top/bottom layout tables are no longer supported",
 				"legacy layout:",
-				`{ type = "input" }`,
+				"Pass a root node",
 				"#migrating-from-topbottom-tables",
 			} {
 				if !strings.Contains(printed, want) {
@@ -72,11 +72,11 @@ func TestLegacyLayoutTableIsRejectedWithoutRaising(t *testing.T) {
 	`)
 }
 
-func TestNativeLayoutParsesDirectStrictTreeWithFlatLeafFields(t *testing.T) {
+func TestLayoutParsesDirectStrictTreeWithFlatLeafFields(t *testing.T) {
 	engine, _, cleanup := setupTest(t)
 	defer cleanup()
 
-	if err := engine.DoString("native layout", `
+	if err := engine.DoString("tree layout", `
 		rune.ui.layout({
 			type = "column",
 			gap = 1,
@@ -129,17 +129,21 @@ func TestNativeLayoutParsesDirectStrictTreeWithFlatLeafFields(t *testing.T) {
 			{Type: ui.LayoutTypeInput, Size: ui.AutoSize(), MaxSize: intPtr(5)},
 		},
 	}}
+	want, err := ui.NormalizeLayoutTree(want)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got := engine.GetLayout(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("parsed native tree =\n%#v\nwant\n%#v", got, want)
 	}
 }
 
-func TestNativeLayoutAllowsNoOutputAndNamespacesResourceNames(t *testing.T) {
+func TestLayoutAllowsNoOutputAndNamespacesResourceNames(t *testing.T) {
 	engine, _, cleanup := setupTest(t)
 	defer cleanup()
 
 	if err := engine.DoString("input-only layout", `rune.ui.layout({ type = "input" })`); err != nil {
-		t.Fatalf("input-only native layout: %v", err)
+		t.Fatalf("input-only tree layout: %v", err)
 	}
 	if got, want := engine.GetLayout(), (ui.LayoutTree{Root: ui.LayoutNode{Type: ui.LayoutTypeInput}}); !reflect.DeepEqual(got, want) {
 		t.Fatalf("input-only layout = %#v, want %#v", got, want)
@@ -159,7 +163,7 @@ func TestNativeLayoutAllowsNoOutputAndNamespacesResourceNames(t *testing.T) {
 	}
 }
 
-func TestNativeLayoutNormalizesIntrinsicLeafDefaults(t *testing.T) {
+func TestLayoutNormalizesIntrinsicLeafDefaults(t *testing.T) {
 	engine, _, cleanup := setupTest(t)
 	defer cleanup()
 
@@ -186,12 +190,44 @@ func TestNativeLayoutNormalizesIntrinsicLeafDefaults(t *testing.T) {
 			{Type: ui.LayoutTypeInput, Size: ui.AutoSize()},
 		},
 	}}
+	want, err := ui.NormalizeLayoutTree(want)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got := engine.GetLayout(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("intrinsic defaults =\n%#v\nwant\n%#v", got, want)
 	}
 }
 
-func TestNativeLayoutParsesConciseMudClientExample(t *testing.T) {
+func TestLayoutAcceptsEmptySingletonAndUnsizedRowLeaves(t *testing.T) {
+	engine, _, cleanup := setupTest(t)
+	defer cleanup()
+	if err := engine.DoString("composable containers", `
+		rune.ui.layout({ type = "column", children = {
+			{ type = "column", id = "empty", children = {} },
+			{ type = "column", id = "single", children = {
+				{ type = "pane", name = "output" },
+			} },
+			{ type = "row", children = {
+				{ type = "input" },
+				{ type = "bar", name = "status" },
+				{ type = "separator" },
+			} },
+		} })
+		assert(rune.ui.regions.is_hidden("empty") == false)
+		assert(rune.ui.regions.hide("empty"))
+		assert(rune.ui.regions.is_hidden("empty") == true)
+	`); err != nil {
+		t.Fatal(err)
+	}
+	for _, child := range engine.GetLayout().Root.Children[2].Children {
+		if child.Size != ui.Fraction(1) {
+			t.Errorf("unsized row child %s = %v, want 1fr", child.Type, child.Size)
+		}
+	}
+}
+
+func TestLayoutParsesConciseMudClientExample(t *testing.T) {
 	engine, _, cleanup := setupTest(t)
 	defer cleanup()
 
@@ -233,12 +269,16 @@ func TestNativeLayoutParsesConciseMudClientExample(t *testing.T) {
 			{Type: ui.LayoutTypeBar, Name: "status", Size: ui.AutoSize()},
 		},
 	}}
+	want, err := ui.NormalizeLayoutTree(want)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got := engine.GetLayout(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("concise layout =\n%#v\nwant\n%#v", got, want)
 	}
 }
 
-func TestNativeLayoutValidationIsStrictAndAtomic(t *testing.T) {
+func TestLayoutValidationIsStrictAndAtomic(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 
@@ -277,7 +317,6 @@ func TestNativeLayoutValidationIsStrictAndAtomic(t *testing.T) {
 		{name: "root id", body: `{ type="column",id="screen",children={{type="pane",name="output"},{type="input"}} }`, want: "root.id is not allowed"},
 		{name: "root size", body: `{ type="input",size="1fr" }`, want: "root.size is not allowed"},
 		{name: "root hidden", body: `{ type="column",hidden=false,children={{type="pane",name="output"},{type="input"}} }`, want: "root.hidden is not allowed"},
-		{name: "one container child", body: `{ type="column",children={{type="input"}} }`, want: "at least two children"},
 		{name: "leaf children", body: `{ type="pane",name="output",children={} }`, want: `unknown field "children"`},
 		{name: "container options table", body: `{ type="column",options={},children={{type="pane",name="output"},{type="input"}} }`, want: `unknown field "options"`},
 		{name: "leaf options table", body: `{ type="column",children={{type="pane",name="output",options={}},{type="input"}} }`, want: `unknown field "options"`},
@@ -290,7 +329,6 @@ func TestNativeLayoutValidationIsStrictAndAtomic(t *testing.T) {
 		{name: "bad fraction", body: `{ type="column",children={{type="pane",name="output"},{type="input",size="0fr"}} }`, want: "between 1"},
 		{name: "bad percent", body: `{ type="column",children={{type="pane",name="output"},{type="input",size="101%"}} }`, want: "between 1 and 100"},
 		{name: "auto width leaf", body: `{ type="row",children={{type="pane",name="output",size="auto"},{type="input"}} }`, want: "intrinsic width is not supported"},
-		{name: "implicit intrinsic width", body: `{ type="row",children={{type="pane",name="output"},{type="input"}} }`, want: "intrinsic width is not supported"},
 		{name: "auto width container", body: `{ type="row",children={{type="column",size="auto",children={{type="pane",name="output"},{type="bar",name="status"}}},{type="input"}} }`, want: "intrinsic width is not supported"},
 		{name: "zero maximum", body: `{ type="column",children={{type="pane",name="output"},{type="input",max_size=0}} }`, want: "max_size must be between 1"},
 		{name: "min above max", body: `{ type="column",children={{type="pane",name="output"},{type="input",min_size=4,max_size=3}} }`, want: "min_size"},
@@ -334,7 +372,7 @@ func TestNativeLayoutValidationIsStrictAndAtomic(t *testing.T) {
 	}
 }
 
-func TestNativeLayoutRejectsCyclicNodeTableAtomically(t *testing.T) {
+func TestLayoutRejectsCyclicNodeTableAtomically(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 	baseline := engine.GetLayout()
@@ -381,8 +419,8 @@ func TestRegionVisibilityPreservesPriorSnapshotsAndPublishesChanges(t *testing.T
 	before := engine.GetLayout()
 
 	assertLua(t, engine, `
-		assert(rune.ui.regions.is_visible("workspace") == false)
-		assert(rune.ui.regions.is_visible("missing") == nil)
+		assert(rune.ui.regions.is_hidden("workspace") == true)
+		assert(rune.ui.regions.is_hidden("missing") == nil)
 	`)
 	if got := host.DrainPresentationChanges(); got != 0 {
 		t.Fatalf("visibility queries published %d presentation changes", got)
@@ -456,8 +494,8 @@ func TestRegionContainingInputCanBeIdentifiedButNotHidden(t *testing.T) {
 	before := engine.GetLayout()
 
 	assertLua(t, engine, `
-		assert(rune.ui.regions.is_visible("io") == true)
-		assert(rune.ui.regions.is_visible("workspace") == true)
+		assert(rune.ui.regions.is_hidden("io") == false)
+		assert(rune.ui.regions.is_hidden("workspace") == false)
 		assert(rune.ui.regions.show("io") == true)
 		assert(rune.ui.regions.show("workspace") == true)
 		for _, id in ipairs({ "io", "workspace" }) do
@@ -467,8 +505,8 @@ func TestRegionContainingInputCanBeIdentifiedButNotHidden(t *testing.T) {
 				assert(err == "rune.ui.regions." .. op .. ": region \"" .. id .. "\" contains input and cannot be hidden", err)
 			end
 		end
-		assert(rune.ui.regions.is_visible("io") == true)
-		assert(rune.ui.regions.is_visible("workspace") == true)
+		assert(rune.ui.regions.is_hidden("io") == false)
+		assert(rune.ui.regions.is_hidden("workspace") == false)
 	`)
 	if got := host.DrainPresentationChanges(); got != 0 {
 		t.Fatalf("refused region operations published %d presentation changes", got)
@@ -486,7 +524,7 @@ func TestRegionVisibilityAPIRejectsInvalidIDs(t *testing.T) {
 		`rune.ui.regions.show()`,
 		`rune.ui.regions.hide(1)`,
 		`rune.ui.regions.toggle("")`,
-		`rune.ui.regions.is_visible(false)`,
+		`rune.ui.regions.is_hidden(false)`,
 	} {
 		err := engine.DoString("invalid region id", call)
 		if err == nil || !strings.Contains(err.Error(), "id must be a non-empty string") {

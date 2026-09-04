@@ -28,9 +28,9 @@ func TestPaneVisibilityIsPlacementStateOnTheLayoutTree(t *testing.T) {
 	before := engine.GetLayout()
 
 	assertLua(t, engine, `
-		assert(rune.pane.is_visible("chat") == false)
-		assert(rune.pane.is_visible("output") == true)
-		assert(rune.pane.is_visible("missing") == nil)
+		assert(rune.pane.is_hidden("chat") == true)
+		assert(rune.pane.is_hidden("output") == false)
+		assert(rune.pane.is_hidden("missing") == nil)
 	`)
 	if got := host.DrainPresentationChanges(); got != 0 {
 		t.Fatalf("visibility queries published %d presentation changes", got)
@@ -88,10 +88,10 @@ func TestReservedOutputUsesTheOrdinaryPaneAPI(t *testing.T) {
 		rune.pane.create("output")
 		rune.pane.write("output", "line")
 		assert(rune.pane.hide("output") == true)
-		assert(rune.pane.is_visible("output") == false)
+		assert(rune.pane.is_hidden("output") == true)
 		assert(rune.pane.show("output") == true)
 		assert(rune.pane.toggle("output") == true)
-		assert(rune.pane.is_visible("output") == false)
+		assert(rune.pane.is_hidden("output") == true)
 		rune.pane.replace("output", "fresh")
 		rune.pane.clear("output")
 	`); err != nil {
@@ -124,7 +124,7 @@ func TestPaneAPIRejectsMissingAndNonStringNames(t *testing.T) {
 		`rune.pane.toggle("")`,
 		`rune.pane.show(false)`,
 		`rune.pane.hide({})`,
-		`rune.pane.is_visible(nil)`,
+		`rune.pane.is_hidden(nil)`,
 		`rune.pane.clear(nil)`,
 		`rune.pane.scroll_up("", 1)`,
 	} {

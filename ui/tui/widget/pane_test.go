@@ -51,10 +51,10 @@ func TestPaneMultilineWriteSplitsIntoLines(t *testing.T) {
 	p := newTestPane(t)
 	p.Write("a\rb\r\nc\nd")
 
-	if len(p.Lines) != 4 {
-		t.Fatalf("expected 4 logical lines, got %d: %q", len(p.Lines), p.Lines)
+	if len(p.lines) != 4 {
+		t.Fatalf("expected 4 logical lines, got %d: %q", len(p.lines), p.lines)
 	}
-	for i, line := range p.Lines {
+	for i, line := range p.lines {
 		if strings.ContainsAny(line, "\r\n") {
 			t.Fatalf("stored line %d contains a line break: %q", i, line)
 		}
@@ -140,7 +140,7 @@ func TestPaneScrollDistancesCannotInvertOrOverflow(t *testing.T) {
 		t.Fatalf("negative distance changed offset from %d to %d", before, p.offset)
 	}
 	p.ScrollUp(int(^uint(0) >> 1))
-	if want := len(p.Lines) - 1; p.offset != want {
+	if want := len(p.lines) - 1; p.offset != want {
 		t.Fatalf("huge distance offset = %d, want maximum %d", p.offset, want)
 	}
 }

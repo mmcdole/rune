@@ -127,93 +127,40 @@ To solve thread-safety issues between the UI rendering loop and the Lua executio
 
 ### 3.1 Layout and Bars
 
-Layout crosses Engine, Session, and TUI boundaries as `ui.LayoutTree`. Each
-node is a row, column, or leaf. Tree-layout leaves are input, separator, named
-pane, and named bar placements. The server-output surface is not a distinct
-node type: the TUI pre-creates a pane buffer named `output`, and the
-layout places it with the same pane leaf used for any other buffer.
-A node's `LayoutSize` is expressed along its parent's axis as fixed cells,
-percentage, fractional remainder, or automatic height. Omitted native size is
-lowered to `auto` for input, separator, and bar leaves, and remains the default
-`1fr` for panes and containers.
+Lua core declares the normal layout; Go provides a minimal output/input recovery
+tree. The Lua parser checks table types and the exactly-one-input invariant.
+`ui.NormalizeLayoutTree` validates structure and copies the declaration with
+axis-aware size defaults. `ui.LayoutTree` is the shared, immutable snapshot:
+containers divide space, leaves select surfaces, and `hidden` is local
+placement state. Pane names and region IDs address the same copy-on-write
+visibility operation.
 
-`lua/api_layout.go` is the only ingestion boundary:
+Session serializes Lua work. Presentation changes mark it dirty, and each event
+handler publishes its final snapshots on return. Layout, bars, and binds remain
+separate messages; the TUI never calls Lua during measurement or rendering.
 
-1. The table passed to `rune.ui.layout` is the root node itself. It may be any
-   node type and is parsed strictly, subject to application invariants
-   including exactly one input leaf. Output placement is optional.
-2. The parser checks Lua types; `ui.ValidateLayoutTree` checks structure,
-   closed-set values, and limits once for every caller and produces
-   `ui.LayoutTree`.
-3. One parse call is atomic within its Lua generation. Only a complete valid
-   candidate replaces that generation's current tree; reload begins a fresh
-   generation from the default before evaluating user configuration.
-4. The retired top/bottom table form is recognized in the Lua wrapper and
-   rejected with a migration notice rather than an error, so a stale
-   `init.lua` keeps loading the registrations below it.
+The TUI prunes inactive nodes, measures surfaces without resizing them, and uses
+`ui.AllocateAxis` to assign rectangles. Each update applies geometry once,
+then settles geometry-dependent search navigation. View paints the final plan
+without changing navigation.
+Input's minimum is protected on both axes when constraints cannot fit.
 
-Placement visibility is owned by the installed layout. Non-root rows and
-columns with an ID are runtime regions whose `hidden` bit is changed through
-`rune.ui.regions.show/hide/toggle`; pane leaves carry the same bit addressed
-by name through `rune.pane.show/hide/toggle`; `is_visible` reads a gate
-without ancestors. Layout replacement and reload both reset visibility from
-the new declarative tree. A region may contain input, but hiding it is refused
-at declaration (`hidden = true`) and at runtime (`hide`/`toggle` return
-`nil, err`) so the composer stays reachable.
+Pane frames, dividers, separators, and joinable input rules feed one frame grid.
+The compositor clips content to its rectangle and resolves junction glyphs.
+Titles use current scroll state and cannot overwrite junctions.
 
-Session pushes that tree snapshot through `UpdateLayout`. `Host.OnPresentationChange`
-only marks the Session dirty; each event handler (UI event, network batch,
-timer, bar tick, internal event) flushes once when it returns, so a callback
-that installs a layout and then hides a pane publishes one layout snapshot
-carrying the final gates, never an intermediate one. Binds, layout, and bars
-still travel as separate messages. The TUI resolves that snapshot for each
-current terminal geometry:
+All leaves share a surface contract: minimum size, bounded height measurement,
+size application, and rendering. Named panes also expose buffer operations.
+The reserved `output` pane implements that interface directly, but retains
+append-time transcript wrapping; ordinary panes re-wrap logical lines.
 
-- Hidden regions, hidden pane placements, and empty bars are pruned before
-  allocation. Containers with no active descendants disappear. Placing a pane
-  creates its buffer, so a declared pane renders even before its first write.
-- The resolver measures each active leaf through the widget contract and
-  constructs one-axis `ui.AxisTrack` values. An automatic-height row first
-  allocates its child widths, then measures those children at the assigned
-  widths.
-- `ui.AllocateAxis` reserves gaps, resolves fixed/percentage/automatic tracks,
-  distributes the remainder among fractional tracks with deterministic
-  rounding, and applies minimum and maximum bounds.
-- Recursion turns those track sizes into exact leaf rectangles. The same
-  `layoutPlan` sizes pane viewports for wrapping, search, scrolling, and the
-  subsequent render, so interaction geometry cannot disagree with the frame.
-- Ordinary pane buffers store logical lines and re-wrap at render time. The
-  reserved `output` pane retains the transcript's physical rows at append-time
-  width because prompt composition, search anchors, and scrolling depend on that
-  history model while implementing the same public pane operations.
-- A centralized frame grid owns pane borders, container dividers, shared seams,
-  titles, and junction glyphs. Leaf content is drawn into its assigned rectangle
-  and clipped there.
+Bar callbacks run on Session's 250ms ticker with the terminal width. The TUI
+aligns/clips their snapshots to the assigned slot. No layout-to-Lua width
+feedback is needed.
 
-Bars retain the Push/Snapshot boundary:
-
-- `rune.ui.bar("status", function(width) ... end)` registers policy in Lua.
-- A layout places it with `type = bar` and `name = status`, keeping
-  registry identity separate from structural node types.
-- Session calls every active renderer on its 250ms ticker, passing the terminal
-  width, and sends the resulting `UpdateBarsMsg` map to the UI.
-- The layout may assign a bar a narrower rectangle. The UI sizes and clips the
-  already-rendered bar to that slot; it never calls Lua to re-render at the slot
-  width.
-
-This keeps Lua on the Session goroutine and geometry/rendering on Bubble Tea's
-goroutine while giving both sides one typed layout contract.
-
-The lifetimes are intentionally different:
-
-- Pane buffers and scroll state belong to the TUI model and survive layout
-  replacement and Lua reload. `clear` leaves an unknown name alone.
-- Bar registration, enabled state, group state, and failure quarantine belong to
-  the Lua registry. They survive layout replacement and reset on reload.
-- Region and pane placement gates belong to one installed layout and reset on
-  replacement/reload. A pane renders only when its placement gate and every
-  ancestor region gate permit it; a bar additionally requires an enabled,
-  non-empty resource snapshot.
+Pane buffers and scrolling survive layout replacement and Lua reload. Hidden
+values reset from each declaration; `is_hidden` reads local state, not ancestors.
+Bar registrations survive layout replacement but are rebuilt on reload.
 
 ### 3.2 Key Bindings
 

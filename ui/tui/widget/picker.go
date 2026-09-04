@@ -3,6 +3,8 @@ package widget
 import (
 	"strings"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/mmcdole/rune/text"
 	"github.com/mmcdole/rune/ui"
 	"github.com/mmcdole/rune/ui/tui/style"
@@ -18,15 +20,16 @@ type PickerConfig struct {
 
 // Picker is a fuzzy-filtering selector for PickerItems.
 type Picker struct {
-	items     []ui.PickerItem
-	filtered  []ui.PickerItem
-	matches   []util.Match
-	query     string
-	selected  int
-	scrollOff int
-	config    PickerConfig
-	styles    style.Styles
-	width     int
+	items        []ui.PickerItem
+	filtered     []ui.PickerItem
+	matches      []util.Match
+	query        string
+	selected     int
+	scrollOff    int
+	config       PickerConfig
+	styles       style.Styles
+	width        int
+	queryVisible bool
 }
 
 // NewPicker creates a new picker.
@@ -38,8 +41,9 @@ func NewPicker(config PickerConfig, styles style.Styles) *Picker {
 		config.EmptyText = "No matches"
 	}
 	return &Picker{
-		config: config,
-		styles: styles,
+		config:       config,
+		queryVisible: config.Header != "",
+		styles:       styles,
 	}
 }
 
@@ -57,6 +61,7 @@ func (p *Picker) SetWidth(w int) {
 // SetHeader updates the header text.
 func (p *Picker) SetHeader(header string) {
 	p.config.Header = header
+	p.queryVisible = header != ""
 }
 
 // Query returns the current filter query.
@@ -156,7 +161,7 @@ func (p *Picker) PreferredHeight() int {
 		h = 1 // "No matches" placeholder
 	}
 
-	if p.config.Header != "" {
+	if p.queryVisible {
 		h++
 	}
 
@@ -164,49 +169,81 @@ func (p *Picker) PreferredHeight() int {
 	return h
 }
 
-// View renders the picker overlay.
-func (p *Picker) View() string {
-	var lines []string
-	overlay := p.styles.OverlayBorder
-	// Lip Gloss v2 Width is the outer width before margins. Reserve its border
-	// and padding once when sizing content so no row soft-wraps inside the frame.
-	frameWidth := max(1, p.width)
-	contentWidth := max(1, frameWidth-overlay.GetHorizontalBorderSize()-overlay.GetHorizontalPadding())
+// View renders the full picker at its preferred height.
+func (p *Picker) View() string { return p.view(p.PreferredHeight(), true) }
 
-	if p.config.Header != "" {
-		header := p.styles.Muted.Render(text.VisualizeTerminalControls(p.config.Header, false)) +
-			text.VisualizeTerminalControls(p.query, false) + "█"
-		lines = append(lines, clipRow(header, contentWidth))
+func (p *Picker) contentView(height int) string { return p.view(height, false) }
+
+func (p *Picker) frameFits(width, height int) bool {
+	chrome := p.styles.OverlayBorder.GetHorizontalBorderSize() + p.styles.OverlayBorder.GetHorizontalPadding()
+	minimum := 3 // border + one result
+	if p.queryVisible {
+		minimum++
 	}
+	return width > chrome && height >= minimum
+}
 
-	if len(p.filtered) == 0 {
-		empty := "  " + text.VisualizeTerminalControls(p.config.EmptyText, false)
-		lines = append(lines, clipRow(p.styles.Muted.Render(empty), contentWidth))
-		content := strings.Join(lines, "\n")
-		return overlay.Width(frameWidth).Render(content)
+// view reduces the result window around the selection before dropping its
+// frame. Even a one-row modal picker retains its editable query and cursor.
+func (p *Picker) view(height int, paintFrame bool) string {
+	if height <= 0 {
+		return ""
 	}
-
-	start := p.scrollOff
-	end := start + p.config.MaxVisible
-	if end > len(p.filtered) {
-		end = len(p.filtered)
+	width := max(1, p.width)
+	framed := p.frameFits(width, height)
+	contentWidth, contentHeight := width, height
+	if framed {
+		contentWidth -= p.styles.OverlayBorder.GetHorizontalBorderSize() + p.styles.OverlayBorder.GetHorizontalPadding()
+		contentHeight -= 2
 	}
-
-	for i := start; i < end; i++ {
-		item := p.filtered[i]
-		selected := i == p.selected
-
-		var positions []int
-		if i < len(p.matches) {
-			positions = p.matches[i].Positions
+	lines := make([]string, 0, contentHeight)
+	if p.queryVisible {
+		lines = append(lines, p.queryLine(contentWidth))
+	}
+	limit := max(0, contentHeight-len(lines))
+	if limit > 0 {
+		if len(p.filtered) == 0 {
+			lines = append(lines, clipRow(p.styles.Muted.Render("  "+text.VisualizeTerminalControls(p.config.EmptyText, false)), contentWidth))
+		} else {
+			visible := min(limit, len(p.filtered))
+			start := min(p.scrollOff, p.selected)
+			start = max(start, p.selected-visible+1)
+			start = max(0, min(start, len(p.filtered)-visible))
+			for i := start; i < start+visible; i++ {
+				var positions []int
+				if i < len(p.matches) {
+					positions = p.matches[i].Positions
+				}
+				lines = append(lines, p.renderItem(p.filtered[i], contentWidth, i == p.selected, positions))
+			}
 		}
-
-		line := p.renderItem(item, contentWidth, selected, positions)
-		lines = append(lines, line)
 	}
-
+	for len(lines) < contentHeight {
+		lines = append(lines, "")
+	}
 	content := strings.Join(lines, "\n")
-	return overlay.Width(frameWidth).Render(content)
+	if framed {
+		if !paintFrame {
+			padding := 1 + p.styles.OverlayBorder.GetPaddingLeft()
+			for n := range lines {
+				lines[n] = strings.Repeat(" ", padding) + lines[n]
+			}
+			return "\n" + strings.Join(lines, "\n") + "\n"
+		}
+		return p.styles.OverlayBorder.Width(width).Render(content)
+	}
+	return content
+}
+
+func (p *Picker) queryLine(width int) string {
+	header := text.VisualizeTerminalControls(p.config.Header, false)
+	if ansi.StringWidth(header)+1 >= width {
+		header = ""
+	}
+	query := text.VisualizeTerminalControls(p.query, false)
+	available := max(0, width-ansi.StringWidth(header)-1)
+	query = ansi.TruncateLeft(query, max(0, ansi.StringWidth(query)-available), "")
+	return p.styles.Muted.Render(header) + query + "█"
 }
 
 func (p *Picker) renderItem(item ui.PickerItem, width int, selected bool, matches []int) string {

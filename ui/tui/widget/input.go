@@ -1,7 +1,7 @@
 package widget
 
 import (
-	"fmt"
+	"image"
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
@@ -15,17 +15,25 @@ import (
 // Compile-time check that Input implements Widget
 var _ Widget = (*Input)(nil)
 
+type inputOverlay uint8
+
+const (
+	overlayNone inputOverlay = iota
+	overlayPickerModal
+	overlayPickerInline
+	overlaySearch
+)
+
 // Input handles the input area including text entry, picker overlay, and borders.
 type Input struct {
 	textinput textinput.Model
-	composer  *Composer
+	composer  *composer
 	picker    *Picker
 	search    *Search
 	styles    style.Styles
 
 	// State
-	pickerActive   bool
-	searchActive   bool
+	overlay        inputOverlay
 	discardPending bool
 	selected       bool // whole line selected (keep-input resend state)
 	width          int
@@ -128,26 +136,21 @@ func (i *Input) View() string {
 	// Search is a modal navigator, not an inline completion surface. It
 	// replaces the command field while active so the terminal never shows
 	// two apparent cursors competing for keyboard focus.
-	if i.searchActive {
-		if i.height > 0 && i.height < i.search.PreferredHeight() {
+	if i.SearchActive() {
+		if i.height > 0 && !i.search.frameFits(i.width, i.height) {
 			return i.search.constrainedView(i.height)
 		}
-		return i.search.View()
+		return i.search.contentView()
 	}
 
-	var parts []string
-
-	// Picker overlay (picker and search modes are mutually exclusive). If the
-	// assigned slot cannot fit the complete overlay, keep the editable field
-	// visible and temporarily suppress the decoration.
-	showPicker := i.pickerActive && (i.height <= 0 || i.height >= i.PreferredHeight())
-	if showPicker {
-		parts = append(parts, i.picker.View())
+	plan := i.layout(i.width, i.height)
+	rows := make([]string, plan.height)
+	if plan.pickerHeight > 0 {
+		copy(rows[:plan.pickerHeight], strings.Split(i.picker.contentView(plan.pickerHeight), "\n"))
 	}
-
 	if i.composer != nil {
-		parts = append(parts, i.composerView()...)
-	} else {
+		copy(rows[plan.body.Min.Y:plan.body.Max.Y], i.composerRows(plan.body.Dy()))
+	} else if !plan.body.Empty() {
 		// Keep the ordinary one-line input in its compact three-row layout.
 		// Compose chrome exists only around structured text.
 		inputView := i.textinput.View()
@@ -163,49 +166,53 @@ func (i *Input) View() string {
 				inputView += strings.Repeat(" ", padding)
 			}
 		}
-		if i.height == 1 {
-			// Under terminal pressure, the protected input row must contain
-			// the editable field rather than decorative chrome.
-			parts = append(parts, inputView)
-		} else if i.height == 2 {
-			parts = append(parts, inputView, i.borderLine())
-		} else {
-			parts = append(parts, i.borderLine(), inputView, i.borderLine())
-		}
+		rows[plan.body.Min.Y] = inputView
 	}
-
-	return strings.Join(parts, "\n")
+	// Decorations are painted once by the compositor, after all content.
+	return strings.Join(rows, "\n")
 }
 
 // SetSize implements Widget.
 func (i *Input) SetSize(width, height int) {
 	i.width = width
 	i.height = height
-	i.textinput.SetWidth(max(0, width-2)) // Account for prompt
+	i.textinput.Prompt = "> "
+	if width < 3 {
+		i.textinput.Prompt = ""
+	}
+	i.textinput.SetWidth(max(0, width-len(i.textinput.Prompt)))
 	i.picker.SetWidth(width)
 	i.search.SetWidth(width)
+	if i.composer != nil && !i.SearchActive() {
+		layout := buildComposerLayout(i.composer.text, i.composer.cursor, width)
+		i.composer.topRow = i.composerTopRow(layout, i.layout(width, height).body.Dy())
+	}
 }
 
-// PreferredHeight implements Widget.
-func (i *Input) PreferredHeight() int {
-	if i.searchActive {
-		return i.search.PreferredHeight()
+func (i *Input) MinimumSize() image.Point {
+	if i.SearchActive() {
+		chrome := i.search.styles.OverlayBorder.GetHorizontalBorderSize() + i.search.styles.OverlayBorder.GetHorizontalPadding()
+		return image.Pt(chrome+1, i.search.PreferredHeight())
+	}
+	return image.Pt(3, 3)
+}
+
+// MeasureHeight does not resize the editor or its children.
+func (i *Input) MeasureHeight(width, limit int) int {
+	if i.SearchActive() {
+		return min(limit, i.search.PreferredHeight())
 	}
 
 	h := 3 // normal: top border + input + bottom border
 	if i.composer != nil {
-		layout := buildComposerLayout(i.composer.text, i.composer.cursor, i.width)
+		layout := buildComposerLayout(i.composer.text, i.composer.cursor, width)
 		bodyRows := clampInt(len(layout.rows), 1, maxComposerBodyRows)
 		h = bodyRows + 2 // status header + content + key footer
 	}
-	if i.pickerActive {
+	if i.PickerActive() {
 		h += i.picker.PreferredHeight()
 	}
-	return h
-}
-
-func (i *Input) borderLine() string {
-	return style.RenderBorder(i.width, "")
+	return min(h, limit)
 }
 
 // Value returns the current input text.
@@ -267,10 +274,7 @@ func (i *Input) SetCursor(pos int) {
 
 // Reset clears the input.
 func (i *Input) Reset() {
-	if i.composer != nil {
-		i.composer.Reset()
-		i.composer = nil
-	}
+	i.composer = nil
 	i.Deselect()
 	i.discardPending = false
 	i.textinput.SetValue("")
@@ -288,25 +292,6 @@ func (i *Input) BeginCompose(text string, cursor int) {
 	i.Deselect()
 	i.composer = newComposer(text, cursor)
 	i.discardPending = false
-}
-
-// EndCompose migrates a now-plain draft back into the ordinary textinput.
-// A caller cannot accidentally collapse LF/TAB content into a widget that
-// would render or sanitize it incorrectly.
-func (i *Input) EndCompose() bool {
-	if i.composer == nil {
-		return true
-	}
-	value := i.composer.Value()
-	if RequiresComposer(value) {
-		return false
-	}
-	pos := i.composer.Position()
-	i.composer = nil
-	i.discardPending = false
-	i.textinput.SetValue(value)
-	i.textinput.SetCursor(pos)
-	return true
 }
 
 // InsertPaste inserts one atomic bracketed-paste payload. Safe, plain
@@ -384,120 +369,6 @@ func (i *Input) CanMoveComposerVertically(delta int) bool {
 	return layout.cursorRow < len(layout.rows)-1
 }
 
-func (i *Input) composerView() []string {
-	layout := buildComposerLayout(i.composer.text, i.composer.cursor, i.width)
-	bodyHeight := clampInt(len(layout.rows), 1, maxComposerBodyRows)
-	if i.height > 0 {
-		// The default layout gives us PreferredHeight. An explicit Lua layout
-		// height is also honored so View emits exactly the rows it was allotted.
-		bodyHeight = max(1, i.height-2)
-	}
-
-	maxTop := max(0, len(layout.rows)-bodyHeight)
-	i.composer.topRow = clampInt(i.composer.topRow, 0, maxTop)
-	if layout.cursorRow < i.composer.topRow {
-		i.composer.topRow = layout.cursorRow
-	} else if layout.cursorRow >= i.composer.topRow+bodyHeight {
-		i.composer.topRow = layout.cursorRow - bodyHeight + 1
-	}
-	i.composer.topRow = clampInt(i.composer.topRow, 0, maxTop)
-
-	lineWord := "lines"
-	if layout.lineCount == 1 {
-		lineWord = "line"
-	}
-	header := i.composeHeader(fmt.Sprintf("VERBATIM · %d %s", layout.lineCount, lineWord))
-	rows := []string{header}
-
-	for n := 0; n < bodyHeight; n++ {
-		rowIndex := i.composer.topRow + n
-		if rowIndex >= len(layout.rows) {
-			rows = append(rows, strings.Repeat(" ", max(0, i.width)))
-			continue
-		}
-		rows = append(rows, i.renderComposerRow(layout, rowIndex))
-	}
-
-	help := "Enter send · Ctrl+Enter newline · Ctrl+E editor · Esc discard"
-	if i.discardPending {
-		help = "Esc again discards · any key keeps editing"
-	}
-	rows = append(rows, i.composeFooter(help))
-	if i.height == 1 {
-		return rows[1:2]
-	}
-	if i.height == 2 {
-		return rows[:2]
-	}
-	return rows
-}
-
-func (i *Input) renderComposerRow(layout composerLayout, rowIndex int) string {
-	row := layout.rows[rowIndex]
-	var b strings.Builder
-
-	if layout.gutterSize > 0 {
-		digits := layout.gutterSize - 3
-		if row.continuation {
-			b.WriteString(i.styles.Muted.Render(strings.Repeat(" ", digits) + " ↳ "))
-		} else {
-			b.WriteString(i.styles.Muted.Render(fmt.Sprintf("%*d │ ", digits, row.line+1)))
-		}
-	}
-
-	col := 0
-	cursorDrawn := false
-	for _, glyph := range row.glyphs {
-		if rowIndex == layout.cursorRow && col == layout.cursorCol && !cursorDrawn {
-			b.WriteString(i.styles.InputCursor.Render(glyph.text))
-			cursorDrawn = true
-		} else {
-			b.WriteString(i.styles.InputText.Render(glyph.text))
-		}
-		col += glyph.width
-	}
-	if rowIndex == layout.cursorRow && !cursorDrawn {
-		b.WriteString(i.styles.InputCursor.Render(" "))
-	}
-
-	view := b.String()
-	if padding := i.width - util.VisibleLen(view); padding > 0 {
-		view += strings.Repeat(" ", padding)
-	}
-	return clipRow(view, i.width)
-}
-
-func (i *Input) composeHeader(label string) string {
-	if i.width < 1 {
-		return ""
-	}
-	label = " " + label + " "
-	if util.VisibleLen(label) >= i.width {
-		return i.styles.Warning.Render(clipRow(label, i.width))
-	}
-	fill := strings.Repeat("─", i.width-util.VisibleLen(label))
-	return i.styles.Muted.Render(fill) + i.styles.Warning.Render(label)
-}
-
-func (i *Input) composeFooter(help string) string {
-	if i.width < 1 {
-		return ""
-	}
-	// The armed discard confirmation must register peripherally: the label
-	// switches to the Warning style the header already uses, while the rule
-	// fill stays quiet.
-	labelStyle := i.styles.Muted
-	if i.discardPending {
-		labelStyle = i.styles.Warning
-	}
-	label := " " + help + " "
-	if util.VisibleLen(label) >= i.width {
-		return labelStyle.Render(clipRow(label, i.width))
-	}
-	fill := strings.Repeat("─", i.width-util.VisibleLen(label))
-	return labelStyle.Render(label) + i.styles.Muted.Render(fill)
-}
-
 // Picker access
 
 // ShowPicker displays the picker with items. The picker's session-side
@@ -505,9 +376,10 @@ func (i *Input) composeFooter(help string) string {
 // controller; the widget only renders the overlay.
 func (i *Input) ShowPicker(opts ui.ShowPickerMsg) {
 	i.picker.SetItems(opts.Items)
-	i.pickerActive = true
+	i.overlay = overlayPickerModal
 
 	if opts.Inline {
+		i.overlay = overlayPickerInline
 		i.picker.SetHeader("")
 		i.picker.Filter(i.textinput.Value())
 	} else {
@@ -516,47 +388,15 @@ func (i *Input) ShowPicker(opts ui.ShowPickerMsg) {
 			header += ": "
 		}
 		i.picker.SetHeader(header)
+		i.picker.queryVisible = true
 		i.picker.Filter("")
 	}
 }
 
 // HidePicker closes the picker.
 func (i *Input) HidePicker() {
-	i.pickerActive = false
+	i.overlay = overlayNone
 	i.picker.Reset()
-}
-
-// PickerSelectUp moves picker selection up.
-func (i *Input) PickerSelectUp() {
-	i.picker.SelectUp()
-}
-
-// PickerSelectDown moves picker selection down.
-func (i *Input) PickerSelectDown() {
-	i.picker.SelectDown()
-}
-
-// PickerSelected returns the selected picker item.
-func (i *Input) PickerSelected() (ui.PickerItem, bool) {
-	return i.picker.Selected()
-}
-
-// PickerFilter updates the picker filter.
-func (i *Input) PickerFilter(query string) {
-	i.picker.Filter(query)
-}
-
-// PickerQuery returns the picker's current query.
-func (i *Input) PickerQuery() string {
-	return i.picker.Query()
-}
-
-// UpdatePickerFilter updates filter based on input value. Closing the
-// picker when the input empties (or hits a space, for dismiss-on-space
-// pickers) is the input controller's job - it must also reset the
-// input mode and cancel the Lua callback.
-func (i *Input) UpdatePickerFilter() {
-	i.picker.Filter(i.textinput.Value())
 }
 
 // Search access
@@ -565,47 +405,28 @@ func (i *Input) UpdatePickerFilter() {
 // previous search's query (the widget persists across open/close).
 func (i *Input) ShowSearch(query string, scope SearchScope) {
 	i.search.Open(query, scope)
-	i.searchActive = true
-}
-
-// ReopenSearch updates an already-active navigator without changing its
-// frozen scrollback scope.
-func (i *Input) ReopenSearch(query string) {
-	i.search.Reopen(query)
+	i.overlay = overlaySearch
 }
 
 // HideSearch closes the search overlay. Query and match state persist
 // in the widget for the next ShowSearch.
 func (i *Input) HideSearch() {
-	i.searchActive = false
+	i.overlay = overlayNone
 }
 
 // SearchActive reports whether the search overlay is showing.
 func (i *Input) SearchActive() bool {
-	return i.searchActive
+	return i.overlay == overlaySearch
 }
 
-// SearchTypeRunes appends typed runes to the search query.
-func (i *Input) SearchTypeRunes(rs []rune) {
-	i.search.TypeRunes(rs)
+func (i *Input) PickerActive() bool {
+	return i.overlay == overlayPickerModal || i.overlay == overlayPickerInline
 }
 
-// SearchBackspace deletes the last rune of the search query.
-func (i *Input) SearchBackspace() {
-	i.search.Backspace()
-}
+func (i *Input) PickerInline() bool { return i.overlay == overlayPickerInline }
 
-// SearchSelectOlder moves the search selection toward earlier output.
-func (i *Input) SearchSelectOlder() {
-	i.search.SelectOlder()
-}
+// Picker exposes local query and selection operations; show/hide transitions
+// stay on Input so focus and geometry always agree.
+func (i *Input) Picker() *Picker { return i.picker }
 
-// SearchSelectNewer moves the search selection toward the live tail.
-func (i *Input) SearchSelectNewer() {
-	i.search.SelectNewer()
-}
-
-// SearchSelected returns the currently selected search match.
-func (i *Input) SearchSelected() (SearchMatch, bool) {
-	return i.search.Selected()
-}
+func (i *Input) Search() *Search { return i.search }

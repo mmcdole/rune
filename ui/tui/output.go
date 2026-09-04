@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"image"
+	"strings"
 
 	"github.com/mmcdole/rune/ui"
 	"github.com/mmcdole/rune/ui/tui/style"
@@ -65,9 +67,20 @@ func (o *outputController) Title() string {
 	return o.Name() + " · scroll"
 }
 
-func (o *outputController) View(width, height int) string {
-	o.setGeometry(width, height)
+func (o *outputController) View() string {
 	return o.viewport.View()
+}
+
+func (o *outputController) SetSize(width, height int) { o.setGeometry(width, height) }
+
+func (o *outputController) MinimumSize() image.Point { return image.Pt(0, 1) }
+
+func (o *outputController) MeasureHeight(width, limit int) int {
+	rows := o.buffer.Count()
+	if o.promptText != "" {
+		rows++
+	}
+	return min(rows, limit)
 }
 
 func (o *outputController) setGeometry(width, height int) {
@@ -158,4 +171,19 @@ func (o *outputController) commitPrompt(text string) {
 	}
 	o.viewport.SetPrompt("")
 	o.promptText = ""
+}
+
+// splitRows shapes a message into physical scrollback rows: one row
+// per line break, tabs expanded per row so columns restart on every
+// row, and rows wider than the resolved output surface are word-wrapped. Rows
+// are final at append time; a resize does not rewrap old output.
+func splitRows(msg string, width int) []string {
+	if !strings.ContainsAny(msg, "\r\n") {
+		return util.WrapLine(util.ExpandTabs(msg), width)
+	}
+	var rows []string
+	for _, line := range util.SplitLines(msg) {
+		rows = append(rows, util.WrapLine(util.ExpandTabs(line), width)...)
+	}
+	return rows
 }

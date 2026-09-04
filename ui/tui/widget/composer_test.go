@@ -54,7 +54,7 @@ func TestPlainPasteKeepsNormalInputAndChrome(t *testing.T) {
 	in := newComposerInput(40)
 	in.SetValue("sa")
 	in.CursorEnd()
-	beforeHeight := in.PreferredHeight()
+	beforeHeight := in.MeasureHeight(in.width, 1<<14)
 	in.InsertPaste("y hello")
 
 	if in.IsComposing() {
@@ -63,7 +63,7 @@ func TestPlainPasteKeepsNormalInputAndChrome(t *testing.T) {
 	if got := in.Value(); got != "say hello" {
 		t.Fatalf("Value = %q, want %q", got, "say hello")
 	}
-	if got := in.PreferredHeight(); got != beforeHeight || got != 3 {
+	if got := in.MeasureHeight(in.width, 1<<14); got != beforeHeight || got != 3 {
 		t.Fatalf("normal PreferredHeight = %d, want unchanged height 3", got)
 	}
 	view := in.View()
@@ -82,7 +82,7 @@ func TestSingleLineTabPasteUsesComposerAndRetainsTab(t *testing.T) {
 	if got := in.Value(); got != "left\tright" {
 		t.Fatalf("Value = %q, want a retained tab", got)
 	}
-	if !strings.Contains(text.StripANSI(in.View()), "VERBATIM · 1 line") {
+	if !strings.Contains(inputLabels(in), "VERBATIM · 1 line") {
 		t.Fatalf("single-line structured draft lacks status: %q", in.View())
 	}
 }
@@ -142,7 +142,7 @@ func TestComposerStaysVerbatimAfterLastStructureDeleted(t *testing.T) {
 	if got := in.Value(); got != "northeast" {
 		t.Fatalf("Value = %q, want joined verbatim input", got)
 	}
-	if plain := text.StripANSI(in.View()); !strings.Contains(plain, "VERBATIM · 1 line") {
+	if plain := inputLabels(in); !strings.Contains(plain, "VERBATIM · 1 line") {
 		t.Fatalf("sticky verbatim status missing: %q", plain)
 	}
 }
@@ -240,10 +240,10 @@ func TestComposerHeightCapsAndScrollsToCursor(t *testing.T) {
 	value := strings.Join(lines, "\n")
 	in.BeginCompose(value, len([]rune(value)))
 
-	if got := in.PreferredHeight(); got != maxComposerBodyRows+2 {
+	if got := in.MeasureHeight(in.width, 1<<14); got != maxComposerBodyRows+2 {
 		t.Fatalf("PreferredHeight = %d, want capped %d", got, maxComposerBodyRows+2)
 	}
-	in.SetSize(80, in.PreferredHeight())
+	in.SetSize(80, in.MeasureHeight(in.width, 1<<14))
 	view := in.View()
 	if got := len(strings.Split(view, "\n")); got != maxComposerBodyRows+2 {
 		t.Fatalf("View rows = %d, want %d", got, maxComposerBodyRows+2)
@@ -286,6 +286,18 @@ func TestComposerWideRunesWrapWithoutOverflow(t *testing.T) {
 	for n, row := range strings.Split(in.View(), "\n") {
 		if width := util.VisibleLen(row); width > 10 {
 			t.Fatalf("rendered row %d width = %d, exceeds terminal width 10: %q", n, width, row)
+		}
+	}
+}
+
+func TestComposerGraphemesShareTerminalCellWidths(t *testing.T) {
+	for _, value := range []string{"❤️", "👩‍💻", "1️⃣", "🇺🇸"} {
+		layout := buildComposerLayout([]rune(value), len([]rune(value)), 40)
+		if layout.cursorCol != 2 {
+			t.Errorf("cursor after %q = %d, want 2", value, layout.cursorCol)
+		}
+		if got := layout.rows[0].glyphs; len(got) != 1 || got[0].text != value || got[0].width != 2 {
+			t.Errorf("grapheme was split: %+v", got)
 		}
 	}
 }

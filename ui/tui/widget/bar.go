@@ -1,6 +1,7 @@
 package widget
 
 import (
+	"image"
 	"strings"
 
 	"github.com/mmcdole/rune/ui"
@@ -12,16 +13,13 @@ var _ Widget = (*Bar)(nil)
 
 // Bar renders a Lua-defined bar with left/center/right sections.
 type Bar struct {
-	name    string
 	content ui.BarContent
 	width   int
 }
 
 // NewBar creates a new bar renderer.
-func NewBar(name string) *Bar {
-	return &Bar{
-		name: name,
-	}
+func NewBar() *Bar {
+	return &Bar{}
 }
 
 // SetContent updates the bar's content.
@@ -66,12 +64,13 @@ func (b *Bar) SetSize(width, height int) {
 	// height is ignored - bars are always 1 line
 }
 
-// PreferredHeight implements Widget.
-func (b *Bar) PreferredHeight() int {
+func (b *Bar) MeasureHeight(width, limit int) int {
 	if util.VisibleLen(b.content.Left) > 0 ||
 		util.VisibleLen(b.content.Center) > 0 ||
 		util.VisibleLen(b.content.Right) > 0 {
-		return 1
+		return min(1, limit)
 	}
 	return 0 // Hidden if no content
 }
+
+func (b *Bar) MinimumSize() image.Point { return image.Point{} }

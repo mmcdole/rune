@@ -189,8 +189,8 @@ func TestOutputPaneImplementsPaneResourceLifecycle(t *testing.T) {
 	}
 	next, _ = m.Update(ui.UpdateLayoutMsg(hidden))
 	m = next.(*Model)
-	if !m.ensureLayout().output.Empty() {
-		t.Fatalf("hidden output remains placed: rect=%v", m.ensureLayout().output)
+	if !m.layoutPlan.output.Empty() {
+		t.Fatalf("hidden output remains placed: rect=%v", m.layoutPlan.output)
 	}
 	next, _ = m.Update(ui.PaneWriteMsg{Name: ui.OutputPaneName, Text: "hidden"})
 	m = next.(*Model)
@@ -199,7 +199,7 @@ func TestOutputPaneImplementsPaneResourceLifecycle(t *testing.T) {
 	shown, _, _ := m.layout.WithPaneVisibility(ui.OutputPaneName, true)
 	next, _ = m.Update(ui.UpdateLayoutMsg(shown))
 	m = next.(*Model)
-	if m.ensureLayout().output.Empty() {
+	if m.layoutPlan.output.Empty() {
 		t.Fatal("shown output is unplaced")
 	}
 
@@ -256,7 +256,7 @@ func TestOutputPaneBuffersWhileHiddenOrUnplacedAtRetainedWidth(t *testing.T) {
 		},
 	}}))
 	m = next.(*Model)
-	if got := m.ensureLayout().output.Dx(); got != 12 {
+	if got := m.layoutPlan.output.Dx(); got != 12 {
 		t.Fatalf("placed output width = %d, want 12", got)
 	}
 	if got := m.output.wrapWidth; got != 12 {
@@ -282,8 +282,8 @@ func TestOutputPaneBuffersWhileHiddenOrUnplacedAtRetainedWidth(t *testing.T) {
 		},
 	}}))
 	m = next.(*Model)
-	if !m.ensureLayout().output.Empty() {
-		t.Fatalf("layout without output placed it at %v", m.ensureLayout().output)
+	if !m.layoutPlan.output.Empty() {
+		t.Fatalf("layout without output placed it at %v", m.layoutPlan.output)
 	}
 	next, _ = m.Update(ui.PaneWriteMsg{Name: ui.OutputPaneName, Text: strings.Repeat("b", 14)})
 	m = next.(*Model)
@@ -413,9 +413,9 @@ func TestClosingTallSearchPublishesGeometryInducedLiveState(t *testing.T) {
 	}
 	next, _ := m.Update(ui.ShowSearchMsg{Query: "line"})
 	m = next.(*Model)
-	if !m.input.SearchActive() || m.ensureLayout().output.Dy() != 1 {
-		t.Fatalf("search setup = active %v output height %d, want true and 1",
-			m.input.SearchActive(), m.ensureLayout().output.Dy())
+	if !m.input.SearchActive() || m.layoutPlan.output.Dy() != 2 {
+		t.Fatalf("search setup = active %v output height %d, want true and 2 (shared border)",
+			m.input.SearchActive(), m.layoutPlan.output.Dy())
 	}
 	next, _ = m.Update(ui.PaneScrollToTopMsg{Name: ui.OutputPaneName})
 	m = next.(*Model)
@@ -506,7 +506,7 @@ func TestOrdinaryPaneLifecycle(t *testing.T) {
 	if !ok {
 		t.Fatal("ordinary pane was not created")
 	}
-	findLeaf(t, m.ensureLayout(), leafPane, "chat")
+	findLeaf(t, m.layoutPlan, ui.LayoutTypePane, "chat")
 
 	// A hidden placement is pruned from the plan while the buffer keeps
 	// accepting writes.
@@ -518,11 +518,12 @@ func TestOrdinaryPaneLifecycle(t *testing.T) {
 	m = next.(*Model)
 	next, _ = m.Update(ui.PaneWriteMsg{Name: "chat", Text: "oldest\nmiddle\nnewest"})
 	m = next.(*Model)
-	if got := chat.View(20, 3); got != "oldest\nmiddle\nnewest" {
+	chat.SetSize(20, 3)
+	if got := chat.View(); got != "oldest\nmiddle\nnewest" {
 		t.Fatalf("hidden ordinary pane did not buffer writes: %q", got)
 	}
-	for _, leaf := range m.ensureLayout().leaves {
-		if leaf.kind == leafPane && leaf.pane == chat {
+	for _, leaf := range m.layoutPlan.leaves {
+		if leaf.node.Type == ui.LayoutTypePane && leaf.surface == chat {
 			t.Fatal("hidden pane placement still resolved")
 		}
 	}
@@ -530,7 +531,7 @@ func TestOrdinaryPaneLifecycle(t *testing.T) {
 	shownChat, _, _ := m.layout.WithPaneVisibility("chat", true)
 	next, _ = m.Update(ui.UpdateLayoutMsg(shownChat))
 	m = next.(*Model)
-	findLeaf(t, m.ensureLayout(), leafPane, "chat")
+	findLeaf(t, m.layoutPlan, ui.LayoutTypePane, "chat")
 	next, _ = m.Update(ui.PaneScrollToTopMsg{Name: "chat"})
 	m = next.(*Model)
 	if !strings.Contains(chat.Title(), "scroll") {
@@ -543,7 +544,8 @@ func TestOrdinaryPaneLifecycle(t *testing.T) {
 	}
 
 	_, _ = m.Update(ui.PaneClearMsg{Name: "chat"})
-	if got := chat.View(20, 1); got != "" {
+	chat.SetSize(20, 1)
+	if got := chat.View(); got != "" {
 		t.Fatalf("ordinary pane clear left content %q", got)
 	}
 }
@@ -555,8 +557,8 @@ func TestPasteMessageRoutesAtomicallyToComposer(t *testing.T) {
 	next, _ := m.Update(tea.PasteMsg{Content: "say hello\nsay goodbye"})
 	m = next.(*Model)
 
-	if m.inputCtl.mode != ModeCompose {
-		t.Fatalf("paste mode = %v, want compose", m.inputCtl.mode)
+	if m.inputCtl.mode() != modeCompose {
+		t.Fatalf("paste mode = %v, want compose", m.inputCtl.mode())
 	}
 	if got := m.input.Value(); got != "say hello\nsay goodbye" {
 		t.Fatalf("pasted input = %q", got)
@@ -1048,8 +1050,8 @@ func newInlinePickerModel(t *testing.T, dismissOnSpace bool, initial string) (*M
 	next, _ = m.Update(ui.SetInputMsg(initial))
 	m = next.(*Model)
 
-	if m.inputCtl.mode != ModePickerInline {
-		t.Fatalf("expected inline picker mode after setup, got %v", m.inputCtl.mode)
+	if m.inputCtl.mode() != modePickerInline {
+		t.Fatalf("expected inline picker mode after setup, got %v", m.inputCtl.mode())
 	}
 	drainPickerCancels(events) // discard setup noise
 	return m, events
@@ -1079,8 +1081,8 @@ func TestInlinePickerDismissesOnSpace(t *testing.T) {
 	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
 	m = next.(*Model)
 
-	if m.inputCtl.mode != ModeNormal {
-		t.Fatalf("expected picker to dismiss on space, mode = %v", m.inputCtl.mode)
+	if m.inputCtl.mode() != modeNormal {
+		t.Fatalf("expected picker to dismiss on space, mode = %v", m.inputCtl.mode())
 	}
 	cancels := drainPickerCancels(events)
 	if len(cancels) != 1 || cancels[0].CallbackID != "cb1" {
@@ -1099,8 +1101,8 @@ func TestInlinePickerWithoutDismissOnSpaceKeepsFiltering(t *testing.T) {
 	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
 	m = next.(*Model)
 
-	if m.inputCtl.mode != ModePickerInline {
-		t.Fatalf("expected picker to stay open, mode = %v", m.inputCtl.mode)
+	if m.inputCtl.mode() != modePickerInline {
+		t.Fatalf("expected picker to stay open, mode = %v", m.inputCtl.mode())
 	}
 	if cancels := drainPickerCancels(events); len(cancels) != 0 {
 		t.Fatalf("expected no cancel, got %v", cancels)
@@ -1115,8 +1117,8 @@ func TestInlinePickerNormalTypingKeepsFiltering(t *testing.T) {
 	next, _ := m.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	m = next.(*Model)
 
-	if m.inputCtl.mode != ModePickerInline {
-		t.Fatalf("expected picker to stay open, mode = %v", m.inputCtl.mode)
+	if m.inputCtl.mode() != modePickerInline {
+		t.Fatalf("expected picker to stay open, mode = %v", m.inputCtl.mode())
 	}
 	if cancels := drainPickerCancels(events); len(cancels) != 0 {
 		t.Fatalf("expected no cancel, got %v", cancels)
@@ -1134,8 +1136,8 @@ func TestInlinePickerClosesCleanlyOnEmptiedInput(t *testing.T) {
 	if m.input.Value() != "" {
 		t.Fatalf("expected empty input after backspace, got %q", m.input.Value())
 	}
-	if m.inputCtl.mode != ModeNormal {
-		t.Fatalf("expected mode reset after input emptied, mode = %v", m.inputCtl.mode)
+	if m.inputCtl.mode() != modeNormal {
+		t.Fatalf("expected mode reset after input emptied, mode = %v", m.inputCtl.mode())
 	}
 	cancels := drainPickerCancels(events)
 	if len(cancels) != 1 || cancels[0].CallbackID != "cb1" {
@@ -1151,8 +1153,8 @@ func TestInlinePickerDismissesOnLuaEditWithSpace(t *testing.T) {
 	next, _ := m.Update(ui.SetInputMsg("/connect vikingmud.org 2001"))
 	m = next.(*Model)
 
-	if m.inputCtl.mode != ModeNormal {
-		t.Fatalf("expected picker to dismiss, mode = %v", m.inputCtl.mode)
+	if m.inputCtl.mode() != modeNormal {
+		t.Fatalf("expected picker to dismiss, mode = %v", m.inputCtl.mode())
 	}
 	cancels := drainPickerCancels(events)
 	if len(cancels) != 1 || cancels[0].CallbackID != "cb1" {
@@ -1165,7 +1167,7 @@ func TestSetInputSubmissionMessageForcesVerbatimMode(t *testing.T) {
 	next, _ := m.Update(ui.SetInputSubmissionMsg(input.Verbatim("one line;still data")))
 	m = next.(*Model)
 
-	if m.inputCtl.mode != ModeCompose || !m.input.IsComposing() {
+	if m.inputCtl.mode() != modeCompose || !m.input.IsComposing() {
 		t.Fatal("explicit verbatim message did not enter composer")
 	}
 	if got := m.input.Value(); got != "one line;still data" {
@@ -1394,14 +1396,14 @@ func TestMouseWheelNavigatesActiveSearchMatches(t *testing.T) {
 	}
 
 	m.inputCtl.ShowSearch(ui.ShowSearchMsg{Query: "thief"})
-	newest, ok := m.input.SearchSelected()
+	newest, ok := m.input.Search().Selected()
 	if !ok || newest.Stripped != "thief newest" {
 		t.Fatalf("initial selection = (%q, %v), want newest match", newest.Stripped, ok)
 	}
 
 	next, _ = m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
 	m = next.(*Model)
-	middle, ok := m.input.SearchSelected()
+	middle, ok := m.input.Search().Selected()
 	if !ok || middle.Stripped != "thief middle" {
 		t.Fatalf("wheel up selection = (%q, %v), want older middle match", middle.Stripped, ok)
 	}
@@ -1411,7 +1413,7 @@ func TestMouseWheelNavigatesActiveSearchMatches(t *testing.T) {
 
 	next, _ = m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
 	m = next.(*Model)
-	selected, ok := m.input.SearchSelected()
+	selected, ok := m.input.Search().Selected()
 	if !ok || selected.Seq != newest.Seq {
 		t.Fatalf("wheel down selection = (%q, %v), want newer match", selected.Stripped, ok)
 	}
@@ -1510,7 +1512,8 @@ func TestReplaceOrdinaryPaneCreatesAndSnapsToLive(t *testing.T) {
 	if !ok {
 		t.Fatal("replace did not create the pane")
 	}
-	if got := status.View(20, 1); got != "HP 10" {
+	status.SetSize(20, 1)
+	if got := status.View(); got != "HP 10" {
 		t.Fatalf("created pane content = %q", got)
 	}
 
@@ -1526,7 +1529,8 @@ func TestReplaceOrdinaryPaneCreatesAndSnapsToLive(t *testing.T) {
 	if got := status.Title(); got != "status" {
 		t.Fatalf("replace left the pane scrolled: %q", got)
 	}
-	if got := status.View(20, 2); got != "HP 11\nMP 5" {
+	status.SetSize(20, 2)
+	if got := status.View(); got != "HP 11\nMP 5" {
 		t.Fatalf("replaced pane content = %q", got)
 	}
 }

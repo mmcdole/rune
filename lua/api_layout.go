@@ -36,31 +36,31 @@ func (e *Engine) registerLayoutFuncs() {
 			if err != nil {
 				return err
 			}
-			visible, found := e.layout.RegionVisible(id)
+			hidden, found := e.layout.RegionHidden(id)
 			if !found {
 				c.Return(false)
 				return nil
 			}
-			if visible && e.refuseHidingInput(c, "toggle", id) {
+			if !hidden && e.refuseHidingInput(c, "toggle", id) {
 				return nil
 			}
-			updated, _, _ := e.layout.WithRegionVisibility(id, !visible)
+			updated, _, _ := e.layout.WithRegionVisibility(id, hidden)
 			e.layout = updated
 			c.Return(true)
 			e.host.OnPresentationChange()
 			return nil
 		},
-		"region_is_visible": func(c *script.Call) error {
-			id, err := layoutRegionID(c, "is_visible")
+		"region_is_hidden": func(c *script.Call) error {
+			id, err := layoutRegionID(c, "is_hidden")
 			if err != nil {
 				return err
 			}
-			visible, found := e.layout.RegionVisible(id)
+			hidden, found := e.layout.RegionHidden(id)
 			if !found {
 				c.Return(nil)
 				return nil
 			}
-			c.Return(visible)
+			c.Return(hidden)
 			return nil
 		},
 	}, nil)
@@ -119,8 +119,8 @@ func parseLayout(tbl script.TableView) (ui.LayoutTree, error) {
 	if err != nil {
 		return ui.LayoutTree{}, err
 	}
-	tree := ui.LayoutTree{Root: root}
-	if err := ui.ValidateLayoutTree(tree); err != nil {
+	tree, err := ui.NormalizeLayoutTree(ui.LayoutTree{Root: root})
+	if err != nil {
 		return ui.LayoutTree{}, err
 	}
 
@@ -173,7 +173,7 @@ func (p *layoutNodeParser) parseTable(
 		return ui.LayoutNode{}, fmt.Errorf("%s.type must be a non-empty string, got %s", path, typeValue.Kind())
 	}
 	node := ui.LayoutNode{Type: typeValue.Str()}
-	allowed, ok := nativeLayoutFields(node.Type)
+	allowed, ok := layoutFields(node.Type)
 	if !ok {
 		return ui.LayoutNode{}, fmt.Errorf("%s: unknown type %q", path, node.Type)
 	}
@@ -204,12 +204,6 @@ func (p *layoutNodeParser) parseTable(
 		var err error
 		if node.Size, err = parseNodeSize(tbl.Field("size"), path+".size"); err != nil {
 			return ui.LayoutNode{}, err
-		}
-		if node.Size.Kind == ui.LayoutSizeDefault {
-			switch node.Type {
-			case ui.LayoutTypeInput, ui.LayoutTypeSeparator, ui.LayoutTypeBar:
-				node.Size = ui.AutoSize()
-			}
 		}
 		if node.MinSize, err = parseOptionalCells(tbl.Field("min_size"), path+".min_size", 0); err != nil {
 			return ui.LayoutNode{}, err
@@ -266,13 +260,13 @@ func (p *layoutNodeParser) parseTable(
 		return node, nil
 	}
 
-	if err := parseNativeLeafFields(tbl, &node, path); err != nil {
+	if err := parseLeafFields(tbl, &node, path); err != nil {
 		return ui.LayoutNode{}, err
 	}
 	return node, nil
 }
 
-func nativeLayoutFields(typeName string) (map[string]bool, bool) {
+func layoutFields(typeName string) (map[string]bool, bool) {
 	fields := map[string]bool{
 		"type": true, "size": true, "min_size": true, "max_size": true,
 	}
@@ -299,10 +293,10 @@ func nativeLayoutFields(typeName string) (map[string]bool, bool) {
 	return fields, true
 }
 
-// parseNativeLeafFields reads leaf presentation fields. It checks Lua types
+// parseLeafFields reads leaf presentation fields. It checks Lua types
 // only; closed-set values and cell widths are validated once by
 // ui.ValidateLayoutTree.
-func parseNativeLeafFields(tbl script.TableView, node *ui.LayoutNode, path string) error {
+func parseLeafFields(tbl script.TableView, node *ui.LayoutNode, path string) error {
 	switch node.Type {
 	case ui.LayoutTypePane:
 		if title := tbl.Field("title"); title.Kind() != script.KindNil {

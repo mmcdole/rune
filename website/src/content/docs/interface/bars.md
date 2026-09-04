@@ -28,32 +28,12 @@ with `type = "bar"` and its registered `name`, the bar is enabled, its renderer
 produces visible content, and every ancestor region is visible. A same-named
 pane is a separate resource and never substitutes for the bar.
 
-## Callback width and assigned width
+## Callback width
 
-The `width` passed to a bar callback is always the full terminal width, even
-when the layout gives that bar a narrower slot. Rune clips the returned content
-to the leaf's assigned width:
-
-```lua
-rune.ui.bar("vitals", function(terminal_width)
-    return "HP 312/340"
-end)
-
--- Normal input prefers three rows, so this auto-height row is three rows.
--- The callback receives the terminal width. The one-row bar content
--- occupies one quarter of the row's width and is clipped to that rectangle.
-{
-    type = "row",
-    size = "auto",
-    children = {
-        { type = "input", size = "3fr" },
-        { type = "bar", name = "vitals", size = "1fr" },
-    },
-}
-```
-
-Use the callback width for terminal-wide policy or formatting, but keep any bar
-that may be placed in a narrow slot compact.
+The callback receives the full terminal width, even in a narrower layout slot.
+Strings are clipped to that slot. Return `{ left = ..., center = ..., right = ... }`
+to let Rune align fields within the assigned width. Keep content compact when
+the bar may appear in a sidebar.
 
 ## Render results
 
@@ -64,8 +44,8 @@ return { left = "HP 312/340", right = "LIVE" }
 ```
 
 Style freely with `rune.style`. Bars render one row and default to automatic
-size in a column, so they take one row when they contain text. Use an explicit
-width when placing one in a row. Returning `""` or `nil`, disabling the bar, or
+size in a column, so they take one row when they contain text. In a row, the
+omitted width is `1fr`. Returning `""` or `nil`, disabling the bar, or
 removing it makes its leaf take no space; its siblings reclaim the space.
 
 ## Vitals example

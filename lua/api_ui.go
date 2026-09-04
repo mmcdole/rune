@@ -88,12 +88,12 @@ func (e *Engine) registerPaneFuncs() {
 			if err != nil {
 				return err
 			}
-			visible, found := e.layout.PaneVisible(name)
+			hidden, found := e.layout.PaneHidden(name)
 			if !found {
 				c.Return(false)
 				return nil
 			}
-			updated, _, changed := e.layout.WithPaneVisibility(name, !visible)
+			updated, _, changed := e.layout.WithPaneVisibility(name, hidden)
 			e.layout = updated
 			c.Return(true)
 			if changed {
@@ -112,19 +112,19 @@ func (e *Engine) registerPaneFuncs() {
 			return e.setPaneVisible(c, "hide", false)
 		},
 
-		// rune._pane.is_visible(name): Report the pane placement's own gate,
+		// rune._pane.is_hidden(name): Report the pane's local hidden state,
 		// or nil when the layout does not place the pane.
-		"is_visible": func(c *script.Call) error {
-			name, err := paneName(c, "is_visible")
+		"is_hidden": func(c *script.Call) error {
+			name, err := paneName(c, "is_hidden")
 			if err != nil {
 				return err
 			}
-			visible, found := e.layout.PaneVisible(name)
+			hidden, found := e.layout.PaneHidden(name)
 			if !found {
 				c.Return(nil)
 				return nil
 			}
-			c.Return(visible)
+			c.Return(hidden)
 			return nil
 		},
 
