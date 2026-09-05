@@ -29,10 +29,7 @@ local function contains_designator(text, separator, marker)
     end
 
     for piece in rune.input._commands(text, separator) do
-        local body = piece:match("^%s*#%d+%s*{([^}]+)}%s*$")
-        if (body and contains_designator(body, separator, marker))
-            or designator_spec(piece, marker, separator) ~= nil
-        then
+        if designator_spec(piece, marker, separator) ~= nil then
             return true
         end
     end
@@ -59,13 +56,7 @@ local function expand_commands(text, history, separator, marker)
     local pieces = {}
     for piece in rune.input._commands(text, separator) do
         local spec = designator_spec(piece, marker, separator)
-        local prefix, body, suffix = piece:match("^(%s*#%d+%s*{)([^}]+)(}%s*)$")
-
-        if body then
-            local expanded = expand_commands(body, history, separator, marker)
-            if not expanded then return false end
-            pieces[#pieces + 1] = prefix .. expanded .. suffix
-        elseif spec ~= nil then
+        if spec ~= nil then
             local replacement = find_previous(spec, history, separator, marker)
             if not replacement then
                 local token = piece:match("^%s*(.-)%s*$")

@@ -22,7 +22,7 @@ Scripting:
 - **Hooks** - Event system for connecting to input/output pipeline
 - **Key Bindings** - Bind keys to Lua callbacks
 - **Groups** - Master switches to enable/disable sets of aliases/triggers/timers
-- **Command Chaining** - `kill rat;loot` sends both; `#3 {kill rat;loot}` repeats
+- **Command Chaining** - `kill rat;loot` sends both; `#3 north` repeats a command or alias
 - **Robust Scripting** - Watchdog interrupts runaway scripts; failing callbacks are quarantined individually instead of taking the client down
 
 Protocols:

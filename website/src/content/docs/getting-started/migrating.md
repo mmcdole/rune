@@ -39,7 +39,7 @@ rune.trigger.regex("(\\w+) attacks you", "flee")
 | `#session x host port` | `/connect host port`, `/world add` for bookmarks |
 | `#read file.tin` | `/load file.lua` |
 | `#write` | your scripts are already files |
-| `#3 north` | works as-is: `#3 north`, `#3 {kill rat;loot}` |
+| `#3 north` | works as-is; repeat an alias or use a Lua loop for command sequences, not `{...}` blocks |
 | `;` separator | works as-is: `kill rat;loot` |
 
 ## From Mudlet

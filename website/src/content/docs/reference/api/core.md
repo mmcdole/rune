@@ -47,17 +47,20 @@ Doubling the separator makes it literal: `rune.send("say one;;two")` sends
 `say one;two` as one command. Escapes are decoded before aliases run. An alias
 returning a string starts a new command-processing pass; use `rune.send_raw`
 inside an alias callback to send its arguments without further interpretation.
-Repeats are anchored at command position — `#3 north` repeats, but
-`say #3 cheers` is chat text and passes through untouched. Alias
-expansions are processed recursively (nested aliases work), with a
-depth limit to catch loops.
+`#N command` repeats one command or alias: `#3 north;look` sends `north`
+three times, then `look` once. `say #3 cheers` is ordinary chat text.
+For a sequence, repeat an alias or use a Lua loop; command blocks are not
+supported. Alias expansions are processed recursively, with a depth limit
+to catch loops.
 
 Unlike text you type into the input line, `rune.send` does not run input hooks,
 save the command in history, or perform history expansion. It still applies
 the command separator, `#N` repeats, and aliases as described above.
 
 ```lua
-rune.send("#2 {get bread bag;eat bread}")  -- get/eat, twice
+for _ = 1, 2 do
+    rune.send("get bread bag;eat bread")
+end
 ```
 
 ### rune.send_raw

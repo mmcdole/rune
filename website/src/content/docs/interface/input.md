@@ -42,6 +42,16 @@ instead (`||` for `|`, or `::::` for `::`). Pairs are read left to right:
 `;;;` is a literal semicolon followed by a command boundary. To include an
 empty command between separators, use `; ;` instead of `;;`.
 
+### Repeating commands
+
+`#3 north` sends `north` three times. Repeats apply to one command or alias:
+`#3 north;look` repeats `north`, then sends `look` once. To repeat a sequence,
+define an [alias](/scripting/aliases/#examples) and use `#3 aliasname`, or write
+a Lua loop.
+
+The former `#N {commands}` form is no longer supported and reports an error.
+Braces in ordinary command text are literal; they do not group commands.
+
 ## Keeping the last command
 
 By default the input clears after each submit. With

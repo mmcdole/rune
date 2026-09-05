@@ -114,12 +114,11 @@ several triggers can match it, so a trigger still needs a `name`.
 
 ## Examples
 
-Chaining and repeats compose with aliases, since expansion runs on the
-result:
+Name a command sequence, then repeat the alias:
 
 ```lua
--- "farm" runs six kill/loot rounds, via #N repeat syntax
-rune.alias.exact("farm", "#6 {kill rat;loot}")
+rune.alias.exact("round", "kill rat;loot")
+rune.alias.exact("farm", "#6 round") -- six kill/loot rounds
 ```
 
 Captures beyond the first:

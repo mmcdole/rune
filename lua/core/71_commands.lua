@@ -8,9 +8,7 @@ function rune.input._commands(text, separator)
     return function()
         if not start then return nil end
 
-        -- A braced repeat is one command; its body is parsed when expanded.
-        local group = text:sub(start):match("^%s*#%d+%s*{[^}]+}")
-        local cursor = start + (group and #group or 0)
+        local cursor = start
         while true do
             local pos = text:find(separator, cursor, true)
             if pos and text:sub(pos, pos + #doubled - 1) == doubled then

@@ -61,21 +61,16 @@ func TestHistoryExpansionKeepsAdjacentSeparatorsSeparate(t *testing.T) {
 	}
 }
 
-func TestHistoryExpansionInsideRepeatsPreservesEscapes(t *testing.T) {
+func TestHistoryReplaysSingleCommandRepeatsWithLiteralBraces(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 
-	host.HistoryEntries = []input.Submission{input.Command("say one;;two")}
-	commitAndDispatchTestCommand(t, engine, host, "#2 {look;!;say literal;;!missing}")
+	commitAndDispatchTestCommand(t, engine, host, "#2 say {one;;two}")
+	commitAndDispatchTestCommand(t, engine, host, "!")
 	assertCommands(t, host, []string{
-		"look", "say one;two", "say literal;!missing",
-		"look", "say one;two", "say literal;!missing",
+		"say {one;two}", "say {one;two}", "say {one;two}", "say {one;two}",
 	})
-	assertHistory(t, host, "say one;;two", "#2 {look;say one;;two;say literal;;!missing}")
-	if commitAndDispatchTestCommand(t, engine, host, "#2 {look;!missing;east}") {
-		t.Fatal("unmatched history inside a repeat was accepted")
-	}
-	assertCommands(t, host, nil)
+	assertHistory(t, host, "#2 say {one;;two}")
 }
 
 // commitAndDispatchTestCommand mirrors Session's hook, history, and command

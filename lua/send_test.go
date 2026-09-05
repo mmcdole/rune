@@ -6,6 +6,7 @@ package lua
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/mmcdole/rune/input"
@@ -79,9 +80,9 @@ func TestSendExpansion(t *testing.T) {
 			want:  []string{"open gate", "south", "south"},
 		},
 		{
-			name:  "repeat braced group",
-			input: "#2 {kill rat;loot}",
-			want:  []string{"kill rat", "loot", "kill rat", "loot"},
+			name:  "repeat only the next command",
+			input: "#2 kill rat;loot",
+			want:  []string{"kill rat", "kill rat", "loot"},
 		},
 		{
 			name:  "repeat a literal separator",
@@ -89,9 +90,30 @@ func TestSendExpansion(t *testing.T) {
 			want:  []string{"say one;two", "say one;two"},
 		},
 		{
-			name:  "repeat group preserves escaped separators",
-			input: "look;#2 {say one;;two;east};west",
-			want:  []string{"look", "say one;two", "east", "say one;two", "east", "west"},
+			name:  "repeat an alias for a command sequence",
+			setup: `rune.alias.exact("round", "kill rat;loot")`,
+			input: "look;#2 round;west",
+			want:  []string{"look", "kill rat", "loot", "kill rat", "loot", "west"},
+		},
+		{
+			name:  "repeat text containing literal braces",
+			input: "#2 say {hello}",
+			want:  []string{"say {hello}", "say {hello}"},
+		},
+		{
+			name:  "braces need not balance in game text",
+			input: "#2 say {hello",
+			want:  []string{"say {hello", "say {hello"},
+		},
+		{
+			name:  "zero repeats",
+			input: "#0 north;look",
+			want:  []string{"look"},
+		},
+		{
+			name:  "repeat shorthand is not a nested language",
+			input: "#2 #3 north",
+			want:  []string{"#3 north", "#3 north"},
 		},
 		{
 			name:  "escaped separator does not introduce a repeat",
@@ -122,14 +144,35 @@ func TestSendEscapesConfiguredSeparator(t *testing.T) {
 			engine, host, cleanup := setupTest(t)
 			defer cleanup()
 
-			text := "say one" + separator + separator + "two" + separator + "#2 {east" + separator + "west}"
+			text := "say one" + separator + separator + "two" + separator + "#2 east" + separator + "west"
 			if err := engine.DoString("escaped separator", fmt.Sprintf(`
 				rune.config.set("command_separator", %q)
 				rune.send(%q)
 			`, separator, text)); err != nil {
 				t.Fatal(err)
 			}
-			assertCommands(t, host, []string{"say one" + separator + "two", "east", "west", "east", "west"})
+			assertCommands(t, host, []string{"say one" + separator + "two", "east", "east", "west"})
+		})
+	}
+}
+
+func TestRepeatBlocksReportMigrationErrorWithoutSendingFragments(t *testing.T) {
+	for _, text := range []string{
+		"#2 {kill rat;loot}",
+		"look;#2 {kill rat;loot};west",
+		"#2 {kill rat;loot",
+		"#2{north}",
+		"#2 {}",
+	} {
+		t.Run(text, func(t *testing.T) {
+			engine, host, cleanup := setupTest(t)
+			defer cleanup()
+
+			assertLua(t, engine, fmt.Sprintf(`rune.send(%q)`, text))
+			assertCommands(t, host, nil)
+			if output := strings.Join(host.DrainPrintCalls(), "\n"); !strings.Contains(output, "repeat an alias with #N name instead") {
+				t.Fatalf("missing migration guidance: %q", output)
+			}
 		})
 	}
 }
@@ -194,13 +237,13 @@ func TestSendExpansionUsesConfiguredCommandSeparator(t *testing.T) {
 
 	if err := engine.DoString("configured command separator repeats", `
 		rune.config.set("command_separator", "|")
-		rune.send("look|#2 north|#2 {east|west}|say #3 cheers")
+		rune.send("look|#2 north|#2 east|west|say #3 cheers")
 	`); err != nil {
 		t.Fatal(err)
 	}
 
 	assertCommands(t, host, []string{
-		"look", "north", "north", "east", "west", "east", "west", "say #3 cheers",
+		"look", "north", "north", "east", "east", "west", "say #3 cheers",
 	})
 }
 

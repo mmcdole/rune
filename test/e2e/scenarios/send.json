@@ -30,6 +30,15 @@
       ]
     },
     {
+      "name": "repeat a named command sequence",
+      "init_lua": "rune.alias.exact('round', 'kill rat;loot')",
+      "steps": [
+        { "connect": true },
+        { "type": "#2 round;score" },
+        { "expect_sent": "kill rat\r\nloot\r\nkill rat\r\nloot\r\nscore\r\n" }
+      ]
+    },
+    {
       "name": "history expansion repeats the last command",
       "steps": [
         { "connect": true },
