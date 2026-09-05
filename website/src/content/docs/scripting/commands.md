@@ -14,9 +14,8 @@ rune.command.add("greet", function(args)
 end, "Greet someone")
 ```
 
-`/greet Bob` now works, appears in `/help`, and shows up in the `/` picker
-with its description. All of that is generated from the registry, so the
-listings never drift from what is actually registered.
+`/greet Bob` runs this handler. The command appears in `/help` and the `/` picker
+with its description. Both listings read from the command registry.
 
 ## Creating
 
@@ -34,7 +33,7 @@ registry name.
 
 Commands take the [common option](/scripting/model/#options) `group`.
 The command name is the registry `name`, so re-adding a name replaces
-it. Passing `name` yourself is ignored with a deprecation notice.
+it. Passing `name` yourself is ignored with a notice.
 
 ## Examples
 

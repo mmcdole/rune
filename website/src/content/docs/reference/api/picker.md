@@ -3,15 +3,14 @@ title: rune.ui.picker
 description: Full signatures for the fuzzy-filter selection panel — options, item formats, and modes.
 ---
 
-The picker is a fuzzy-filtering selection panel over a list of items —
-the machinery behind the world picker, history search, and slash
-command autocomplete. For a task-oriented introduction, see
+The picker filters a list of items as you type. World selection, history,
+aliases, and slash-command completion use this control. For examples, see
 [Pickers](/interface/pickers/).
 
 ## Quick reference
 
 ```lua
-rune.ui.picker.show(opts)  -- open a picker overlay
+rune.ui.picker.show(opts)  -- open a picker in the input area
 ```
 
 ### rune.ui.picker.show
@@ -20,7 +19,7 @@ rune.ui.picker.show(opts)  -- open a picker overlay
 rune.ui.picker.show(opts)
 ```
 
-- `title` (string, optional) — header text; modal mode only.
+- `title` (string, optional) — label beside the filter field; modal mode only.
 - `items` (array) — the choices; see [Item formats](#item-formats).
 - `on_select` (function) — `function(value)`; called with the chosen
   item's value.
@@ -51,9 +50,9 @@ items = {
 
 ## Modes
 
-**Modal** (default) captures all keyboard input and has its own
-search field — a focused selection dialog. The default `ctrl+r`
-history search is one:
+**Modal** (default) captures keyboard input and shows results above a labeled
+filter field. The command draft is hidden until the picker closes.
+For example, open a history picker with `ctrl+r`:
 
 ```lua
 rune.bind("ctrl+r", function()
@@ -72,8 +71,8 @@ rune.bind("ctrl+r", function()
 end)
 ```
 
-**Inline** filters from the live input field as you type —
-autocomplete-style selection. The default `/` command picker runs
+**Inline** shows suggestions above the command field and filters them as you
+type into that field. The default `/` command picker runs
 inline with `match_description` and `dismiss_on_space` set.
 
 ## Navigation

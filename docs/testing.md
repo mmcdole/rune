@@ -1,9 +1,9 @@
-# Testing Philosophy
+# Testing
 
-How to decide where a new test goes and what form it takes. The decision
-is two questions, asked in order.
+Choose the lowest layer that can express the failure, then use the test
+format for that layer.
 
-## Question 1 — Layer: test at the lowest layer that can express the failure
+## Test layers
 
 Work down this list and stop at the first layer where the failure you
 are guarding against is observable.
@@ -14,9 +14,9 @@ are guarding against is observable.
 | **Lua layer** | `lua/` | Anything the embedded Lua core + MockHost can express: features, hooks, registries, quarantine, watchdog. Most feature work lands here. |
 | **Session synchronous** | `session/*_test.go` | Narrow charter: exact ordering/state assertions impossible at e2e (it is async) and below the session (no session exists). Examples: cumulative prompt updates; whole-batch callback and send ordering; partial-line commit ordering; reload deferral through the event queue; boot robustness with broken files on disk. If a lower layer can express the contract, test it there instead. |
 | **E2E scenarios** | `test/e2e/scenarios/*.json` | User-visible behavior contracts through the live client (real event loop, real TCP, mocked terminal): one representative per feature, plus every regression from a reported bug. |
-| **E2E imperative Go** | `test/e2e/*_test.go` | Escape hatch when the step vocabulary can't express the case: exact byte frames beyond `expect_sent_bytes`, concurrency-only behavior, bespoke server scripting. |
+| **E2E imperative Go** | `test/e2e/*_test.go` | Cases the scenario vocabulary cannot express: exact byte frames beyond `expect_sent_bytes`, concurrency-only behavior, bespoke server scripting. |
 
-## Question 2 — Format: Go tables in-process, scenario JSON at e2e
+## Test formats
 
 Every in-process layer uses ordinary table-driven Go tests. A feature's
 variant matrix is a `[]featureCase` table in its feature file
@@ -32,8 +32,7 @@ input line) and the distance between the data and the harness is real.
 A case that fits the **existing** vocabulary is a scenario; needing a
 new verb or field is the signal to write imperative Go instead. A verb
 earns schema admission only when roughly three scenarios would use it.
-This guard is what keeps the runner from becoming a bad programming
-language.
+Keep control flow and custom setup in Go.
 
 ## Determinism and speed
 
@@ -83,12 +82,6 @@ One-line forwarders (`session/lua_ui.go`), interface marker methods
 diagnostic, not a target — these are covered implicitly by the e2e
 suite or not worth covering at all.
 
-## Named future slots
-
-- Fuzz/property testing belongs at the telnet parser
-  (`network/telnet.go` consumes attacker-controlled bytes) when added.
-- Scenario schema growth goes through the verb budget above.
-
 ## Cross-cutting rules
 
 - Assert only text that cannot appear at boot or from earlier steps:
@@ -96,5 +89,5 @@ suite or not worth covering at all.
   mentions `/connect`, `/world`, and `init.lua` — never assert those.
 - Test files are named for the feature, not for the harness that runs
   them, so "bug in X" maps to "open X's test file".
-- When adding a new assertion helper or verb, sanity-break it once
+- When adding a new assertion helper or verb, verify that it detects a failure
   (invert the expectation locally, watch it fail) before trusting it.

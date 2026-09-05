@@ -12,10 +12,10 @@ const base = raw.endsWith('/') ? raw : raw + '/';
   <header class="hero-grid">
     <div>
       <p class="brand">ᚱune</p>
-      <h1>Script the <span class="accent">client</span>, not just the game.</h1>
+      <h1>A MUD <span class="accent">client</span> you can script.</h1>
       <p class="sub">
-        A fast, modern MUD client with careful terminal ergonomics and a Lua
-        API that goes all the way down.
+        Play in your terminal. Use Lua to define commands, react to server
+        output, and arrange panes and status bars.
       </p>
       <div class="cta-row">
         <a class="btn primary" href={`${base}getting-started/installation/`}>Get started</a>
@@ -49,16 +49,16 @@ const base = raw.endsWith('/') ? raw : raw + '/';
   <section>
     <div class="grid">
       <div class="card">
-        <h3>Everything is Lua</h3>
-        <p>Core client functionality is Lua: input handling, the UI, the keymap. All of it can be overridden.</p>
+        <h3>Lua scripting</h3>
+        <p>Define aliases, triggers, key bindings, and bar renderers. Customize the built-in scripts through the same Lua API.</p>
       </div>
       <div class="card">
         <h3>GMCP · MCCP2 · TLS</h3>
-        <p>Vitals and room data arrive as Lua events. Compression and encryption are on by default.</p>
+        <p>Handle GMCP vitals and room data in Lua. Rune negotiates MCCP2 compression and uses TLS for <code>tls://</code> connections.</p>
       </div>
       <div class="card">
         <h3>Panes · Bars · Pickers</h3>
-        <p>Dock chat panes, render live status bars, open fuzzy-filtered pickers. Every UI component is scriptable.</p>
+        <p>Arrange scrollable panes in rows and columns, render status bars, and open pickers from your scripts.</p>
       </div>
       <div class="card">
         <h3>Feels like your shell</h3>

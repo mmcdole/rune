@@ -1,6 +1,6 @@
 ---
 title: Pickers
-description: Fuzzy-filtered overlays for commands, worlds, and history, including pickers your own scripts can open.
+description: Filter commands, worlds, history, and custom lists in the input area.
 ---
 
 ## Built-in pickers
@@ -24,7 +24,7 @@ above it, a match count beside the query, and navigation help above the separato
 
 ## Your own pickers
 
-`rune.ui.picker.show` gives scripts the same overlay:
+Use `rune.ui.picker.show` to open a picker from a script:
 
 ```lua
 rune.ui.picker.show({

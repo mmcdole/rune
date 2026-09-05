@@ -36,7 +36,7 @@ end)
 
 ## Key format
 
-`key` is a canonical Rune key name such as `"j"`, `"ctrl+r"`, `"pgup"`, or
+`key` is a Rune key name such as `"j"`, `"ctrl+r"`, `"pgup"`, or
 `"f13"`. The key-name table, modifier order, terminal caveats, and reserved keys
 are documented under [Key names](/scripting/keybindings/#key-names).
 Aliases are not normalized: use `esc`, `pgup`, and `pgdown`, not `escape`,
@@ -44,7 +44,7 @@ Aliases are not normalized: use `esc`, `pgup`, and `pgdown`, not `escape`,
 
 ## Dispatch behavior and defaults
 
-The Keybindings guide is the canonical description of
+The Keybindings guide describes
 [where binds run](/scripting/keybindings/#where-binds-run) and the
 [default keymap](/scripting/keybindings/#defaults). It distinguishes normal
 input, inline and modal pickers, scrollback search, and the composer.

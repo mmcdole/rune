@@ -8,10 +8,10 @@ const base = raw.endsWith('/') ? raw : raw + '/';
 const demos = [
   {
     id: 'pickers',
-    title: 'Pickers for everything',
+    title: 'Searchable pickers',
     body:
-      'Saved worlds, command history, your aliases, and every slash ' +
-      'command sit one keypress away, fuzzy-filtered as you type. ' +
+      'Filter saved worlds, command history, aliases, and slash ' +
+      'commands as you type. ' +
       'Scripts can open the same picker with their own items.',
     keys: [
       ['/connect', 'worlds'],
@@ -29,8 +29,8 @@ const demos = [
     body:
       'Paste multiline text - or press Ctrl+Enter - and the input grows ' +
       'into a composer with numbered lines. Enter sends the draft ' +
-      'exactly as written: no alias expansion, no splitting, no lost ' +
-      'blank lines. Boards and mail editors just work.',
+      'line by line, preserving blank lines and whitespace. ' +
+      'Use it for in-game boards and mail editors.',
     keys: [
       ['Ctrl+Enter', 'compose'],
       ['Enter', 'send as written'],
@@ -44,9 +44,8 @@ const demos = [
     id: 'editor',
     title: 'Your editor, mid-session',
     body:
-      'When a draft deserves better than a one-line box, Ctrl+E opens ' +
-      'it in Vim, Emacs, or whatever $EDITOR points at. Save and quit, ' +
-      'and the whole letter lands back in the composer, ready to send.',
+      'Ctrl+E opens the draft in $EDITOR. Save and exit to return ' +
+      'the edited text to Rune. Multiline text opens in the composer.',
     keys: [['Ctrl+E', 'edit in $EDITOR']],
     term: 'rune — mud.arctic.org:2700',
     aria:

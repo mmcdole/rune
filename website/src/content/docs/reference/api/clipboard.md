@@ -12,8 +12,8 @@ terminal emulator to set the clipboard. Because the terminal does the
 work, it also works over SSH, with no clipboard tools needed on the
 remote machine.
 
-Support depends on your terminal. Modern emulators (kitty, alacritty,
-WezTerm, iTerm2, Windows Terminal, foot) handle it; some cap how much
+Support depends on your terminal. Terminals such as Kitty, Alacritty,
+WezTerm, iTerm2, Windows Terminal, and foot handle it; some cap how much
 text one copy can carry. Inside tmux, `set-clipboard` must be `on` or
 `external` (the default) in the tmux config.
 

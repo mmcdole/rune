@@ -107,7 +107,7 @@ works without you naming anything, and a `name` in `opts` is ignored with
 a notice. A regex alias is a matcher rather than a phrase, and several can
 match one line, so it takes `name` like a trigger does.
 
-Note that `rune.alias.exact` and [`rune.trigger.exact`](/scripting/triggers/)
+`rune.alias.exact` and [`rune.trigger.exact`](/scripting/triggers/)
 do not mean the same thing here. An alias phrase is something you type, so
 it names the alias. A trigger's exact line is something you match, and
 several triggers can match it, so a trigger still needs a `name`.

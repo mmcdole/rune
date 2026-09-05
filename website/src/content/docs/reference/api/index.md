@@ -60,9 +60,9 @@ for capturing an existing action and wrapping it, not for dispatch.
 
 ## Names
 
-Every registration has a name. It is what you pass to
-[`get`, `enable`, `disable` and `remove`](#managing), what a
-re-registration replaces on, and what the listing commands show.
+A registration's name identifies it in
+[`get`, `enable`, `disable` and `remove`](#managing), replacement registrations,
+and listing commands. Unnamed registrations are managed through their handles.
 
 Most registries take the name from you. Four take it from what you passed
 first:
@@ -79,9 +79,9 @@ first:
 | `rune.command.add` | the command, `"greet"` | one handler per `/command` |
 | `rune.alias.exact` | the phrase, `"chat off"` | one expansion per typed phrase |
 
-Read down the last column and the split explains itself: where several
-entries can share a first argument you name them, and where only one can
-exist the first argument is already the name.
+Use `opts.name` to distinguish registrations that can share the same first
+argument. Functions with one registration per key, bar, command, or phrase
+use that argument as the name.
 
 Either way the management calls look the same:
 
@@ -97,10 +97,8 @@ That is also why `rune.binds.disable("ctrl+g")` and
 `rune.bars.get("status")` reach the core's own binds and bars, which are
 registered without options at all.
 
-These four accepted a `name` option before rune 0.9. Passing one now is
-ignored with a `[Deprecated]` notice giving the key to manage it by, so
-older scripts keep loading; only management calls that used the old name
-need changing.
+For the four automatically named functions, `opts.name` is ignored with a
+notice stating the registration's name.
 
 ## Options
 
@@ -141,8 +139,8 @@ The matching slash commands — `/triggers`, `/aliases`, `/timers`,
 
 A callback that errors 3 times consecutively is disabled individually,
 with a notice. Re-enable it (`.enable(name)`), re-register it, or
-`/reload` to reset the count; one successful run also clears it. Full
-story: [The Scripting Model](/scripting/model/#quarantine).
+`/reload` to reset the count; one successful run also clears it. See
+[The Scripting Model](/scripting/model/#quarantine).
 
 **Related:** [The Scripting Model](/scripting/model/) ·
 [Slash Commands](/reference/slash-commands/) ·

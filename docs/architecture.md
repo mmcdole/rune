@@ -1,15 +1,15 @@
 # Rune Architecture
 
-Rune is a modern, highly scriptable MUD client written in Go. Its architecture is defined by a strict separation between **Mechanism** (Go) and **Policy** (Lua).
+Rune is a terminal MUD client written in Go with Lua scripting. Go runs the
+network connection, event loops, and terminal renderer. Lua scripts configure
+the layout and define commands, aliases, triggers, key bindings, and bars.
 
-The core design philosophy aligns with tools like Neovim or WezTerm: the binary provides a high-performance, concurrent runtime and rendering engine, while the user experience, layout, and game logic are defined in Lua scripts.
+## 1. Go and Lua responsibilities
 
-## 1. Core Philosophy: Mechanism vs. Policy
-
-- **Mechanism (Go):** Handles concurrency, TCP/Telnet protocol parsing, TUI rendering, timer scheduling, and file I/O. It knows *how* to draw a list of items or establish a socket connection, but it doesn't determine *when* to do so.
-- **Policy (Lua):** Handles keybindings, layout configuration, aliases,
-  triggers, and application UI policy. It decides *what* to draw and *how* the
-  application reacts to user input.
+- **Go:** Concurrency, TCP/Telnet parsing, terminal rendering, editing,
+  timer scheduling, and file I/O.
+- **Lua:** Key bindings, layout declarations, aliases, triggers, commands,
+  and bar renderers.
 
 ### Example
 
@@ -56,7 +56,7 @@ graph TD
 
 ## 2.1 The Session (The Orchestrator)
 
-The `Session` struct is the heart of the application. It owns the main event loop.
+The `Session` struct runs the main application event loop.
 
 - **Responsibility:** It serializes application-state changes and Lua calls.
   Network events, UI events, and timers all enter through the Session loop.
@@ -172,10 +172,16 @@ Bar registrations survive layout replacement but are rebuilt on reload.
 
 ### 3.3 The Generic Picker
 
-Rune avoids hardcoded UI modals. Instead, it exposes a single, configurable Picker component.
+Input owns result placement, editor placement, height measurement, and
+separator rules. Picker and Search supply result rows and query state.
+The compositor joins Input's separators to surrounding layout dividers.
 
-- **Modal Mode:** Used for History/Aliases. The Picker traps focus and keys.
-- **Inline Mode:** Used for slash-command completion. The picker sits above the input line and filters as the user types.
+- **Modal mode:** History and alias pickers show results above their filter
+  field. The command draft is hidden and preserved while the picker is open.
+- **Inline mode:** Slash-command suggestions appear above the active command
+  field and filter from its text.
+- **Search:** Find shows matching transcript rows and navigation help above
+  its query field. The selected match controls the output viewport position.
 
 **Flow:**
 
@@ -316,13 +322,7 @@ the Session also stops producers waiting to publish a result. HTTP completions
 carry the Lua generation that created their callback; a result from before
 `/reload` cannot claim a reused callback ID in the rebuilt VM.
 
-## 6. Future Extensibility
-
-- New UI widgets can be added to `ui/tui/widget` and exposed via `Show...Msg` without changing the engine core.
-- A headless mode can be implemented by providing an alternate `ui.UI` interface implementation.
-- Multiple concurrent sessions (tabs) are supported since no global state is shared.
-
-## 7. Directory Structure
+## 6. Directory Structure
 
 - `cmd/rune/`: Entry point
 - `config/`: Config dir resolution (XDG/APPDATA)

@@ -159,39 +159,25 @@ Ordinary panes re-wrap logical lines at their current width. The reserved
 `output` pane retains rows wrapped at append time. While hidden or omitted,
 new output uses its last placement width. See [Panes](/interface/panes/).
 
-## Migrating from top/bottom tables
+## Toggleable chat pane
 
-The old form prints a short migration notice, returns `false`, and leaves the
-current layout unchanged. Convert it to a column: top entries, output, then
-bottom entries.
-
-Before:
-
-```lua
-rune.ui.layout({
-    top = { { name = "chat", height = 10 }, "separator" },
-    bottom = { "input", "status" },
-})
-```
-
-After:
+Place a hidden pane above output and bind a key to show or hide it:
 
 ```lua
 rune.ui.layout({
     type = "column",
     children = {
         { type = "pane", name = "chat", size = 10, border = "horizontal", hidden = true },
-        { type = "separator" },
         { type = "pane", name = "output", border = "none" },
         { type = "input" },
         { type = "bar", name = "status" },
     },
 })
+
+rune.bind("f3", function() rune.pane.toggle("chat") end)
 ```
 
-Tree layouts require exactly one input. Old panes started hidden; keep
-`hidden = true` on those your binds reveal on demand. New panes are visible
-unless declared hidden.
+Panes are visible unless declared with `hidden = true`.
 
 The [API reference](/reference/api/ui/) covers all fields, validation limits,
 and reload behavior.

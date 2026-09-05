@@ -3,9 +3,8 @@ title: Input & History
 description: The normal command line, history, completion, scrolling, the lossless multiline composer, and editing input in $EDITOR.
 ---
 
-Ordinary commands use the single-line input at the bottom of the screen. It
-behaves like a modern shell: prefix-matching history, fuzzy search, tab
-completion, and word-level editing.
+The single-line input supports command history, fuzzy search, tab completion,
+and word-level editing.
 
 ## Normal command input
 
@@ -33,9 +32,9 @@ look;north             → two commands
 say hello;;friend      → say hello;friend
 ```
 
-Aliases receive the literal separator too: `pendwalk 12345 open desk;;take all
-desk` passes `12345 open desk;take all desk` to the `pendwalk` alias. History
-keeps the doubled spelling so recalling the command behaves the same way.
+Aliases receive the literal separator too: if you define a custom `queue`
+alias, `queue look;;north` passes `look;north` as its arguments. History keeps
+the doubled spelling so recalling the command behaves the same way.
 
 If you configure another `command_separator`, double that entire separator
 instead (`||` for `|`, or `::::` for `::`). Pairs are read left to right:
@@ -49,9 +48,6 @@ empty command between separators, use `; ;` instead of `;;`.
 define an [alias](/scripting/aliases/#examples) and use `#3 aliasname`, or write
 a Lua loop.
 
-The former `#N {commands}` form is no longer supported and reports an error.
-Braces in ordinary command text are literal; they do not group commands.
-
 ## Keeping the last command
 
 By default the input clears after each submit. With
@@ -59,9 +55,8 @@ By default the input clears after each submit. With
 stays in the input line, shown selected: press `Enter` to submit it
 again, type to replace it, or press `Left` or `Right` to deselect it and edit
 in place.
-Handy for walking with `n` `Enter` `Enter` `Enter`. While the line is
-selected it counts as empty for printable-key binds, so hotkeys keep
-firing.
+For example, type `n` and press `Enter` repeatedly to walk north. A selected
+line counts as empty for printable-key bindings.
 
 Input hooks can change a command before Rune runs it, but the selected text
 still shows exactly what you typed. For example, if `!` expands to `north`,
@@ -124,8 +119,8 @@ in the status bar, with `Shift+Tab` going backward.
 `PageUp`/`PageDown` scroll the output viewport; `Ctrl+Home`/`Ctrl+End` jump to
 the top and bottom (`Home`/`End` stay on the input line; rebind them if you
 prefer they scroll). While you're off the bottom, the status bar shows
-`SCROLL (n new)` so you know what's piling up, and it returns to `LIVE` when
-you catch up.
+`SCROLL (n new)` with the number of lines received while scrolled. It returns
+to `LIVE` at the bottom.
 
 Rune leaves the mouse to the terminal by default, so click-drag selects text
 normally. To capture it for wheel scrolling, enable the `mouse` setting:
@@ -141,9 +136,8 @@ for native text selection.
 
 ## Multiline verbatim composer
 
-A plain one-line paste stays in normal input and adds no mode label or other
-chrome. Pasting structured text switches the input area instead to a taller
-composer. Newlines, tabs, blank lines, indentation, trailing spaces, and
+A plain one-line paste stays in normal input. Pasting structured text opens
+the multiline composer. Newlines, tabs, blank lines, indentation, trailing spaces, and
 terminal control bytes are kept in the draft; CRLF and bare CR line endings are
 normalized to LF. You can also press `Ctrl+Enter` to insert the first newline
 and enter the composer.
@@ -171,10 +165,9 @@ move through the draft's visual rows, `PageUp`/`PageDown` move by a composer
 page, and the mouse wheel still scrolls output when mouse capture is enabled.
 The ordinary one-line input and its bindings return after the composer closes.
 
-So that an accidental paste can't flood the connection, a verbatim submission
-is capped at 1,000 physical lines and 256 KiB; over either limit Rune rejects
-the whole submission, leaves the draft open, and warns, rather than silently
-truncating.
+A verbatim submission is limited to 1,000 physical lines and 256 KiB. If either
+limit is exceeded, Rune rejects the submission, leaves the draft open, and
+shows a warning.
 
 Recalling a verbatim entry from history restores the composer, even when that
 entry contains only one physical line. History retains both the text and the
@@ -193,7 +186,7 @@ text file terminator. Additional blank lines, indentation, tabs, trailing
 spaces, and an intentionally empty result are preserved.
 
 A structured editor result enters the visible verbatim composer. Editing an
-existing composer keeps it verbatim even if the result is now one non-empty
+existing composer keeps it verbatim even if the result is one non-empty
 line.
 
 ## The default keymap

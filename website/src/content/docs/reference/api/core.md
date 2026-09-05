@@ -49,9 +49,8 @@ returning a string starts a new command-processing pass; use `rune.send_raw`
 inside an alias callback to send its arguments without further interpretation.
 `#N command` repeats one command or alias: `#3 north;look` sends `north`
 three times, then `look` once. `say #3 cheers` is ordinary chat text.
-For a sequence, repeat an alias or use a Lua loop; command blocks are not
-supported. Alias expansions are processed recursively, with a depth limit
-to catch loops.
+For a sequence, repeat an alias or use a Lua loop. Alias expansions are
+processed recursively, with a depth limit to catch loops.
 
 Unlike text you type into the input line, `rune.send` does not run input hooks,
 save the command in history, or perform history expansion. It still applies

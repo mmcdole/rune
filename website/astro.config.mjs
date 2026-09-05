@@ -10,7 +10,7 @@ export default defineConfig({
   integrations: [
     starlight({
       title: 'ᚱune',
-      description: 'A fast, modern MUD client with careful terminal ergonomics and a Lua API that goes all the way down.',
+      description: 'A terminal MUD client with Lua scripting, configurable layouts, command history, and server-output search.',
       social: [
         { icon: 'discord', label: 'Discord', href: 'https://discord.gg/gNZkrJ2jHe' },
         { icon: 'github', label: 'GitHub', href: 'https://github.com/mmcdole/rune' },

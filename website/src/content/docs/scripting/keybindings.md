@@ -49,10 +49,9 @@ an ordinary `8` or `Up`, Rune cannot tell that it came from the number pad.
 
 Rune supports both ways terminals preserve that information:
 
-- **Modern protocol (Kitty keyboard protocol):** identifies the physical key
-  with NumLock on or off.
-- **Legacy mode (DEC application keypad mode, or DECKPAM):** supported by
-  older terminals, usually with NumLock off.
+- **Kitty keyboard protocol:** identifies the physical key with NumLock on or off.
+- **DEC application keypad mode (DECKPAM):** identifies keypad keys, usually
+  with NumLock off.
 
 Enable both in `init.lua`:
 
@@ -64,16 +63,16 @@ Rune requests both modes; your terminal uses the one it supports.
 
 | Input mode | Known terminals | Required setup |
 |---|---|---|
-| Modern | Ghostty, Kitty, Alacritty, foot, iTerm2 | None |
-| Modern | WezTerm | Set `enable_kitty_keyboard = true` |
-| Modern | Windows Terminal | Version 1.25 or newer |
-| Legacy | macOS Terminal | Enable **Profiles → Advanced → Allow VT100 application keypad mode** |
-| Legacy | xterm | Launch `xterm -kt vt220` with NumLock off |
-| Legacy | urxvt | Use NumLock off |
+| Kitty protocol | Ghostty, Kitty, Alacritty, foot, iTerm2 | None |
+| Kitty protocol | WezTerm | Set `enable_kitty_keyboard = true` |
+| Kitty protocol | Windows Terminal | Version 1.25 or newer |
+| DEC keypad | macOS Terminal | Enable **Profiles → Advanced → Allow VT100 application keypad mode** |
+| DEC keypad | xterm | Launch `xterm -kt vt220` with NumLock off |
+| DEC keypad | urxvt | Use NumLock off |
 | Not supported | GNOME Terminal, Ptyxis, COSMIC Terminal | These terminals do not preserve the physical number-pad key |
 
-Current tmux releases do not pass the modern protocol through. Some legacy
-setups work inside tmux, but test Rune without tmux first.
+If numpad bindings fail inside tmux, test Rune directly in the terminal to
+check whether tmux is forwarding the keypad information.
 
 Bind the physical keys using `numpad0` through `numpad9`:
 

@@ -1,6 +1,6 @@
 ---
 title: rune.ui
-description: Full signatures for tree layout configuration, bar renderers, and UI surfaces.
+description: Configure layouts, register bar renderers, and open output search.
 ---
 
 Arrange the terminal and register status displays. For task-oriented guides,
@@ -48,10 +48,7 @@ rune.ui.layout({
 The accepted table is parsed and validated before it replaces the active tree.
 Within a Lua generation, each call is atomic: an invalid tree raises
 `rune.ui.layout: ...` and leaves that generation's current layout in place.
-A successful call returns `true`. A top/bottom table from before the tree
-layout is rejected with a printed migration notice and returns `false` without
-raising, so the rest of the script still loads; see
-[Migrating from top/bottom tables](/interface/layout/#migrating-from-topbottom-tables).
+A successful call returns `true`.
 `/reload` starts a fresh generation at the default layout before re-evaluating
 `init.lua`; an invalid layout during reload therefore leaves the default active,
 not the pre-reload tree. Replacing or reloading a layout resets region and
@@ -170,10 +167,10 @@ presentation fields are set directly on the leaf:
 
 The assigned pane rectangle includes its border. Adjacent bordered panes with
 `gap = 0` share a boundary. Setting `border = "none"` gives all assigned cells
-to pane content. During normal allocation, full pane chrome requires at least
+to pane content. During normal allocation, a full pane border requires at least
 two columns and two rows, `"horizontal"` requires at least two rows, and a
-borderless pane adds no chrome minimum. A smaller explicit `max_size` is a hard
-cap and intentionally clips the chrome. Tiny-terminal fallback may also clip
+borderless pane adds no border minimum. A smaller explicit `max_size` is a hard
+cap and intentionally clips the border. Tiny-terminal fallback may also clip
 below intrinsic minima when the screen cannot satisfy every constraint.
 
 Separator fields are also direct:
@@ -245,11 +242,11 @@ rune.ui.search(opts?)
 ```
 
 - `opts` (table, optional): `query` (string), the initial search text. Omitted
-  or empty reopens the overlay with the previous query.
+  or empty reopens search with the previous query.
 
 Search scans the output pane's history, newest first, using a
 case-insensitive substring match. The viewport follows the selected match.
-`Ctrl+F` and `/find [pattern]` open the same surface.
+`Ctrl+F` and `/find [pattern]` open the same search panel.
 
 | Key | Action |
 |---|---|

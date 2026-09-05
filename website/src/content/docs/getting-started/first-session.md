@@ -25,8 +25,8 @@ Or start `rune` empty and connect from inside:
 /world add example mud.example.com 4000
 ```
 
-From now on, `/connect example` inside the client (or `rune example` from
-your shell) connects by name. `/connect` with no arguments opens a picker
+Use `/connect example` inside the client (or `rune example` from
+your shell) to connect by name. `/connect` with no arguments opens a picker
 over your saved worlds, and `/reconnect` redials the last server, even
 across restarts.
 

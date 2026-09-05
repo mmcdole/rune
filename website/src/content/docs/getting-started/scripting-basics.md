@@ -74,15 +74,14 @@ rune.trigger.contains("flees in panic", "kill target")
 ```
 
 Since `/reload` rebuilds the whole Lua state, edits to required files are
-picked up on the next `/reload` just like edits to `init.lua`.
+loaded on `/reload`, along with `init.lua`.
 
-## The client itself is Lua
+## Customizing built-in behavior
 
-The API isn't a plugin surface bolted onto the side; the client's own
-behavior is built with it. The input pipeline, local echo, the default
-keymap, and the status bar are Lua scripts embedded in the binary,
-registered through the same hooks your `init.lua` uses. For example, the
-`> ` prefix on echoed commands is a hook handler, so you can replace it:
+The input hooks, local echo, default keymap, and status bar are Lua scripts
+embedded in the binary. They use the same registration functions as your
+`init.lua`. For example, replace the default `> ` prefix on echoed commands
+with an echo hook:
 
 ```lua
 rune.hooks.on("echo", function(text)
@@ -119,8 +118,7 @@ the [API reference](/reference/api/) has full signatures for every
 
 ## Next
 
-[Triggers](/scripting/triggers/) is where most scripts start. Once the
-shapes are familiar, [The Scripting Model](/scripting/model/) explains the
-machinery every registration shares, so you only learn it once. Coming
-from TinTin++ or Mudlet? Start with
+Read [Triggers](/scripting/triggers/) for pattern matching and
+[The Scripting Model](/scripting/model/) for registration options and handles.
+For TinTin++ and Mudlet equivalents, see
 [Migrating from Other Clients](/getting-started/migrating/).

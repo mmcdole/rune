@@ -1,6 +1,6 @@
 ---
 title: The Scripting Model
-description: "Options, actions, handles, groups, and quarantine: the machinery every registration shares."
+description: "Shared registration behavior: options, actions, handles, groups, and error handling."
 ---
 
 Everything you register with rune (aliases, triggers, timers, hooks, key
@@ -148,8 +148,7 @@ rune.bars.get("status"):disable()
 
 ## Handles
 
-For the times you would rather hold a reference than name a thing, every
-creation function also returns a handle:
+Every creation function returns a handle for managing the registration directly:
 
 ```lua
 local h = rune.trigger.contains("spam", nil, {gag = true, name = "spam-gag"})
@@ -162,7 +161,7 @@ h:group()    -- nil (no group set)
 h:action()   -- the registered action
 ```
 
-Methods chain, which is handy for registering something already switched off:
+Handle methods can be chained. To register an item in a disabled state:
 
 ```lua
 rune.trigger.contains("Weather:", nil, {gag = true}):disable()
@@ -198,7 +197,7 @@ running.
 :::
 
 To recover, fix the error and re-enable the item with `h:enable()`,
-`rune.trigger.enable("name")`, or just `/reload` (re-registering
+`rune.trigger.enable("name")`, or `/reload` (re-registering
 resets the failure count). One successful run also clears the count.
 
 ## Source attribution
