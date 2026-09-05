@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/mmcdole/rune/ui/tui/widget"
 )
 
 func TestKeyToStringUsesCanonicalV2Names(t *testing.T) {
@@ -170,5 +171,50 @@ func TestUndocumentedNumpadKeysDoNotCollideWithOrdinaryBinds(t *testing.T) {
 		if got := keyToString(tea.KeyPressMsg{Code: code}); got != "" {
 			t.Fatalf("keyToString(Code=%v) = %q, want no bind name", code, got)
 		}
+	}
+}
+
+// TestHomeEndEditInputWhileCtrlVariantsScroll pins the default key
+// split: with no binds registered, bare Home/End fall through to the
+// input widget as cursor movement, while Ctrl+Home/Ctrl+End hit the Go
+// scroll fallback (the path that keeps degraded mode navigable).
+func TestHomeEndEditInputWhileCtrlVariantsScroll(t *testing.T) {
+	m := newTestModel(t)
+
+	typed := "say hello"
+	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyExtended, Text: typed})
+	m = next.(*Model)
+
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyHome})
+	m = next.(*Model)
+	if m.output.viewport.Mode() != widget.ModeLive {
+		t.Fatal("Home scrolled the viewport instead of reaching the input")
+	}
+	if pos := m.inputCtl.input.Position(); pos != 0 {
+		t.Fatalf("Home left cursor at %d, want 0", pos)
+	}
+
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnd})
+	m = next.(*Model)
+	if m.output.viewport.Mode() != widget.ModeLive {
+		t.Fatal("End scrolled the viewport instead of reaching the input")
+	}
+	if pos := m.inputCtl.input.Position(); pos != len(typed) {
+		t.Fatalf("End left cursor at %d, want %d", pos, len(typed))
+	}
+
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyHome, Mod: tea.ModCtrl})
+	m = next.(*Model)
+	if m.output.viewport.Mode() == widget.ModeLive {
+		t.Fatal("Ctrl+Home did not scroll the viewport to the top")
+	}
+
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnd, Mod: tea.ModCtrl})
+	m = next.(*Model)
+	if m.output.viewport.Mode() != widget.ModeLive {
+		t.Fatal("Ctrl+End did not return the viewport to live")
+	}
+	if got := m.inputCtl.input.Value(); got != typed {
+		t.Fatalf("input draft = %q, want %q", got, typed)
 	}
 }

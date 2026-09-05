@@ -7,7 +7,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
-
 	"github.com/mmcdole/rune/ui"
 	"github.com/mmcdole/rune/ui/tui/widget"
 )
@@ -183,10 +182,12 @@ var _ widget.Widget = (*measuringWidget)(nil)
 func (w *measuringWidget) MinimumSize() image.Point { return image.Point{} }
 
 func (w *measuringWidget) SetSize(width, height int) { w.width, w.height = width, height }
+
 func (w *measuringWidget) MeasureHeight(width, limit int) int {
 	w.preferredCalls++
 	return min(limit, w.preferred(max(1, width)))
 }
+
 func (w *measuringWidget) View() string { return w.text }
 
 func TestOnlyAutoTracksRequestIntrinsicMeasurement(t *testing.T) {
@@ -958,5 +959,55 @@ func TestSeparatorInsideRowKeepsWidgetRendering(t *testing.T) {
 	separator := findLeaf(t, m.layoutPlan, "", ui.LayoutTypeSeparator)
 	if separator.parentAxis != axisHorizontal || separator.content.Empty() {
 		t.Fatalf("row separator parentAxis=%v content=%v, want widget rendering", separator.parentAxis, separator.content)
+	}
+}
+
+// TestBarNameDoesNotReplaceBuiltinWidget verifies that bar and built-in names
+// belong to independent resource namespaces.
+func TestBarNameDoesNotReplaceBuiltinWidget(t *testing.T) {
+	m := newTestModel(t)
+	inputWidget := m.input
+
+	next, _ := m.Update(ui.UpdateBarsMsg{"input": {Left: "hijack"}})
+	m = next.(*Model)
+
+	if m.input != inputWidget {
+		t.Fatal("bar named \"input\" replaced the input widget")
+	}
+	if _, exists := m.bars["input"]; !exists {
+		t.Fatal("bar named \"input\" was not retained in its own namespace")
+	}
+
+	next, _ = m.Update(ui.UpdateBarsMsg{})
+	m = next.(*Model)
+
+	if m.input != inputWidget {
+		t.Fatal("removing the colliding bar deleted the input widget")
+	}
+}
+
+// TestSeparatorLeafCharactersAreIndependent verifies that configured and
+// default separator characters belong to their individual leaves.
+func TestSeparatorLeafCharactersAreIndependent(t *testing.T) {
+	m := newTestModel(t)
+
+	// No "input" entry: the input widget draws its own default rule,
+	// which would mask a separator that failed to reset.
+	next, _ := m.Update(ui.UpdateLayoutMsg(ui.LayoutTree{Root: ui.LayoutNode{
+		Type: ui.LayoutTypeColumn,
+		Children: []ui.LayoutNode{
+			{Type: ui.LayoutTypeSeparator, SeparatorChar: "═", Size: ui.AutoSize()},
+			{Type: ui.LayoutTypePane, Name: ui.OutputPaneName, Border: ui.PaneBorderNone},
+			{Type: ui.LayoutTypeSeparator, Size: ui.AutoSize()},
+		},
+	}}))
+	m = next.(*Model)
+
+	view := ansi.Strip(m.View().Content)
+	if !strings.Contains(view, strings.Repeat("═", m.width)) {
+		t.Error("configured separator rule missing from view")
+	}
+	if !strings.Contains(view, strings.Repeat("─", m.width)) {
+		t.Error("default separator did not retain its own rule character")
 	}
 }

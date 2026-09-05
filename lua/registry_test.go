@@ -11,6 +11,43 @@ import (
 	"github.com/mmcdole/rune/text"
 )
 
+// TestRegistrationsRecordSource verifies that hooks, triggers, aliases,
+// and timers record the registering script's file:line for listings and
+// error attribution.
+func TestRegistrationsRecordSource(t *testing.T) {
+	engine, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	script := `
+		rune.hooks.on("output", function() end, {name = "h"})
+		rune.trigger.contains("x", "look", {name = "t"})
+		rune.alias.exact("n", "north")
+		rune.timer.after(60, function() end, {name = "tm"})
+
+		local function source_of(list, name)
+			for _, item in ipairs(list) do
+				if item.name == name then
+					return item.source
+				end
+			end
+		end
+
+		for _, entry in ipairs({
+			{"hook", rune.hooks.list(), "h"},
+			{"trigger", rune.trigger.list(), "t"},
+			{"alias", rune.alias.list(), "n"},
+			{"timer", rune.timer.list(), "tm"},
+		}) do
+			local src = source_of(entry[2], entry[3])
+			assert(src and src:find("attr_test"),
+				entry[1] .. " source not recorded, got " .. tostring(src))
+		end
+	`
+	if err := engine.DoString("attr_test.lua", script); err != nil {
+		t.Fatalf("source attribution failed: %v", err)
+	}
+}
+
 func TestRegistryUpsertByNameReplaces(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()

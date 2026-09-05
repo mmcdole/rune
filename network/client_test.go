@@ -11,6 +11,8 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"errors"
+	"fmt"
+	"io"
 	"math/big"
 	"net"
 	"sync"
@@ -425,33 +427,92 @@ func TestMCCP2DecompressAndResume(t *testing.T) {
 	}
 }
 
-// TestMCCP2SplitAcrossReads verifies compression works when the
-// compressed bytes arrive in a separate TCP segment from the
-// activation marker.
-func TestMCCP2SplitAcrossReads(t *testing.T) {
-	addr := telnetServer(t, func(t *testing.T, conn net.Conn) {
-		conn.Write([]byte{CmdIAC, CmdWILL, OptMCCP2})
-		expectBytes(t, conn, []byte{CmdIAC, CmdDO, OptMCCP2}, "DO MCCP2")
+// Exercise readLoop with explicit read boundaries: separate TCP writes do not
+// guarantee separate reads. The loopback test above covers actual socket wiring.
+func TestMCCP2ReadChunkingPreservesDataAndPlainTrailer(t *testing.T) {
+	const compressed = "compressed one\r\ncompressed two\r\n"
+	const trailer = "plain after stream\r\n"
+	var wire bytes.Buffer
+	wire.Write([]byte{CmdIAC, CmdSB, OptMCCP2, CmdIAC, CmdSE})
+	zw := zlib.NewWriter(&wire)
+	if _, err := zw.Write([]byte(compressed)); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	wire.WriteString(trailer)
 
-		// Marker alone in one segment...
-		conn.Write([]byte{CmdIAC, CmdSB, OptMCCP2, CmdIAC, CmdSE})
-		time.Sleep(50 * time.Millisecond)
+	type readCase struct {
+		name   string
+		chunks [][]byte
+	}
+	cases := []readCase{{name: "unsplit", chunks: [][]byte{wire.Bytes()}}}
+	var singleBytes [][]byte
+	for split := 1; split < wire.Len(); split++ {
+		cases = append(cases, readCase{fmt.Sprintf("split-%d", split), [][]byte{wire.Bytes()[:split], wire.Bytes()[split:]}})
+	}
+	for i := range wire.Len() {
+		singleBytes = append(singleBytes, wire.Bytes()[i:i+1])
+	}
+	cases = append(cases, readCase{"one-byte-at-a-time", singleBytes})
 
-		// ...compressed data in the next
-		var z bytes.Buffer
-		zw := zlib.NewWriter(&z)
-		zw.Write([]byte("split activation\r\n"))
-		zw.Close()
-		conn.Write(z.Bytes())
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var readers []io.Reader
+			for _, chunk := range tc.chunks {
+				readers = append(readers, bytes.NewReader(chunk))
+			}
+			// MultiReader returns each chunk separately, including when zlib
+			// starts reading the underlying source during activation.
+			source := io.MultiReader(readers...)
+			conn, peer := net.Pipe()
+			defer conn.Close()
+			defer peer.Close()
+			// Complete WILL/DO before activation, as an MCCP server must.
+			parser := NewParser()
+			negotiation := parser.Receive([]byte{CmdIAC, CmdWILL, OptMCCP2})
+			if len(negotiation) != 2 || negotiation[0].Kind != TelnetEventDataSend ||
+				!bytes.Equal(negotiation[0].Data, []byte{CmdIAC, CmdDO, OptMCCP2}) {
+				t.Fatalf("MCCP negotiation = %+v, want DO MCCP2", negotiation)
+			}
+			cx := &connection{
+				conn: conn, connectionID: 1, parser: parser,
+				reader: source, raw: source, done: make(chan struct{}),
+			}
+			// Capacity bounds every possible byte-sized batch plus EOF, so
+			// the real read loop can run synchronously to completion.
+			c := &TCPClient{current: cx, inboundChan: make(chan Inbound, wire.Len()+1)}
+			c.readLoop(cx)
+			close(c.inboundChan)
 
-		buf := make([]byte, 1)
-		conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-		conn.Read(buf)
-	})
-
-	c := connectLoopback(t, addr)
-	if got := dataThrough(t, c, "split activation\r\n", "split-activation data"); got != "split activation\r\n" {
-		t.Fatalf("got data %q, want %q", got, "split activation\r\n")
+			var got bytes.Buffer
+			disconnects := 0
+			for inbound := range c.Inbound() {
+				if inbound.ConnectionID != 1 || disconnects != 0 {
+					t.Fatalf("unexpected inbound envelope or event after EOF: %+v", inbound)
+				}
+				if inbound.Kind == InboundDisconnect {
+					disconnects++
+					continue
+				}
+				if inbound.Kind != InboundBatch || len(inbound.Batch.Events) == 0 {
+					t.Fatalf("expected a nonempty data batch: %+v", inbound)
+				}
+				for _, event := range inbound.Batch.Events {
+					if event.Kind != TelnetEventDataReceive {
+						t.Fatalf("transport-local compression event escaped: %+v", event)
+					}
+					got.Write(event.Data)
+				}
+			}
+			if got.String() != compressed+trailer {
+				t.Fatalf("data = %q, want %q", got.String(), compressed+trailer)
+			}
+			if cx.compressed || disconnects != 1 || c.current != nil {
+				t.Fatalf("unclean stream end: compressed=%t disconnects=%d current=%p", cx.compressed, disconnects, c.current)
+			}
+		})
 	}
 }
 

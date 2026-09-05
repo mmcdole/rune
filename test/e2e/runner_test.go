@@ -30,7 +30,9 @@ package e2e
 // user-visible symptom under scenarios/regressions/ - named
 // <issue#>-slug.json when a tracker report exists, else
 // <yyyy-mm>-slug.json, with "issue" pointing at the report - watch it
-// fail, then fix. regressions/ is only for entries whose sole reason
+// fail, then fix. Preserve coverage while the behavior is supported; tests
+// may be consolidated or retired with the behavior (see docs/testing.md).
+// regressions/ is only for entries whose sole reason
 // to exist is a specific bug (reported or discovered); if the
 // reproduction is a general behavior contract, it belongs in the
 // feature file.
@@ -51,6 +53,10 @@ package e2e
 //     "press": "f6"              a bound key reaches the session
 //     "resize": {"width": W, "height": H}
 //
+//   Expectations search accumulated observations, not event order or current
+//   prompt state. Exact byte expectations are subsequence checks, not whole
+//   stream equality or occurrence counts.
+//
 //   Expectations (poll up to 5s; timeouts are failure detectors, not
 //   synchronization - sync by causality, e.g. a marker line). The
 //   wire capture accumulates for the whole scenario, including across
@@ -59,7 +65,7 @@ package e2e
 //     "expect_sent_bytes": [...]  exact byte sequence appears on the wire
 //     "expect_printed": "..."     substring reaches the scrollback
 //     "expect_echoed": "..."      substring reaches the local echo
-//     "expect_prompt": "..."      substring shown in the prompt overlay
+//     "expect_prompt": "..."      substring was observed in the prompt overlay
 //     "expect_input": "..."       the input line was set to exactly this
 //
 //   Negative expectations (checked immediately - place them AFTER a

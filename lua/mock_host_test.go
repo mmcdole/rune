@@ -1,12 +1,15 @@
 package lua
 
 import (
+	"errors"
 	"sync"
 	"time"
 
 	"github.com/mmcdole/rune/input"
 	"github.com/mmcdole/rune/ui"
 )
+
+var errNotConnected = errors.New("not connected")
 
 // Compile-time check that MockHost implements Host
 var _ Host = (*MockHost)(nil)

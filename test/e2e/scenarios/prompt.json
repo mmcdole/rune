@@ -2,7 +2,7 @@
   "description": "Prompt overlay behavior for partial lines, GA/EOR prompts, submissions, accepted game sends, and no-GA login.",
   "scenarios": [
     {
-      "name": "an accepted game send commits a GA/EOR prompt",
+      "name": "an accepted game send commits a GA prompt",
       "steps": [
         { "connect": true },
         { "server_prompt": "HP:100> " },
@@ -13,7 +13,7 @@
       ]
     },
     {
-      "name": "a local submission commits a partial prompt before echo and output",
+      "name": "a local submission commits a partial prompt and produces echo and help output",
       "steps": [
         { "connect": true },
         {
@@ -22,19 +22,19 @@
         },
         { "expect_prompt": "What is your name:" },
         { "type": "/help" },
-        { "expect_printed": "What is your name:", "note": "submission commits the partial prompt before local processing" },
-        { "expect_echoed": "/help", "note": "local echo follows the committed prompt" },
-        { "expect_printed": "/aliases", "note": "unique /help output follows the submission" }
+        { "expect_printed": "What is your name:", "note": "submission commits the partial prompt to scrollback" },
+        { "expect_echoed": "/help", "note": "the submitted command is echoed" },
+        { "expect_printed": "/aliases", "note": "the help command produces its unique output" }
       ]
     },
     {
-      "name": "a server line follows a committed GA/EOR prompt",
+      "name": "a GA prompt and the next server line both reach scrollback",
       "steps": [
         { "connect": true },
         { "server_prompt": "HP:90> " },
         { "expect_prompt": "HP:90>" },
         { "server_line": "the sun rises" },
-        { "expect_printed": "HP:90>", "note": "GA confirmed the prompt before the next line" },
+        { "expect_printed": "HP:90>", "note": "the confirmed prompt reaches scrollback" },
         { "expect_printed": "the sun rises" }
       ]
     },

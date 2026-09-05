@@ -131,6 +131,7 @@ func TestTriggerMatchTypes(t *testing.T) {
 	})
 }
 
+// All match types share registry handles; matching variants are covered above.
 func TestTriggerHandles(t *testing.T) {
 	runFeatureCases(t, []featureCase{
 		{
@@ -163,30 +164,6 @@ func TestTriggerHandles(t *testing.T) {
 			`,
 			output: "A goblin attacks you!",
 			want:   []string{"flee"},
-		},
-		{
-			name:   "regex disable via handle",
-			setup:  `local t = rune.trigger.regex('HP: (\\d+)/100', 'heal'); t:disable()`,
-			output: "HP: 30/100",
-			want:   []string{},
-		},
-		{
-			name:   "regex enable after disable",
-			setup:  `local t = rune.trigger.regex('HP: (\\d+)/100', 'heal'); t:disable(); t:enable()`,
-			output: "HP: 30/100",
-			want:   []string{"heal"},
-		},
-		{
-			name:   "starts disable via handle",
-			setup:  `local t = rune.trigger.starts('Enemy', 'attack'); t:disable()`,
-			output: "Enemy approaches!",
-			want:   []string{},
-		},
-		{
-			name:   "starts enable after disable",
-			setup:  `local t = rune.trigger.starts('Enemy', 'attack'); t:disable(); t:enable()`,
-			output: "Enemy approaches!",
-			want:   []string{"attack"},
 		},
 	})
 }

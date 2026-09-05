@@ -19,6 +19,18 @@ func setupTest(t *testing.T) (*Engine, *MockHost, func()) {
 		t.Fatal("Failed to initialize engine:", err)
 	}
 
+	loadTestCoreScripts(t, engine)
+
+	cleanup := func() {
+		engine.Close()
+	}
+
+	return engine, host, cleanup
+}
+
+// loadTestCoreScripts loads the embedded core in production boot order.
+func loadTestCoreScripts(t *testing.T, engine *Engine) {
+	t.Helper()
 	// Load core scripts (mimicking Session.boot())
 	entries, err := CoreScripts.ReadDir("core")
 	if err != nil {
@@ -44,11 +56,6 @@ func setupTest(t *testing.T) (*Engine, *MockHost, func()) {
 		}
 	}
 
-	cleanup := func() {
-		engine.Close()
-	}
-
-	return engine, host, cleanup
 }
 
 // featureCase is one semantic variant: register something in Lua,

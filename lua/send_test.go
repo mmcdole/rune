@@ -1,9 +1,5 @@
 package lua
 
-// Command expansion semantics (75_send.lua): the variant matrix for
-// semicolon splitting and #N repeats. The e2e wiring proof lives in
-// test/e2e/scenarios/send.json.
-
 import (
 	"fmt"
 	"strings"
@@ -11,6 +7,35 @@ import (
 
 	"github.com/mmcdole/rune/input"
 )
+
+// TestSendRawFailureIsReportedNotRaised verifies the nil+err convention:
+// a failed send is echoed and returned as a value, and does not raise a
+// Lua error that would abort the calling script.
+func TestSendRawFailureIsReportedNotRaised(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	host.SendErr = errNotConnected
+
+	script := `
+		local ok, err = rune.send_raw("north")
+		assert(ok == nil, "expected nil ok")
+		assert(err == "not connected", "expected error message, got " .. tostring(err))
+	`
+	if err := engine.DoString("test", script); err != nil {
+		t.Fatalf("send_raw should not raise: %v", err)
+	}
+
+	echoed := false
+	for _, p := range host.DrainPrintCalls() {
+		if strings.Contains(p, "not connected") {
+			echoed = true
+		}
+	}
+	if !echoed {
+		t.Error("expected send failure to be echoed")
+	}
+}
 
 func TestSendExpansion(t *testing.T) {
 	runFeatureCases(t, []featureCase{

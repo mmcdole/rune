@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"sort"
 	"strings"
 	"testing"
 
@@ -214,31 +213,7 @@ func newRefreshBarsReentryEngine(
 	if err := engine.Init(); err != nil {
 		t.Fatalf("initialize engine: %v", err)
 	}
-	loadCoreScriptsForReentryTest(t, engine)
+	loadTestCoreScripts(t, engine)
 	host.DrainPrintCalls()
 	return engine, host
-}
-
-func loadCoreScriptsForReentryTest(t *testing.T, engine *Engine) {
-	t.Helper()
-	entries, err := CoreScripts.ReadDir("core")
-	if err != nil {
-		t.Fatalf("read core scripts: %v", err)
-	}
-	files := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			files = append(files, entry.Name())
-		}
-	}
-	sort.Strings(files)
-	for _, file := range files {
-		content, err := CoreScripts.ReadFile("core/" + file)
-		if err != nil {
-			t.Fatalf("read %s: %v", file, err)
-		}
-		if err := engine.DoString(file, string(content)); err != nil {
-			t.Fatalf("execute %s: %v", file, err)
-		}
-	}
 }
