@@ -12,6 +12,8 @@ import (
 type inputLayout struct {
 	height         int
 	pickerHeight   int
+	results        image.Rectangle
+	help           int
 	body           image.Rectangle
 	rules          []Rule
 	header, footer int
@@ -21,32 +23,29 @@ func (i *Input) layout(width, height int) inputLayout {
 	if height <= 0 {
 		height = i.MeasureHeight(width, 1<<14)
 	}
-	p := inputLayout{height: height, header: -1, footer: -1}
+	p := inputLayout{height: height, help: -1, header: -1, footer: -1}
 	if width <= 0 {
 		return p
 	}
-	if i.SearchActive() {
-		if i.search.frameFits(width, height) {
-			p.rules = boxRules(width, i.search.PreferredHeight())
+	if i.PickerActive() || i.SearchActive() {
+		// One editor stays at the bottom. Suggestions/results occupy the
+		// rows above it; Input owns their shared separators, with no box.
+		fieldHeight := min(3, max(1, height-1))
+		p.pickerHeight = max(0, height-fieldHeight)
+		start := 0
+		if p.pickerHeight > 1 {
+			p.rules = append(p.rules, Rule{At: 0, To: width})
+			start = 1
 		}
-		return p
-	}
-	if i.PickerActive() {
-		// Preserve the focused picker before spending rows on command chrome.
-		// Inline completion still needs its editable command field; a modal
-		// picker can occupy the entire surface on a one-row terminal.
-		fieldHeight := min(3, max(0, height-2))
-		if i.PickerInline() {
-			fieldHeight = max(1, fieldHeight)
-		}
-		p.pickerHeight = min(i.picker.PreferredHeight(), max(0, height-fieldHeight))
-		if i.picker.frameFits(width, p.pickerHeight) {
-			p.rules = boxRules(width, p.pickerHeight)
+		p.results = image.Rect(0, start, width, p.pickerHeight)
+		if i.SearchActive() && p.results.Dy() > 1 {
+			p.results.Max.Y--
+			p.help = p.results.Max.Y
 		}
 	}
 	top, bottom := p.pickerHeight, height
 	fieldHeight := bottom - top
-	if i.composer != nil {
+	if i.composer != nil && !i.SearchActive() && (!i.PickerActive() || i.PickerInline()) {
 		if fieldHeight >= 2 {
 			p.header = top
 			p.rules = append(p.rules, Rule{At: top, To: width})
@@ -78,7 +77,7 @@ func (i *Input) Rules(width, height int) []Rule {
 		return nil
 	}
 	plan := i.layout(width, height)
-	if i.composer != nil && !i.SearchActive() {
+	if i.composer != nil && !i.SearchActive() && (!i.PickerActive() || i.PickerInline()) {
 		header, footer := i.composeLabels(strings.Count(i.composer.Value(), "\n") + 1)
 		for n := range plan.rules {
 			rule := &plan.rules[n]

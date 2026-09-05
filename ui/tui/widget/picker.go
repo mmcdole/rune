@@ -20,16 +20,14 @@ type PickerConfig struct {
 
 // Picker is a fuzzy-filtering selector for PickerItems.
 type Picker struct {
-	items        []ui.PickerItem
-	filtered     []ui.PickerItem
-	matches      []util.Match
-	query        string
-	selected     int
-	scrollOff    int
-	config       PickerConfig
-	styles       style.Styles
-	width        int
-	queryVisible bool
+	items     []ui.PickerItem
+	filtered  []ui.PickerItem
+	matches   []util.Match
+	query     string
+	selected  int
+	scrollOff int
+	config    PickerConfig
+	styles    style.Styles
 }
 
 // NewPicker creates a new picker.
@@ -41,9 +39,8 @@ func NewPicker(config PickerConfig, styles style.Styles) *Picker {
 		config.EmptyText = "No matches"
 	}
 	return &Picker{
-		config:       config,
-		queryVisible: config.Header != "",
-		styles:       styles,
+		config: config,
+		styles: styles,
 	}
 }
 
@@ -53,15 +50,9 @@ func (p *Picker) SetItems(items []ui.PickerItem) {
 	p.Reset()
 }
 
-// SetWidth updates the picker width.
-func (p *Picker) SetWidth(w int) {
-	p.width = w
-}
-
 // SetHeader updates the header text.
 func (p *Picker) SetHeader(header string) {
 	p.config.Header = header
-	p.queryVisible = header != ""
 }
 
 // Query returns the current filter query.
@@ -151,88 +142,33 @@ func (p *Picker) Selected() (ui.PickerItem, bool) {
 	return p.filtered[p.selected], true
 }
 
-// PreferredHeight returns the rendered height including border.
-func (p *Picker) PreferredHeight() int {
-	h := len(p.filtered)
-	if h > p.config.MaxVisible {
-		h = p.config.MaxVisible
-	}
-	if h == 0 {
-		h = 1 // "No matches" placeholder
-	}
-
-	if p.queryVisible {
-		h++
-	}
-
-	h += 2 // border
-	return h
+// resultHeight excludes the query and decoration owned by the input surface.
+func (p *Picker) resultHeight() int {
+	return max(1, min(len(p.filtered), p.config.MaxVisible))
 }
 
-// View renders the full picker at its preferred height.
-func (p *Picker) View() string { return p.view(p.PreferredHeight(), true) }
-
-func (p *Picker) contentView(height int) string { return p.view(height, false) }
-
-func (p *Picker) frameFits(width, height int) bool {
-	chrome := p.styles.OverlayBorder.GetHorizontalBorderSize() + p.styles.OverlayBorder.GetHorizontalPadding()
-	minimum := 3 // border + one result
-	if p.queryVisible {
-		minimum++
-	}
-	return width > chrome && height >= minimum
-}
-
-// view reduces the result window around the selection before dropping its
-// frame. Even a one-row modal picker retains its editable query and cursor.
-func (p *Picker) view(height int, paintFrame bool) string {
+func (p *Picker) resultRows(width, height int) []string {
 	if height <= 0 {
-		return ""
+		return nil
 	}
-	width := max(1, p.width)
-	framed := p.frameFits(width, height)
-	contentWidth, contentHeight := width, height
-	if framed {
-		contentWidth -= p.styles.OverlayBorder.GetHorizontalBorderSize() + p.styles.OverlayBorder.GetHorizontalPadding()
-		contentHeight -= 2
+	rows := make([]string, height)
+	if len(p.filtered) == 0 {
+		rows[0] = clipRow(p.styles.Muted.Render("  "+text.VisualizeTerminalControls(p.config.EmptyText, false)), width)
+		return rows
 	}
-	lines := make([]string, 0, contentHeight)
-	if p.queryVisible {
-		lines = append(lines, p.queryLine(contentWidth))
-	}
-	limit := max(0, contentHeight-len(lines))
-	if limit > 0 {
-		if len(p.filtered) == 0 {
-			lines = append(lines, clipRow(p.styles.Muted.Render("  "+text.VisualizeTerminalControls(p.config.EmptyText, false)), contentWidth))
-		} else {
-			visible := min(limit, len(p.filtered))
-			start := min(p.scrollOff, p.selected)
-			start = max(start, p.selected-visible+1)
-			start = max(0, min(start, len(p.filtered)-visible))
-			for i := start; i < start+visible; i++ {
-				var positions []int
-				if i < len(p.matches) {
-					positions = p.matches[i].Positions
-				}
-				lines = append(lines, p.renderItem(p.filtered[i], contentWidth, i == p.selected, positions))
-			}
+	visible := min(height, len(p.filtered))
+	start := min(p.scrollOff, p.selected)
+	start = max(start, p.selected-visible+1)
+	start = max(0, min(start, len(p.filtered)-visible))
+	for n := 0; n < visible; n++ {
+		index := start + n
+		var positions []int
+		if index < len(p.matches) {
+			positions = p.matches[index].Positions
 		}
+		rows[n] = p.renderItem(p.filtered[index], width, index == p.selected, positions)
 	}
-	for len(lines) < contentHeight {
-		lines = append(lines, "")
-	}
-	content := strings.Join(lines, "\n")
-	if framed {
-		if !paintFrame {
-			padding := 1 + p.styles.OverlayBorder.GetPaddingLeft()
-			for n := range lines {
-				lines[n] = strings.Repeat(" ", padding) + lines[n]
-			}
-			return "\n" + strings.Join(lines, "\n") + "\n"
-		}
-		return p.styles.OverlayBorder.Width(width).Render(content)
-	}
-	return content
+	return rows
 }
 
 func (p *Picker) queryLine(width int) string {

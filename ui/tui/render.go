@@ -252,9 +252,8 @@ func (m *Model) planFrames(plan *layoutPlan) {
 		if decorated, ok := leaf.surface.(interface{ Rules(int, int) []widget.Rule }); ok {
 			for _, rule := range decorated.Rules(leaf.content.Dx(), leaf.content.Dy()) {
 				rule = rule.Translate(leaf.content.Min)
-				// A partial widget frame (such as a picker above input) does
-				// not own the whole column edge. Reuse the boundary reserved
-				// by the surrounding layout instead of drawing an inset box.
+				// Extend edge-aligned rules to the boundaries reserved by the
+				// surrounding layout so separators meet neighboring dividers.
 				if rule.Vertical {
 					if rule.At == leaf.content.Min.X {
 						rule.At = leaf.outer.Min.X

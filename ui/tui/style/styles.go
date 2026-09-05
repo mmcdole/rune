@@ -25,7 +25,6 @@ type Styles struct {
 	InputSelected lipgloss.Style // whole-line keep-input selection
 
 	// Picker overlay
-	OverlayBorder        lipgloss.Style
 	OverlaySelected      lipgloss.Style
 	OverlayNormal        lipgloss.Style
 	OverlayMatch         lipgloss.Style
@@ -51,10 +50,6 @@ func DefaultStyles() Styles {
 		InputSelected: lipgloss.NewStyle().Reverse(true),
 
 		// Picker overlay (slash picker, fuzzy search)
-		OverlayBorder: lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("62")).
-			Padding(0, 1),
 		OverlaySelected: lipgloss.NewStyle().
 			Background(lipgloss.Color("62")).
 			Foreground(lipgloss.Color("230")),

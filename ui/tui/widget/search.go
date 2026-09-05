@@ -49,7 +49,6 @@ type Search struct {
 	frozenTail uint64
 	frozenSet  bool
 	notice     string
-	width      int
 }
 
 // NewSearch creates a search overlay over the given buffer.
@@ -255,85 +254,9 @@ func (s *Search) Selected() (SearchMatch, bool) {
 	return s.matches[s.selected], true
 }
 
-// SetWidth updates the overlay width.
-func (s *Search) SetWidth(w int) {
-	s.width = w
-}
-
-// PreferredHeight returns the rendered height including border.
-func (s *Search) PreferredHeight() int {
-	rows := len(s.matches)
-	if rows > searchMaxVisible {
-		rows = searchMaxVisible
-	}
-	if rows == 0 {
-		rows = 1 // "No matches" placeholder
-	}
-	return 2 + rows + 2 // header + rows + help footer + border
-}
-
-// View renders the search overlay.
-func (s *Search) View() string {
-	return s.view(true)
-}
-
-func (s *Search) contentView() string { return s.view(false) }
-
-func (s *Search) view(paintFrame bool) string {
-	if !s.frameFits(s.width, s.PreferredHeight()) {
-		return s.constrainedView(s.PreferredHeight())
-	}
-	var lines []string
-	overlay := s.styles.OverlayBorder
-	frameWidth := max(1, s.width)
-	contentWidth := max(1, frameWidth-overlay.GetHorizontalBorderSize()-overlay.GetHorizontalPadding())
-
-	lines = append(lines, s.headerLine(contentWidth))
-	lines = append(lines, s.resultLines(contentWidth, searchMaxVisible)...)
-	lines = append(lines, s.footerLine(contentWidth))
-
-	content := strings.Join(lines, "\n")
-	if !paintFrame {
-		padding := 1 + overlay.GetPaddingLeft()
-		for n := range lines {
-			lines[n] = strings.Repeat(" ", padding) + lines[n]
-		}
-		return "\n" + strings.Join(lines, "\n") + "\n"
-	}
-	return overlay.Width(frameWidth).Render(content)
-}
-
-// constrainedView preserves the active search field when its layout slot is
-// too small for the complete bordered surface. Results use any middle rows;
-// a help row is retained when at least three rows are available.
-func (s *Search) constrainedView(height int) string {
-	if height <= 0 {
-		return ""
-	}
-	width := max(1, s.width)
-	lines := []string{s.headerLine(width)}
-	bodyRows := height - 1
-	showFooter := height >= 3
-	if showFooter {
-		bodyRows--
-	}
-	lines = append(lines, s.resultLines(width, bodyRows)...)
-	bodyEnd := height
-	if showFooter {
-		bodyEnd--
-	}
-	for len(lines) < bodyEnd {
-		lines = append(lines, "")
-	}
-	if showFooter {
-		lines = append(lines, s.footerLine(width))
-	}
-	return strings.Join(lines, "\n")
-}
-
-func (s *Search) frameFits(width, height int) bool {
-	chrome := s.styles.OverlayBorder.GetHorizontalBorderSize() + s.styles.OverlayBorder.GetHorizontalPadding()
-	return width > chrome && height >= s.PreferredHeight()
+// resultHeight measures matching rows only; Input owns query, help, and separators.
+func (s *Search) resultHeight() int {
+	return max(1, min(len(s.matches), searchMaxVisible))
 }
 
 func (s *Search) resultLines(width, limit int) []string {
@@ -363,8 +286,8 @@ func (s *Search) resultLines(width, limit int) []string {
 	return lines
 }
 
-// headerLine renders "Search: query█        cur/total", count right-aligned.
-func (s *Search) headerLine(width int) string {
+// queryLine renders "Search: query█        cur/total", count right-aligned.
+func (s *Search) queryLine(width int) string {
 	count := "0/0"
 	if len(s.matches) > 0 {
 		if s.olderMore || s.newerMore {

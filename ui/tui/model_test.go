@@ -413,8 +413,8 @@ func TestClosingTallSearchPublishesGeometryInducedLiveState(t *testing.T) {
 	}
 	next, _ := m.Update(ui.ShowSearchMsg{Query: "line"})
 	m = next.(*Model)
-	if !m.input.SearchActive() || m.layoutPlan.output.Dy() != 2 {
-		t.Fatalf("search setup = active %v output height %d, want true and 2 (shared border)",
+	if !m.input.SearchActive() || m.layoutPlan.output.Dy() != 1 {
+		t.Fatalf("search setup = active %v output height %d, want true and 1 (shared border)",
 			m.input.SearchActive(), m.layoutPlan.output.Dy())
 	}
 	next, _ = m.Update(ui.PaneScrollToTopMsg{Name: ui.OutputPaneName})

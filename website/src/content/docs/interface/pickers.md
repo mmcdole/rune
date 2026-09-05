@@ -15,6 +15,13 @@ Inside any picker: type to filter, arrows to move, `Enter` to select,
 `Esc`/`Ctrl+C` to cancel. In the inline command picker, `Tab` completes the
 highlighted command into the input line.
 
+Results appear above the editor, with one shared separator and no separate
+picker box. Modal pickers show their labeled filter at the bottom and hide
+your command draft until they close. Inline completion keeps the command
+field active in that same position and uses its text to filter suggestions.
+Find uses the same arrangement for its search query, with matching output
+above it, a match count beside the query, and navigation help above the separator.
+
 ## Your own pickers
 
 `rune.ui.picker.show` gives scripts the same overlay:

@@ -696,8 +696,8 @@ func TestSearchUsesTheSameResolvedOutputRectangleAsView(t *testing.T) {
 	next, _ := m.Update(ui.ShowSearchMsg{})
 	m = next.(*Model)
 	plan := m.layoutPlan
-	if got := plan.output.Dy(); got != 11 {
-		t.Fatalf("search output height = %d, want 11", got)
+	if got := plan.output.Dy(); got != 10 {
+		t.Fatalf("search output height = %d, want 10", got)
 	}
 	if got := len(strings.Split(m.output.viewport.View(), "\n")); got != plan.output.Dy() {
 		t.Fatalf("viewport height = %d, want resolved output height %d", got, plan.output.Dy())

@@ -19,27 +19,37 @@ func newTestInput(width int) *Input {
 	return in
 }
 
-func TestPickerKeepsItsFrameAboveCommandField(t *testing.T) {
+func TestModalPickerShowsResultsAboveItsOnlyEditor(t *testing.T) {
 	in := newTestInput(40)
+	in.SetValue("unfinished command")
 	in.ShowPicker(ui.ShowPickerMsg{Title: "Aliases", Items: []ui.PickerItem{{Text: "north"}, {Text: "south"}}})
 	in.SetSize(40, in.MeasureHeight(in.width, 1<<14)+2)
 	plan := in.layout(40, in.height)
 	rows := strings.Split(text.StripANSI(in.View()), "\n")
-	if len(rows) != in.height || !strings.Contains(rows[1], "Aliases") {
+	if len(rows) != in.height || !strings.Contains(rows[1], "north") || !strings.Contains(rows[in.height-2], "Aliases: █") {
 		t.Fatalf("picker placement changed: %q", rows)
 	}
 	horizontal := make(map[int]bool)
 	for _, rule := range in.Rules(40, in.height) {
+		if rule.Vertical {
+			t.Fatal("picker must not draw a separate side wall")
+		}
 		if !rule.Vertical && rule.From == 0 && rule.To == 40 {
 			horizontal[rule.At] = true
 		}
 	}
-	if !horizontal[plan.pickerHeight-1] || !horizontal[plan.pickerHeight] || !horizontal[in.height-1] ||
-		!strings.HasPrefix(rows[plan.pickerHeight+1], "> ") {
+	if len(horizontal) != 3 || !horizontal[0] || !horizontal[plan.pickerHeight] || !horizontal[in.height-1] {
 		t.Fatalf("picker/field boundaries disagree with assigned geometry:\n%s", strings.Join(rows, "\n"))
 	}
 	if strings.Contains(in.View(), "─") {
 		t.Fatal("content painted compositor-owned rules")
+	}
+	if strings.Contains(in.View(), "unfinished command") || strings.Count(in.View(), "█") != 1 {
+		t.Fatal("modal picker exposed the inactive command editor")
+	}
+	in.HidePicker()
+	if in.Value() != "unfinished command" || !strings.Contains(text.StripANSI(in.View()), "unfinished command") {
+		t.Fatal("closing picker did not restore the command draft")
 	}
 }
 
@@ -285,7 +295,7 @@ func TestConstrainedSearchKeepsActiveQueryVisible(t *testing.T) {
 		if len(rows) != height {
 			t.Fatalf("height %d rendered %d rows: %q", height, len(rows), rows)
 		}
-		if !strings.Contains(rows[0], "Search: thief") {
+		if !strings.Contains(rows[len(rows)-1], "Search: thief") {
 			t.Fatalf("height %d hid active search query: %q", height, rows)
 		}
 	}
@@ -349,8 +359,15 @@ func TestInputSearchReplacesInactiveCommandField(t *testing.T) {
 	if strings.Contains(view, "COMMAND-DRAFT") {
 		t.Fatalf("inactive command field remained visible during search:\n%s", view)
 	}
-	if got, want := in.MeasureHeight(in.width, 1<<14), search.PreferredHeight(); got != want {
+	if got, want := in.MeasureHeight(in.width, 1<<14), 6; got != want {
 		t.Fatalf("PreferredHeight = %d, want search-only height %d", got, want)
+	}
+	rows := strings.Split(view, "\n")
+	if !strings.HasPrefix(rows[len(rows)-2], "Search: thief") || strings.Count(view, "█") != 1 {
+		t.Fatalf("search must have one bottom editor: %q", rows)
+	}
+	if !strings.Contains(view, "↑ older") || !strings.Contains(view, "1/1") {
+		t.Fatalf("search lost help or match count: %q", rows)
 	}
 
 	in.HideSearch()

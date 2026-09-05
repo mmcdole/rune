@@ -134,9 +134,16 @@ func newTestSearch(lines ...string) *Search {
 	return NewSearch(newTestBuffer(lines...), style.DefaultStyles())
 }
 
+// Preserve the search state while exercising its production Input renderer.
+func searchInput(s *Search, width, height int) *Input {
+	in := NewInput(s.styles, s)
+	in.overlay = overlaySearch
+	in.SetSize(width, height)
+	return in
+}
+
 func TestSearchOpenPreservesQueryAndTypingReplaces(t *testing.T) {
 	s := newTestSearch("a thief", "a guard")
-	s.SetWidth(60)
 
 	s.Open("thief", SearchScope{})
 	if len(s.matches) != 1 {
@@ -264,10 +271,9 @@ func TestSearchReopenResumesCommittedSequence(t *testing.T) {
 
 func TestSearchViewHeaderAndRows(t *testing.T) {
 	s := newTestSearch("one thief", "two", "THIEF two")
-	s.SetWidth(60)
 	s.Open("thief", SearchScope{})
 
-	view := runetext.StripANSI(s.View())
+	view := runetext.StripANSI(searchInput(s, 60, 0).View())
 	if !strings.Contains(view, "2/2") {
 		t.Errorf("header should show newest as the final chronological match, view:\n%s", view)
 	}
@@ -282,17 +288,16 @@ func TestSearchViewHeaderAndRows(t *testing.T) {
 		t.Errorf("footer should explain temporal navigation, view:\n%s", view)
 	}
 	s.SelectOlder()
-	if view := runetext.StripANSI(s.View()); !strings.Contains(view, "1/2") {
+	if view := runetext.StripANSI(searchInput(s, 60, 0).View()); !strings.Contains(view, "1/2") {
 		t.Errorf("count should follow selection, view:\n%s", view)
 	}
 }
 
 func TestSearchViewNoMatches(t *testing.T) {
 	s := newTestSearch("nothing here")
-	s.SetWidth(60)
 	s.Open("zzz", SearchScope{})
 
-	view := runetext.StripANSI(s.View())
+	view := runetext.StripANSI(searchInput(s, 60, 0).View())
 	if !strings.Contains(view, "0/0") || !strings.Contains(view, "No matches") {
 		t.Errorf("empty result view wrong:\n%s", view)
 	}
@@ -307,14 +312,13 @@ func TestConstrainedSearchAlwaysRendersSelectedMatch(t *testing.T) {
 		lines[i] = fmt.Sprintf("thief %d", i+1)
 	}
 	s := newTestSearch(lines...)
-	s.SetWidth(40)
 	s.Open("thief", SearchScope{})
 	if selected, ok := s.Selected(); !ok || selected.Stripped != "thief 8" {
 		t.Fatalf("test setup selected %+v, want newest match", selected)
 	}
 
 	for _, height := range []int{2, 3, 4} {
-		view := runetext.StripANSI(s.constrainedView(height))
+		view := runetext.StripANSI(searchInput(s, 40, height).View())
 		if !strings.Contains(view, "thief 8") {
 			t.Fatalf("height %d hid selected match:\n%s", height, view)
 		}
@@ -327,40 +331,38 @@ func TestSearchViewPartialCount(t *testing.T) {
 		buf.Append("thief")
 	}
 	s := NewSearch(buf, style.DefaultStyles())
-	s.SetWidth(60)
 	s.Open("thief", SearchScope{})
 
-	if view := runetext.StripANSI(s.View()); !strings.Contains(view, "250+ matches") {
+	if view := runetext.StripANSI(searchInput(s, 60, 0).View()); !strings.Contains(view, "250+ matches") {
 		t.Errorf("partial scan should avoid a false ordinal, view:\n%s", view)
 	}
 }
 
-func TestSearchPreferredHeight(t *testing.T) {
+func TestSearchInputMeasuredHeight(t *testing.T) {
 	s := newTestSearch("thief 1", "thief 2")
-	s.SetWidth(60)
 	s.Open("thief", SearchScope{})
-	// header + 2 rows + help footer + border
-	if got := s.PreferredHeight(); got != 6 {
-		t.Errorf("PreferredHeight = %d, want 6", got)
+	// 2 results + help + editor + three separators
+	if got := searchInput(s, 60, 0).MeasureHeight(60, 100); got != 7 {
+		t.Errorf("input height = %d, want 7", got)
 	}
 	s.Open("", SearchScope{})
 	s.TypeRunes([]rune("zzz"))
-	// header + placeholder + help footer + border
-	if got := s.PreferredHeight(); got != 5 {
-		t.Errorf("PreferredHeight = %d, want 5", got)
+	// Placeholder + help + editor + three separators
+	if got := searchInput(s, 60, 0).MeasureHeight(60, 100); got != 6 {
+		t.Errorf("input height = %d, want 6", got)
 	}
 }
 
-func TestSearchPreferredHeightCapsAtFiveResults(t *testing.T) {
+func TestSearchInputMeasuredHeightCapsAtFiveResults(t *testing.T) {
 	lines := make([]string, 20)
 	for i := range lines {
 		lines[i] = fmt.Sprintf("thief %d", i)
 	}
 	s := newTestSearch(lines...)
 	s.Open("thief", SearchScope{})
-	// header + five rows + help footer + border
-	if got := s.PreferredHeight(); got != 9 {
-		t.Errorf("PreferredHeight = %d, want 9", got)
+	// Five results + help + editor + three separators
+	if got := searchInput(s, 60, 0).MeasureHeight(60, 100); got != 10 {
+		t.Errorf("input height = %d, want 10", got)
 	}
 }
 

@@ -74,12 +74,13 @@ func TestContainedPickerBordersUseColumnBoundary(t *testing.T) {
 				m.Update(ui.ShowPickerMsg{Title: "Aliases", Inline: inline, Items: []ui.PickerItem{{Text: "north"}, {Text: "south"}}})
 				input := findLeaf(t, m.layoutPlan, "", ui.LayoutTypeInput)
 				rows := strings.Split(ansi.Strip(m.View().Content), "\n")
-				// The picker remains above the three-row command field.
-				pickerBottom := input.content.Max.Y - 4
+				// Results share one separator with the editor below them.
+				pickerBottom := input.content.Max.Y - 3
 				for y := input.content.Min.Y + 1; y < pickerBottom; y++ {
 					row := []rune(rows[y])
 					for _, x := range []int{input.outer.Min.X, input.outer.Max.X - 1} {
-						if row[x] != '│' {
+						shared := x < input.content.Min.X || x >= input.content.Max.X
+						if shared && row[x] != '│' {
 							t.Fatalf("missing column edge at (%d,%d): %q", x, y, rows[y])
 						}
 					}
@@ -90,7 +91,7 @@ func TestContainedPickerBordersUseColumnBoundary(t *testing.T) {
 					}
 				}
 				bottom := []rune(rows[pickerBottom])
-				left, right := '└', '┘'
+				left, right := '─', '─'
 				if input.content.Min.X > input.outer.Min.X {
 					left = '├'
 				}
@@ -101,6 +102,42 @@ func TestContainedPickerBordersUseColumnBoundary(t *testing.T) {
 					t.Fatalf("picker bottom does not join column edges: %q", rows[pickerBottom])
 				}
 			})
+		}
+	}
+}
+
+func TestInputResultsWithoutLeftNeighborHaveNoLeftWall(t *testing.T) {
+	for _, mode := range []string{"modal", "inline", "search"} {
+		m := resizeModel(t, NewModel(make(chan ui.UIEvent, 100)), 90, 24)
+		setLayout(m, ui.LayoutNode{Type: ui.LayoutTypeRow, Dividers: true, Children: []ui.LayoutNode{
+			{Type: ui.LayoutTypeColumn, Size: ui.Fraction(2), Children: []ui.LayoutNode{
+				{Type: ui.LayoutTypePane, Name: ui.OutputPaneName},
+				{Type: ui.LayoutTypeInput},
+			}},
+			{Type: ui.LayoutTypePane, Name: "sidebar"},
+		}})
+		if mode == "search" {
+			m.Update(ui.ShowSearchMsg{Query: "north"})
+		} else {
+			m.Update(ui.ShowPickerMsg{Title: "History", Inline: mode == "inline", Items: []ui.PickerItem{{Text: "north"}, {Text: "south"}}})
+		}
+		input := findLeaf(t, m.layoutPlan, "", ui.LayoutTypeInput)
+		rows := strings.Split(ansi.Strip(m.View().Content), "\n")
+		for y := input.content.Min.Y + 1; y < input.content.Max.Y-1; y++ {
+			row := []rune(rows[y])
+			if row[0] == '│' || row[0] == '└' || row[0] == '├' {
+				t.Fatalf("picker introduced a left wall: %q", rows[y])
+			}
+			if got := row[input.outer.Max.X-1]; got != '│' && got != '┤' {
+				t.Fatalf("sidebar divider interrupted: %q", rows[y])
+			}
+		}
+		label := "History: "
+		if mode == "search" {
+			label = "Search: "
+		}
+		if mode != "inline" && !strings.HasPrefix(rows[input.content.Max.Y-2], label) {
+			t.Fatalf("filter is not at the bottom: %q", rows)
 		}
 	}
 }

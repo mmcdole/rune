@@ -40,9 +40,8 @@ type Input struct {
 	height         int
 }
 
-// NewInput creates the input widget with its scrollback-search child. Search
-// is required because the widget delegates its entire surface to that child
-// while search mode is active.
+// NewInput creates the input surface. Search supplies transcript matches and
+// navigation state; Input owns composition, measurement, and decoration.
 func NewInput(styles style.Styles, search *Search) *Input {
 	if search == nil {
 		panic("widget.NewInput requires a search widget")
@@ -133,20 +132,28 @@ func (i *Input) Selected() bool {
 
 // View implements Widget.
 func (i *Input) View() string {
-	// Search is a modal navigator, not an inline completion surface. It
-	// replaces the command field while active so the terminal never shows
-	// two apparent cursors competing for keyboard focus.
-	if i.SearchActive() {
-		if i.height > 0 && !i.search.frameFits(i.width, i.height) {
-			return i.search.constrainedView(i.height)
-		}
-		return i.search.contentView()
-	}
-
 	plan := i.layout(i.width, i.height)
 	rows := make([]string, plan.height)
-	if plan.pickerHeight > 0 {
-		copy(rows[:plan.pickerHeight], strings.Split(i.picker.contentView(plan.pickerHeight), "\n"))
+	if i.SearchActive() {
+		if !plan.results.Empty() {
+			copy(rows[plan.results.Min.Y:plan.results.Max.Y], i.search.resultLines(plan.results.Dx(), plan.results.Dy()))
+		}
+		if plan.help >= 0 {
+			rows[plan.help] = i.search.footerLine(i.width)
+		}
+		if !plan.body.Empty() {
+			rows[plan.body.Min.Y] = i.search.queryLine(plan.body.Dx())
+		}
+		return strings.Join(rows, "\n")
+	}
+	if !plan.results.Empty() {
+		copy(rows[plan.results.Min.Y:plan.results.Max.Y], i.picker.resultRows(plan.results.Dx(), plan.results.Dy()))
+	}
+	if i.PickerActive() && !i.PickerInline() {
+		if !plan.body.Empty() {
+			rows[plan.body.Min.Y] = i.picker.queryLine(plan.body.Dx())
+		}
+		return strings.Join(rows, "\n")
 	}
 	if i.composer != nil {
 		copy(rows[plan.body.Min.Y:plan.body.Max.Y], i.composerRows(plan.body.Dy()))
@@ -181,8 +188,6 @@ func (i *Input) SetSize(width, height int) {
 		i.textinput.Prompt = ""
 	}
 	i.textinput.SetWidth(max(0, width-len(i.textinput.Prompt)))
-	i.picker.SetWidth(width)
-	i.search.SetWidth(width)
 	if i.composer != nil && !i.SearchActive() {
 		layout := buildComposerLayout(i.composer.text, i.composer.cursor, width)
 		i.composer.topRow = i.composerTopRow(layout, i.layout(width, height).body.Dy())
@@ -190,17 +195,17 @@ func (i *Input) SetSize(width, height int) {
 }
 
 func (i *Input) MinimumSize() image.Point {
-	if i.SearchActive() {
-		chrome := i.search.styles.OverlayBorder.GetHorizontalBorderSize() + i.search.styles.OverlayBorder.GetHorizontalPadding()
-		return image.Pt(chrome+1, i.search.PreferredHeight())
-	}
 	return image.Pt(3, 3)
 }
 
 // MeasureHeight does not resize the editor or its children.
 func (i *Input) MeasureHeight(width, limit int) int {
 	if i.SearchActive() {
-		return min(limit, i.search.PreferredHeight())
+		// Matching rows, one help row, one query row, and three separators.
+		return min(limit, i.search.resultHeight()+5)
+	}
+	if i.PickerActive() && !i.PickerInline() {
+		return min(limit, i.picker.resultHeight()+4)
 	}
 
 	h := 3 // normal: top border + input + bottom border
@@ -210,7 +215,7 @@ func (i *Input) MeasureHeight(width, limit int) int {
 		h = bodyRows + 2 // status header + content + key footer
 	}
 	if i.PickerActive() {
-		h += i.picker.PreferredHeight()
+		h += i.picker.resultHeight() + 1
 	}
 	return min(h, limit)
 }
@@ -388,7 +393,6 @@ func (i *Input) ShowPicker(opts ui.ShowPickerMsg) {
 			header += ": "
 		}
 		i.picker.SetHeader(header)
-		i.picker.queryVisible = true
 		i.picker.Filter("")
 	}
 }

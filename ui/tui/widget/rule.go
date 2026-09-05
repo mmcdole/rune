@@ -30,10 +30,3 @@ func (r Rule) Translate(origin image.Point) Rule {
 	}
 	return r
 }
-
-func boxRules(width, height int) []Rule {
-	return []Rule{
-		{At: 0, To: width}, {At: height - 1, To: width},
-		{Vertical: true, At: 0, To: height}, {Vertical: true, At: width - 1, To: height},
-	}
-}
