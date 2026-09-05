@@ -5,11 +5,78 @@ package lua
 // rune.send remains separate from interactive input history.
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/mmcdole/rune/input"
 )
+
+func TestHistoryPreservesSeparatorEscapes(t *testing.T) {
+	for _, separator := range []string{";", "|", "::", "%", "↻"} {
+		t.Run(separator, func(t *testing.T) {
+			engine, host, cleanup := setupTest(t)
+			defer cleanup()
+
+			assertLua(t, engine, fmt.Sprintf(`rune.config.set("command_separator", %q)`, separator))
+			original := "say hello" + separator + separator + "!missing"
+			if !commitAndDispatchTestCommand(t, engine, host, original) {
+				t.Fatal("escaped separator introduced a history designator")
+			}
+			commitAndDispatchTestCommand(t, engine, host, "look"+separator+"!say")
+			commitAndDispatchTestCommand(t, engine, host, "!")
+			assertCommands(t, host, []string{
+				"say hello" + separator + "!missing",
+				"look", "say hello" + separator + "!missing",
+				"look", "say hello" + separator + "!missing",
+			})
+			assertHistory(t, host, original, "look"+separator+original)
+		})
+	}
+}
+
+func TestHistoryExpansionKeepsAdjacentSeparatorsSeparate(t *testing.T) {
+	tests := []struct {
+		stored string
+		text   string
+		want   []string
+	}{
+		{stored: ";look", text: "north;!", want: []string{"north", "", "look"}},
+		{stored: "look;", text: "!;north", want: []string{"look", "", "north"}},
+		{stored: ";;look", text: "north;!", want: []string{"north", ";look"}},
+		{stored: "look;;", text: "!;north", want: []string{"look;", "north"}},
+	}
+	for _, test := range tests {
+		t.Run(test.stored+"/"+test.text, func(t *testing.T) {
+			engine, host, cleanup := setupTest(t)
+			defer cleanup()
+
+			host.HistoryEntries = []input.Submission{input.Command(test.stored)}
+			commitAndDispatchTestCommand(t, engine, host, test.text)
+			assertCommands(t, host, test.want)
+			// The rewritten history entry must also be safe to replay.
+			commitAndDispatchTestCommand(t, engine, host, "!")
+			assertCommands(t, host, test.want)
+		})
+	}
+}
+
+func TestHistoryExpansionInsideRepeatsPreservesEscapes(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	host.HistoryEntries = []input.Submission{input.Command("say one;;two")}
+	commitAndDispatchTestCommand(t, engine, host, "#2 {look;!;say literal;;!missing}")
+	assertCommands(t, host, []string{
+		"look", "say one;two", "say literal;!missing",
+		"look", "say one;two", "say literal;!missing",
+	})
+	assertHistory(t, host, "say one;;two", "#2 {look;say one;;two;say literal;;!missing}")
+	if commitAndDispatchTestCommand(t, engine, host, "#2 {look;!missing;east}") {
+		t.Fatal("unmatched history inside a repeat was accepted")
+	}
+	assertCommands(t, host, nil)
+}
 
 // commitAndDispatchTestCommand mirrors Session's hook, history, and command
 // processing order for these Lua-focused tests; local echo is omitted. A
@@ -356,6 +423,8 @@ func TestCommandSeparatorTakesPrecedenceOverDoubledHistoryCharacter(t *testing.T
 	if !proceed || effective.Text != "!!" {
 		t.Fatalf("submit = (%q, %v), want separator text unchanged", effective.Text, proceed)
 	}
+	commitAndDispatchTestCommand(t, engine, host, "!!!!")
+	assertCommands(t, host, []string{"!!"})
 }
 
 func TestBangSkipsIneligibleStructuredHistory(t *testing.T) {

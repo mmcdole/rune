@@ -4,9 +4,9 @@
 -- text stored in history and processed as input. Programmatic rune.send calls
 -- do not use interactive submission history.
 
-local function designator_spec(piece, marker)
+local function designator_spec(piece, marker, separator)
     local token = piece:match("^%s*(.-)%s*$")
-    if token:sub(1, #marker) ~= marker then
+    if token:sub(1, #separator) == separator or token:sub(1, #marker) ~= marker then
         return nil
     end
 
@@ -28,18 +28,15 @@ local function contains_designator(text, separator, marker)
         return false
     end
 
-    local start = 1
-    while true do
-        local pos = text:find(separator, start, true)
-        local piece = pos and text:sub(start, pos - 1) or text:sub(start)
-        if designator_spec(piece, marker) ~= nil then
+    for piece in rune.input._commands(text, separator) do
+        local body = piece:match("^%s*#%d+%s*{([^}]+)}%s*$")
+        if (body and contains_designator(body, separator, marker))
+            or designator_spec(piece, marker, separator) ~= nil
+        then
             return true
         end
-        if not pos then
-            return false
-        end
-        start = pos + #separator
     end
+    return false
 end
 
 local function find_previous(spec, history, separator, marker)
@@ -58,34 +55,17 @@ local function find_previous(spec, history, separator, marker)
     end
 end
 
-local function expand_history(text, context)
-    if context.mode ~= "command" then
-        return nil
-    end
-    -- A leading slash is a local Rune command; leave its whole line literal.
-    if text:sub(1, 1) == "/" then
-        return nil
-    end
-
-    local marker = rune.config.get("history_character")
-    if marker == "" or not text:find(marker, 1, true) then
-        return nil
-    end
-
-    local separator = rune.config.get("command_separator")
-    if not contains_designator(text, separator, marker) then
-        return nil
-    end
-    local history = rune._history.entries()
+local function expand_commands(text, history, separator, marker)
     local pieces = {}
-    local start = 1
+    for piece in rune.input._commands(text, separator) do
+        local spec = designator_spec(piece, marker, separator)
+        local prefix, body, suffix = piece:match("^(%s*#%d+%s*{)([^}]+)(}%s*)$")
 
-    while true do
-        local pos = text:find(separator, start, true)
-        local piece = pos and text:sub(start, pos - 1) or text:sub(start)
-        local spec = designator_spec(piece, marker)
-
-        if spec ~= nil then
+        if body then
+            local expanded = expand_commands(body, history, separator, marker)
+            if not expanded then return false end
+            pieces[#pieces + 1] = prefix .. expanded .. suffix
+        elseif spec ~= nil then
             local replacement = find_previous(spec, history, separator, marker)
             if not replacement then
                 local token = piece:match("^%s*(.-)%s*$")
@@ -97,14 +77,36 @@ local function expand_history(text, context)
         else
             pieces[#pieces + 1] = piece
         end
-
-        if not pos then
-            break
-        end
-        start = pos + #separator
     end
 
+    -- A recalled line may start or end with separators. Keep them from
+    -- pairing with the separator that joins it to the surrounding commands.
+    for i = 2, #pieces do
+        if pieces[i - 1]:sub(-#separator) == separator
+            or pieces[i]:sub(1, #separator) == separator
+        then
+            pieces[i - 1] = pieces[i - 1] .. " "
+            pieces[i] = " " .. pieces[i]
+        end
+    end
     return table.concat(pieces, separator)
+end
+
+local function expand_history(text, context)
+    -- A leading slash is a local Rune command; leave its whole line literal.
+    if context.mode ~= "command" or text:sub(1, 1) == "/" then
+        return nil
+    end
+
+    local marker = rune.config.get("history_character")
+    if marker == "" or not text:find(marker, 1, true) then
+        return nil
+    end
+
+    local separator = rune.config.get("command_separator")
+    if contains_designator(text, separator, marker) then
+        return expand_commands(text, rune._history.entries(), separator, marker)
+    end
 end
 
 rune.hooks.on("input", expand_history, {

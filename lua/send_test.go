@@ -5,6 +5,7 @@ package lua
 // test/e2e/scenarios/send.json.
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/mmcdole/rune/input"
@@ -29,8 +30,33 @@ func TestSendExpansion(t *testing.T) {
 		},
 		{
 			name:  "empty commands",
-			input: ";say hello;;look;",
+			input: ";say hello; ;look;",
 			want:  []string{"", "say hello", "", "look", ""},
+		},
+		{
+			name:  "doubled separator is literal",
+			input: "say hello;;look;east",
+			want:  []string{"say hello;look", "east"},
+		},
+		{
+			name:  "separator pairs are consumed left to right",
+			input: "say one;;;say two;;;;three",
+			want:  []string{"say one;", "say two;;three"},
+		},
+		{
+			name:  "literal separator at command edges",
+			input: ";;look;;",
+			want:  []string{";look;"},
+		},
+		{
+			name:  "only a literal separator",
+			input: ";;",
+			want:  []string{";"},
+		},
+		{
+			name:  "empty input",
+			setup: `rune.send("")`,
+			want:  []string{""},
 		},
 		{
 			name:  "only whitespace",
@@ -58,6 +84,26 @@ func TestSendExpansion(t *testing.T) {
 			want:  []string{"kill rat", "loot", "kill rat", "loot"},
 		},
 		{
+			name:  "repeat a literal separator",
+			input: "#2 say one;;two",
+			want:  []string{"say one;two", "say one;two"},
+		},
+		{
+			name:  "repeat group preserves escaped separators",
+			input: "look;#2 {say one;;two;east};west",
+			want:  []string{"look", "say one;two", "east", "say one;two", "east", "west"},
+		},
+		{
+			name:  "escaped separator does not introduce a repeat",
+			input: "say hello;;#2 {north;east}",
+			want:  []string{"say hello;#2 {north", "east}"},
+		},
+		{
+			name:  "ordinary braces do not quote separators",
+			input: "say {one;two}",
+			want:  []string{"say {one", "two}"},
+		},
+		{
 			name:  "repeat mid-text passes through",
 			input: "say #3 cheers",
 			want:  []string{"say #3 cheers"},
@@ -68,6 +114,78 @@ func TestSendExpansion(t *testing.T) {
 			want:  []string{"say meet at #4", "west", "west"},
 		},
 	})
+}
+
+func TestSendEscapesConfiguredSeparator(t *testing.T) {
+	for _, separator := range []string{"|", "::", "%", "↻"} {
+		t.Run(separator, func(t *testing.T) {
+			engine, host, cleanup := setupTest(t)
+			defer cleanup()
+
+			text := "say one" + separator + separator + "two" + separator + "#2 {east" + separator + "west}"
+			if err := engine.DoString("escaped separator", fmt.Sprintf(`
+				rune.config.set("command_separator", %q)
+				rune.send(%q)
+			`, separator, text)); err != nil {
+				t.Fatal(err)
+			}
+			assertCommands(t, host, []string{"say one" + separator + "two", "east", "west", "east", "west"})
+		})
+	}
+}
+
+func TestRepeatedAliasReceivesDecodedArgumentsEachTime(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	assertLua(t, engine, `
+		local calls = 0
+		rune.alias.exact("count", function(args)
+			assert(args == "one;two", args)
+			calls = calls + 1
+			rune.send_raw(calls .. ": " .. args)
+		end)
+		rune.send("#2 count one;;two")
+	`)
+	assertCommands(t, host, []string{"1: one;two", "2: one;two"})
+}
+
+func TestAliasReceivesLiteralSeparatorForDeferredCommands(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	assertLua(t, engine, `
+		local deferred
+		rune.alias.exact("pendwalk", function(args) deferred = args end)
+		rune.send("pendwalk 12345 open desk;;take all desk")
+		assert(deferred == "12345 open desk;take all desk", deferred)
+		rune.send(deferred:match("^%d+ (.*)$"))
+	`)
+	assertCommands(t, host, []string{"open desk", "take all desk"})
+}
+
+func TestAliasReturnStartsANewCommandParse(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	assertLua(t, engine, `
+		rune.alias.exact("again", function(args) return args end)
+		rune.send("again look;;north")
+		rune.send("again say one;;;;two")
+		rune.send_raw("say raw;;text")
+	`)
+	assertCommands(t, host, []string{"look", "north", "say one;two", "say raw;;text"})
+}
+
+func TestEscapedSeparatorDoesNotIntroduceRepeatSyntax(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	assertLua(t, engine, `
+		rune.config.set("command_separator", "#")
+		rune.send("##2 north")
+	`)
+	assertCommands(t, host, []string{"#2 north"})
 }
 
 func TestSendExpansionUsesConfiguredCommandSeparator(t *testing.T) {
@@ -96,11 +214,11 @@ func TestVerbatimInputPreservesLinesAndBypassesCommands(t *testing.T) {
 		t.Fatalf("setup failed: %v", err)
 	}
 
-	draft := "  indented;still one line  \n\n/quit\n#2 north\naliased\ntrailing  \n"
+	draft := "  indented;still one line;;  \n\n/quit\n#2 north\naliased\ntrailing  \n"
 	dispatchTestSubmission(engine, input.Verbatim(draft))
 
 	assertCommands(t, host, []string{
-		"  indented;still one line  ",
+		"  indented;still one line;;  ",
 		"",
 		"/quit",
 		"#2 north",

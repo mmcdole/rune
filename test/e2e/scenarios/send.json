@@ -19,6 +19,17 @@
       ]
     },
     {
+      "name": "doubled separators stay literal through history replay",
+      "steps": [
+        { "connect": true },
+        { "type": "say one;;two;look" },
+        { "expect_sent": "say one;two" },
+        { "expect_sent": "look" },
+        { "type": "!" },
+        { "expect_sent": "say one;two\r\nlook\r\nsay one;two\r\nlook\r\n" }
+      ]
+    },
+    {
       "name": "history expansion repeats the last command",
       "steps": [
         { "connect": true },

@@ -43,6 +43,10 @@ rune.send(text)
 Before sending the text, Rune processes the configured command separator (`;`
 by default) and `#N` repeats, then checks each resulting command against your
 [aliases](/reference/api/alias/).
+Doubling the separator makes it literal: `rune.send("say one;;two")` sends
+`say one;two` as one command. Escapes are decoded before aliases run. An alias
+returning a string starts a new command-processing pass; use `rune.send_raw`
+inside an alias callback to send its arguments without further interpretation.
 Repeats are anchored at command position — `#3 north` repeats, but
 `say #3 cheers` is chat text and passes through untouched. Alias
 expansions are processed recursively (nested aliases work), with a
@@ -189,9 +193,9 @@ command separators before history expansion. For example, if `!!` is your
 command separator and `!` is your history character, the `!!` between two
 commands remains a separator.
 
-There is not yet an escape for putting a command separator literally into
-normal command input. When typing, use verbatim input to send a whole line
-without splitting it into commands. From Lua, call `rune.send_raw`.
+Double the configured separator to include it literally in a command (see
+[command separators](/interface/input/#command-separators)). Verbatim input
+and `rune.send_raw` bypass command processing and leave doubled separators unchanged.
 
 A successful `set` takes effect immediately. On `/reload`, settings start from
 their defaults and your `init.lua` applies your choices again. Put settings you

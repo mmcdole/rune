@@ -24,6 +24,24 @@ separators, `#N` repeats, and `/commands` all work here.
 (On terminals that encode `Ctrl+Backspace` as `Ctrl+H`, Rune cannot bind them
 distinctly. Use `Ctrl+W` or `Alt+Backspace` to delete words instead.)
 
+### Command separators
+
+Use `;` to separate commands, or double it to send a literal semicolon:
+
+```text
+look;north             → two commands
+say hello;;friend      → say hello;friend
+```
+
+Aliases receive the literal separator too: `pendwalk 12345 open desk;;take all
+desk` passes `12345 open desk;take all desk` to the `pendwalk` alias. History
+keeps the doubled spelling so recalling the command behaves the same way.
+
+If you configure another `command_separator`, double that entire separator
+instead (`||` for `|`, or `::::` for `::`). Pairs are read left to right:
+`;;;` is a literal semicolon followed by a command boundary. To include an
+empty command between separators, use `; ;` instead of `;;`.
+
 ## Keeping the last command
 
 By default the input clears after each submit. With
