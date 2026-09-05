@@ -12,6 +12,11 @@ func (s *Session) TimerEvery(d time.Duration) int {
 	return s.timer.Every(d)
 }
 
+// TimerRemaining implements lua.Host.
+func (s *Session) TimerRemaining(id int) time.Duration {
+	return s.timer.Remaining(id)
+}
+
 // TimerCancel implements lua.Host.
 func (s *Session) TimerCancel(id int) {
 	s.timer.Cancel(id)

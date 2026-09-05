@@ -33,7 +33,7 @@ add. `/` on an empty line opens the fuzzy picker over the same registry.
 
 | Command | Description |
 |---|---|
-| `/aliases` `/triggers` `/timers` `/hooks` `/binds` `/bars` | List registrations with state, group, and source `file:line` |
+| `/aliases` `/triggers` `/timers` `/hooks` `/binds` `/bars` | List registrations with state, group, and source `file:line`; `/timers` also shows time remaining |
 | `/groups` | List groups and their state |
 | `/group <name> on\|off` | Toggle a group |
 | `/gmcp` | GMCP negotiation state, subscriptions, handlers |

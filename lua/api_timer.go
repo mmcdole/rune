@@ -28,6 +28,12 @@ func (e *Engine) registerTimerFuncs() {
 			return nil
 		},
 
+		// rune._timer.remaining(id): Seconds until the next wake-up, or zero if due/absent
+		"remaining": func(c *script.Call) error {
+			c.Return(e.host.TimerRemaining(c.Int(1)).Seconds())
+			return nil
+		},
+
 		// rune._timer.cancel(id): Stop a scheduled wake-up
 		"cancel": func(c *script.Call) error {
 			e.host.TimerCancel(c.Int(1))

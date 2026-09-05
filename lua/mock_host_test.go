@@ -39,6 +39,8 @@ type MockHost struct {
 
 	// Timer ID generation
 	nextTimerID int
+	// Explicit snapshots supplied by tests; the mock does not run a clock.
+	TimerRemainingByID map[int]time.Duration
 
 	// When set, Send fails with this error instead of recording the call
 	SendErr error
@@ -405,6 +407,12 @@ func (m *MockHost) TimerEvery(d time.Duration) int {
 		Repeat   bool
 	}{id, d, true})
 	return id
+}
+
+func (m *MockHost) TimerRemaining(id int) time.Duration {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.TimerRemainingByID[id]
 }
 
 func (m *MockHost) TimerCancel(id int) {

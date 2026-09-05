@@ -73,8 +73,23 @@ h:disable()  h:enable()  h:cancel()   -- :cancel() is an alias for :remove()
 By name: `rune.timer.disable/enable/remove(name)` (`rune.timer.cancel` is
 the same as `remove`). The full list is in the
 [API reference](/reference/api/#managing). In the client, `/timers` shows
-every timer with its state, mode and interval, action, group, name, and
-the `file:line` that registered it.
+every timer with its state, mode and interval, time remaining, action,
+group, name, and the `file:line` that registered it. For example,
+`every 60.0s (23.4s left)` means the next scheduled firing is about 23.4
+seconds away. This is a snapshot when you run `/timers`; run it again
+to see an updated countdown.
+
+Scripts can read the remaining seconds from `rune.timer.list()`:
+
+```lua
+for _, timer in ipairs(rune.timer.list()) do
+    rune.echo(string.format("%s: %.1fs left", timer.name, timer.remaining))
+end
+```
+
+Disabled timers and timers in disabled groups keep counting down because
+disabling suppresses callbacks without pausing the schedule. A one-shot
+that is due but still waiting for callback dispatch shows `0.0s left`.
 
 Timers are cleared on `/reload` and re-registered when your scripts load
 again, which keeps reloads deterministic.

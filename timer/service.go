@@ -25,6 +25,7 @@ type Service struct {
 
 type entry struct {
 	interval time.Duration // 0 = one-shot, >0 = repeating
+	deadline time.Time     // next wake-up, including the monotonic clock reading
 	cancel   func() bool   // time.Timer.Stop
 }
 
@@ -57,6 +58,19 @@ func (s *Service) Every(d time.Duration) int {
 	return s.schedule(d, d)
 }
 
+// Remaining returns the time until the next scheduled wake-up. It returns zero
+// for unknown, cancelled, or already-fired one-shot timers, including wake-ups
+// still waiting for delivery. Querying a timer does not change its schedule.
+func (s *Service) Remaining(id int) time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if e, ok := s.timers[id]; ok {
+		return max(0, time.Until(e.deadline))
+	}
+	return 0
+}
+
 func (s *Service) schedule(d, interval time.Duration) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -64,12 +78,14 @@ func (s *Service) schedule(d, interval time.Duration) int {
 	s.nextID++
 	id := s.nextID
 
-	t := time.AfterFunc(d, func() {
+	deadline := time.Now().Add(d)
+	t := time.AfterFunc(time.Until(deadline), func() {
 		s.fire(id)
 	})
 
 	s.timers[id] = &entry{
 		interval: interval,
+		deadline: deadline,
 		cancel:   t.Stop,
 	}
 
@@ -89,7 +105,8 @@ func (s *Service) fire(id int) {
 
 	if repeating {
 		// Fixed-interval: reschedule immediately
-		t := time.AfterFunc(e.interval, func() {
+		e.deadline = time.Now().Add(e.interval)
+		t := time.AfterFunc(time.Until(e.deadline), func() {
 			s.fire(id)
 		})
 		e.cancel = t.Stop

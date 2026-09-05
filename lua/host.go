@@ -54,6 +54,7 @@ type Host interface {
 	// Timers
 	TimerAfter(d time.Duration) int
 	TimerEvery(d time.Duration) int
+	TimerRemaining(id int) time.Duration
 	TimerCancel(id int)
 	TimerCancelAll()
 

@@ -139,12 +139,14 @@ end
 -- Alias: cancel is intuitive for timers
 rune.timer.cancel = rune.timer.remove
 
--- List all timers - returns array of {seconds, mode, value, name, enabled, group}
+-- List all timers. Remaining seconds come from the Go schedule, even when
+-- callbacks are suppressed by disable/group state. A spent wake-up reads zero.
 function rune.timer.list()
     local result = {}
     for _, data in ipairs(registry:items()) do
         table.insert(result, {
             seconds = data.seconds,
+            remaining = rune._timer.remaining(data.timer_id),
             mode = data.repeating and "every" or "after",
             value = type(data.action) == "function" and "(function)" or tostring(data.action),
             name = data.name,

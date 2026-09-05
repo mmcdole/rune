@@ -3,9 +3,36 @@
   "scenarios": [
     {
       "name": "a scheduled timer runs its action",
-      "init_lua": ["rune.timer.after(0.05, function() rune.echo('E2E-TIMER-FIRED') end)"],
+      "init_lua": [
+        "rune.timer.after(0.05, function() rune.echo('E2E-TIMER-FIRED') end)"
+      ],
       "steps": [
-        { "expect_printed": "E2E-TIMER-FIRED" }
+        {
+          "expect_printed": "E2E-TIMER-FIRED"
+        }
+      ]
+    },
+    {
+      "name": "timer listings expose the live schedule and show time remaining",
+      "init_lua": [
+        "rune.timer.after(3600, \"save\", {name = \"E2E-TIMER-COUNTDOWN\"})"
+      ],
+      "steps": [
+        {
+          "type": "/lua local t = rune.timer.list()[1]; assert(t.name == \"E2E-TIMER-COUNTDOWN\"); assert(type(t.remaining) == \"number\" and t.remaining > 0 and t.remaining <= t.seconds); rune.echo(\"E2E-TIMER-REMAINING-API\")"
+        },
+        {
+          "expect_printed": "E2E-TIMER-REMAINING-API"
+        },
+        {
+          "type": "/timers"
+        },
+        {
+          "expect_printed": "s left)"
+        },
+        {
+          "expect_printed": "E2E-TIMER-COUNTDOWN"
+        }
       ]
     }
   ]

@@ -305,7 +305,7 @@ rune.command.add("timers", function(args)
         local group_str = t.group and ("  " .. cyan("<" .. t.group .. ">")) or ""
         local name_str = t.name and (" " .. dim("name:") .. t.name) or ""
         local src_str = t.source and ("  " .. dim("@" .. t.source)) or ""
-        local timing = string.format("%s %.1fs", t.mode, t.seconds)
+        local timing = string.format("%s %.1fs (%.1fs left)", t.mode, t.seconds, t.remaining)
         rune.echo(string.format("  %s %-12s %s %s%s%s%s",
             status, timing, dim("->"), t.value, group_str, name_str, src_str))
     end
