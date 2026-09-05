@@ -1524,8 +1524,7 @@ func TestReplaceOrdinaryPaneCreatesAndSnapsToLive(t *testing.T) {
 	if !strings.Contains(status.Title(), "scroll") {
 		t.Fatal("test setup did not scroll the pane")
 	}
-	next, _ = m.Update(ui.PaneReplaceMsg{Name: "status", Text: "HP 11\nMP 5"})
-	m = next.(*Model)
+	m.Update(ui.PaneReplaceMsg{Name: "status", Text: "HP 11\nMP 5"})
 	if got := status.Title(); got != "status" {
 		t.Fatalf("replace left the pane scrolled: %q", got)
 	}

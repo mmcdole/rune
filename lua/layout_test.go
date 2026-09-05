@@ -11,13 +11,6 @@ import (
 func intPtr(n int) *int          { return &n }
 func stringPtr(s string) *string { return &s }
 
-func outputPane() ui.LayoutNode {
-	return ui.LayoutNode{
-		Type: ui.LayoutTypePane, Name: ui.OutputPaneName,
-		Border: ui.PaneBorderNone,
-	}
-}
-
 func TestLegacyLayoutTableIsRejectedWithoutRaising(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
