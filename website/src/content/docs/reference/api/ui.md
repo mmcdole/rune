@@ -161,7 +161,9 @@ presentation fields are set directly on the leaf:
 
 - `title` (string): supplies the complete header text and replaces the pane name
   and dynamic scroll-state suffix. An empty string suppresses title text; an
-  omitted field uses the generated header.
+  omitted field uses the generated header for ordinary panes. The reserved
+  `output` pane is untitled by default, including while scrolled; an explicit
+  `title` still supplies its header.
 - `border` (string): `"full"`, the default, draws all four
   sides; `"none"` draws none; `"horizontal"` draws titled top and closing
   bottom rules without side walls.

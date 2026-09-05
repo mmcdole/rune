@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"image"
 	"strings"
 
@@ -58,13 +57,8 @@ func (o *outputController) ScrollToTop()         { o.viewport.GotoTop() }
 func (o *outputController) ScrollToBottom()      { o.viewport.GotoBottom() }
 
 func (o *outputController) Title() string {
-	if o.viewport.Mode() == widget.ModeLive {
-		return o.Name()
-	}
-	if count := o.viewport.NewLineCount(); count > 0 {
-		return fmt.Sprintf("%s · scroll +%d", o.Name(), count)
-	}
-	return o.Name() + " · scroll"
+	// Output is untitled by default; layout placements may supply an explicit title.
+	return ""
 }
 
 func (o *outputController) View() string {

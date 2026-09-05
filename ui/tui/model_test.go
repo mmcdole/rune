@@ -350,7 +350,7 @@ func TestClearOutputPaneResetsTranscriptSearchAndViewportButPreservesPrompt(t *t
 	}
 }
 
-func TestGrowingOutputViewportPublishesLiveStateAndRefreshesTitle(t *testing.T) {
+func TestGrowingOutputViewportPublishesLiveState(t *testing.T) {
 	events := make(chan ui.UIEvent, 128)
 	m := resizeModel(t, NewModel(events), 30, 6)
 	setLayout(m, ui.LayoutNode{
@@ -369,8 +369,8 @@ func TestGrowingOutputViewportPublishesLiveStateAndRefreshesTitle(t *testing.T) 
 	if m.output.viewport.Mode() != widget.ModeScrolled {
 		t.Fatal("test setup did not scroll the constrained output pane")
 	}
-	if view := runetext.StripANSI(m.View().Content); !strings.Contains(view, "output · scroll") {
-		t.Fatalf("scrolled output title missing before resize: %q", view)
+	if view := runetext.StripANSI(m.View().Content); strings.Contains(view, "output · scroll") {
+		t.Fatalf("scrolled output has an unexpected default title: %q", view)
 	}
 	for len(events) > 0 {
 		<-events

@@ -252,6 +252,23 @@ func (m *Model) planFrames(plan *layoutPlan) {
 		if decorated, ok := leaf.surface.(interface{ Rules(int, int) []widget.Rule }); ok {
 			for _, rule := range decorated.Rules(leaf.content.Dx(), leaf.content.Dy()) {
 				rule = rule.Translate(leaf.content.Min)
+				// A partial widget frame (such as a picker above input) does
+				// not own the whole column edge. Reuse the boundary reserved
+				// by the surrounding layout instead of drawing an inset box.
+				if rule.Vertical {
+					if rule.At == leaf.content.Min.X {
+						rule.At = leaf.outer.Min.X
+					} else if rule.At == leaf.content.Max.X-1 {
+						rule.At = leaf.outer.Max.X - 1
+					}
+				} else {
+					if rule.From == leaf.content.Min.X {
+						rule.From = leaf.outer.Min.X
+					}
+					if rule.To == leaf.content.Max.X {
+						rule.To = leaf.outer.Max.X
+					}
+				}
 				plan.frame.markRule(rule)
 				plan.rules = append(plan.rules, rule)
 			}

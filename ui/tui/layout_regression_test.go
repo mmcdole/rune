@@ -65,6 +65,46 @@ func TestExplicitGapsRemainBetweenOutputAndInput(t *testing.T) {
 	}
 }
 
+func TestContainedPickerBordersUseColumnBoundary(t *testing.T) {
+	for _, inline := range []bool{false, true} {
+		for _, gap := range []int{0, 2} {
+			t.Run(fmt.Sprintf("inline=%t/gap=%d", inline, gap), func(t *testing.T) {
+				m := resizeModel(t, NewModel(make(chan ui.UIEvent, 100)), 80, 24)
+				setLayout(m, containedInputLayout(ui.PaneBorderFull, ui.AutoSize(), gap))
+				m.Update(ui.ShowPickerMsg{Title: "Aliases", Inline: inline, Items: []ui.PickerItem{{Text: "north"}, {Text: "south"}}})
+				input := findLeaf(t, m.layoutPlan, "", ui.LayoutTypeInput)
+				rows := strings.Split(ansi.Strip(m.View().Content), "\n")
+				// The picker remains above the three-row command field.
+				pickerBottom := input.content.Max.Y - 4
+				for y := input.content.Min.Y + 1; y < pickerBottom; y++ {
+					row := []rune(rows[y])
+					for _, x := range []int{input.outer.Min.X, input.outer.Max.X - 1} {
+						if row[x] != '│' {
+							t.Fatalf("missing column edge at (%d,%d): %q", x, y, rows[y])
+						}
+					}
+					for _, x := range []int{input.content.Min.X, input.content.Max.X - 1} {
+						if x > input.outer.Min.X && x < input.outer.Max.X-1 && row[x] == '│' {
+							t.Fatalf("inset picker border at (%d,%d): %q", x, y, rows[y])
+						}
+					}
+				}
+				bottom := []rune(rows[pickerBottom])
+				left, right := '└', '┘'
+				if input.content.Min.X > input.outer.Min.X {
+					left = '├'
+				}
+				if input.content.Max.X < input.outer.Max.X {
+					right = '┤'
+				}
+				if bottom[input.outer.Min.X] != left || bottom[input.outer.Max.X-1] != right {
+					t.Fatalf("picker bottom does not join column edges: %q", rows[pickerBottom])
+				}
+			})
+		}
+	}
+}
+
 func TestContainedInputModesPreserveLabelsAndCursor(t *testing.T) {
 	for _, mode := range []string{"normal", "composer", "picker", "search"} {
 		for _, size := range []image.Point{image.Pt(100, 30), image.Pt(20, 8), image.Pt(3, 3), image.Pt(1, 1)} {
@@ -253,6 +293,41 @@ func TestTitleCannotCoverStaggeredJunction(t *testing.T) {
 	row := []rune(ansi.Strip(strings.Split(m.View().Content, "\n")[bottom.outer.Min.Y]))
 	if got := row[left.outer.Max.X-1]; got != '┴' {
 		t.Fatalf("title covered junction: %q", string(row))
+	}
+}
+
+func TestOutputTitleDefaultsToEmpty(t *testing.T) {
+	custom, empty := "Transcript", ""
+	for _, border := range []ui.PaneBorder{ui.PaneBorderFull, ui.PaneBorderHorizontal} {
+		for _, tc := range []struct {
+			name  string
+			title *string
+			want  string
+		}{
+			{"default", nil, ""},
+			{"explicit", &custom, custom},
+			{"empty", &empty, ""},
+		} {
+			t.Run(string(border)+"/"+tc.name, func(t *testing.T) {
+				m := resizeModel(t, NewModel(make(chan ui.UIEvent, 100)), 40, 10)
+				setLayout(m, ui.LayoutNode{Type: ui.LayoutTypeColumn, Children: []ui.LayoutNode{
+					{Type: ui.LayoutTypePane, Name: ui.OutputPaneName, Border: border, Title: tc.title},
+					{Type: ui.LayoutTypeInput},
+				}})
+				check := func() {
+					t.Helper()
+					row := ansi.Strip(strings.Split(m.View().Content, "\n")[0])
+					if got := strings.Trim(row, "─┌┐ "); got != tc.want {
+						t.Fatalf("header text = %q, want %q", got, tc.want)
+					}
+				}
+				check()
+				m.output.Write(strings.Repeat("line\n", 30))
+				m.output.ScrollToTop()
+				m.output.Write("new line")
+				check()
+			})
+		}
 	}
 }
 

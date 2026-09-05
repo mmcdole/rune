@@ -107,7 +107,9 @@ use `1fr`.
 Pane rectangles include their borders. Choose `border = "full"` (default),
 `"horizontal"` (top and bottom only), or `"none"`. A `title` replaces the
 complete generated header, including its scroll-state suffix; `title = ""`
-removes the text. Omit it to retain the generated title.
+removes the text. Omit it to retain the generated title for ordinary panes.
+The reserved `output` pane has no title by default, including while scrolled;
+set an explicit `title` to label it.
 
 Containers do not draw outer borders. `dividers = true` draws between active
 children: vertical rules in a row, horizontal rules in a column. With no gap,
