@@ -333,7 +333,7 @@ func (m *MockHost) SetInput(text string) {
 	switch {
 	case text == "":
 		m.InputMode = input.ModeCommand
-	case m.InputMode == input.ModeVerbatim || input.RequiresVerbatim(text):
+	case m.InputMode == input.ModeVerbatim || input.RequiresStructuredEditor(text):
 		m.InputMode = input.ModeVerbatim
 	default:
 		m.InputMode = input.ModeCommand

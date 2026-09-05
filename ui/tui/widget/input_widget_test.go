@@ -56,7 +56,9 @@ func TestModalPickerShowsResultsAboveItsOnlyEditor(t *testing.T) {
 func inputLabels(in *Input) string {
 	var labels []string
 	for _, rule := range in.Rules(in.width, in.MeasureHeight(in.width, 1<<14)) {
-		labels = append(labels, rule.Label)
+		for _, label := range rule.Labels {
+			labels = append(labels, label.Text)
+		}
 	}
 	return strings.Join(labels, "\n")
 }

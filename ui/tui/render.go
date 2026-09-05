@@ -85,8 +85,8 @@ func (m *Model) renderPlan(plan layoutPlan) string {
 		drawFrameLabel(canvas, plan.frame, m.styles.PaneHeader.Render(title), left, right, leaf.outer.Min.Y)
 	}
 	for _, rule := range plan.rules {
-		if rule.Label != "" {
-			drawFrameLabel(canvas, plan.frame, rule.LabelStyle.Render(rule.Label), rule.LabelAt, rule.To, rule.At)
+		for _, label := range rule.Labels {
+			drawFrameLabel(canvas, plan.frame, label.Style.Render(label.Text), label.At, rule.To, rule.At)
 		}
 	}
 	return exactCanvasRender(canvas, m.width, m.height)

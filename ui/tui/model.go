@@ -198,6 +198,7 @@ func (m *Model) handleConfigUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case ui.UpdateBindsMsg:
 		m.boundKeys = msg
+		m.input.SetEditorAvailable(msg["ctrl+e"])
 	case ui.UpdateBarsMsg:
 		m.syncBars(msg)
 	case ui.UpdateLayoutMsg:
@@ -334,18 +335,20 @@ func (m *Model) appendMessage(text string) {
 }
 
 // submit offers a submission and its following draft to the session as one
-// transition. It rejects oversized verbatim drafts or a busy engine with a
+// transition. It rejects invalid or oversized drafts or a busy engine with a
 // visible warning rather than blocking the render loop; false tells the
 // controller to retain the current local draft.
 func (m *Model) submit(msg ui.InputSubmittedMsg) bool {
-	if msg.Submission.Mode == input.ModeVerbatim {
-		lineCount := len(msg.Submission.PhysicalLines())
-		if len(msg.Submission.Text) > maxVerbatimBytes || lineCount > maxVerbatimLines {
-			// A size rejection is local validation, not queue pressure, so
-			// the normal reporting append keeps scroll state in sync.
-			m.appendMessage(text.Red("[WARNING] Verbatim input not sent - limit is 1000 lines or 256 KiB"))
-			return false
-		}
+	if msg.Submission.Mode == input.ModeCommand && !input.ValidCommandText(msg.Submission.Text) {
+		m.appendMessage(text.Red("[WARNING] Command not run - newlines and tabs require one /command; terminal controls are not allowed. Use Alt+V for verbatim."))
+		return false
+	}
+	// Count physical lines for either interpretation; a multiline command is
+	// still one dispatch, but consumes the same draft resources as verbatim.
+	lineCount := len(input.Verbatim(msg.Submission.Text).PhysicalLines())
+	if len(msg.Submission.Text) > maxSubmissionBytes || lineCount > maxSubmissionLines {
+		m.appendMessage(text.Red("[WARNING] Input not sent - limit is 1000 lines or 256 KiB"))
+		return false
 	}
 	if m.tryPost(msg) {
 		return true
@@ -355,8 +358,8 @@ func (m *Model) submit(msg ui.InputSubmittedMsg) bool {
 }
 
 const (
-	maxVerbatimBytes = 256 * 1024
-	maxVerbatimLines = 1000
+	maxSubmissionBytes = 256 * 1024
+	maxSubmissionLines = 1000
 )
 
 func (m *Model) isBound(key string) bool {

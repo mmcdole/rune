@@ -7,6 +7,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/mmcdole/rune/input"
 	"github.com/mmcdole/rune/ui"
 	"github.com/mmcdole/rune/ui/tui/style"
 	"github.com/mmcdole/rune/ui/tui/util"
@@ -33,11 +34,14 @@ type Input struct {
 	styles    style.Styles
 
 	// State
-	overlay        inputOverlay
-	discardPending bool
-	selected       bool // whole line selected (keep-input resend state)
-	width          int
-	height         int
+	submissionMode  input.SubmissionMode
+	editorAvailable bool // Ctrl+E binding is present
+	modeExplicit    bool // user choice or history restoration, retained for this draft
+	overlay         inputOverlay
+	discardPending  bool
+	selected        bool // whole line selected (keep-input resend state)
+	width           int
+	height          int
 }
 
 // NewInput creates the input surface. Search supplies transcript matches and
@@ -93,17 +97,15 @@ func (i *Input) UpdateTextInput(msg tea.Msg) tea.Cmd {
 // whole selected line, any other key deselects and edits in place.
 func (i *Input) resolveSelection(key tea.KeyPressMsg) {
 	if key.Text != "" || matchesKey(key, tea.KeyBackspace, 0) || matchesKey(key, tea.KeyDelete, 0) {
-		i.textinput.SetValue("")
-		i.textinput.SetCursor(0)
+		i.Reset()
 	}
 	i.Deselect()
 }
 
-// SelectAll marks the whole line selected: the keep-input resend state,
-// where Enter resends it and typing replaces it. No-op while composing
-// or empty.
+// SelectAll marks the whole draft selected: Enter resends it and typing
+// replaces it. Empty drafts have no selection.
 func (i *Input) SelectAll() {
-	if i.composer != nil || i.textinput.Value() == "" {
+	if i.Value() == "" {
 		return
 	}
 	i.selected = true
@@ -159,7 +161,7 @@ func (i *Input) View() string {
 		copy(rows[plan.body.Min.Y:plan.body.Max.Y], i.composerRows(plan.body.Dy()))
 	} else if !plan.body.Empty() {
 		// Keep the ordinary one-line input in its compact three-row layout.
-		// Compose chrome exists only around structured text.
+		// Mode labels are painted on the surrounding rules.
 		inputView := i.textinput.View()
 		if i.selected {
 			// Bubbles renders TextStyle across its width padding. Render the
@@ -230,15 +232,14 @@ func (i *Input) Value() string {
 
 // SetValue sets the input text.
 func (i *Input) SetValue(s string) {
+	if s == "" {
+		i.Reset()
+		return
+	}
 	i.Deselect()
 	if i.composer != nil {
-		// Verbatim interpretation is sticky: replacing a structured draft
-		// with one non-empty physical line (for example through Ctrl+E) must
-		// not silently re-enable command-separator or slash-command processing.
-		if s == "" {
-			i.Reset()
-			return
-		}
+		// Preserve the editing surface and interpretation when an edit
+		// replaces the draft with one non-empty physical line.
 		i.composer.Set(s, len([]rune(normalizeComposerText(s))))
 		i.discardPending = false
 		return
@@ -279,12 +280,41 @@ func (i *Input) SetCursor(pos int) {
 
 // Reset clears the input.
 func (i *Input) Reset() {
+	i.submissionMode = input.ModeCommand
+	i.modeExplicit = false
 	i.composer = nil
 	i.Deselect()
 	i.discardPending = false
 	i.textinput.SetValue("")
 	i.textinput.SetCursor(0)
 }
+
+// SubmissionMode is the draft's interpretation, independent of its editor.
+func (i *Input) SubmissionMode() input.SubmissionMode { return i.submissionMode }
+
+// SetSubmissionMode makes an explicit choice without changing text, cursor,
+// selection, or the editing surface. Structured pastes respect this choice.
+func (i *Input) SetSubmissionMode(mode input.SubmissionMode) {
+	i.submissionMode = mode
+	i.modeExplicit = true
+	i.discardPending = false
+}
+
+// ToggleSubmissionMode opens the composer when necessary so an explicit mode
+// change is always visible, preserving text, cursor, and selection.
+func (i *Input) ToggleSubmissionMode() {
+	mode := input.ModeVerbatim
+	if i.submissionMode == input.ModeVerbatim {
+		mode = input.ModeCommand
+	}
+	i.SetSubmissionMode(mode)
+	if i.composer == nil {
+		i.composer = newComposer(i.textinput.Value(), i.textinput.Position())
+	}
+}
+
+// SetEditorAvailable controls the optional external-editor shortcut hint.
+func (i *Input) SetEditorAvailable(available bool) { i.editorAvailable = available }
 
 // IsComposing reports whether the lossless structured-text editor is active.
 func (i *Input) IsComposing() bool {
@@ -294,6 +324,9 @@ func (i *Input) IsComposing() bool {
 // BeginCompose replaces the active input with a canonical structured draft.
 // It does not submit and it never routes the text through bubbles/textinput.
 func (i *Input) BeginCompose(text string, cursor int) {
+	if !i.modeExplicit {
+		i.submissionMode = input.ModeVerbatim
+	}
 	i.Deselect()
 	i.composer = newComposer(text, cursor)
 	i.discardPending = false
@@ -306,8 +339,7 @@ func (i *Input) BeginCompose(text string, cursor int) {
 func (i *Input) InsertPaste(text string) tea.Cmd {
 	if i.selected {
 		// Pasting over a selection replaces it, like typing.
-		i.textinput.SetValue("")
-		i.textinput.SetCursor(0)
+		i.Reset()
 		i.Deselect()
 	}
 	i.discardPending = false
@@ -337,6 +369,14 @@ func (i *Input) InsertPaste(text string) tea.Cmd {
 func (i *Input) UpdateComposer(msg tea.KeyPressMsg) bool {
 	if i.composer == nil {
 		return false
+	}
+	if i.selected {
+		i.resolveSelection(msg)
+		if i.composer == nil {
+			// Typing or deleting over the selection starts a fresh draft.
+			i.UpdateTextInput(msg)
+			return true
+		}
 	}
 	handled := i.composer.Update(msg, i.width)
 	if handled {

@@ -43,7 +43,7 @@ type inputController struct {
 	// Picker callbacks belong to the Session contract, not the widget.
 	pickerCB      string // Lua callback ID to settle on close
 	pickerDismiss bool   // close inline picker once input contains a space
-	historyRecall bool   // unmodified verbatim entry restored from history
+	historyRecall bool   // unmodified composed entry restored from history
 	keepOnSubmit  bool   // keep_input: keep the sent command selected
 
 	notify  func(ui.UIEvent)                // state and actions sent to the session
@@ -124,6 +124,24 @@ func (c *inputController) HandleKey(msg tea.KeyPressMsg) {
 		}
 	}
 
+	// Interpretation shortcuts belong to the draft, never an overlay query.
+	if c.mode() != modePickerModal && c.mode() != modeSearch {
+		toggle := matchesKey(msg, 'v', tea.ModAlt)
+		runCommand := matchesEnterKey(msg, tea.ModAlt)
+		if toggle || runCommand {
+			if c.mode() == modePickerInline {
+				c.closePicker(false, "")
+			}
+			if toggle {
+				c.input.ToggleSubmissionMode()
+				c.historyRecall = false
+			} else {
+				c.submitInput(input.ModeCommand)
+			}
+			return
+		}
+	}
+
 	switch c.mode() {
 	case modeCompose:
 		c.handleComposeKey(msg)
@@ -174,14 +192,13 @@ func (c *inputController) SetSubmission(submission input.Submission) {
 		c.closeSearch(false)
 	}
 	wasPicker := c.mode() == modePickerInline || c.mode() == modePickerModal
-	c.historyRecall = submission.Mode == input.ModeVerbatim
+	c.historyRecall = true
+	c.input.Reset()
+	c.input.SetSubmissionMode(submission.Mode)
 
 	if submission.Mode == input.ModeVerbatim {
 		c.input.BeginCompose(submission.Text, utf8.RuneCountInString(submission.Text))
 	} else {
-		// Reset first so sticky compose state cannot reinterpret a recalled
-		// command entry that happens to have identical text.
-		c.input.Reset()
 		c.input.SetValue(submission.Text)
 		c.input.CursorEnd()
 	}
@@ -228,7 +245,7 @@ func (c *inputController) handleNormalKey(msg tea.KeyPressMsg) {
 		return
 	}
 	if matchesEnterKey(msg, 0) {
-		c.submitInput()
+		c.submitInput(c.input.SubmissionMode())
 		return
 	}
 
@@ -257,7 +274,7 @@ func (c *inputController) handleComposeKey(msg tea.KeyPressMsg) {
 		return
 	}
 	if matchesEnterKey(msg, 0) {
-		c.submitInput()
+		c.submitInput(c.input.SubmissionMode())
 		return
 	}
 
@@ -402,11 +419,8 @@ func (c *inputController) SetKeepOnSubmit(on bool) {
 // submitInput transfers the current submission and its following draft as one
 // event, then applies that same transition locally only after Session accepts
 // ownership.
-func (c *inputController) submitInput() {
-	submission := input.Command(c.input.Value())
-	if c.input.IsComposing() {
-		submission = input.Verbatim(c.input.Value())
-	}
+func (c *inputController) submitInput(mode input.SubmissionMode) {
+	submission := input.Submission{Text: c.input.Value(), Mode: mode}
 	keep := c.keepOnSubmit && submission.Mode == input.ModeCommand && submission.Text != ""
 	nextDraft := ""
 	if keep {

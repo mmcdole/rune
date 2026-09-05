@@ -92,12 +92,15 @@ rune.bind("numpad3", function() rune.send("down") end)
 
 | Key | Normal input | Composer |
 |---|---|---|
-| `enter` | Submit the command | Send the draft verbatim |
+| `enter` | Submit the command | Submit using the displayed mode |
+| `alt+v` | Open the composer in Verbatim mode | Toggle Command/Verbatim |
+| `alt+enter` | Run this draft as a command once | Run this draft as a command once |
 | `ctrl+enter`, `ctrl+j` | Start a composer newline | Insert a newline |
 
 These actions are built in and do not dispatch Lua binds. Terminals that cannot
 distinguish Ctrl+Enter report it as Ctrl+J. Picker and search behavior is shown
-in the context table below.
+in the context table below. The inline picker closes before `alt+v` or
+`alt+enter` acts on the draft; modal pickers and search capture those keys.
 
 ## Where binds run
 
@@ -116,9 +119,10 @@ replace it.
 
 Bracketed paste never runs a bind. Normal input, an inline picker, and the
 composer insert it all at once, so a bind can't fire partway through it;
-structured paste switches normal or inline input to the
-[verbatim composer](/interface/input/#multiline-verbatim-composer).
-Modal pickers and scrollback search append paste to their query.
+structured paste opens the
+[composer](/interface/input/#multiline-verbatim-composer).
+Verbatim is the initial interpretation unless you explicitly chose a mode for
+this draft. Modal pickers and scrollback search append paste to their query.
 
 ## Options
 

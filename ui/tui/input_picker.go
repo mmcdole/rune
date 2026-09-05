@@ -104,7 +104,7 @@ func (c *inputController) handleInlineKey(msg tea.KeyPressMsg) {
 		} else {
 			c.closePicker(false, "")
 		}
-		c.submitInput()
+		c.submitInput(c.input.SubmissionMode())
 		return
 	}
 

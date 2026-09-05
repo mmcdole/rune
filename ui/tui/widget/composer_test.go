@@ -66,7 +66,7 @@ func TestPlainPasteKeepsNormalInputAndChrome(t *testing.T) {
 	if got := in.MeasureHeight(in.width, 1<<14); got != beforeHeight || got != 3 {
 		t.Fatalf("normal PreferredHeight = %d, want unchanged height 3", got)
 	}
-	view := in.View()
+	view := in.View() + inputLabels(in)
 	if strings.Contains(view, "VERBATIM") || strings.Contains(view, "COMMAND") || strings.Contains(view, "Ctrl+Enter") {
 		t.Fatalf("normal input gained compose artifacts: %q", view)
 	}

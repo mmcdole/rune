@@ -125,9 +125,9 @@ argument. Echo hooks run after non-empty final text is recorded and can
 therefore observe its history entry. An accepted `""` rewrite still continues
 to local echo and input processing, but it is not added to history.
 
-In command mode, the final replacement must remain valid text on one line
-without tabs or control characters. Rune rejects the submission if the final
-replacement needs the verbatim composer. To deliberately send several physical
+In command mode, the final replacement must remain valid command text. Ordinary
+game commands stay on one line; local `/commands` may carry multiline,
+tab-indented arguments. Terminal controls are rejected. To deliberately send several physical
 lines from a command handler, call `rune.send_raw` and return `false` so Rune
 does not also process the original command. Verbatim-mode handlers may rewrite
 the complete multiline draft.

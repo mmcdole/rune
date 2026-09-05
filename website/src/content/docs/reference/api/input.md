@@ -34,8 +34,10 @@ snaps an offset inside a multibyte sequence to the preceding UTF-8 code point
 boundary.
 
 Setting text containing a newline, tab, or terminal control byte activates the
-visible verbatim composer. Once active, replacing the draft with one non-empty
-plain line keeps it verbatim; setting it to `""` clears the composer. See
+visible composer and initially selects Verbatim. An explicit mode choice made
+with `Alt+V` or restored from history persists through text changes. Replacing
+the draft with one non-empty plain line preserves its mode; setting it to `""`
+clears the draft and resets to Command. See
 [Multiline verbatim composer](/interface/input/#multiline-verbatim-composer)
 for its submission semantics and limits.
 
@@ -57,7 +59,7 @@ file. It returns `"", false` when the editor could not run or exited with an
 error.
 
 The default `ctrl+e` bind is a thin wrapper. A multiline result enters the
-verbatim composer instead of being converted to semicolon-separated commands:
+composer, respecting an explicit mode choice and preserving newlines:
 
 ```lua
 rune.bind("ctrl+e", function()
@@ -85,8 +87,10 @@ deduplicated only when both their text and mode match.
 `get()` returns the text-only view and does not expose the stored mode.
 `add(cmd)` adds a normal command entry for scripts that want a synthetic
 command (one sent by an alias, say) to be recallable. Because it creates a
-normal command entry, `cmd` must be valid text on one line without tabs or control
-characters; verbatim history entries come only from submitted verbatim input.
+normal command entry, `cmd` must be valid command text: ordinary game commands
+stay on one line, while local `/commands` may have multiline, tab-indented
+arguments. Terminal controls are rejected. Verbatim history entries come only
+from submitted verbatim input.
 
 **Related:** [Input & History guide](/interface/input/) ·
 [rune.bind](/reference/api/bind/) ·

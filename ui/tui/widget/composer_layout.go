@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/mmcdole/rune/input"
 	"github.com/mmcdole/rune/text"
 	"github.com/mmcdole/rune/ui/tui/util"
 )
@@ -209,17 +210,62 @@ func (i *Input) composerRows(bodyHeight int) []string {
 	return rows
 }
 
-func (i *Input) composeLabels(lines int) (header, footer string) {
+// composeLabels fits complete labels in the available cells. Mode switching
+// takes precedence over line count; submit and newline precede secondary actions.
+func (i *Input) composeLabels(lines, width int) (header, toggle, footer string) {
+	mode, destination, submit := "COMMAND", "verbatim", "Enter run"
+	if i.SubmissionMode() == input.ModeVerbatim {
+		mode, destination, submit = "VERBATIM", "command", "Enter send"
+	}
 	word := "lines"
 	if lines == 1 {
 		word = "line"
 	}
-	header = fmt.Sprintf("VERBATIM · %d %s", lines, word)
-	footer = "Enter send · Ctrl+Enter newline · Ctrl+E editor · Esc discard"
-	if i.discardPending {
-		footer = "Esc again discards · any key keeps editing"
+	title := fmt.Sprintf("%s · %d %s", mode, lines, word)
+	toggle = "Alt+V " + destination
+	header = title
+	if ansi.StringWidth(header)+3+ansi.StringWidth(toggle) > width {
+		header = mode
 	}
-	return header, footer
+	if ansi.StringWidth(header)+3+ansi.StringWidth(toggle) > width {
+		toggle = ""
+		header = fitComposerHints(width, title)
+		if header == "" {
+			header = fitComposerHints(width, mode)
+		}
+	}
+	hints := []string{submit, "Ctrl+J newline"}
+	if i.SubmissionMode() == input.ModeVerbatim {
+		hints = append(hints, "Alt+Enter run")
+	}
+	hints = append(hints, "Esc×2 discard")
+	if i.editorAvailable {
+		hints = append(hints, "Ctrl+E editor")
+	}
+	footer = fitComposerHints(width, hints...)
+	if i.discardPending {
+		footer = fitComposerHints(width, "Esc again to discard")
+		if footer == "" {
+			footer = fitComposerHints(width, "Esc to discard")
+		}
+	}
+	return header, toggle, footer
+}
+
+// fitComposerHints keeps hints in priority order without cutting a key or label.
+func fitComposerHints(width int, hints ...string) string {
+	var fitted string
+	for _, hint := range hints {
+		candidate := hint
+		if fitted != "" {
+			candidate = fitted + " · " + hint
+		}
+		if ansi.StringWidth(candidate) > width {
+			break
+		}
+		fitted = candidate
+	}
+	return fitted
 }
 
 func (i *Input) renderComposerRow(layout composerLayout, rowIndex int) string {
@@ -238,7 +284,9 @@ func (i *Input) renderComposerRow(layout composerLayout, rowIndex int) string {
 	col := 0
 	cursorDrawn := false
 	for _, glyph := range row.glyphs {
-		if rowIndex == layout.cursorRow && col == layout.cursorCol && !cursorDrawn {
+		if i.selected {
+			b.WriteString(i.styles.InputSelected.Render(glyph.text))
+		} else if rowIndex == layout.cursorRow && col == layout.cursorCol && !cursorDrawn {
 			b.WriteString(i.styles.InputCursor.Render(glyph.text))
 			cursorDrawn = true
 		} else {
@@ -246,7 +294,7 @@ func (i *Input) renderComposerRow(layout composerLayout, rowIndex int) string {
 		}
 		col += glyph.width
 	}
-	if rowIndex == layout.cursorRow && !cursorDrawn {
+	if rowIndex == layout.cursorRow && !cursorDrawn && !i.selected {
 		b.WriteString(i.styles.InputCursor.Render(" "))
 	}
 

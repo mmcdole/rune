@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/mmcdole/rune/input"
 )
 
 // inputLayout describes the picker and command field separately. Both painting
@@ -78,7 +79,7 @@ func (i *Input) Rules(width, height int) []Rule {
 	}
 	plan := i.layout(width, height)
 	if i.composer != nil && !i.SearchActive() && (!i.PickerActive() || i.PickerInline()) {
-		header, footer := i.composeLabels(strings.Count(i.composer.Value(), "\n") + 1)
+		header, toggle, footer := i.composeLabels(strings.Count(i.Value(), "\n")+1, width-4)
 		for n := range plan.rules {
 			rule := &plan.rules[n]
 			if rule.Vertical {
@@ -86,14 +87,23 @@ func (i *Input) Rules(width, height int) []Rule {
 			}
 			switch rule.At {
 			case plan.header:
-				rule.Label = ansi.Truncate(" "+header+" ", width, "")
-				rule.LabelAt = width - ansi.StringWidth(rule.Label)
-				rule.LabelStyle = i.styles.Warning
+				modeStyle := i.styles.InputText
+				if i.SubmissionMode() == input.ModeVerbatim {
+					modeStyle = i.styles.Warning
+				}
+				if header != "" {
+					rule.Labels = append(rule.Labels, RuleLabel{Text: " " + header + " ", At: 1, Style: modeStyle})
+				}
+				if toggle != "" {
+					rule.Labels = append(rule.Labels, RuleLabel{Text: " " + toggle + " ", At: width - 3 - ansi.StringWidth(toggle), Style: i.styles.Muted})
+				}
 			case plan.footer:
-				rule.Label = ansi.Truncate(" "+footer+" ", width, "")
-				rule.LabelStyle = i.styles.Muted
+				hintStyle := i.styles.Muted
 				if i.discardPending {
-					rule.LabelStyle = i.styles.Warning
+					hintStyle = i.styles.Warning
+				}
+				if footer != "" {
+					rule.Labels = append(rule.Labels, RuleLabel{Text: " " + footer + " ", At: 1, Style: hintStyle})
 				}
 			}
 		}

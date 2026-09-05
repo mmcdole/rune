@@ -28,7 +28,7 @@ func (e *Engine) registerHistoryFuncs() {
 		"add": func(c *script.Call) error {
 			cmd := c.Str(1)
 			if !input.ValidCommandText(cmd) {
-				return c.Errorf("rune.history.add only accepts valid one-line command text without tabs or control characters")
+				return c.Errorf("rune.history.add only accepts valid command text; newlines and tabs require one /command, and terminal controls are not allowed")
 			}
 			e.host.AddToHistory(cmd)
 			return nil

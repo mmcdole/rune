@@ -142,30 +142,65 @@ terminal control bytes are kept in the draft; CRLF and bare CR line endings are
 normalized to LF. You can also press `Ctrl+Enter` to insert the first newline
 and enter the composer.
 
-The composer displays `VERBATIM` and its physical line count, so its submit
-behavior is explicit:
+The multiline composer displays `COMMAND` or `VERBATIM` and its physical line
+count on the left, with `Alt+V command` or `Alt+V verbatim` on the right.
+The footer shows Enter to submit and `Ctrl+J newline` in both modes.
+Verbatim also shows `Alt+Enter run`; `Esc×2 discard` describes the two-press
+discard action. When space permits, `Ctrl+E editor` appears if its binding
+is present. Narrow layouts omit secondary hints and then the line count
+to keep essential actions visible; hints are never cut mid-label.
+
+Ordinary single-line input keeps plain borders. Pressing `Alt+V` opens the
+composer in Verbatim mode, preserving text, cursor, and selection. The composer
+stays visible when you switch modes or remove the last newline; an accepted
+submission or discard closes it unless `keep_input` retains the command.
+The editor and interpretation are independent: multiline text can be a command,
+and a single line can be sent verbatim.
 
 | Key | Action |
 |---|---|
-| `Enter` | Send the draft verbatim |
-| `Ctrl+Enter` | Insert a newline |
-| `Tab` | Insert a literal tab |
+| `Alt+V` | Toggle Command/Verbatim without changing text, cursor, or selection |
+| `Enter` | Submit using the displayed mode |
+| `Alt+Enter` | Run this draft as a command once, without changing its mode |
+| `Ctrl+Enter` or `Ctrl+J` | Insert a newline |
+| `Tab` in the composer | Insert a literal tab |
 | `Ctrl+E` | Edit the whole draft in `$EDITOR` |
-| `Escape` twice | Discard the draft; any other key cancels the first warning |
+| `Escape` twice in the composer | First press shows `Esc again to discard`; the second discards the draft |
+
+A different key cancels discard confirmation and performs its usual action;
+for example, Enter still submits.
+
+Structured paste initially chooses Verbatim. Once you explicitly switch modes,
+your choice stays with that draft through edits, additional pastes, and external
+editor changes. Removing the last newline does not switch modes. A fresh draft
+starts in Command mode.
 
 Verbatim submission treats LF, CRLF, and bare CR as line breaks and sends each
-physical line without command processing. Rune does not expand aliases, split
-at the configured command separator, apply `#N` repeats, or interpret `/quit`
-and other slash-looking lines. Those are all data. The mode remains verbatim
-after edits even if you remove the last newline or tab; it ends when you send
-or discard the draft.
+physical line without command processing. Aliases, command separators, `#N`
+repeats, and slash-looking lines such as `/quit` are all literal data.
+
+Command mode interprets commands and aliases. A multiline draft must be one
+local `/command`: its arguments retain their newlines and tabs. For example,
+paste this, then press `Alt+Enter` (or `Alt+V`, then `Enter`):
+
+```lua
+/lua -- this comment ends at the newline
+local timer = rune.timer.after(60, function() rune.echo("Timer fired") end)
+rune.echo("Timer created")
+```
+
+Rune passes the whole Lua source to `/lua`; it does not join lines or execute
+each line as a separate command. Ordinary game commands must stay on one line;
+use the configured command separator for a command sequence. Command mode
+rejects terminal control characters. A rejected submission leaves your draft
+and its mode intact so you can edit it or switch to Verbatim.
 
 Composer editing keys are handled locally rather than by Lua binds. `Up`/`Down`
 move through the draft's visual rows, `PageUp`/`PageDown` move by a composer
 page, and the mouse wheel still scrolls output when mouse capture is enabled.
 The ordinary one-line input and its bindings return after the composer closes.
 
-A verbatim submission is limited to 1,000 physical lines and 256 KiB. If either
+A submission in either mode is limited to 1,000 physical lines and 256 KiB. If either
 limit is exceeded, Rune rejects the submission, leaves the draft open, and
 shows a warning.
 
@@ -185,16 +220,16 @@ normalizes CRLF and bare CR to LF and removes exactly one final LF used as the
 text file terminator. Additional blank lines, indentation, tabs, trailing
 spaces, and an intentionally empty result are preserved.
 
-A structured editor result enters the visible verbatim composer. Editing an
-existing composer keeps it verbatim even if the result is one non-empty
-line.
+A structured editor result opens the composer and initially selects Verbatim.
+An explicit mode choice stays in effect, including Command mode for multiline
+Lua. Replacing a draft with one non-empty line preserves its mode.
 
 ## The default keymap
 
 Application actions such as history, completion, and `Ctrl+E` are registered
 with `rune.bind` in the core scripts and can be rebound or removed in
-`init.lua`. Paste handling, composer editing, `Ctrl+Enter`, and submitting with
-`Enter` keep their built-in behavior. The full policy and default table are in
+`init.lua`. Paste handling, composer editing, mode switching with `Alt+V`,
+`Ctrl+Enter`/`Ctrl+J`, and submission with `Enter`/`Alt+Enter` keep their built-in behavior. The full policy and default table are in
 the [Key Bindings guide](/scripting/keybindings/#where-binds-run).
 
 **Related:** [rune.input reference](/reference/api/input/),

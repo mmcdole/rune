@@ -105,7 +105,7 @@ func TestStructuredCommandRewriteHasNoEchoHistoryOrDispatch(t *testing.T) {
 	if echoed := uiMock.drainEchoed(); len(echoed) != 0 {
 		t.Fatalf("structured command rewrite was locally echoed: %q", echoed)
 	}
-	if printed := uiMock.drainPrinted(); !contains(printed, "command rewrite must be valid text on one line") {
+	if printed := uiMock.drainPrinted(); !contains(printed, "command rewrite must be valid command text") {
 		t.Fatalf("structured command rewrite produced no useful error: %q", printed)
 	}
 }
@@ -202,5 +202,18 @@ func TestSubmissionEchoVisualizesControlsWithoutChangingWireData(t *testing.T) {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("safe echo missing %q: %q", want, plain)
 		}
+	}
+}
+
+func TestMultilineLuaCommandPreservesSourceAndHistory(t *testing.T) {
+	s, net, _ := newTestSession(t)
+	net.connected = true
+	source := "/lua -- this comment must end at the newline\nlocal value = 40\n\trune.send_raw('answer ' .. (value + 2))"
+	s.handleSubmission(input.Command(source))
+	if got := net.drainSent(); !slices.Equal(got, []string{"answer 42"}) {
+		t.Fatalf("multiline Lua output = %q", got)
+	}
+	if got := s.GetHistoryEntries(); !slices.Equal(got, []input.Submission{input.Command(source)}) {
+		t.Fatalf("history = %+v", got)
 	}
 }

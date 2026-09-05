@@ -41,7 +41,7 @@ func normalizeComposerText(text string) string {
 // lossless editor. Kept as a widget-level name for the local call sites; the
 // admission rule itself belongs to the input package.
 func RequiresComposer(value string) bool {
-	return input.RequiresVerbatim(value)
+	return input.RequiresStructuredEditor(value)
 }
 
 func (c *composer) Value() string {

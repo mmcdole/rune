@@ -2,7 +2,7 @@ package input
 
 import "testing"
 
-func TestRequiresVerbatim(t *testing.T) {
+func TestRequiresStructuredEditor(t *testing.T) {
 	tests := []struct {
 		name  string
 		value string
@@ -25,8 +25,8 @@ func TestRequiresVerbatim(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := RequiresVerbatim(tt.value); got != tt.want {
-				t.Fatalf("RequiresVerbatim(%q) = %v, want %v", tt.value, got, tt.want)
+			if got := RequiresStructuredEditor(tt.value); got != tt.want {
+				t.Fatalf("RequiresStructuredEditor(%q) = %v, want %v", tt.value, got, tt.want)
 			}
 		})
 	}
@@ -41,5 +41,26 @@ func TestValidCommandTextRejectsInvalidUTF8(t *testing.T) {
 	}
 	if ValidCommandText(string([]byte{'l', 0xff, 'k'})) {
 		t.Fatal("invalid UTF-8 command text was accepted")
+	}
+}
+
+func TestCommandAdmissionAllowsStructuredArgumentsOnlyForLocalCommands(t *testing.T) {
+	for _, tc := range []struct {
+		text  string
+		valid bool
+	}{
+		{"/lua -- comment\n\trune.echo('hello')", true},
+		{"/lua\r\nrune.echo('hello')", true},
+		{"/echo first\n/quit", true},
+		{"look\neast", false},
+		{"say\thello", false},
+		{"/\nquit", false},
+		{" /lua\nprint('hello')", false},
+		{"/lua print('\x1b')", false},
+		{"/lua --\u202e\nprint('hello')", false},
+	} {
+		if got := ValidCommandText(tc.text); got != tc.valid {
+			t.Errorf("ValidCommandText(%q) = %v", tc.text, got)
+		}
 	}
 }

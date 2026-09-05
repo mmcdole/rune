@@ -172,7 +172,7 @@ func TestHistoryAddRejectsStructuredCommandText(t *testing.T) {
 		rune.history.add("north")
 		local ok, err = pcall(rune.history.add, "one\ntwo")
 		assert(not ok, "rune.history.add accepted multiline command text")
-		assert(tostring(err):find("rune.history.add only accepts valid one-line command text", 1, true), tostring(err))
+		assert(tostring(err):find("rune.history.add only accepts valid command text", 1, true), tostring(err))
 	`); err != nil {
 		t.Fatal(err)
 	}

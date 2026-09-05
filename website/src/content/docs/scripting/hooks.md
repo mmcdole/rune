@@ -45,8 +45,9 @@ see only earlier accepted submissions. In verbatim mode `text` is the whole
 draft and may contain line breaks. Existing handlers that accept only `text`
 continue to work because Lua ignores the extra context argument.
 
-The final command-mode replacement must remain valid text on one line without
-tabs or control characters. If the final replacement is structured, Rune
+The final command-mode replacement must remain valid command text: ordinary
+game commands stay on one line, while local `/commands` may carry multiline,
+tab-indented arguments. Terminal controls are rejected. For invalid text, Rune
 reports an error and does not echo, save, or send that submission. To
 deliberately send several physical lines, call `rune.send_raw` and return
 `false` so Rune does not also process the original command. Verbatim-mode

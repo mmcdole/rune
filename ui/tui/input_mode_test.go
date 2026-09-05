@@ -1009,9 +1009,11 @@ func TestComposerEscapeRequiresConfirmation(t *testing.T) {
 	}
 	var labels string
 	for _, rule := range h.ctl.input.Rules(80, h.ctl.input.MeasureHeight(80, 100)) {
-		labels += rule.Label
+		for _, label := range rule.Labels {
+			labels += label.Text
+		}
 	}
-	if !strings.Contains(labels, "Esc again discard") {
+	if !strings.Contains(labels, "Esc again to discard") {
 		t.Fatalf("discard confirmation is not visible: %q", labels)
 	}
 	if len(h.events) != 0 {
