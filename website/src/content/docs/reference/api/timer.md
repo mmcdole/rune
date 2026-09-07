@@ -1,6 +1,6 @@
 ---
 title: rune.timer
-description: Full signatures for one-shot and repeating timers — scheduling, remaining time, self-cancellation, and disabling callbacks.
+description: Create timers, check time remaining, and enable, disable, or cancel their actions.
 ---
 
 Timers run actions after a delay or at a fixed interval. For a
@@ -12,12 +12,13 @@ task-oriented introduction, see [Timers](/scripting/timers/).
 rune.timer.after(seconds, action, opts?)   -- one-shot: fires once, then removes itself
 rune.timer.every(seconds, action, opts?)   -- repeating: fires every interval
 rune.timer.cancel(name)                    -- alias of rune.timer.remove
-rune.timer.list()                          -- registrations with remaining seconds
+rune.timer.list()                          -- all timers with remaining seconds
 ```
 
-Both constructors return a [handle](/reference/api/#handles) and accept
+Both functions return a [handle](/reference/api/#handles) and accept
 the [common options](/reference/api/#options) (`name`, `group`). Timer
-handles additionally accept `h:cancel()` as an alias of `h:remove()`.
+handles additionally accept `h:cancel()` as an alias of `h:remove()`,
+and `h:remaining()` to read the time left.
 
 ### rune.timer.every
 
@@ -30,8 +31,8 @@ rune.timer.every(seconds, action, opts?) -> handle
   or `function(ctx)`.
 - `opts` (table, optional) — [common options](/reference/api/#options).
 
-Scheduling is fixed-interval: the next firing is scheduled the moment
-the previous one fires, regardless of how long the action takes to run.
+The countdown to the next repeat starts when the timer becomes due,
+without waiting for its action to finish.
 
 ```lua
 rune.timer.every(60, "save", {name = "autosave"})
@@ -54,23 +55,52 @@ end)
 
 ## Disabling and enabling
 
-`h:disable()` suppresses firing without unregistering; `h:enable()`
-resumes. A repeating timer keeps its schedule while disabled and picks
-it back up on re-enable.
+`h:disable()` stops the timer's action from running; `h:enable()` allows
+it to run again. Disabling a repeating timer does not pause or restart
+its countdown.
 
 :::caution
-A **one-shot** whose moment passes while disabled is removed — its
-wake-up is spent and re-enabling cannot revive it. Timers are also
-Lua-registered state, so `/reload` clears them all; register timers in
-your script so they come back on reload.
+A **one-shot** that becomes due while disabled is removed without running
+its action. Enabling it afterward will not bring it back; create a new
+timer instead. `/reload` clears all timers, so create them in your script
+if they should start again when you reload.
 :::
 
 ## Managing
 
-Standard registry management applies:
+Manage timers by name:
 `rune.timer.get/enable/disable/remove(name)`, `.cancel(name)`, `.list()`,
 `.count()`, `.clear()`, `.remove_group(group)` — see
 [Registries](/reference/api/#managing). `/timers` lists everything.
+
+### handle:remaining
+
+```lua
+h:remaining() -> number | nil
+```
+
+Returns the number of seconds until this timer is next due, including
+fractions; never negative. Reading the time left does not pause or restart
+the timer. It works for both named and unnamed timers.
+
+```lua
+local h = rune.timer.after(30, "stand")
+local seconds = h:remaining()
+
+local autosave = rune.timer.get("autosave")
+local left = autosave and autosave:remaining()
+```
+
+Returns `nil` when the timer has finished, been cancelled, or been removed.
+Disabled timers and timers in disabled groups keep counting down. A
+one-shot that is due but still waiting to run returns `0`. If Rune is busy,
+the action may run later than the countdown suggests.
+
+Creating another timer with the same name replaces the old timer, whose
+handle then returns `nil`. Use `rune.timer.get(name)` to get the new timer.
+
+Use `h:remaining()` to check one timer, or `rune.timer.list()` below to
+check all timers.
 
 ### rune.timer.list
 
@@ -83,20 +113,19 @@ Each entry includes:
 | Field | Meaning |
 |---|---|
 | `seconds` | Configured delay or repeat interval, in seconds |
-| `remaining` | Seconds until the next scheduled wake-up, including fractions; never negative |
+| `remaining` | Seconds until the timer is next due, including fractions; never negative |
 | `mode` | `"after"` or `"every"` |
 | `value` | The command string, or `"(function)"` for a callback |
-| `name`, `enabled`, `group`, `source` | Registration metadata as described in [Registries](/reference/api/#managing) |
+| `name`, `enabled`, `group`, `source` | Timer details as described in [Registries](/reference/api/#managing) |
 
-`remaining` is a snapshot from the Go timer scheduler. Repeating timers
-count down to their next wake-up even while disabled, while their group
-is disabled, or while an earlier callback is waiting to run. A one-shot
-whose wake-up has already fired returns zero until Lua processes it and
-removes the registration. Removed timers do not appear in the list.
-This reports scheduling time, not a guarantee of when the callback will
-execute on the client's event loop.
+`remaining` is the time left when you call `list()`. Call it again for
+updated values. Repeating timers count down to the next repeat even when
+they or their group are disabled, or an earlier action is waiting to run.
+A one-shot that is due but still waiting to run shows zero. Finished and
+cancelled timers do not appear in the list. If Rune is busy, an action may
+run later than the countdown suggests.
 
-`/timers` shows the snapshot rounded to one decimal place, for example
+`/timers` shows the time left rounded to one decimal place, for example
 `every 60.0s (23.4s left)`. It refreshes when you run the command again.
 
 **Related:** [Timers guide](/scripting/timers/) ·
