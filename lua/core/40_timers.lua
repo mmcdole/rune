@@ -15,6 +15,7 @@
 -- disabled is removed - its wake-up is spent and cannot recur.
 --
 -- Returns a handle with :disable(), :enable(), :cancel(), :name(), :group()
+-- and :remaining() (seconds until the next wake-up, or nil after removal).
 --
 -- Options:
 --   name  = "string"  -- Unique ID for upsert/management
@@ -40,6 +41,14 @@ local registry = rune.registry.new{
     end,
 }
 
+local function remaining(self)
+    local data = self._data
+    if data.removed then
+        return nil
+    end
+    return rune._timer.remaining(data.timer_id)
+end
+
 -- Create a timer (internal)
 local function create_timer(seconds, action, opts, repeating)
     local data = {
@@ -51,6 +60,7 @@ local function create_timer(seconds, action, opts, repeating)
 
     local handle = registry:add(data, opts)
     handle.cancel = handle.remove -- :cancel() is intuitive for timers
+    handle.remaining = remaining
 
     local function callback()
         -- Individual state AND group master switch

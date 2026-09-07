@@ -17,7 +17,8 @@ rune.timer.list()                          -- registrations with remaining secon
 
 Both constructors return a [handle](/reference/api/#handles) and accept
 the [common options](/reference/api/#options) (`name`, `group`). Timer
-handles additionally accept `h:cancel()` as an alias of `h:remove()`.
+handles additionally accept `h:cancel()` as an alias of `h:remove()`,
+and `h:remaining()` to query the next scheduled wake-up.
 
 ### rune.timer.every
 
@@ -71,6 +72,33 @@ Standard registry management applies:
 `rune.timer.get/enable/disable/remove(name)`, `.cancel(name)`, `.list()`,
 `.count()`, `.clear()`, `.remove_group(group)` — see
 [Registries](/reference/api/#managing). `/timers` lists everything.
+
+### handle:remaining
+
+```lua
+h:remaining() -> number | nil
+```
+
+Returns seconds until this timer's next scheduled wake-up, including
+fractions; never negative. Each call queries the current scheduler deadline
+without changing the schedule. It works for both named and unnamed timers.
+
+```lua
+local h = rune.timer.after(30, "stand")
+local seconds = h:remaining()
+
+local autosave = rune.timer.get("autosave")
+local left = autosave and autosave:remaining()
+```
+
+Disabled timers and timers in disabled groups keep counting down. A due
+one-shot returns `0` until Lua processes its wake-up and removes it.
+After removal, cancellation, or completion, the handle returns `nil`.
+Replacing a timer with the same name also makes the old handle return
+`nil`; use `rune.timer.get(name)` to retrieve the replacement's handle.
+
+This uses the same scheduling-time semantics as `remaining` in
+`rune.timer.list()` below, without building or scanning the list.
 
 ### rune.timer.list
 

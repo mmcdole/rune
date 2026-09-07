@@ -79,7 +79,29 @@ group, name, and the `file:line` that registered it. For example,
 seconds away. This is a snapshot when you run `/timers`; run it again
 to see an updated countdown.
 
-Scripts can read the remaining seconds from `rune.timer.list()`:
+To query one timer, call `:remaining()` on its handle:
+
+```lua
+local h = rune.timer.after(30, "stand")
+local seconds = h:remaining()
+```
+
+For a named timer in an existing status bar:
+
+```lua
+rune.ui.bar("status", function()
+    local timer = rune.timer.get("autosave")
+    local left = timer and timer:remaining()
+    return left and string.format("Save: %.1fs", left) or ""
+end)
+```
+
+Bar callbacks already refresh every 250ms. The method returns fractional
+seconds until the next scheduled wake-up, or `nil` after the timer is
+removed. A retained handle continues to refer to its original timer;
+looking up the name each time follows replacements.
+
+To inspect all timers, use `rune.timer.list()`:
 
 ```lua
 for _, timer in ipairs(rune.timer.list()) do
