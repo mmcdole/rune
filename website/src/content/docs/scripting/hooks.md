@@ -45,13 +45,16 @@ see only earlier accepted submissions. In verbatim mode `text` is the whole
 draft and may contain line breaks. Existing handlers that accept only `text`
 continue to work because Lua ignores the extra context argument.
 
-The final command-mode replacement must remain valid command text: ordinary
-game commands stay on one line, while local `/commands` may carry multiline,
-tab-indented arguments. Terminal controls are rejected. For invalid text, Rune
-reports an error and does not echo, save, or send that submission. To
-deliberately send several physical lines, call `rune.send_raw` and return
-`false` so Rune does not also process the original command. Verbatim-mode
-handlers may rewrite the whole multiline draft.
+In Command mode, hooks receive each nonblank physical line separately, in order.
+A replacement may contain newlines and tabs; its physical lines execute as separate
+commands after all hook chains finish. Rewritten lines are not fed back through
+input hooks. Invalid UTF-8, terminal controls, and results exceeding the submission
+limits cancel the whole submission before echo, history, or dispatch. A hook returning
+`false` also cancels the whole submission. Hook side effects cannot be undone.
+
+Verbatim hooks receive the whole draft, including line breaks. Both modes retain
+one effective history entry per submission. All command lines resolve history
+references against history from before the submission.
 
 ```lua
 -- Timestamp every line, after triggers have run

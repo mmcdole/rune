@@ -246,6 +246,48 @@ func (e *Engine) callHooks(nret int, args ...any) ([]script.Result, bool, error)
 // a replacement string or false to consume the submission. Interpretation
 // mode is owned by Go and cannot be rewritten by scripts.
 func (e *Engine) ApplyInputHooks(submission input.Submission) (input.Submission, bool) {
+	if !submission.WithinLimits() || (submission.Mode == input.ModeCommand && !input.ValidCommandText(submission.Text)) {
+		e.reportError("input", fmt.Errorf("invalid command text or submission limit exceeded"))
+		return submission, false
+	}
+	if submission.Mode == input.ModeVerbatim || !strings.ContainsAny(submission.Text, "\r\n") {
+		return e.applyInputLineHooks(submission)
+	}
+	// Finish every hook chain before committing history or dispatching. History
+	// expansion therefore sees the same prior history for every line.
+	lines := make([]string, 0)
+	hasCommand := false
+	totalBytes, totalLines := 0, 0
+	for _, line := range submission.PhysicalLines() {
+		if strings.TrimSpace(line) == "" {
+			lines = append(lines, line)
+			continue
+		}
+		hasCommand = true
+		effective, proceed := e.applyInputLineHooks(input.Command(line))
+		if !proceed {
+			return submission, false
+		}
+		totalBytes += len(effective.Text) + 1
+		totalLines += len(effective.PhysicalLines())
+		if totalBytes > input.MaxSubmissionBytes+1 || totalLines > input.MaxSubmissionLines {
+			e.reportError("input hooks", fmt.Errorf("submission limit exceeded"))
+			return submission, false
+		}
+		lines = append(lines, effective.Text)
+	}
+	if !hasCommand {
+		return submission, false
+	}
+	submission.Text = strings.Join(lines, "\n")
+	if !submission.WithinLimits() {
+		e.reportError("input hooks", fmt.Errorf("submission limit exceeded"))
+		return submission, false
+	}
+	return submission, true
+}
+
+func (e *Engine) applyInputLineHooks(submission input.Submission) (input.Submission, bool) {
 	ctx := script.Tree{V: map[string]any{"mode": submission.Mode.String()}}
 	results, found, err := e.callHooks(1, "input", submission.Text, ctx)
 	if err != nil {
@@ -266,11 +308,15 @@ func (e *Engine) ApplyInputHooks(submission input.Submission) (input.Submission,
 	case result.Kind == script.KindString:
 		if submission.Mode != input.ModeVerbatim && !input.ValidCommandText(result.Str) {
 			e.reportError("input hooks", fmt.Errorf(
-				"command rewrite must be valid command text; newlines and tabs require one /command, and terminal controls are not allowed",
+				"command rewrite must be valid command text; terminal controls are not allowed",
 			))
 			return submission, false
 		}
 		submission.Text = result.Str
+		if !submission.WithinLimits() {
+			e.reportError("input hooks", fmt.Errorf("submission limit exceeded"))
+			return submission, false
+		}
 		return submission, true
 	default:
 		e.reportError("input hooks", fmt.Errorf(
@@ -287,36 +333,46 @@ func (e *Engine) ApplyInputHooks(submission input.Submission) (input.Submission,
 // dispatcher that starts and then fails is never retried, because it may
 // already have produced side effects.
 func (e *Engine) DispatchSubmission(submission input.Submission) {
-	var found bool
-	err := e.guard(func() error {
-		var callErr error
-		_, found, callErr = e.vm.CallModule(
-			"rune.input", "_dispatch", 0,
-			submission.Text, submission.Mode.String(),
-		)
-		return callErr
-	})
-	if err != nil {
-		e.reportError("input dispatch", err)
-		return
+	lines := submission.PhysicalLines()
+	for index, line := range lines {
+		if submission.Mode == input.ModeCommand && len(lines) > 1 && strings.TrimSpace(line) == "" {
+			continue
+		}
+		var found bool
+		var results []script.Result
+		err := e.guard(func() error {
+			var callErr error
+			results, found, callErr = e.vm.CallModule(
+				"rune.input", "_dispatch", 1, line, submission.Mode.String(),
+			)
+			return callErr
+		})
+		if err != nil {
+			e.reportError(fmt.Sprintf("input line %d", index+1), err)
+			return
+		}
+		if found && len(results) > 0 && results[0].False() {
+			e.reportError("input", fmt.Errorf("stopped at line %d", index+1))
+			return
+		}
+		if !found {
+			e.reportCoreBroken()
+			if !e.dispatchSubmissionFallback(input.Submission{Text: line, Mode: submission.Mode}) {
+				return
+			}
+		}
 	}
-	if found {
-		return
-	}
-
-	e.reportCoreBroken()
-	e.dispatchSubmissionFallback(submission)
 }
 
-func (e *Engine) dispatchSubmissionFallback(submission input.Submission) {
+func (e *Engine) dispatchSubmissionFallback(submission input.Submission) bool {
 	if submission.Mode == input.ModeVerbatim {
 		for _, line := range submission.PhysicalLines() {
 			if err := e.host.Send(line); err != nil {
 				e.reportError("input fallback", err)
-				return
+				return false
 			}
 		}
-		return
+		return true
 	}
 
 	switch submission.Text {
@@ -327,8 +383,10 @@ func (e *Engine) dispatchSubmissionFallback(submission input.Submission) {
 	default:
 		if err := e.host.Send(submission.Text); err != nil {
 			e.reportError("input fallback", err)
+			return false
 		}
 	}
+	return true
 }
 
 // OnEcho runs the echo hook. The core adds styling; user hooks may rewrite or

@@ -118,7 +118,7 @@ implements by default and the LuaJIT backend implements under `-tags luajit`.
 
 - **Single Host interface:** The Engine depends on one `lua.Host` interface (`lua/host.go`). Session implements it, with the methods grouped by service area across `session/lua_*.go` (network, ui, timers, system, history, session, store, log, state). Tests substitute a mock Host.
 - **Reactivity:** The Engine updates a global `rune.state` table whenever system state changes (connection, scroll position), allowing scripts to reactively render UI elements.
-- **Pre-commit input:** The Engine first folds an interactive submission through `input` hooks. Strings rewrite and chain, `nil` or other values pass through, and `false` consumes before history, echo, or routing. A command-mode result must still satisfy the shared command admission rule (one-line game input or a local `/command` with multiline arguments, without terminal controls); verbatim results may remain structured. Session records and echoes the effective value, then the Engine invokes the separate internal command/verbatim dispatcher.
+- **Pre-commit input:** The Engine first folds an interactive submission through `input` hooks. Strings rewrite and chain, `nil` or other values pass through, and `false` consumes before history, echo, or routing. Command hooks run on each nonblank physical line before any batch dispatch; verbatim hooks receive the whole draft. Rewrites may contain newlines and tabs, but command results must exclude terminal controls and all results must fit submission limits. Session records and echoes the effective value, then the Engine invokes the separate internal command/verbatim dispatcher.
 - **Staged config publication:** Go owns the typed config schema and defaults. Core scripts, user scripts, and ready hooks evaluate `rune.config.set` against a staged candidate during startup or reload; after they finish, Engine publishes one complete snapshot to Session. Later runtime updates publish immediately through a dedicated callback that does not re-enter Lua.
 
 ## 3. UI Architecture: The "Push" Model
@@ -347,8 +347,10 @@ mode choice persists for the draft. The Go input controller handles `Alt+V`
 and applying accepted submissions atomically. The Model validates command text
 and draft limits before queueing, so rejection leaves the draft intact. The
 shared `input` admission policy also validates Lua hook rewrites and synthetic
-history. Session retains text and mode in history; Lua dispatch receives a
-multiline local command once with its arguments intact.
+history. Session retains the effective block and mode as one history entry. Engine dispatch
+splits both modes into physical lines; Command skips blank batch lines and invokes
+normal Lua routing, while Verbatim sends literal lines. Visual wrapping never
+changes submitted text. A failing dispatch stops later lines without retrying.
 
 ### JSON conversion
 

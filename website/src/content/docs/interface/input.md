@@ -89,7 +89,7 @@ itself.
 
 Rune searches earlier normal commands. It ignores local `/commands`, verbatim
 blocks, and earlier commands that still contain history expansion syntax. If
-any expansion has no match, Rune shows a warning and sends none of the line.
+any expansion has no match, Rune shows a warning and sends none of the submission.
 
 A line beginning with `/` is a local Rune command, so Rune does not perform
 history expansion anywhere on that line. It also does not perform history
@@ -179,21 +179,35 @@ Verbatim submission treats LF, CRLF, and bare CR as line breaks and sends each
 physical line without command processing. Aliases, command separators, `#N`
 repeats, and slash-looking lines such as `/quit` are all literal data.
 
-Command mode interprets commands and aliases. A multiline draft must be one
-local `/command`: its arguments retain their newlines and tabs. For example,
-paste this, then press `Alt+Enter` (or `Alt+V`, then `Enter`):
+Command mode executes each physical line in order. Each line supports aliases,
+command separators, repeats, and local `/commands`. For example, paste this,
+press `Alt+V` to select Command, then press `Enter`:
 
-```lua
-/lua -- this comment ends at the newline
-local timer = rune.timer.after(60, function() rune.echo("Timer fired") end)
-rune.echo("Timer created")
+```text
+north
+look;score
+/echo Finished
 ```
 
-Rune passes the whole Lua source to `/lua`; it does not join lines or execute
-each line as a separate command. Ordinary game commands must stay on one line;
-use the configured command separator for a command sequence. Command mode
-rejects terminal control characters. A rejected submission leaves your draft
-and its mode intact so you can edit it or switch to Verbatim.
+LF, CRLF, and bare CR separate commands. Blank and whitespace-only lines are
+ignored in a batch; tabs are allowed. Verbatim preserves blank lines and whitespace.
+A long command that wraps across display rows is still one command. This includes
+`/lua`: its full single-line source is passed intact, however many rows it occupies.
+An actual newline starts another command, including after a slash command.
+
+Rune checks the complete draft before running it. Command mode rejects invalid
+UTF-8 and terminal controls. A rejected draft stays in the editor with its mode
+intact. If a command fails during execution, Rune reports the line and stops the
+remaining batch. Commands already executed are not undone or retried. An error
+printed by a script that handles the failure itself does not stop execution.
+
+The block is saved as one history entry after input hooks finish. Up or history
+search restores the block and its mode. History expansion uses the history from
+before this submission: `!` selects the most recent eligible command line, even
+when that line belongs to a saved batch. Local command lines bypass expansion.
+Input hooks run on each nonblank command line before any of the batch is dispatched.
+A hook returning `false`, a missing history match, or an invalid rewrite cancels the
+whole submission before history and echo. In Verbatim, hooks receive the whole draft.
 
 Composer editing keys are handled locally rather than by Lua binds. `Up`/`Down`
 move through the draft's visual rows, `PageUp`/`PageDown` move by a composer

@@ -11,7 +11,7 @@ func TestSubmissionPhysicalLines(t *testing.T) {
 		submission Submission
 		want       []string
 	}{
-		{name: "command remains one line", submission: Command("one\ntwo"), want: []string{"one\ntwo"}},
+		{name: "command physical lines", submission: Command("one\ntwo"), want: []string{"one", "two"}},
 		{name: "verbatim line endings", submission: Verbatim("one\r\ntwo\rthree\n"), want: []string{"one", "two", "three", ""}},
 		{name: "verbatim empty", submission: Verbatim(""), want: []string{""}},
 	}

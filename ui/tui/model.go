@@ -340,13 +340,10 @@ func (m *Model) appendMessage(text string) {
 // controller to retain the current local draft.
 func (m *Model) submit(msg ui.InputSubmittedMsg) bool {
 	if msg.Submission.Mode == input.ModeCommand && !input.ValidCommandText(msg.Submission.Text) {
-		m.appendMessage(text.Red("[WARNING] Command not run - newlines and tabs require one /command; terminal controls are not allowed. Use Alt+V for verbatim."))
+		m.appendMessage(text.Red("[WARNING] Command not run - invalid text or terminal controls. Use Alt+V for verbatim."))
 		return false
 	}
-	// Count physical lines for either interpretation; a multiline command is
-	// still one dispatch, but consumes the same draft resources as verbatim.
-	lineCount := len(input.Verbatim(msg.Submission.Text).PhysicalLines())
-	if len(msg.Submission.Text) > maxSubmissionBytes || lineCount > maxSubmissionLines {
+	if !msg.Submission.WithinLimits() {
 		m.appendMessage(text.Red("[WARNING] Input not sent - limit is 1000 lines or 256 KiB"))
 		return false
 	}
@@ -358,8 +355,8 @@ func (m *Model) submit(msg ui.InputSubmittedMsg) bool {
 }
 
 const (
-	maxSubmissionBytes = 256 * 1024
-	maxSubmissionLines = 1000
+	maxSubmissionBytes = input.MaxSubmissionBytes
+	maxSubmissionLines = input.MaxSubmissionLines
 )
 
 func (m *Model) isBound(key string) bool {

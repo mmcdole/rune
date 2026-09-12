@@ -65,6 +65,7 @@ end
 -- INTERNAL: run a command protected (called by the input dispatcher).
 -- Returns true if the name was a known command, even when it is
 -- disabled or its handler failed - the input is consumed either way.
+-- The second result reports success so a batch can stop after a failure.
 function rune.command.dispatch(name, args)
     local data = by_cmd[name]
     if not data then
@@ -73,12 +74,12 @@ function rune.command.dispatch(name, args)
     if not registry:active(data) then
         rune.echo(red("[Error]") .. " /" .. name .. " is disabled" ..
             " (re-enable with rune.command.enable)")
-        return true
+        return true, false
     end
     local label = 'Command "/' .. name .. '"' ..
         (data.source and (" @" .. data.source) or "")
-    rune.guarded_call(label, data, data.handler, args)
-    return true
+    local ok, result = rune.guarded_call(label, data, data.handler, args)
+    return true, ok and result ~= false
 end
 
 -- Management by name
@@ -221,9 +222,11 @@ rune.command.add("lua", function(args)
             end
         else
             rune.echo(red("[Error]") .. " " .. tostring(result))
+            return false
         end
     else
         rune.echo(red("[Error]") .. " " .. tostring(err))
+        return false
     end
 end, "Execute Lua code")
 
@@ -408,7 +411,7 @@ rune.command.add("raw", function(args)
         rune.echo("[Usage] /raw <text>")
         return
     end
-    rune.send_raw(args)
+    return rune.send_raw(args) ~= nil
 end, "Send text without alias expansion")
 
 -- /echo <text> - Print to the local screen (never sent to the server).

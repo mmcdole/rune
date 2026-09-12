@@ -82,13 +82,13 @@ func TestConsumedInputHasNoEchoHistoryOrDispatch(t *testing.T) {
 	}
 }
 
-func TestStructuredCommandRewriteHasNoEchoHistoryOrDispatch(t *testing.T) {
+func TestControlCommandRewriteHasNoEchoHistoryOrDispatch(t *testing.T) {
 	s, net, uiMock := newTestSession(t)
 	net.connected = true
 
 	if err := s.engine.DoString("rewrite command as structured text", `
 		rune.hooks.on("input", function()
-			return "east\nwest"
+			return "east\027west"
 		end, { name = "test-structured-rewrite", priority = 90 })
 	`); err != nil {
 		t.Fatal(err)
@@ -205,15 +205,29 @@ func TestSubmissionEchoVisualizesControlsWithoutChangingWireData(t *testing.T) {
 	}
 }
 
-func TestMultilineLuaCommandPreservesSourceAndHistory(t *testing.T) {
-	s, net, _ := newTestSession(t)
+func TestCommandBatchProcessesLinesAndKeepsHistory(t *testing.T) {
+	s, net, uiMock := newTestSession(t)
 	net.connected = true
-	source := "/lua -- this comment must end at the newline\nlocal value = 40\n\trune.send_raw('answer ' .. (value + 2))"
+	source := "/lua rune.alias.exact('batch', 'answer 42')\n\tbatch\n/lua -- comment ends on this line\nbatch;look\n\n"
 	s.handleSubmission(input.Command(source))
-	if got := net.drainSent(); !slices.Equal(got, []string{"answer 42"}) {
-		t.Fatalf("multiline Lua output = %q", got)
+	if got := net.drainSent(); !slices.Equal(got, []string{"answer 42", "answer 42", "look"}) {
+		t.Fatalf("batch output = %q", got)
 	}
 	if got := s.GetHistoryEntries(); !slices.Equal(got, []input.Submission{input.Command(source)}) {
 		t.Fatalf("history = %+v", got)
+	}
+	if got := uiMock.drainEchoed(); len(got) != 4 {
+		t.Fatalf("echo = %q", got)
+	}
+}
+
+func TestLongSingleLineLuaExecutesOnce(t *testing.T) {
+	s, net, _ := newTestSession(t)
+	net.connected = true
+	payload := strings.Repeat("wrapped text ", 40)
+	source := "/lua rune.send_raw('" + payload + "')"
+	s.handleSubmission(input.Command(source))
+	if got := net.drainSent(); !slices.Equal(got, []string{payload}) {
+		t.Fatalf("long command sent %q", got)
 	}
 }

@@ -164,14 +164,14 @@ func TestHistoryPublicAndInternalAPIs(t *testing.T) {
 	}
 }
 
-func TestHistoryAddRejectsStructuredCommandText(t *testing.T) {
+func TestHistoryAddRejectsTerminalControls(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 
 	if err := engine.DoString("structured_history", `
 		rune.history.add("north")
-		local ok, err = pcall(rune.history.add, "one\ntwo")
-		assert(not ok, "rune.history.add accepted multiline command text")
+		local ok, err = pcall(rune.history.add, "one\027two")
+		assert(not ok, "rune.history.add accepted terminal controls")
 		assert(tostring(err):find("rune.history.add only accepts valid command text", 1, true), tostring(err))
 	`); err != nil {
 		t.Fatal(err)

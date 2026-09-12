@@ -28,10 +28,10 @@ type Submission struct {
 	Mode SubmissionMode
 }
 
-// PhysicalLines splits verbatim input on LF, CRLF, and bare CR. Command input
-// remains one logical command.
+// PhysicalLines splits either mode on LF, CRLF, and bare CR.
+// Visual wrapping is not part of the submitted text.
 func (s Submission) PhysicalLines() []string {
-	if s.Mode != ModeVerbatim || !strings.ContainsAny(s.Text, "\r\n") {
+	if !strings.ContainsAny(s.Text, "\r\n") {
 		return []string{s.Text}
 	}
 	text := strings.ReplaceAll(s.Text, "\r\n", "\n")
@@ -48,3 +48,13 @@ func Command(text string) Submission {
 func Verbatim(text string) Submission {
 	return Submission{Text: text, Mode: ModeVerbatim}
 }
+
+// WithinLimits applies the same resource limits before and after input hooks.
+func (s Submission) WithinLimits() bool {
+	return len(s.Text) <= MaxSubmissionBytes && len(s.PhysicalLines()) <= MaxSubmissionLines
+}
+
+const (
+	MaxSubmissionBytes = 256 * 1024
+	MaxSubmissionLines = 1000
+)

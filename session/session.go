@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/mmcdole/rune/input"
@@ -431,6 +432,9 @@ func (s *Session) handleSubmission(submission input.Submission) {
 
 	if s.protocol.LocalEchoEnabled() {
 		for _, line := range effective.PhysicalLines() {
+			if effective.Mode == input.ModeCommand && strings.ContainsAny(effective.Text, "\r\n") && strings.TrimSpace(line) == "" {
+				continue
+			}
 			if styled, show := s.engine.OnEcho(line); show {
 				s.ui.Echo(styled)
 			}

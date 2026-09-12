@@ -136,9 +136,9 @@ func TestModeShortcutsRespectOverlayCaptureAndAltGr(t *testing.T) {
 func TestRejectedCommandPreservesDraftAndCanBeSentVerbatim(t *testing.T) {
 	events := make(chan ui.UIEvent, 20)
 	m := NewModel(events)
-	m.inputCtl.HandlePaste("north\nlook")
+	m.inputCtl.HandlePaste("north\x1blook")
 	m.inputCtl.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt})
-	if m.input.Value() != "north\nlook" || m.input.SubmissionMode() != input.ModeVerbatim {
+	if m.input.Value() != "north\x1blook" || m.input.SubmissionMode() != input.ModeVerbatim {
 		t.Fatal("invalid command lost draft")
 	}
 	if m.output.buffer.Count() == 0 || !strings.Contains(m.output.buffer.At(0), "Command not run") {
@@ -151,7 +151,7 @@ func TestRejectedCommandPreservesDraftAndCanBeSentVerbatim(t *testing.T) {
 	}
 	m.inputCtl.HandleKey(keyPress(tea.KeyEnter))
 	msg, ok := (<-events).(ui.InputSubmittedMsg)
-	if !ok || msg.Submission != input.Verbatim("north\nlook") {
+	if !ok || msg.Submission != input.Verbatim("north\x1blook") {
 		t.Fatalf("verbatim retry = %#v", msg)
 	}
 }
@@ -194,4 +194,46 @@ func TestEscapeConfirmationDoesNotConsumeSubmit(t *testing.T) {
 	if h.ctl.input.IsComposing() || h.ctl.input.Value() != "" {
 		t.Fatal("accepted submission retained composer")
 	}
+}
+
+func TestComposerWrapDoesNotSplitSlashCommand(t *testing.T) {
+	for _, prefix := range []string{"/lua rune.echo('", "/echo "} {
+		t.Run(prefix, func(t *testing.T) {
+			h := newControllerHarness()
+			h.ctl.input.SetSize(30, 0)
+			draft := prefix + strings.Repeat("long command ", 30)
+			if strings.HasPrefix(prefix, "/lua") {
+				draft += "')"
+			}
+			h.ctl.SetSubmission(input.Command(draft))
+			// Open the composer and return to Command mode at a narrow width.
+			h.ctl.HandleKey(tea.KeyPressMsg{Code: 'v', Mod: tea.ModAlt})
+			h.ctl.HandleKey(tea.KeyPressMsg{Code: 'v', Mod: tea.ModAlt})
+			if h.ctl.input.MeasureHeight(30, 30) <= 3 {
+				t.Fatal("test command did not wrap")
+			}
+			h.ctl.HandleKey(keyPress(tea.KeyEnter))
+			if len(h.submitted) != 1 || h.submitted[0] != input.Command(draft) {
+				t.Fatalf("wrapped submission = %+v", h.submitted)
+			}
+		})
+	}
+}
+
+func TestPasteToggleSubmitsCommandLines(t *testing.T) {
+	events := make(chan ui.UIEvent, 20)
+	m := NewModel(events)
+	draft := "north\nlook\n/echo done"
+	m.inputCtl.HandlePaste(draft)
+	m.inputCtl.HandleKey(tea.KeyPressMsg{Code: 'v', Mod: tea.ModAlt})
+	m.inputCtl.HandleKey(keyPress(tea.KeyEnter))
+	for len(events) > 0 {
+		if msg, ok := (<-events).(ui.InputSubmittedMsg); ok {
+			if msg.Submission != input.Command(draft) {
+				t.Fatalf("submission = %+v", msg.Submission)
+			}
+			return
+		}
+	}
+	t.Fatal("multiline command was not submitted")
 }

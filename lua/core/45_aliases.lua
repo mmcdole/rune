@@ -209,7 +209,7 @@ end
 
 -- Run an alias action protected, with quarantine: an action failing
 -- repeatedly is disabled like any hook/trigger/timer action.
--- Returns the action's result, or nil on failure.
+-- Returns the action result and a failure flag for command dispatch.
 local function run_action(data, arg, ctx)
     local label = 'Alias "' .. tostring(data.name or data.pattern) .. '"' ..
         (data.source and (" @" .. data.source) or "")
@@ -217,11 +217,11 @@ local function run_action(data, arg, ctx)
     if ok then
         return result
     end
-    return nil
+    return nil, true
 end
 
 -- Process input through aliases
--- Returns: processed (bool), result (string or nil)
+-- Returns: processed (bool), result (string or nil), failed (bool or nil)
 -- If processed is true and result is nil, input was consumed by function alias
 -- If processed is true and result is string, use result as new input
 -- If processed is false, no alias matched
@@ -231,7 +231,7 @@ function rune.alias.process(input)
         if not data.is_exact and registry:active(data) then
             local matches = rune.regex.match(data.pattern, input)
             if matches then
-                local result = nil
+                local result, failed
 
                 if type(data.action) == "function" then
                     local ctx = {
@@ -241,7 +241,7 @@ function rune.alias.process(input)
                         type = "alias",
                         matches = matches,
                     }
-                    result = run_action(data, matches, ctx)
+                    result, failed = run_action(data, matches, ctx)
                 elseif type(data.action) == "string" then
                     result = rune.substitute_captures(data.action, matches)
                 end
@@ -250,7 +250,7 @@ function rune.alias.process(input)
                     data._handle:remove()
                 end
 
-                return true, result
+                return true, result, failed
             end
         end
     end
@@ -278,7 +278,7 @@ function rune.alias.process(input)
     if winner then
         local args_start = input:find("%S", winner_end + 1)
         local args = args_start and input:sub(args_start) or ""
-        local result = nil
+        local result, failed
 
         if type(winner.action) == "function" then
             local ctx = {
@@ -288,7 +288,7 @@ function rune.alias.process(input)
                 type = "alias",
                 args = args,
             }
-            result = run_action(winner, args, ctx)
+            result, failed = run_action(winner, args, ctx)
         elseif type(winner.action) == "string" then
             if args and args ~= "" then
                 result = winner.action .. " " .. args
@@ -301,7 +301,7 @@ function rune.alias.process(input)
             winner._handle:remove()
         end
 
-        return true, result
+        return true, result, failed
     end
 
     return false, nil

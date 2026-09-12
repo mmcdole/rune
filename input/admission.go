@@ -1,23 +1,19 @@
 package input
 
 import (
-	"strings"
 	"unicode/utf8"
 
 	"github.com/mmcdole/rune/text"
 )
 
-// ValidCommandText admits a single command. Local /commands may carry multiline,
-// tab-indented arguments (for example Lua source); game input stays one line.
-// Neither form admits invalid UTF-8 or terminal-active controls.
+// ValidCommandText accepts command lines separated by newlines, with tabs
+// allowed in arguments. Invalid UTF-8 and terminal controls are rejected.
 func ValidCommandText(value string) bool {
 	if !utf8.ValidString(value) {
 		return false
 	}
-	// Match the dispatcher's ^/(%S+) prefix. Lua's whitespace class is ASCII.
-	local := len(value) > 1 && value[0] == '/' && !strings.ContainsRune(" \t\r\n\v\f", rune(value[1]))
 	for _, r := range value {
-		if local && (r == '\n' || r == '\r' || r == '\t') {
+		if r == '\n' || r == '\r' || r == '\t' {
 			continue
 		}
 		if text.RequiresTerminalProjection(r) {

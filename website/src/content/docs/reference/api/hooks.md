@@ -125,12 +125,16 @@ argument. Echo hooks run after non-empty final text is recorded and can
 therefore observe its history entry. An accepted `""` rewrite still continues
 to local echo and input processing, but it is not added to history.
 
-In command mode, the final replacement must remain valid command text. Ordinary
-game commands stay on one line; local `/commands` may carry multiline,
-tab-indented arguments. Terminal controls are rejected. To deliberately send several physical
-lines from a command handler, call `rune.send_raw` and return `false` so Rune
-does not also process the original command. Verbatim-mode handlers may rewrite
-the complete multiline draft.
+In Command mode, hooks receive each nonblank physical line separately, in order.
+A replacement may contain newlines and tabs; its physical lines execute as separate
+commands after all hook chains finish. Rewritten lines are not fed back through
+input hooks. Invalid UTF-8, terminal controls, and results exceeding the submission
+limits cancel the whole submission before echo, history, or dispatch. A hook returning
+`false` also cancels the whole submission. Hook side effects cannot be undone.
+
+Verbatim hooks receive the whole draft, including line breaks. Both modes retain
+one effective history entry per submission. All command lines resolve history
+references against history from before the submission.
 
 All input handlers run in priority order, with lower numbers first. If none
 returns `false`, Rune processes the final text after the last handler finishes.

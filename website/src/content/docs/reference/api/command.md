@@ -41,7 +41,10 @@ rune.command.add(name, handler, description?, opts?) -> handle
 - `name` (string) — a non-empty, single-word command name without the
   slash. Re-adding the same name replaces the old handler (upsert).
 - `handler` (function) — `function(args)`; `args` is everything after
-  `/name ` as a single string (`""` when there are no arguments).
+  `/name ` on that physical line as a single string (`""` when there are no
+  arguments). Visual wrapping does not split the argument string. A handler
+  can return `false` to stop the remaining lines of a command batch; throwing
+  an error also stops the batch.
 - `description` (string, optional) — shown in `/help` and the `/`
   command picker.
 - `opts` (table, optional) — `{group = "..."}`.

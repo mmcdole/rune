@@ -87,9 +87,8 @@ deduplicated only when both their text and mode match.
 `get()` returns the text-only view and does not expose the stored mode.
 `add(cmd)` adds a normal command entry for scripts that want a synthetic
 command (one sent by an alias, say) to be recallable. Because it creates a
-normal command entry, `cmd` must be valid command text: ordinary game commands
-stay on one line, while local `/commands` may have multiline, tab-indented
-arguments. Terminal controls are rejected. Verbatim history entries come only
+normal command entry, `cmd` may contain several newline-separated commands
+and tabs. Invalid UTF-8 and terminal controls are rejected. Verbatim history entries come only
 from submitted verbatim input.
 
 **Related:** [Input & History guide](/interface/input/) ·
