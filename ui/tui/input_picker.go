@@ -135,7 +135,7 @@ func (c *inputController) handleModalKey(msg tea.KeyPressMsg) {
 			c.closePicker(false, "")
 		}
 
-	case matchesKey(msg, tea.KeyBackspace, 0):
+	case matchesKey(msg, tea.KeyBackspace, 0), matchesKey(msg, tea.KeyBackspace, tea.ModShift):
 		query := []rune(c.input.Picker().Query())
 		if len(query) > 0 {
 			c.input.Picker().Filter(string(query[:len(query)-1]))
