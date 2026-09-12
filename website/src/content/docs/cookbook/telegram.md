@@ -73,7 +73,9 @@ end, { priority = 10 })
 ```
 
 Forward to any webhook the same way — Discord, Slack, ntfy.sh — by
-swapping the URL and body format (JSON bodies want a
-`Content-Type = "application/json"` header).
+swapping the URL and body format. For JSON, build a Lua table, encode it
+with [`rune.json.encode`](/reference/api/json/), and set
+`Content-Type: application/json`. The [HTTP JSON example](/reference/api/http/#json)
+shows encoding and response handling.
 
 **Related:** [rune.http reference](/reference/api/http/) · [Triggers](/scripting/triggers/) · [Hooks & Events](/scripting/hooks/) · [Groups](/scripting/groups/) · [Timers](/scripting/timers/)

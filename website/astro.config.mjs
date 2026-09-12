@@ -88,6 +88,7 @@ export default defineConfig({
                 { label: 'rune.group', slug: 'reference/api/group' },
                 { label: 'rune.gmcp', slug: 'reference/api/gmcp' },
                 { label: 'rune.http', slug: 'reference/api/http' },
+                { label: 'rune.json', slug: 'reference/api/json' },
                 { label: 'rune.input', slug: 'reference/api/input' },
                 { label: 'Storage', slug: 'reference/api/storage' },
                 { label: 'rune.log', slug: 'reference/api/log' },

@@ -169,3 +169,35 @@ func TestHTTPBadArgumentsRaise(t *testing.T) {
 		}
 	}
 }
+
+func TestHTTPJSONRequestAndResponse(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+	if err := engine.DoString("JSON request", `
+  local body, err = rune.json.encode({message='He said "hello"\n', tags=rune.json.array()})
+  assert(err == nil)
+  rune.http.post("https://example.com/api", body, {
+   headers = {["Content-Type"]="application/json"},
+  }, function(resp, requestErr)
+   assert(requestErr == nil and resp.status == 200)
+   local data, decodeErr = rune.json.decode(resp.body)
+   assert(decodeErr == nil)
+   assert(data.result == false and data.extra == rune.json.null)
+   assert(rune.json.encode(data.items) == "[]")
+   json_http_done = true
+  end)
+ `); err != nil {
+		t.Fatal(err)
+	}
+	if len(host.HTTPCalls) != 1 {
+		t.Fatalf("got %d requests", len(host.HTTPCalls))
+	}
+	call := host.HTTPCalls[0]
+	if call.Req.Body != `{"message":"He said \"hello\"\n","tags":[]}` || call.Req.Headers["Content-Type"] != "application/json" {
+		t.Fatalf("unexpected request: %+v", call.Req)
+	}
+	engine.OnHTTPResult(call.ID, &HTTPResponse{Status: 200, Body: `{"result":false,"extra":null,"items":[]}`}, "")
+	if err := engine.DoString("JSON response", `assert(json_http_done)`); err != nil {
+		t.Fatal(err)
+	}
+}

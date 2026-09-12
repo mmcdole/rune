@@ -56,6 +56,44 @@ rune.http.post("https://example.com/hook", '{"event":"levelup"}',
     { headers = { ["Content-Type"] = "application/json" } })
 ```
 
+## JSON
+
+Use [`rune.json`](/reference/api/json/) to encode dynamic data. POST takes
+a string; setting a content type does not convert a table automatically.
+
+```lua
+local body, err = rune.json.encode({message = 'He said "hello"'})
+if err then
+    rune.echo("JSON encode: " .. err)
+    return
+end
+
+rune.http.post("https://example.com/api", body, {
+    headers = { ["Content-Type"] = "application/json" },
+}, function(resp, requestErr)
+    if requestErr then
+        rune.echo("Request failed: " .. requestErr)
+        return
+    end
+    if resp.status < 200 or resp.status >= 300 then
+        rune.echo("HTTP " .. resp.status)
+        return
+    end
+    -- This endpoint is expected to return JSON. A 204 has no body.
+    if resp.status == 204 then return end
+
+    local data, decodeErr = rune.json.decode(resp.body)
+    if decodeErr then
+        rune.echo("JSON decode: " .. decodeErr)
+        return
+    end
+    -- Use data here. JSON false and rune.json.null are valid results.
+end)
+```
+
+Response bodies remain strings regardless of their content type. Decode
+only when the endpoint returns JSON; an empty body is not a JSON value.
+
 ## The response
 
 | Field | Description |

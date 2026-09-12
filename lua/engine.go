@@ -2,7 +2,6 @@ package lua
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -428,8 +427,8 @@ func (e *Engine) DiscardSpans() {
 func (e *Engine) OnGMCP(pkg, raw string) {
 	var value any
 	if raw != "" {
-		var decoded any
-		if err := json.Unmarshal([]byte(escapeRawJSONControlsInStrings(raw)), &decoded); err != nil {
+		decoded, err := decodeJSON(escapeRawJSONControlsInStrings(raw), compatibleJSON)
+		if err != nil {
 			e.reportError("gmcp "+pkg, fmt.Errorf("malformed JSON: %w", err))
 			return
 		}
@@ -560,6 +559,7 @@ func (e *Engine) registerAPIs() {
 	e.registerCoreFuncs()
 	e.registerTimerFuncs()
 	e.registerRegexFuncs()
+	e.registerJSONFuncs()
 	e.registerUIFuncs()
 	e.registerStateFuncs()
 	e.registerConfigFuncs()

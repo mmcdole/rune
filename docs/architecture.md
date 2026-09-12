@@ -349,3 +349,19 @@ and draft limits before queueing, so rejection leaves the draft intact. The
 shared `input` admission policy also validates Lua hook rewrites and synthetic
 history. Session retains text and mode in history; Lua dispatch receives a
 multiline local command once with its arguments intact.
+
+### JSON conversion
+
+`lua/json_codec.go` converts JSON text and Go value trees for `rune.json`,
+GMCP, and durable storage. The public JSON API uses strict validation and
+bounded conversion; GMCP and storage select their existing compatibility
+policy. GMCP still owns raw-control-byte repair and its protocol-specific
+nesting check.
+
+`lua/core/08_json.lua` owns the public null value and private weak table-kind
+marks. Its Go boundary uses tagged container trees so the existing script
+backend interface can carry nulls and empty arrays without losing their
+identity. Lua scalars cross directly. `lua/api_json.go` adapts those trees to
+the shared codec. Both VM backends use the same implementation; generic
+`script.Tree` conversion and existing GMCP callback values stay unchanged.
+HTTP carries strings and does not infer a JSON body or response.
