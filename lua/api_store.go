@@ -1,8 +1,6 @@
 package lua
 
 import (
-	"encoding/json"
-
 	"github.com/mmcdole/rune/script"
 )
 
@@ -35,12 +33,12 @@ func (e *Engine) registerStoreFuncs() {
 				c.Return(nil, err.Error())
 				return nil
 			}
-			raw, err := json.Marshal(gv)
+			raw, err := encodeJSON(gv, compatibleJSON)
 			if err != nil {
 				c.Return(nil, err.Error())
 				return nil
 			}
-			if err := e.host.StoreSet(key, string(raw)); err != nil {
+			if err := e.host.StoreSet(key, raw); err != nil {
 				c.Return(nil, err.Error())
 				return nil
 			}
@@ -56,8 +54,8 @@ func (e *Engine) registerStoreFuncs() {
 				c.Return(nil)
 				return nil
 			}
-			var v any
-			if err := json.Unmarshal([]byte(raw), &v); err != nil {
+			v, err := decodeJSON(raw, compatibleJSON)
+			if err != nil {
 				c.Return(nil, err.Error())
 				return nil
 			}

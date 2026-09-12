@@ -37,8 +37,9 @@ The name encodes the lifetime:
 
 A string store scoped to this client session: it survives `/reload`
 (the Lua VM is torn down and rebuilt) but not exit. Values are
-strings; encode anything richer yourself. `get` returns `nil` for
-unset keys.
+strings; use [`rune.json.encode` and `rune.json.decode`](/reference/api/json/)
+for tables. `get` returns `nil` for unset keys. The
+[storage guide](/scripting/storage/#session-store) shows a complete example.
 
 ## rune.store
 

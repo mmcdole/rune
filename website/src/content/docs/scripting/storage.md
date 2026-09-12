@@ -21,8 +21,30 @@ rune.session.set("kills", tostring(kills))
 kills = tonumber(rune.session.get("kills") or "0")
 ```
 
-Values are strings only; encode anything richer yourself.
-`rune.session.delete(key)` removes one.
+Values are strings only. Use [`rune.json`](/reference/api/json/) for tables:
+
+```lua
+local encoded, err = rune.json.encode({kills = 12, route = rune.json.array()})
+if err then
+    rune.echo(err)
+    return
+end
+rune.session.set("my-script.state", encoded)
+
+-- Later, including after /reload:
+local saved = rune.session.get("my-script.state")
+if saved ~= nil then
+    local state, decodeErr = rune.json.decode(saved)
+    if decodeErr then
+        rune.echo(decodeErr)
+        return
+    end
+    rune.echo("Kills: " .. state.kills)
+end
+```
+
+The string survives reload; decoding rebuilds tables and JSON null values in
+the current VM. `rune.session.delete(key)` removes a stored entry.
 
 ## Durable store
 

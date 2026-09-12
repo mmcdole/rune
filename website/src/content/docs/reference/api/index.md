@@ -37,6 +37,9 @@ Also in Reference: the built-in
 The contracts below apply across the API; individual pages link here
 rather than restating them.
 
+For JSON request bodies, responses, and session state, see
+[`rune.json`](/reference/api/json/).
+
 ## Handles
 
 Every creation function (`rune.trigger.*`, `rune.alias.*`,

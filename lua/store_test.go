@@ -80,3 +80,29 @@ func TestStoreRoundTripsStructuredValues(t *testing.T) {
 		t.Fatalf("store round-trip failed: %v", err)
 	}
 }
+
+func TestJSONSessionStateSurvivesReload(t *testing.T) {
+	engine, _, cleanup := setupTest(t)
+	defer cleanup()
+	if err := engine.DoString("save JSON session", `
+  local state = {missing = rune.json.null, route = rune.json.array(), enabled = false}
+  local encoded, err = rune.json.encode(state)
+  assert(err == nil)
+  rune.session.set("json.state", encoded)
+ `); err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.Init(); err != nil {
+		t.Fatal(err)
+	}
+	loadTestCoreScripts(t, engine)
+	if err := engine.DoString("restore JSON session", `
+  local state, err = rune.json.decode(rune.session.get("json.state"))
+  assert(err == nil and state.enabled == false)
+  assert(state.missing == rune.json.null)
+  assert(rune.json.encode(state.route) == "[]")
+  assert(rune.json.encode(state) == rune.session.get("json.state"))
+ `); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -1,8 +1,6 @@
 package lua
 
 import (
-	"encoding/json"
-
 	"github.com/mmcdole/rune/script"
 )
 
@@ -27,12 +25,12 @@ func (e *Engine) registerGMCPFuncs() {
 					c.Return(nil, err.Error())
 					return nil
 				}
-				raw, err := json.Marshal(gv)
+				raw, err := encodeJSON(gv, compatibleJSON)
 				if err != nil {
 					c.Return(nil, err.Error())
 					return nil
 				}
-				data = string(raw)
+				data = raw
 			}
 
 			if err := e.host.GMCPSend(pkg, data); err != nil {
