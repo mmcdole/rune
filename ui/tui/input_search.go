@@ -42,7 +42,7 @@ func (c *inputController) handleSearchKey(msg tea.KeyPressMsg) {
 	case matchesEnterKey(msg, 0):
 		c.closeSearch(true)
 
-	case matchesKey(msg, tea.KeyBackspace, 0):
+	case matchesKey(msg, tea.KeyBackspace, 0), matchesKey(msg, tea.KeyBackspace, tea.ModShift):
 		c.input.Search().Backspace()
 		c.previewSearch()
 

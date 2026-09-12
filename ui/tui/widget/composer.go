@@ -248,7 +248,8 @@ func (c *composer) Update(msg tea.KeyPressMsg, widgetWidth int) bool {
 	case matchesKey(msg, tea.KeyEnd, tea.ModCtrl):
 		c.DocEnd()
 		return true
-	case matchesKey(msg, tea.KeyBackspace, 0), matchesKey(msg, 'h', tea.ModCtrl):
+	case matchesKey(msg, tea.KeyBackspace, 0), matchesKey(msg, tea.KeyBackspace, tea.ModShift),
+		matchesKey(msg, 'h', tea.ModCtrl):
 		c.Backspace()
 		return true
 	case matchesKey(msg, tea.KeyBackspace, tea.ModAlt),

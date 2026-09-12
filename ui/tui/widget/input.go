@@ -51,6 +51,8 @@ func NewInput(styles style.Styles, search *Search) *Input {
 		panic("widget.NewInput requires a search widget")
 	}
 	ti := textinput.New()
+	// Enhanced keyboard reporting distinguishes Backspace held with Shift.
+	ti.KeyMap.DeleteCharacterBackward.SetKeys(append(ti.KeyMap.DeleteCharacterBackward.Keys(), "shift+backspace")...)
 	ti.Placeholder = ""
 	ti.Prompt = "> "
 	ti.CharLimit = 0
@@ -96,7 +98,8 @@ func (i *Input) UpdateTextInput(msg tea.Msg) tea.Cmd {
 // editing key reaches the textinput: typing or deleting replaces the
 // whole selected line, any other key deselects and edits in place.
 func (i *Input) resolveSelection(key tea.KeyPressMsg) {
-	if key.Text != "" || matchesKey(key, tea.KeyBackspace, 0) || matchesKey(key, tea.KeyDelete, 0) {
+	if key.Text != "" || matchesKey(key, tea.KeyBackspace, 0) ||
+		matchesKey(key, tea.KeyBackspace, tea.ModShift) || matchesKey(key, tea.KeyDelete, 0) {
 		i.Reset()
 	}
 	i.Deselect()

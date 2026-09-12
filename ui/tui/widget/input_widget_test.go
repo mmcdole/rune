@@ -163,7 +163,7 @@ func TestInputSelectionReplacementUsesExactDeleteChords(t *testing.T) {
 	}{
 		{name: "backspace", key: tea.KeyPressMsg{Code: tea.KeyBackspace}, want: ""},
 		{name: "delete", key: tea.KeyPressMsg{Code: tea.KeyDelete}, want: ""},
-		{name: "shift backspace", key: tea.KeyPressMsg{Code: tea.KeyBackspace, Mod: tea.ModShift}, want: "north east"},
+		{name: "shift backspace", key: tea.KeyPressMsg{Code: tea.KeyBackspace, Mod: tea.ModShift}, want: ""},
 		{name: "alt backspace", key: tea.KeyPressMsg{Code: tea.KeyBackspace, Mod: tea.ModAlt}, want: "north "},
 		{name: "shift delete", key: tea.KeyPressMsg{Code: tea.KeyDelete, Mod: tea.ModShift}, want: "north east"},
 		{name: "alt delete", key: tea.KeyPressMsg{Code: tea.KeyDelete, Mod: tea.ModAlt}, want: "north east"},
