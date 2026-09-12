@@ -23,16 +23,17 @@ type jsonPolicy struct {
 	maxDepth, maxBytes, maxNodes int
 }
 
-// Strict JSON is for arbitrary script input. Compatibility preserves the
-// historical number, Unicode, duplicate-key and limit behavior of storage
-// and GMCP. GMCP applies its own wire repair and VM nesting check.
+// The new rune.json API rejects invalid Unicode, duplicate object keys, and
+// integers Lua cannot represent safely. It also limits input size and depth.
+// Storage and GMCP keep their previous behavior so existing scripts continue
+// to work. GMCP separately repairs raw control characters sent by some servers
+// and checks nesting before passing the decoded data to Lua.
 var scriptJSON = jsonPolicy{strict: true, maxDepth: jsonMaxDepth, maxBytes: jsonMaxBytes, maxNodes: jsonMaxNodes}
 var compatibleJSON = jsonPolicy{}
 
-// The codec works on Go value trees. Callers choose strict script JSON or
-// compatibility behavior for the existing GMCP and storage APIs.
-// JSON escaping and scalar formatting use encoding/json; the bounded writer
-// avoids allocating an unbounded encoded result before checking its size.
+// jsonWriter writes Go values as JSON, using encoding/json to escape strings
+// and format numbers. It checks the output size as it goes, so a large input
+// can fail before the entire JSON string has been built.
 type jsonWriter struct {
 	strings.Builder
 	nodes  int
@@ -187,8 +188,10 @@ func decodeJSON(text string, policy jsonPolicy) (any, error) {
 	return value, nil
 }
 
-// Parse into ordinary Go trees. Lua presentation (null sentinel and table
-// kind, or the legacy nil/plain-table behavior) is a separate adapter choice.
+// readJSONValue parses one value into Go maps, slices, and scalar values.
+// It leaves JSON null as Go nil. The caller decides how to present those
+// values to Lua: rune.json preserves null and array/object types, while the
+// existing storage and GMCP APIs use nil and ordinary tables.
 func readJSONValue(d *json.Decoder, depth int, nodes *int, policy jsonPolicy) (any, error) {
 	*nodes++
 	if policy.maxNodes > 0 && *nodes > policy.maxNodes {
@@ -261,9 +264,11 @@ func readJSONValue(d *json.Decoder, depth int, nodes *int, policy jsonPolicy) (a
 	return nil, fmt.Errorf("unexpected token %v", token)
 }
 
-// encoding/json replaces unpaired UTF-16 surrogates with U+FFFD. Check the
-// original escapes so malformed strings fail instead of changing user data.
-// All other syntax is checked by the standard decoder.
+// A Unicode escape such as \uD800 must be followed by its matching low
+// surrogate. Go's JSON parser replaces an unmatched surrogate with the
+// replacement character (U+FFFD). Check these escapes first so rune.json can
+// report malformed input instead of silently changing it. The standard
+// decoder checks the rest of the JSON syntax.
 func validateJSONSurrogates(text string) error {
 	inString := false
 	hex4 := func(s string) (uint64, bool) { n, err := strconv.ParseUint(s, 16, 16); return n, err == nil }

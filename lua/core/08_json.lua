@@ -1,6 +1,7 @@
--- JSON syntax and string/number conversion live in Go. Lua owns container
--- identity: private weak keys preserve array/object intent without changing
--- user metatables or adding fields to their data.
+-- Go parses and writes JSON. This module handles the Lua-specific details:
+-- which tables represent arrays or objects, and how to represent JSON null.
+-- The kinds table remembers each table's JSON type without adding fields or
+-- changing its metatable. Weak keys let unused tables be garbage-collected.
 local native = rune._json
 local null = native.null
 local kinds = setmetatable({}, { __mode = "k" })
@@ -26,16 +27,19 @@ function rune.json.object(value)
     return mark(value, "object")
 end
 
--- The private wire form wraps only containers and null: {kind, contents}.
--- Scalars pass through unchanged. Every user table is wrapped, so member
--- names can never be mistaken for type metadata. Both VM backends already
--- support these plain trees; their general-purpose conversion stays intact.
+-- Prepare Lua values for Go before it writes the JSON text. A temporary
+-- wrapper records each table's type: {"array", items} or {"object", fields}.
+-- Null uses {"null"}; strings, numbers, and booleans need no wrapper.
+-- These wrappers are only passed between Lua and Go. They never appear in
+-- the JSON output or in the values returned to user scripts.
 function rune.json.encode(value)
     local seen, nodes, bytes = {}, 0, 0
     local function pack(v, depth, path)
         nodes = nodes + 1
         if nodes > max_nodes then return nil, path .. ": JSON exceeds " .. max_nodes .. " values" end
         local kind = type(v)
+        -- Stop obviously oversized inputs before copying their tables.
+        -- Go checks the final size, including any JSON escape sequences.
         bytes = bytes + (kind == "string" and #v + 2 or 1)
         if bytes > max_bytes then return nil, path .. ": JSON exceeds 5 MiB" end
         if v == nil or rawequal(v, null) then return { "null" } end
@@ -71,6 +75,8 @@ function rune.json.encode(value)
             if err then return nil, err end
             contents[key] = packed
         end
+        -- Only a reference to a table still being visited is a cycle.
+        -- The same table may appear again elsewhere in the input.
         seen[v] = nil
         return { shape, contents }
     end
@@ -83,6 +89,8 @@ function rune.json.decode(text)
     if type(text) ~= "string" then error("rune.json.decode: string expected", 2) end
     local packed, err = native.decode(text)
     if err then return nil, err end
+    -- Remove Go's temporary wrappers, restore null values, and remember
+    -- whether each returned table came from a JSON array or object.
     local function unpack(v)
         if type(v) ~= "table" then return v end
         local kind = rawget(v, 1)
