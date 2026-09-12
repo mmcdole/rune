@@ -52,7 +52,8 @@ input hooks. Invalid UTF-8, terminal controls, and results exceeding the submiss
 limits cancel the whole submission before echo, history, or dispatch. A hook returning
 `false` also cancels the whole submission. Hook side effects cannot be undone.
 
-Verbatim hooks receive the whole draft, including line breaks. Both modes retain
+In Verbatim mode, the same `input` hooks receive the whole draft, including
+line breaks. Both modes retain
 one effective history entry per submission. All command lines resolve history
 references against history from before the submission.
 
