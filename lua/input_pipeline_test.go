@@ -42,7 +42,7 @@ func TestFailingInputDispatcherIsNotRetried(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	dispatchTestCommand(engine, "north")
+	dispatchTestCommand(engine, "north\nsouth")
 	if got, want := host.DrainNetworkCalls(), []string{"north:once"}; !slices.Equal(got, want) {
 		t.Fatalf("dispatcher sends = %q, want no fallback duplicate %q", got, want)
 	}
@@ -90,7 +90,7 @@ func dispatchTestCommand(engine *Engine, text string) bool {
 	return dispatchTestSubmission(engine, input.Command(text))
 }
 
-func TestCommandBatchStopsOnFailure(t *testing.T) {
+func TestCommandBatchContinuesAfterCommandErrors(t *testing.T) {
 	for _, tc := range []struct{ name, setup, draft string }{
 		{"unknown command", "", "north\n/missing\nsouth"},
 		{"throwing command", `rune.command.add("broken", function() error("broken") end)`, "north\n/broken\nsouth"},
@@ -98,7 +98,6 @@ func TestCommandBatchStopsOnFailure(t *testing.T) {
 		{"invalid Lua", "", "north\n/lua invalid lua syntax\nsouth"},
 		{"Lua runtime error", "", "north\n/lua error('broken')\nsouth"},
 		{"alias recursion", `rune.alias.exact("loop", "loop")`, "north\nloop\nsouth"},
-		{"dispatcher throws after send", `function rune.input._dispatch(line) rune.send_raw(line); error("broken") end`, "north\nsouth"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			engine, host, cleanup := setupTest(t)
@@ -107,11 +106,11 @@ func TestCommandBatchStopsOnFailure(t *testing.T) {
 				t.Fatal(err)
 			}
 			dispatchTestCommand(engine, tc.draft)
-			if got := host.DrainNetworkCalls(); !slices.Equal(got, []string{"north"}) {
+			if got := host.DrainNetworkCalls(); !slices.Equal(got, []string{"north", "south"}) {
 				t.Fatalf("sent %q", got)
 			}
-			if got := strings.Join(host.DrainPrintCalls(), "\n"); !strings.Contains(got, "line ") {
-				t.Fatalf("missing line number: %s", got)
+			if got := strings.Join(host.DrainPrintCalls(), "\n"); got == "" {
+				t.Fatalf("missing error: %s", got)
 			}
 		})
 	}

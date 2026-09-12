@@ -197,9 +197,8 @@ An actual newline starts another command, including after a slash command.
 
 Rune checks the complete draft before running it. Command mode rejects invalid
 UTF-8 and terminal controls. A rejected draft stays in the editor with its mode
-intact. If a command fails during execution, Rune reports the line and stops the
-remaining batch. Commands already executed are not undone or retried. An error
-printed by a script that handles the failure itself does not stop execution.
+intact. Errors from an alias or slash command are reported normally; Rune continues
+with the following lines.
 
 The block is saved as one history entry after input hooks finish. Up or history
 search restores the block and its mode. History expansion uses the history from

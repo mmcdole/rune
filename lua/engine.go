@@ -339,11 +339,10 @@ func (e *Engine) DispatchSubmission(submission input.Submission) {
 			continue
 		}
 		var found bool
-		var results []script.Result
 		err := e.guard(func() error {
 			var callErr error
-			results, found, callErr = e.vm.CallModule(
-				"rune.input", "_dispatch", 1, line, submission.Mode.String(),
+			_, found, callErr = e.vm.CallModule(
+				"rune.input", "_dispatch", 0, line, submission.Mode.String(),
 			)
 			return callErr
 		})
@@ -351,42 +350,28 @@ func (e *Engine) DispatchSubmission(submission input.Submission) {
 			e.reportError(fmt.Sprintf("input line %d", index+1), err)
 			return
 		}
-		if found && len(results) > 0 && results[0].False() {
-			e.reportError("input", fmt.Errorf("stopped at line %d", index+1))
-			return
-		}
 		if !found {
 			e.reportCoreBroken()
-			if !e.dispatchSubmissionFallback(input.Submission{Text: line, Mode: submission.Mode}) {
-				return
-			}
+			e.dispatchSubmissionFallback(input.Submission{Text: line, Mode: submission.Mode})
 		}
 	}
 }
 
-func (e *Engine) dispatchSubmissionFallback(submission input.Submission) bool {
-	if submission.Mode == input.ModeVerbatim {
-		for _, line := range submission.PhysicalLines() {
-			if err := e.host.Send(line); err != nil {
-				e.reportError("input fallback", err)
-				return false
-			}
-		}
-		return true
-	}
-
-	switch submission.Text {
-	case "/quit":
-		e.host.Quit()
-	case "/reload":
-		e.host.Reload()
-	default:
-		if err := e.host.Send(submission.Text); err != nil {
-			e.reportError("input fallback", err)
-			return false
+// The caller has already split physical lines for both modes.
+func (e *Engine) dispatchSubmissionFallback(submission input.Submission) {
+	if submission.Mode == input.ModeCommand {
+		switch submission.Text {
+		case "/quit":
+			e.host.Quit()
+			return
+		case "/reload":
+			e.host.Reload()
+			return
 		}
 	}
-	return true
+	if err := e.host.Send(submission.Text); err != nil {
+		e.reportError("input fallback", err)
+	}
 }
 
 // OnEcho runs the echo hook. The core adds styling; user hooks may rewrite or

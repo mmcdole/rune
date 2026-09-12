@@ -5,7 +5,7 @@ local MAX_RECURSION_DEPTH = 100
 local function send_impl(input, depth)
     if depth > MAX_RECURSION_DEPTH then
         rune.echo(rune.style.red("[Error]") .. " Alias loop detected (depth limit exceeded)")
-        return false
+        return
     end
 
     local separator = rune.config.get("command_separator")
@@ -15,7 +15,7 @@ local function send_impl(input, depth)
         if source:match("^%s*#%d+%s*{") then
             rune.echo(rune.style.red("[Error]") ..
                 " Command blocks are not supported; repeat an alias with #N name instead")
-            return false
+            return
         end
     end
 
@@ -27,19 +27,17 @@ local function send_impl(input, depth)
 
         for _ = 1, tonumber(count) or 1 do
             if line == "" then
-                if not rune.send_raw(line) then return false end
+                rune.send_raw(line)
             else
-                local processed, result, failed = rune.alias.process(line)
-                if failed then return false end
+                local processed, result = rune.alias.process(line)
                 if not processed then
-                    if not rune.send_raw(line) then return false end
+                    rune.send_raw(line)
                 elseif result then
-                    if not send_impl(result, depth + 1) then return false end
+                    send_impl(result, depth + 1) -- alias result is new command text
                 end
             end
         end
     end
-    return true
 end
 
 -- PUBLIC: Send commands to the MUD
@@ -51,7 +49,8 @@ end
 -- Programmatic rune.send deliberately enters below this boundary.
 function rune.input._dispatch(input, mode)
     if mode == "verbatim" then
-        return rune.send_raw(input) ~= nil
+        rune.send_raw(input) -- no alias or command interpretation
+        return
     end
 
     -- Check for slash command first. Dispatch runs the handler under
@@ -59,15 +58,13 @@ function rune.input._dispatch(input, mode)
     -- instead of breaking the terminal dispatcher.
     local cmd, args = input:match("^/(%S+)%s*(.*)")
     if cmd then
-        local found, ok = rune.command.dispatch(cmd, args)
-        if not found then
+        if not rune.command.dispatch(cmd, args) then
             rune.echo(rune.style.red("[Error]") .. " Unknown command: /" .. cmd)
-            return false
         end
-        return ok
+        return
     end
 
-    return send_impl(input, 0)
+    rune.send(input)
 end
 
 -- Register output handler

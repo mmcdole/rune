@@ -350,7 +350,8 @@ shared `input` admission policy also validates Lua hook rewrites and synthetic
 history. Session retains the effective block and mode as one history entry. Engine dispatch
 splits both modes into physical lines; Command skips blank batch lines and invokes
 normal Lua routing, while Verbatim sends literal lines. Visual wrapping never
-changes submitted text. A failing dispatch stops later lines without retrying.
+changes submitted text. Ordinary alias and command errors do not stop later lines. An internal
+dispatcher failure is never retried.
 
 ### JSON conversion
 
