@@ -144,124 +144,95 @@ local function input_context(mode)
     return setmetatable({}, input_context_metatables[mode] or input_context_metatables.command)
 end
 
--- Call all handlers for an event
--- For output/prompt: chains modifications (each handler sees the
---   previous handler's rewrite), false gags
--- For echo: like output/prompt, but the argument is a plain string
---   (the effective submitted text), not a line object
--- For input: strings chain; false stops processing
--- For sys events: all handlers run (notifications)
---
--- Return semantics for handlers:
---   return false    -> Stop/Gag
---   return string   -> Replace the line for subsequent handlers
---   return nil      -> Pass through unmodified
-function rune.hooks.call(event, ...)
-    local live = by_event[event]
-    if not live or #live == 0 then
-        -- No handlers registered
-        if event == "output" or event == "prompt" then
-            local line = select(1, ...)
-            return line:raw(), true
-        elseif event == "echo" then
-            return select(1, ...), true
-        elseif event == "input" then
-            return select(1, ...)
-        end
-        return
+-- Output and prompt chain Line objects; strings replace the object seen by
+-- later handlers, and false gags it. Only prompt receives a second argument.
+local function line_chain(event, handlers, line, confirmed)
+    if event == "prompt" and #handlers > 0 and type(confirmed) ~= "boolean" then
+        error("prompt requires an explicit confirmed boolean", 2)
     end
+    for _, entry in ipairs(handlers) do
+        if registry:active(entry) then
+            local result
+            if event == "prompt" then
+                result = run_handler(entry, line, confirmed)
+            else
+                result = run_handler(entry, line)
+            end
+            if result == false then
+                return "", false
+            elseif type(result) == "string" then
+                line = rune.line.new(result)
+            end
+        end
+    end
+    return line:raw(), true
+end
 
-    -- Iterate a snapshot: a handler that adds or removes hooks mutates
-    -- the live array, which would skip or double-run its neighbors.
-    -- Removals mid-dispatch are still honored via registry:active().
+-- Echo chains display text; false hides the local echo.
+local function text_chain(_, handlers, text)
+    for _, entry in ipairs(handlers) do
+        if registry:active(entry) then
+            local result = run_handler(entry, text)
+            if result == false then
+                return "", false
+            elseif type(result) == "string" then
+                text = result
+            end
+        end
+    end
+    return text, true
+end
+
+-- Input chains physical lines. Reject newlines before subsequent handlers
+-- can act on them, and isolate each handler's view of the canonical mode.
+local function input_chain(_, handlers, ...)
+    if #handlers == 0 then return ... end
+    local text, context = ...
+    local mode = context and context.mode or "command"
+    for _, entry in ipairs(handlers) do
+        if registry:active(entry) then
+            local result = run_handler(entry, text, input_context(mode))
+            if result == false then
+                return false
+            elseif type(result) == "string" then
+                if result:find("[\r\n]") then
+                    rune.echo(rune.style.red("[Error]") .. " Input hook rewrite must stay on one line")
+                    return false
+                end
+                text = result
+            end
+        end
+    end
+    return text
+end
+
+-- Notifications preserve the full argument list, including embedded/trailing
+-- nil values. Handler return values do not affect subsequent notifications.
+local function notify(_, handlers, ...)
+    local nargs = select("#", ...)
+    local args = {...}
+    for _, entry in ipairs(handlers) do
+        if registry:active(entry) then
+            run_handler(entry, unpack(args, 1, nargs))
+        end
+    end
+end
+
+local chains = {
+    output = line_chain,
+    prompt = line_chain,
+    echo = text_chain,
+    input = input_chain,
+}
+
+-- Snapshot membership before calling user code. Additions wait for the next
+-- dispatch; removals are honored by each chain's registry:active check.
+function rune.hooks.call(event, ...)
     local handlers = {}
-    for i, entry in ipairs(live) do
+    for i, entry in ipairs(by_event[event] or {}) do
         handlers[i] = entry
     end
-
-    if event == "output" or event == "prompt" then
-        -- Output/prompt receive a Line object (:raw() and :clean()).
-        -- True chaining: a handler returning a string replaces the line
-        -- for every subsequent handler, so rewrites compose in priority
-        -- order instead of last-writer-wins on the original text.
-        local line = select(1, ...)
-        local confirmed = select(2, ...)
-        if event == "prompt" and type(confirmed) ~= "boolean" then
-            error("prompt requires an explicit confirmed boolean", 2)
-        end
-
-        for _, entry in ipairs(handlers) do
-            if registry:active(entry) then
-                local result
-                if event == "prompt" then
-                    result = run_handler(entry, line, confirmed)
-                else
-                    result = run_handler(entry, line)
-                end
-                if result == false then
-                    return "", false  -- gagged
-                elseif type(result) == "string" then
-                    line = rune.line.new(result)
-                end
-                -- nil = pass through unchanged
-            end
-        end
-
-        return line:raw(), true
-
-    elseif event == "echo" then
-        -- Echo receives the effective submitted text as a plain string. Rewrites
-        -- chain like output/prompt; false hides the echo entirely.
-        local text = select(1, ...)
-        for _, entry in ipairs(handlers) do
-            if registry:active(entry) then
-                local result = run_handler(entry, text)
-                if result == false then
-                    return "", false
-                elseif type(result) == "string" then
-                    text = result
-                end
-            end
-        end
-        return text, true
-
-    elseif event == "input" then
-        -- Input is a pre-commit transform pass. Each handler sees the result
-        -- of the previous rewrite; false consumes this input line.
-        local text = select(1, ...)
-        local context = select(2, ...)
-        local mode = context and context.mode or "command"
-        for _, entry in ipairs(handlers) do
-            if registry:active(entry) then
-                -- Existing one-argument handlers remain valid in Lua; they
-                -- simply ignore the submission context.
-                local result = run_handler(entry, text, input_context(mode))
-                if result == false then
-                    return false
-                elseif type(result) == "string" then
-                    if result:find("[\r\n]") then
-                        rune.echo(rune.style.red("[Error]") .. " Input hook rewrite must stay on one line")
-                        return false
-                    end
-                    text = result
-                end
-            end
-        end
-        return text
-
-    else
-        -- System events (notifications) - all handlers run.
-        -- Keep the true argument count: an embedded nil (e.g. a GMCP
-        -- message with no body) makes #args implementation-defined,
-        -- and a bare unpack(args) would truncate at the hole.
-        local nargs = select("#", ...)
-        local args = {...}
-        for _, entry in ipairs(handlers) do
-            if registry:active(entry) then
-                run_handler(entry, unpack(args, 1, nargs))
-            end
-        end
-    end
+    return (chains[event] or notify)(event, handlers, ...)
 end
 
 -- List all registered handlers
