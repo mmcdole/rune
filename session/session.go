@@ -423,45 +423,19 @@ func (s *Session) handleSubmission(submission input.Submission) {
 	// input hook later consumes it or dispatch produces no network send.
 	s.finishPartialLine()
 
-	if !submission.WithinLimits() || (submission.Mode == input.ModeCommand && !input.ValidCommandText(submission.Text)) {
-		s.ui.Print(text.Red("[WARNING] Input not run - invalid text or submission limit exceeded"))
-		return
-	}
-	var history []string
-	historyBytes := 0
-	err := s.engine.RunInputBatch(func() error {
-		for index, authored := range submission.Lines() {
-			if s.backgroundCtx.Err() != nil {
-				break
-			}
-			line, proceed := s.engine.ApplyInputHooks(input.Submission{Text: authored, Mode: submission.Mode})
-			if !proceed {
-				continue
-			}
-			size := len(line.Text)
-			if len(history) > 0 {
-				size++
-			}
-			if historyBytes+size > input.MaxSubmissionBytes {
-				return fmt.Errorf("input rewrite exceeds submission limit at line %d", index+1)
-			}
-			history = append(history, line.Text)
-			historyBytes += size
-			if s.protocol.LocalEchoEnabled() {
-				if styled, show := s.engine.OnEcho(line.Text); show {
-					s.ui.Echo(styled)
-				}
-			}
-			if err := s.engine.DispatchInputLine(line); err != nil {
-				return fmt.Errorf("input line %d: %w", index+1, err)
+	history, err := s.engine.RunSubmission(s.backgroundCtx, submission, func(line string) {
+		if s.protocol.LocalEchoEnabled() {
+			if styled, show := s.engine.OnEcho(line); show {
+				s.ui.Echo(styled)
 			}
 		}
-		return nil
 	})
 	if len(history) > 0 {
 		s.addHistorySubmission(input.Submission{Text: strings.Join(history, "\n"), Mode: submission.Mode})
 	}
-	if err != nil {
+	if err == lua.ErrInvalidSubmission {
+		s.ui.Print(text.Red("[WARNING] Input not run - " + err.Error()))
+	} else if err != nil {
 		s.ui.Print(text.Red("[Error] " + err.Error()))
 	}
 }

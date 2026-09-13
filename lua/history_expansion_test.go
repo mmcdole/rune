@@ -77,8 +77,8 @@ func TestHistoryReplaysSingleCommandRepeatsWithLiteralBraces(t *testing.T) {
 // A literal false consumes the line before history and command processing.
 func commitAndDispatchTestCommand(t *testing.T, engine *Engine, host *MockHost, text string) bool {
 	t.Helper()
-	effective, proceed := engine.ApplyInputHooks(input.Command(text))
-	if !proceed {
+	effective, proceed, err := engine.applyInputHooks(input.Command(text))
+	if err != nil || !proceed {
 		return false
 	}
 	if err := engine.DispatchInputLine(effective); err != nil {
@@ -110,8 +110,8 @@ func TestHistoryExpansionPreservesStoredSurroundingWhitespace(t *testing.T) {
 	defer cleanup()
 
 	host.HistoryEntries = []input.Submission{input.Command("  kill rat  ")}
-	effective, proceed := engine.ApplyInputHooks(input.Command("!ki"))
-	if !proceed || effective.Text != "  kill rat  " {
+	effective, proceed, err := engine.applyInputHooks(input.Command("!ki"))
+	if err != nil || !proceed || effective.Text != "  kill rat  " {
 		t.Fatalf("submit = (%q, %v), want exact stored command", effective.Text, proceed)
 	}
 }
@@ -124,8 +124,8 @@ func TestHistoryExpansionSkipsWhitespaceOnlyHistory(t *testing.T) {
 		input.Command("north"),
 		input.Command("   "),
 	}
-	effective, proceed := engine.ApplyInputHooks(input.Command("!"))
-	if !proceed || effective.Text != "north" {
+	effective, proceed, err := engine.applyInputHooks(input.Command("!"))
+	if err != nil || !proceed || effective.Text != "north" {
 		t.Fatalf("submit = (%q, %v), want prior non-blank command", effective.Text, proceed)
 	}
 }
@@ -331,14 +331,14 @@ func TestHistoryExpansionUsesConfiguredCharacterLiterally(t *testing.T) {
 				{text: "east;" + test.marker + "lo", want: "east;look"},
 				{text: "!", want: "!"},
 			} {
-				effective, proceed := engine.ApplyInputHooks(input.Command(rewrite.text))
-				if !proceed || effective.Text != rewrite.want {
+				effective, proceed, err := engine.applyInputHooks(input.Command(rewrite.text))
+				if err != nil || !proceed || effective.Text != rewrite.want {
 					t.Fatalf("submit %q = (%q, %v), want (%q, true)",
 						rewrite.text, effective.Text, proceed, rewrite.want)
 				}
 			}
 
-			if _, proceed := engine.ApplyInputHooks(input.Command(test.marker + "missing")); proceed {
+			if _, proceed, err := engine.applyInputHooks(input.Command(test.marker + "missing")); err != nil || proceed {
 				t.Fatal("unmatched configured history designator was accepted")
 			}
 			warning := "no matching command: " + test.marker + "missing"
@@ -390,8 +390,8 @@ func TestHistoryExpansionFiltersStoredEntriesByCurrentCharacter(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	effective, proceed := engine.ApplyInputHooks(input.Command("^"))
-	if !proceed || effective.Text != "!old" {
+	effective, proceed, err := engine.applyInputHooks(input.Command("^"))
+	if err != nil || !proceed || effective.Text != "!old" {
 		t.Fatalf("caret submit = (%q, %v), want old literal bang entry", effective.Text, proceed)
 	}
 
@@ -399,8 +399,8 @@ func TestHistoryExpansionFiltersStoredEntriesByCurrentCharacter(t *testing.T) {
 		`rune.config.set("history_character", "!")`); err != nil {
 		t.Fatal(err)
 	}
-	effective, proceed = engine.ApplyInputHooks(input.Command("!"))
-	if !proceed || effective.Text != "^staged" {
+	effective, proceed, err = engine.applyInputHooks(input.Command("!"))
+	if err != nil || !proceed || effective.Text != "^staged" {
 		t.Fatalf("bang submit = (%q, %v), want old literal caret entry", effective.Text, proceed)
 	}
 }
@@ -415,8 +415,8 @@ func TestCommandSeparatorTakesPrecedenceOverDoubledHistoryCharacter(t *testing.T
 	}
 	host.HistoryEntries = []input.Submission{input.Command("look")}
 
-	effective, proceed := engine.ApplyInputHooks(input.Command("!!"))
-	if !proceed || effective.Text != "!!" {
+	effective, proceed, err := engine.applyInputHooks(input.Command("!!"))
+	if err != nil || !proceed || effective.Text != "!!" {
 		t.Fatalf("submit = (%q, %v), want separator text unchanged", effective.Text, proceed)
 	}
 	commitAndDispatchTestCommand(t, engine, host, "!!!!")
@@ -542,8 +542,8 @@ func TestVerbatimBangIsLiteral(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 
-	effective, proceed := engine.ApplyInputHooks(input.Verbatim("!"))
-	if !proceed || effective != input.Verbatim("!") {
+	effective, proceed, err := engine.applyInputHooks(input.Verbatim("!"))
+	if err != nil || !proceed || effective != input.Verbatim("!") {
 		t.Fatalf("verbatim transform = %+v proceed=%v", effective, proceed)
 	}
 	engine.DispatchInputLine(effective)

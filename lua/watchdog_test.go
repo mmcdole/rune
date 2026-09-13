@@ -1,10 +1,12 @@
 package lua
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/mmcdole/rune/input"
 	"github.com/mmcdole/rune/script"
 )
 
@@ -18,14 +20,8 @@ func TestInputBatchSharesOneWatchdogDeadline(t *testing.T) {
 			return nil
 		},
 	}, nil)
-	err := engine.RunInputBatch(func() error {
-		for range 3 {
-			if err := engine.DoString("batch line", `batchprobe.pause(); rune.send_raw("line")`); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
+	_, err := engine.RunSubmission(context.Background(), input.Command(strings.Repeat(
+		`/lua batchprobe.pause(); rune.send_raw("line")`+"\n", 3)), nil)
 	if err == nil || !strings.Contains(err.Error(), "interrupted") {
 		t.Fatalf("batch deadline: %v", err)
 	}
@@ -40,14 +36,20 @@ func TestInputBatchSharesOneWatchdogDeadline(t *testing.T) {
 func TestInputBatchDoesNotEnterLuaAfterDeadline(t *testing.T) {
 	engine, _, cleanup := setupTest(t)
 	defer cleanup()
-	called := false
-	err := engine.RunInputBatch(func() error {
-		engine.guardCancel()
-		return engine.guard(func() error { called = true; return nil })
-	})
-	if err == nil || called {
-		t.Fatalf("expired batch entered Lua: called=%v err=%v", called, err)
+	if err := engine.DoString("observe dispatch", `
+		function rune.input._dispatch()
+			dispatch_calls = (dispatch_calls or 0) + 1
+		end
+	`); err != nil {
+		t.Fatal(err)
 	}
+	_, err := engine.RunSubmission(context.Background(), input.Command("first\nsecond"), func(string) {
+		engine.guardCancel()
+	})
+	if err == nil {
+		t.Fatal("expired batch was accepted")
+	}
+	assertLua(t, engine, `assert(dispatch_calls == nil)`)
 }
 
 // runawayLoop returns an infinite loop the active backend's watchdog

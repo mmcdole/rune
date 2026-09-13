@@ -118,7 +118,7 @@ implements by default and the LuaJIT backend implements under `-tags luajit`.
 
 - **Single Host interface:** The Engine depends on one `lua.Host` interface (`lua/host.go`). Session implements it, with the methods grouped by service area across `session/lua_*.go` (network, ui, timers, system, history, session, store, log, state). Tests substitute a mock Host.
 - **Reactivity:** The Engine updates a global `rune.state` table whenever system state changes (connection, scroll position), allowing scripts to reactively render UI elements.
-- **Input lines:** Session validates and splits each submission with `input.Submission.Lines`, then runs hooks, echo, and dispatch for one line before advancing. The Engine invokes one-line operations; Lua hooks neither split nor assemble batches. `false` consumes only the current line. Replacements must stay single-line, and Command replacements exclude terminal controls. Session enforces cumulative rewritten size and records one effective history entry afterward. `Engine.RunInputBatch` supplies one watchdog deadline and an internal history snapshot for expansion; public history reads stay live.
+- **Submissions:** `Engine.RunSubmission` validates and splits each submission with `input.Submission.Lines`, then runs hooks, the Session echo callback, and dispatch for one line before advancing. It owns the cumulative rewrite budget, checks cancellation between lines, and supplies one watchdog deadline and an internal history snapshot for expansion; public history reads stay live. Lua hooks neither split nor assemble batches. `false` consumes only the current line. Replacements must stay single-line, and Command replacements exclude terminal controls. Session owns prompt completion, echo presentation, and recording the returned attempted effective lines as one history entry afterward. Those lines include a line whose dispatch failed, since it may already have produced side effects.
 - **Staged config publication:** Go owns the typed config schema and defaults. Core scripts, user scripts, and ready hooks evaluate `rune.config.set` against a staged candidate during startup or reload; after they finish, Engine publishes one complete snapshot to Session. Later runtime updates publish immediately through a dedicated callback that does not re-enter Lua.
 
 ## 3. UI Architecture: The "Push" Model
@@ -261,7 +261,7 @@ spans alone.
 
 Every submission closes any active partial-line display, regardless of whether
 an input hook consumes it, whether it is a slash command, connection state, or
-a later send failure. Session processes each physical line through input hooks,
+a later send failure. Engine processes each physical line through input hooks,
 echo, and dispatch. A `false` result suppresses that line's history, echo, and
 dispatch; later lines still run. Session records the surviving lines together
 after processing. History expansion reads a snapshot from before submission.
@@ -349,8 +349,8 @@ and draft limits before queueing, so rejection leaves the draft intact. The
 shared `input` admission policy also validates Lua hook rewrites and synthetic
 history. Session records the effective lines as one history entry after processing.
 `input.Submission.Lines` owns physical splitting and blank-command-line selection.
-The same input hook chain runs per line in both modes. Session then echoes and
-routes that line before advancing. Ordinary alias and command errors do not stop
+The same input hook chain runs per line in both modes. Engine invokes Session's
+echo callback and dispatches that line before advancing. Ordinary alias and command errors do not stop
 later lines; an internal dispatcher failure is never retried. `/quit` cancels
 remaining lines; `/reload` stays queued until the submission finishes.
 

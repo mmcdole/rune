@@ -2,6 +2,7 @@ package lua
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -18,10 +19,10 @@ import (
 // error instead of hanging the event loop forever.
 const DefaultCallTimeout = 5 * time.Second
 
-// Engine drives Rune's scripting environment through the engine-neutral
-// script seam. It is a pure mechanism: it knows how to run Lua code and
-// expose APIs. It does NOT know about core scripts, config dirs, or
-// boot sequences.
+// Engine drives Rune's scripting environment through the engine-neutral script
+// seam. It exposes host APIs and executes submissions and events through Lua's
+// hook and dispatch contracts, including deadlines and degraded-core recovery.
+// Session owns its lifetime and invokes it synchronously on the event loop.
 type Engine struct {
 	vm   script.Engine
 	host Host
@@ -51,7 +52,7 @@ type Engine struct {
 	// or violated a result contract. Reset for each VM generation.
 	coreBrokenReported bool
 
-	// Fixed history used only by expansion while Session processes a submission.
+	// Fixed history used only by expansion while RunSubmission executes.
 	inputHistory []input.Submission
 
 	// True while dispatching the "error" event, so failures inside
@@ -248,63 +249,95 @@ func (e *Engine) callHooks(nret int, args ...any) ([]script.Result, bool, error)
 	return results, found, err
 }
 
-// RunInputBatch shares one script deadline and history snapshot across the
-// Session-owned line loop. Public history reads still see live history.
-func (e *Engine) RunInputBatch(run func() error) error {
+// RunSubmission validates and processes physical lines in order under one
+// watchdog deadline and history snapshot. echo runs before each dispatch and
+// may be nil. The caller owns presentation and committing history afterward.
+// Returned lines are attempted effective input, including a line whose dispatch
+// failed; they are not a receipt of successful sends. Cancellation stops between
+// lines without an error, allowing /quit to end the submission quietly.
+func (e *Engine) RunSubmission(ctx context.Context, submission input.Submission, echo func(string)) ([]string, error) {
+	if !submission.WithinLimits() || (submission.Mode == input.ModeCommand && !input.ValidCommandText(submission.Text)) {
+		return nil, ErrInvalidSubmission
+	}
 	previous := e.inputHistory
 	e.inputHistory = append([]input.Submission{}, e.host.GetHistoryEntries()...)
 	defer func() { e.inputHistory = previous }()
-	return e.guard(run)
+	var attempted []string
+	rewrittenBytes := 0
+	err := e.guard(func() error {
+		for index, authored := range submission.Lines() {
+			if ctx.Err() != nil {
+				break
+			}
+			line, proceed, err := e.applyInputHooks(input.Submission{Text: authored, Mode: submission.Mode})
+			if err != nil {
+				e.reportError("input hooks", err)
+				continue
+			}
+			if !proceed {
+				continue
+			}
+			size := len(line.Text)
+			if len(attempted) > 0 {
+				size++ // newline between effective lines
+			}
+			if rewrittenBytes+size > input.MaxSubmissionBytes {
+				return fmt.Errorf("input rewrite exceeds submission limit at line %d", index+1)
+			}
+			attempted = append(attempted, line.Text)
+			rewrittenBytes += size
+			if echo != nil {
+				echo(line.Text)
+			}
+			if err := e.DispatchInputLine(line); err != nil {
+				return fmt.Errorf("input line %d: %w", index+1, err)
+			}
+		}
+		return nil
+	})
+	return attempted, err
 }
 
-// ApplyInputHooks transforms one physical line. False consumes only that line.
-// Interpretation mode remains owned by Go.
-func (e *Engine) ApplyInputHooks(submission input.Submission) (input.Submission, bool) {
-	if strings.ContainsAny(submission.Text, "\r\n") || !submission.WithinLimits() ||
-		(submission.Mode == input.ModeCommand && !input.ValidCommandText(submission.Text)) {
-		e.reportError("input", fmt.Errorf("expected a valid input line within submission limits"))
-		return submission, false
-	}
+// ErrInvalidSubmission identifies admission failures so callers can retain their
+// warning presentation separately from execution errors.
+var ErrInvalidSubmission = errors.New("invalid text or submission limit exceeded")
+
+// applyInputHooks transforms a validated physical line. False with no error
+// means consumed; an error rejects the line. Mode remains owned by Go.
+func (e *Engine) applyInputHooks(submission input.Submission) (input.Submission, bool, error) {
 	ctx := script.Tree{V: map[string]any{"mode": submission.Mode.String()}}
 	results, found, err := e.callHooks(1, "input", submission.Text, ctx)
 	if err != nil {
-		e.reportError("input hooks", err)
 		// Some handlers may already have rewritten input or produced side
 		// effects. Fail closed rather than dispatching the authored text and
 		// risking a duplicate send or bypassed interceptor.
-		return submission, false
+		return submission, false, err
 	}
 	if !found {
 		e.reportCoreBroken()
-		return submission, true
+		return submission, true, nil
 	}
 	result := results[0]
 	switch {
 	case result.False():
-		return submission, false
+		return submission, false, nil
 	case result.Kind == script.KindString:
 		if strings.ContainsAny(result.Str, "\r\n") {
-			e.reportError("input hooks", fmt.Errorf("input rewrite must stay on one line"))
-			return submission, false
+			return submission, false, fmt.Errorf("input rewrite must stay on one line")
 		}
 		if submission.Mode != input.ModeVerbatim && !input.ValidCommandText(result.Str) {
-			e.reportError("input hooks", fmt.Errorf(
+			return submission, false, fmt.Errorf(
 				"command rewrite must be valid command text; terminal controls are not allowed",
-			))
-			return submission, false
+			)
 		}
 		submission.Text = result.Str
 		if !submission.WithinLimits() {
-			e.reportError("input hooks", fmt.Errorf("submission limit exceeded"))
-			return submission, false
+			return submission, false, fmt.Errorf("submission limit exceeded")
 		}
-		return submission, true
+		return submission, true, nil
 	default:
-		e.reportError("input hooks", fmt.Errorf(
-			"expected a string or false, got %s", result.Kind,
-		))
 		e.reportCoreBroken()
-		return submission, false
+		return submission, false, fmt.Errorf("expected a string or false, got %s", result.Kind)
 	}
 }
 
