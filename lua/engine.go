@@ -19,10 +19,9 @@ import (
 // error instead of hanging the event loop forever.
 const DefaultCallTimeout = 5 * time.Second
 
-// Engine drives Rune's scripting environment through the engine-neutral script
-// seam. It exposes host APIs and executes submissions and events through Lua's
-// hook and dispatch contracts, including deadlines and degraded-core recovery.
-// Session owns its lifetime and invokes it synchronously on the event loop.
+// Engine invokes Lua and validates its results through the engine-neutral script
+// seam, including deadlines and degraded-core recovery. Session owns application
+// state, submission sequencing, and the Engine's lifetime on its event loop.
 type Engine struct {
 	vm   script.Engine
 	host Host
@@ -51,9 +50,6 @@ type Engine struct {
 	// True once the user has been warned that the core Lua pipeline is missing
 	// or violated a result contract. Reset for each VM generation.
 	coreBrokenReported bool
-
-	// Fixed history used only by expansion while RunSubmission executes.
-	inputHistory []input.Submission
 
 	// True while dispatching the "error" event, so failures inside
 	// error handlers print directly instead of recursing.
@@ -86,37 +82,48 @@ func (e *Engine) EngineBackend() string { return e.vm.Backend() }
 // event loop. Nested entries (Go APIs called from Lua that re-enter
 // the engine, e.g. rune._load) run under the outermost deadline.
 func (e *Engine) guard(fn func() error) error {
-	if !e.inLua {
-		e.inLua = true
-		ctx, cancel := context.WithTimeout(context.Background(), e.CallTimeout)
-		e.guardCancel = cancel
-		e.vm.SetContext(ctx)
-		defer func() {
-			e.vm.RemoveContext()
-			e.guardCancel()
-			e.guardCancel = nil
-			e.inLua = false
-		}()
-	}
-
-	// A previous line may already have exhausted the shared deadline.
-	if lctx := e.vm.Context(); lctx != nil && lctx.Err() != nil {
-		return lctx.Err()
+	end := e.BeginBatch()
+	defer end()
+	if err := e.interruption(nil); err != nil {
+		return err
 	}
 	err := fn()
-	// The active context may have been replaced by pauseWatchdog, so consult
-	// the VM's current context rather than the original. Treat an expired
-	// watchdog as an entry failure even if Lua pcall caught the interruption;
-	// otherwise backend-specific catch behavior could let a timed-out pipeline
-	// continue and dispatch.
-	if lctx := e.vm.Context(); lctx != nil && lctx.Err() != nil {
-		cause := err
-		if cause == nil {
-			cause = lctx.Err()
-		}
-		return fmt.Errorf("script interrupted after %v (runaway loop?): %w", e.CallTimeout, cause)
+	// Check again even if Lua pcall swallowed an interruption.
+	if interrupted := e.interruption(err); interrupted != nil {
+		return interrupted
 	}
 	return err
+}
+
+// ErrInterrupted identifies an exhausted or cancelled script watchdog.
+var ErrInterrupted = errors.New("script interrupted")
+
+// BeginBatch shares one watchdog across synchronous Engine calls. The caller
+// must defer the returned cleanup immediately. Nested scopes borrow the active
+// deadline; only the outer scope cleans it up.
+func (e *Engine) BeginBatch() (end func()) {
+	if e.inLua {
+		return func() {}
+	}
+	e.inLua = true
+	ctx, cancel := context.WithTimeout(context.Background(), e.CallTimeout)
+	e.guardCancel = cancel
+	e.vm.SetContext(ctx)
+	return func() {
+		e.vm.RemoveContext()
+		// pauseWatchdog may have replaced the original context and cancel.
+		e.guardCancel()
+		e.guardCancel = nil
+		e.inLua = false
+	}
+}
+
+func (e *Engine) interruption(cause error) error {
+	if ctx := e.vm.Context(); ctx != nil && ctx.Err() != nil {
+		return fmt.Errorf("%w after %v (runaway loop?): %w",
+			ErrInterrupted, e.CallTimeout, errors.Join(ctx.Err(), cause))
+	}
+	return nil
 }
 
 // pauseWatchdog runs fn with the watchdog deadline detached, then arms
@@ -249,107 +256,54 @@ func (e *Engine) callHooks(nret int, args ...any) ([]script.Result, bool, error)
 	return results, found, err
 }
 
-// RunSubmission validates and processes physical lines in order under one
-// watchdog deadline and history snapshot. echo runs before each dispatch and
-// may be nil. The caller owns presentation and committing history afterward.
-// Returned lines are attempted effective input, including a line whose dispatch
-// failed; they are not a receipt of successful sends. Cancellation stops between
-// lines without an error, allowing /quit to end the submission quietly.
-func (e *Engine) RunSubmission(ctx context.Context, submission input.Submission, echo func(string)) ([]string, error) {
-	if !submission.WithinLimits() || (submission.Mode == input.ModeCommand && !input.ValidCommandText(submission.Text)) {
-		return nil, ErrInvalidSubmission
-	}
-	previous := e.inputHistory
-	e.inputHistory = append([]input.Submission{}, e.host.GetHistoryEntries()...)
-	defer func() { e.inputHistory = previous }()
-	var attempted []string
-	rewrittenBytes := 0
-	err := e.guard(func() error {
-		for index, authored := range submission.Lines() {
-			if ctx.Err() != nil {
-				break
-			}
-			line, proceed, err := e.applyInputHooks(input.Submission{Text: authored, Mode: submission.Mode})
-			if err != nil {
-				e.reportError("input hooks", err)
-				continue
-			}
-			if !proceed {
-				continue
-			}
-			size := len(line.Text)
-			if len(attempted) > 0 {
-				size++ // newline between effective lines
-			}
-			if rewrittenBytes+size > input.MaxSubmissionBytes {
-				return fmt.Errorf("input rewrite exceeds submission limit at line %d", index+1)
-			}
-			attempted = append(attempted, line.Text)
-			rewrittenBytes += size
-			if echo != nil {
-				echo(line.Text)
-			}
-			if err := e.DispatchInputLine(line); err != nil {
-				return fmt.Errorf("input line %d: %w", index+1, err)
-			}
-		}
-		return nil
-	})
-	return attempted, err
-}
-
-// ErrInvalidSubmission identifies admission failures so callers can retain their
-// warning presentation separately from execution errors.
-var ErrInvalidSubmission = errors.New("invalid text or submission limit exceeded")
-
-// applyInputHooks transforms a validated physical line. False with no error
+// ApplyInputHooks transforms a validated physical line. False with no error
 // means consumed; an error rejects the line. Mode remains owned by Go.
-func (e *Engine) applyInputHooks(submission input.Submission) (input.Submission, bool, error) {
-	ctx := script.Tree{V: map[string]any{"mode": submission.Mode.String()}}
-	results, found, err := e.callHooks(1, "input", submission.Text, ctx)
+func (e *Engine) ApplyInputHooks(line string, mode input.SubmissionMode) (string, bool, error) {
+	ctx := script.Tree{V: map[string]any{"mode": mode.String()}}
+	results, found, err := e.callHooks(1, "input", line, ctx)
 	if err != nil {
 		// Some handlers may already have rewritten input or produced side
 		// effects. Fail closed rather than dispatching the authored text and
 		// risking a duplicate send or bypassed interceptor.
-		return submission, false, err
+		return line, false, err
 	}
 	if !found {
 		e.reportCoreBroken()
-		return submission, true, nil
+		return line, true, nil
 	}
 	result := results[0]
 	switch {
 	case result.False():
-		return submission, false, nil
+		return line, false, nil
 	case result.Kind == script.KindString:
 		if strings.ContainsAny(result.Str, "\r\n") {
-			return submission, false, fmt.Errorf("input rewrite must stay on one line")
+			return line, false, fmt.Errorf("input rewrite must stay on one line")
 		}
-		if submission.Mode != input.ModeVerbatim && !input.ValidCommandText(result.Str) {
-			return submission, false, fmt.Errorf(
+		if mode != input.ModeVerbatim && !input.ValidCommandText(result.Str) {
+			return line, false, fmt.Errorf(
 				"command rewrite must be valid command text; terminal controls are not allowed",
 			)
 		}
-		submission.Text = result.Str
-		if !submission.WithinLimits() {
-			return submission, false, fmt.Errorf("submission limit exceeded")
+		line = result.Str
+		if len(line) > input.MaxSubmissionBytes {
+			return line, false, fmt.Errorf("submission limit exceeded")
 		}
-		return submission, true, nil
+		return line, true, nil
 	default:
 		e.reportCoreBroken()
-		return submission, false, fmt.Errorf("expected a string or false, got %s", result.Kind)
+		return line, false, fmt.Errorf("expected a string or false, got %s", result.Kind)
 	}
 }
 
 // DispatchInputLine routes one physical line without hooks, history, or echo.
 // Ordinary command errors are handled by Lua. An internal dispatcher failure
 // is returned to Session and must never be retried after possible side effects.
-func (e *Engine) DispatchInputLine(line input.Submission) error {
+func (e *Engine) DispatchInputLine(line string, mode input.SubmissionMode) error {
 	var found bool
 	err := e.guard(func() error {
 		var callErr error
 		_, found, callErr = e.vm.CallModule(
-			"rune.input", "_dispatch", 0, line.Text, line.Mode.String(),
+			"rune.input", "_dispatch", 0, line, mode.String(),
 		)
 		return callErr
 	})
@@ -358,7 +312,7 @@ func (e *Engine) DispatchInputLine(line input.Submission) error {
 	}
 	if !found {
 		e.reportCoreBroken()
-		e.dispatchSubmissionFallback(line)
+		e.dispatchSubmissionFallback(input.Submission{Text: line, Mode: mode})
 	}
 	return nil
 }
@@ -382,7 +336,7 @@ func (e *Engine) dispatchSubmissionFallback(submission input.Submission) {
 
 // OnEcho runs the echo hook. The core adds styling; user hooks may rewrite or
 // hide the result.
-func (e *Engine) OnEcho(in string) (string, bool) {
+func (e *Engine) OnEcho(in string) (string, bool, error) {
 	// Echo is a presentation boundary. Preserve canonical submission bytes
 	// elsewhere, but never let pasted terminal controls reach either Lua
 	// styling or the degraded Go fallback as executable sequences.
@@ -390,20 +344,23 @@ func (e *Engine) OnEcho(in string) (string, bool) {
 	fallback := text.Green("> " + in)
 
 	results, found, err := e.callHooks(2, "echo", in)
+	if errors.Is(err, ErrInterrupted) {
+		return "", false, err
+	}
 	if !found {
 		e.reportCoreBroken()
-		return fallback, true
+		return fallback, true, nil
 	}
 	if err != nil {
 		e.reportError("echo dispatch", err)
-		return fallback, true
+		return fallback, true, nil
 	}
 
 	modified, show := results[0], results[1]
 	if show.False() {
-		return "", false
+		return "", false, nil
 	}
-	return modified.String(), true
+	return modified.String(), true, nil
 }
 
 // OnOutput handles server text.

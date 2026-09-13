@@ -1,7 +1,7 @@
 package lua
 
 import (
-	"context"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -76,14 +76,31 @@ func TestMalformedInputHookResultCancelsSubmission(t *testing.T) {
 	}
 }
 
-// Tests focused on Lua behavior omit Session-owned echo and history commits.
-// All submission processing uses the production entry point.
+// Lua-focused tests drive lines without Session's echo, history, or budget policy.
+// Production batch semantics are covered by session/submission_test.go.
 func dispatchTestSubmission(engine *Engine, submission input.Submission) bool {
-	attempted, err := engine.RunSubmission(context.Background(), submission, nil)
-	if err != nil {
-		engine.reportError("input", err)
+	end := engine.BeginBatch()
+	defer end()
+	accepted := false
+	for _, authored := range submission.Lines() {
+		line, proceed, err := engine.ApplyInputHooks(authored, submission.Mode)
+		if err != nil {
+			engine.reportError("input", err)
+			if errors.Is(err, ErrInterrupted) {
+				break
+			}
+			continue
+		}
+		if !proceed {
+			continue
+		}
+		accepted = true
+		if err := engine.DispatchInputLine(line, submission.Mode); err != nil {
+			engine.reportError("input", err)
+			break
+		}
 	}
-	return len(attempted) > 0
+	return accepted
 }
 
 func dispatchTestCommand(engine *Engine, text string) bool {

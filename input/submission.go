@@ -64,7 +64,7 @@ const (
 func (s Submission) Lines() []string {
 	lines := s.PhysicalLines()
 	if s.Mode == ModeCommand && len(lines) > 1 {
-		kept := lines[:0]
+		kept := make([]string, 0, len(lines))
 		for _, line := range lines {
 			if strings.TrimSpace(line) != "" {
 				kept = append(kept, line)

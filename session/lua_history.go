@@ -29,3 +29,12 @@ func (s *Session) addHistorySubmission(entry input.Submission) {
 		s.historyEntries = s.historyEntries[len(s.historyEntries)-s.historyLimit:]
 	}
 }
+
+// GetExpansionHistory returns the active submission snapshot, or live history
+// outside a submission. An empty snapshot must remain distinct from no snapshot.
+func (s *Session) GetExpansionHistory() []input.Submission {
+	if s.expansionHistory != nil {
+		return append([]input.Submission{}, s.expansionHistory...)
+	}
+	return s.GetHistoryEntries()
+}

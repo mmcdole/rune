@@ -4,6 +4,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -78,10 +79,11 @@ type Session struct {
 	protocol     *network.Protocol // Session-confined Telnet state
 
 	// Input and history
-	currentInput   string // Tracked so Lua can query via rune.input.get()
-	currentCursor  int    // Zero-based UTF-8 byte offset exposed to Lua
-	historyEntries []input.Submission
-	historyLimit   int
+	currentInput     string // Tracked so Lua can query via rune.input.get()
+	currentCursor    int    // Zero-based UTF-8 byte offset exposed to Lua
+	historyEntries   []input.Submission
+	expansionHistory []input.Submission
+	historyLimit     int
 
 	// Inbound text and its display lifecycle.
 	// activeBatch is set only while one event batch is being applied, so a
@@ -419,25 +421,80 @@ func (s *Session) handleUIEvent(event ui.UIEvent) {
 }
 
 func (s *Session) handleSubmission(submission input.Submission) {
-	// Every submission closes any active partial-line display, even when an
-	// input hook later consumes it or dispatch produces no network send.
+	// Accepted submissions commit the prompt even if validation or hooks reject.
 	s.finishPartialLine()
+	if !submission.WithinLimits() || (submission.Mode == input.ModeCommand && !input.ValidCommandText(submission.Text)) {
+		s.ui.Print(text.Red("[WARNING] Input not run - invalid text or submission limit exceeded"))
+		return
+	}
 
-	history, err := s.engine.RunSubmission(s.backgroundCtx, submission, func(line string) {
-		if s.protocol.LocalEchoEnabled() {
-			if styled, show := s.engine.OnEcho(line); show {
-				s.ui.Echo(styled)
-			}
+	previous := s.expansionHistory
+	s.expansionHistory = s.GetHistoryEntries() // non-nil even for empty history
+	defer func() { s.expansionHistory = previous }()
+	end := s.engine.BeginBatch()
+	defer end()
+
+	var effective []string
+	// Bounds execution as well as the size of the eventual history entry.
+	effectiveBytes := 0
+	var stopErr error
+	for index, authored := range submission.Lines() {
+		if s.backgroundCtx.Err() != nil {
+			break
 		}
-	})
-	if len(history) > 0 {
-		s.addHistorySubmission(input.Submission{Text: strings.Join(history, "\n"), Mode: submission.Mode})
+		line, proceed, err := s.engine.ApplyInputHooks(authored, submission.Mode)
+		if errors.Is(err, lua.ErrInterrupted) {
+			stopErr = err
+			break
+		}
+		if err != nil {
+			s.engine.NotifyError("input hooks: " + err.Error())
+			continue
+		}
+		if !proceed {
+			continue
+		}
+		size := len(line)
+		if len(effective) > 0 {
+			size++ // newline between effective lines
+		}
+		if effectiveBytes+size > input.MaxSubmissionBytes {
+			stopErr = fmt.Errorf("input rewrite exceeds submission limit at line %d", index+1)
+			break
+		}
+		effective = append(effective, line)
+		effectiveBytes += size
+		if err := s.echoInput(line); err != nil {
+			stopErr = err
+			break
+		}
+		if err := s.engine.DispatchInputLine(line, submission.Mode); err != nil {
+			stopErr = fmt.Errorf("input line %d: %w", index+1, err)
+			break
+		}
 	}
-	if err == lua.ErrInvalidSubmission {
-		s.ui.Print(text.Red("[WARNING] Input not run - " + err.Error()))
-	} else if err != nil {
-		s.ui.Print(text.Red("[Error] " + err.Error()))
+	// These are attempted effective lines, not confirmed successful sends.
+	// Always finalize the prefix, including when echo or dispatch failed.
+	if len(effective) > 0 {
+		s.addHistorySubmission(input.Submission{Text: strings.Join(effective, "\n"), Mode: submission.Mode})
 	}
+	if stopErr != nil {
+		s.ui.Print(text.Red("[Error] " + stopErr.Error()))
+	}
+}
+
+func (s *Session) echoInput(line string) error {
+	if !s.protocol.LocalEchoEnabled() {
+		return nil
+	}
+	styled, show, err := s.engine.OnEcho(line)
+	if err != nil {
+		return err
+	}
+	if show {
+		s.ui.Echo(styled)
+	}
+	return nil
 }
 
 // boot loads the VM state.
@@ -478,7 +535,7 @@ func (s *Session) boot() error {
 	if s.connectTarget != "" {
 		target := s.connectTarget
 		s.connectTarget = ""
-		if err := s.engine.DispatchInputLine(input.Command("/connect " + target)); err != nil {
+		if err := s.engine.DispatchInputLine("/connect "+target, input.ModeCommand); err != nil {
 			s.ui.Print(text.Red("[Error] " + err.Error()))
 		}
 	}

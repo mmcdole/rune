@@ -4,11 +4,78 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mmcdole/rune/input"
 	runetext "github.com/mmcdole/rune/text"
 	"github.com/mmcdole/rune/ui"
 )
+
+func TestSubmissionInterruptionFinalizesAttemptedPrefix(t *testing.T) {
+	for _, stage := range []string{"input", "echo", "dispatch"} {
+		t.Run(stage, func(t *testing.T) {
+			s, net, uiMock := newTestSession(t)
+			net.connected = true
+			setup := `local function stall(line)
+				if line == "second" then
+					while true do rune._strip_ansi("x") end
+				end
+			end
+			`
+			if stage == "dispatch" {
+				setup += `local dispatch = rune.input._dispatch
+					function rune.input._dispatch(line, mode)
+						stall(line)
+						return dispatch(line, mode)
+					end`
+			} else {
+				setup += `rune.hooks.on("` + stage + `", stall, {priority = 1})`
+			}
+			if err := s.engine.DoString("stall setup", setup); err != nil {
+				t.Fatal(err)
+			}
+			uiMock.drainPrinted()
+			s.engine.CallTimeout = 20 * time.Millisecond
+			s.handleSubmission(input.Command("first\nsecond\nthird"))
+			if got := net.drainSent(); !slices.Equal(got, []string{"first"}) {
+				t.Fatalf("sent = %q", got)
+			}
+			want := "first\nsecond"
+			if stage == "input" {
+				want = "first"
+			}
+			if got := s.GetHistoryEntries(); !slices.Equal(got, []input.Submission{input.Command(want)}) {
+				t.Fatalf("attempted history = %+v", got)
+			}
+			stoppingErrors := 0
+			for _, line := range uiMock.drainPrinted() {
+				if strings.Contains(line, "runaway loop?") {
+					stoppingErrors++
+				}
+			}
+			if stoppingErrors != 1 {
+				t.Fatalf("reported %d stopping errors, want one", stoppingErrors)
+			}
+			s.handleSubmission(input.Command("recovered"))
+			if got := net.drainSent(); !slices.Equal(got, []string{"recovered"}) {
+				t.Fatalf("after interruption = %q", got)
+			}
+		})
+	}
+}
+
+func TestEmptyExpansionSnapshotStaysEmpty(t *testing.T) {
+	s, net, _ := newTestSession(t)
+	net.connected = true
+	s.handleSubmission(input.Command("/lua rune.history.add('score')\n!"))
+	if got := net.drainSent(); len(got) != 0 {
+		t.Fatalf("empty snapshot saw live history: %q", got)
+	}
+	s.handleSubmission(input.Command("!"))
+	if got := net.drainSent(); !slices.Equal(got, []string{"score"}) {
+		t.Fatalf("snapshot was not released: %q", got)
+	}
+}
 
 func TestInputRewriteControlsEchoHistoryAndDispatch(t *testing.T) {
 	s, net, uiMock := newTestSession(t)

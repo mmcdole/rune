@@ -77,14 +77,14 @@ func TestHistoryReplaysSingleCommandRepeatsWithLiteralBraces(t *testing.T) {
 // A literal false consumes the line before history and command processing.
 func commitAndDispatchTestCommand(t *testing.T, engine *Engine, host *MockHost, text string) bool {
 	t.Helper()
-	effective, proceed, err := engine.applyInputHooks(input.Command(text))
+	effective, proceed, err := engine.ApplyInputHooks(text, input.ModeCommand)
 	if err != nil || !proceed {
 		return false
 	}
-	if err := engine.DispatchInputLine(effective); err != nil {
+	if err := engine.DispatchInputLine(effective, input.ModeCommand); err != nil {
 		t.Fatal(err)
 	}
-	host.AddToHistory(effective.Text)
+	host.AddToHistory(effective)
 	return true
 }
 
@@ -110,9 +110,9 @@ func TestHistoryExpansionPreservesStoredSurroundingWhitespace(t *testing.T) {
 	defer cleanup()
 
 	host.HistoryEntries = []input.Submission{input.Command("  kill rat  ")}
-	effective, proceed, err := engine.applyInputHooks(input.Command("!ki"))
-	if err != nil || !proceed || effective.Text != "  kill rat  " {
-		t.Fatalf("submit = (%q, %v), want exact stored command", effective.Text, proceed)
+	effective, proceed, err := engine.ApplyInputHooks("!ki", input.ModeCommand)
+	if err != nil || !proceed || effective != "  kill rat  " {
+		t.Fatalf("submit = (%q, %v), want exact stored command", effective, proceed)
 	}
 }
 
@@ -124,9 +124,9 @@ func TestHistoryExpansionSkipsWhitespaceOnlyHistory(t *testing.T) {
 		input.Command("north"),
 		input.Command("   "),
 	}
-	effective, proceed, err := engine.applyInputHooks(input.Command("!"))
-	if err != nil || !proceed || effective.Text != "north" {
-		t.Fatalf("submit = (%q, %v), want prior non-blank command", effective.Text, proceed)
+	effective, proceed, err := engine.ApplyInputHooks("!", input.ModeCommand)
+	if err != nil || !proceed || effective != "north" {
+		t.Fatalf("submit = (%q, %v), want prior non-blank command", effective, proceed)
 	}
 }
 
@@ -331,14 +331,14 @@ func TestHistoryExpansionUsesConfiguredCharacterLiterally(t *testing.T) {
 				{text: "east;" + test.marker + "lo", want: "east;look"},
 				{text: "!", want: "!"},
 			} {
-				effective, proceed, err := engine.applyInputHooks(input.Command(rewrite.text))
-				if err != nil || !proceed || effective.Text != rewrite.want {
+				effective, proceed, err := engine.ApplyInputHooks(rewrite.text, input.ModeCommand)
+				if err != nil || !proceed || effective != rewrite.want {
 					t.Fatalf("submit %q = (%q, %v), want (%q, true)",
-						rewrite.text, effective.Text, proceed, rewrite.want)
+						rewrite.text, effective, proceed, rewrite.want)
 				}
 			}
 
-			if _, proceed, err := engine.applyInputHooks(input.Command(test.marker + "missing")); err != nil || proceed {
+			if _, proceed, err := engine.ApplyInputHooks(test.marker+"missing", input.ModeCommand); err != nil || proceed {
 				t.Fatal("unmatched configured history designator was accepted")
 			}
 			warning := "no matching command: " + test.marker + "missing"
@@ -390,18 +390,18 @@ func TestHistoryExpansionFiltersStoredEntriesByCurrentCharacter(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	effective, proceed, err := engine.applyInputHooks(input.Command("^"))
-	if err != nil || !proceed || effective.Text != "!old" {
-		t.Fatalf("caret submit = (%q, %v), want old literal bang entry", effective.Text, proceed)
+	effective, proceed, err := engine.ApplyInputHooks("^", input.ModeCommand)
+	if err != nil || !proceed || effective != "!old" {
+		t.Fatalf("caret submit = (%q, %v), want old literal bang entry", effective, proceed)
 	}
 
 	if err := engine.DoString("restore history character",
 		`rune.config.set("history_character", "!")`); err != nil {
 		t.Fatal(err)
 	}
-	effective, proceed, err = engine.applyInputHooks(input.Command("!"))
-	if err != nil || !proceed || effective.Text != "^staged" {
-		t.Fatalf("bang submit = (%q, %v), want old literal caret entry", effective.Text, proceed)
+	effective, proceed, err = engine.ApplyInputHooks("!", input.ModeCommand)
+	if err != nil || !proceed || effective != "^staged" {
+		t.Fatalf("bang submit = (%q, %v), want old literal caret entry", effective, proceed)
 	}
 }
 
@@ -415,9 +415,9 @@ func TestCommandSeparatorTakesPrecedenceOverDoubledHistoryCharacter(t *testing.T
 	}
 	host.HistoryEntries = []input.Submission{input.Command("look")}
 
-	effective, proceed, err := engine.applyInputHooks(input.Command("!!"))
-	if err != nil || !proceed || effective.Text != "!!" {
-		t.Fatalf("submit = (%q, %v), want separator text unchanged", effective.Text, proceed)
+	effective, proceed, err := engine.ApplyInputHooks("!!", input.ModeCommand)
+	if err != nil || !proceed || effective != "!!" {
+		t.Fatalf("submit = (%q, %v), want separator text unchanged", effective, proceed)
 	}
 	commitAndDispatchTestCommand(t, engine, host, "!!!!")
 	assertCommands(t, host, []string{"!!"})
@@ -542,11 +542,11 @@ func TestVerbatimBangIsLiteral(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 
-	effective, proceed, err := engine.applyInputHooks(input.Verbatim("!"))
-	if err != nil || !proceed || effective != input.Verbatim("!") {
+	effective, proceed, err := engine.ApplyInputHooks("!", input.ModeVerbatim)
+	if err != nil || !proceed || effective != "!" {
 		t.Fatalf("verbatim transform = %+v proceed=%v", effective, proceed)
 	}
-	engine.DispatchInputLine(effective)
+	engine.DispatchInputLine(effective, input.ModeVerbatim)
 
 	assertCommands(t, host, []string{"!"})
 }

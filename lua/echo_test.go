@@ -14,8 +14,8 @@ func TestEchoHookStylesAndGags(t *testing.T) {
 	engine, _, cleanup := setupTest(t)
 	defer cleanup()
 
-	styled, show := engine.OnEcho("north")
-	if !show {
+	styled, show, err := engine.OnEcho("north")
+	if err != nil || !show {
 		t.Fatal("default echo unexpectedly hidden")
 	}
 	if !strings.Contains(styled, "> north") {
@@ -29,10 +29,10 @@ func TestEchoHookStylesAndGags(t *testing.T) {
 		t.Fatalf("setup failed: %v", err)
 	}
 
-	if _, show := engine.OnEcho("secret"); show {
+	if _, show, err := engine.OnEcho("secret"); err != nil || show {
 		t.Error("echo hook returning false should hide the echo")
 	}
-	if _, show := engine.OnEcho("hello"); !show {
+	if _, show, err := engine.OnEcho("hello"); err != nil || !show {
 		t.Error("non-matching input should still echo")
 	}
 }
@@ -49,8 +49,8 @@ func TestEchoVisualizesTerminalControlsBeforeHooksAndFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	styled, show := engine.OnEcho("safe\x1b]52;c;x\a\tend")
-	if !show {
+	styled, show, err := engine.OnEcho("safe\x1b]52;c;x\a\tend")
+	if err != nil || !show {
 		t.Fatal("safe echo unexpectedly hidden")
 	}
 	seen := text.StripANSI(styled)
@@ -61,8 +61,8 @@ func TestEchoVisualizesTerminalControlsBeforeHooksAndFallback(t *testing.T) {
 	if err := engine.DoString("break-hooks", `rune.hooks = nil`); err != nil {
 		t.Fatal(err)
 	}
-	styled, show = engine.OnEcho("\x1b[2J\x00")
-	if !show || !strings.Contains(text.StripANSI(styled), "␛[2J␀") {
+	styled, show, err = engine.OnEcho("\x1b[2J\x00")
+	if err != nil || !show || !strings.Contains(text.StripANSI(styled), "␛[2J␀") {
 		t.Fatalf("degraded echo is unsafe: %q (show=%v)", styled, show)
 	}
 }

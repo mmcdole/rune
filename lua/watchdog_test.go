@@ -2,6 +2,7 @@ package lua
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -20,9 +21,16 @@ func TestInputBatchSharesOneWatchdogDeadline(t *testing.T) {
 			return nil
 		},
 	}, nil)
-	_, err := engine.RunSubmission(context.Background(), input.Command(strings.Repeat(
-		`/lua batchprobe.pause(); rune.send_raw("line")`+"\n", 3)), nil)
-	if err == nil || !strings.Contains(err.Error(), "interrupted") {
+	end := engine.BeginBatch()
+	var err error
+	for range 3 {
+		err = engine.DispatchInputLine(`/lua batchprobe.pause(); rune.send_raw("line")`, input.ModeCommand)
+		if err != nil {
+			break
+		}
+	}
+	end()
+	if !errors.Is(err, ErrInterrupted) || !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("batch deadline: %v", err)
 	}
 	if got := host.DrainNetworkCalls(); len(got) >= 3 {
@@ -43,13 +51,47 @@ func TestInputBatchDoesNotEnterLuaAfterDeadline(t *testing.T) {
 	`); err != nil {
 		t.Fatal(err)
 	}
-	_, err := engine.RunSubmission(context.Background(), input.Command("first\nsecond"), func(string) {
-		engine.guardCancel()
-	})
+	end := engine.BeginBatch()
+	engine.guardCancel()
+	err := engine.DispatchInputLine("first", input.ModeCommand)
+	end()
 	if err == nil {
 		t.Fatal("expired batch was accepted")
 	}
 	assertLua(t, engine, `assert(dispatch_calls == nil)`)
+}
+
+func TestBatchScopeCleanupAfterWatchdogReplacement(t *testing.T) {
+	engine, _, cleanup := setupTest(t)
+	defer cleanup()
+	end := engine.BeginBatch()
+	outer := engine.vm.Context()
+	nestedEnd := engine.BeginBatch()
+	nestedEnd()
+	if engine.vm.Context() != outer || outer.Err() != nil {
+		t.Fatal("nested cleanup changed the outer watchdog")
+	}
+	engine.pauseWatchdog(func() {})
+	replacement := engine.vm.Context()
+	end()
+	if outer.Err() == nil || replacement.Err() == nil || engine.inLua {
+		t.Fatal("scope cleanup did not release the replaced watchdog")
+	}
+}
+
+func TestInterruptionPreservesLuaErrorAndContextCause(t *testing.T) {
+	engine, _, cleanup := setupTest(t)
+	defer cleanup()
+	cause := errors.New("Lua failure")
+	err := engine.guard(func() error {
+		engine.guardCancel()
+		return cause
+	})
+	for _, want := range []error{ErrInterrupted, context.Canceled, cause} {
+		if !errors.Is(err, want) {
+			t.Fatalf("%v does not wrap %v", err, want)
+		}
+	}
 }
 
 // runawayLoop returns an infinite loop the active backend's watchdog

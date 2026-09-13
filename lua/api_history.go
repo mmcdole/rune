@@ -18,11 +18,7 @@ func (e *Engine) registerHistoryFuncs() {
 
 		// Internal snapshot for expansion; public history remains live.
 		"expansion_entries": func(c *script.Call) error {
-			history := e.inputHistory
-			if history == nil {
-				history = e.host.GetHistoryEntries()
-			}
-			returnHistory(c, history)
+			returnHistory(c, e.host.GetExpansionHistory())
 			return nil
 		},
 

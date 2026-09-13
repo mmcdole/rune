@@ -118,7 +118,7 @@ implements by default and the LuaJIT backend implements under `-tags luajit`.
 
 - **Single Host interface:** The Engine depends on one `lua.Host` interface (`lua/host.go`). Session implements it, with the methods grouped by service area across `session/lua_*.go` (network, ui, timers, system, history, session, store, log, state). Tests substitute a mock Host.
 - **Reactivity:** The Engine updates a global `rune.state` table whenever system state changes (connection, scroll position), allowing scripts to reactively render UI elements.
-- **Submissions:** `Engine.RunSubmission` validates and splits each submission with `input.Submission.Lines`, then runs hooks, the Session echo callback, and dispatch for one line before advancing. It owns the cumulative rewrite budget, checks cancellation between lines, and supplies one watchdog deadline and an internal history snapshot for expansion; public history reads stay live. Lua hooks neither split nor assemble batches. `false` consumes only the current line. Replacements must stay single-line, and Command replacements exclude terminal controls. Session owns prompt completion, echo presentation, and recording the returned attempted effective lines as one history entry afterward. Those lines include a line whose dispatch failed, since it may already have produced side effects.
+- **Input calls:** Engine invokes one-line hooks and dispatch, validates Lua results, and supplies a nestable watchdog scope. Session owns the [submission lifecycle](#submission-lifecycle).
 - **Staged config publication:** Go owns the typed config schema and defaults. Core scripts, user scripts, and ready hooks evaluate `rune.config.set` against a staged candidate during startup or reload; after they finish, Engine publishes one complete snapshot to Session. Later runtime updates publish immediately through a dedicated callback that does not re-enter Lua.
 
 ## 3. UI Architecture: The "Push" Model
@@ -259,12 +259,7 @@ an accepted game send commits its already processed overlay and closes spans;
 it does not run the prompt hook again. A send with no partial line leaves open
 spans alone.
 
-Every submission closes any active partial-line display, regardless of whether
-an input hook consumes it, whether it is a slash command, connection state, or
-a later send failure. Engine processes each physical line through input hooks,
-echo, and dispatch. A `false` result suppresses that line's history, echo, and
-dispatch; later lines still run. Session records the surviving lines together
-after processing. History expansion reads a snapshot from before submission.
+The [submission lifecycle](#submission-lifecycle) commits the partial-line display before input processing.
 Separately, Lua actions
 from aliases, triggers, timers, and other callbacks finish the partial line
 only when the connection accepts their game send. Deferring that finish to the
@@ -347,12 +342,41 @@ mode choice persists for the draft. The Go input controller handles `Alt+V`
 and applying accepted submissions atomically. The Model validates command text
 and draft limits before queueing, so rejection leaves the draft intact. The
 shared `input` admission policy also validates Lua hook rewrites and synthetic
-history. Session records the effective lines as one history entry after processing.
-`input.Submission.Lines` owns physical splitting and blank-command-line selection.
-The same input hook chain runs per line in both modes. Engine invokes Session's
-echo callback and dispatches that line before advancing. Ordinary alias and command errors do not stop
-later lines; an internal dispatcher failure is never retried. `/quit` cancels
-remaining lines; `/reload` stays queued until the submission finishes.
+history. See the [submission lifecycle](#submission-lifecycle) for execution.
+
+### Submission lifecycle
+
+Session owns sequencing and application state; Engine owns safe Lua calls and
+result contracts; Lua core owns the meaning and presentation of each line.
+The pure `input` package defines admission rules and physical-line selection.
+
+1. UI validates for feedback, then transfers `{Submission, NextDraft}` atomically.
+2. Session applies the draft transition, finishes the partial line, validates
+   authoritatively, and snapshots history for expansion.
+3. Session splits with `input.Submission.Lines()` and processes each line under
+   one shared watchdog scope from `Engine.BeginBatch()`:
+   - Engine `ApplyInputHooks(text, mode)` calls Lua `hooks.call("input")` and
+     returns rewritten text, consumption, or an error. Lua rejects multiline
+     replacements before later handlers; Go validates the completed chain.
+     Each handler receives a fresh read-only context; mode never changes.
+   - Session skips consumed lines, reports and skips failed lines, and stops
+     immediately on `lua.ErrInterrupted`. It applies the cumulative effective
+     byte budget before recording the line as attempted.
+   - Session echoes if local echo is enabled, via Engine `OnEcho`. Echo
+     interruption stops processing before dispatch.
+   - Engine `DispatchInputLine(text, mode)` calls Lua `rune.input._dispatch`,
+     which selects verbatim sending, slash commands, or `rune.send`.
+   - Session stops on cancellation (`/quit`) or dispatcher failure, which is
+     never retried. Ordinary command errors remain local to the command.
+4. Session records effective lines as one history entry (attempted, not
+   confirmed sends), including the attempted prefix on failure, and prints any
+   batch-stopping error. Deferred cleanup releases the watchdog and restores
+   the previous expansion snapshot.
+
+Input and echo hooks do not see the current history entry. Expansion reads the
+fixed snapshot, including an empty snapshot, while public history reads remain
+live. `/reload` stays queued until processing finishes. Programmatic
+`rune.send` enters below interactive hooks, echo, and history.
 
 ### JSON conversion
 

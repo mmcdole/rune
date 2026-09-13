@@ -490,11 +490,11 @@ func TestInputRewritePreservesVerbatimMode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	effective, proceed, err := engine.applyInputHooks(input.Verbatim("original"))
-	if err != nil || !proceed || effective != input.Verbatim("first;second") {
+	effective, proceed, err := engine.ApplyInputHooks("original", input.ModeVerbatim)
+	if err != nil || !proceed || effective != "first;second" {
 		t.Fatalf("effective submission = %+v proceed=%v", effective, proceed)
 	}
-	engine.DispatchInputLine(effective)
+	engine.DispatchInputLine(effective, input.ModeVerbatim)
 
 	assertCommands(t, host, []string{"first;second"})
 }
