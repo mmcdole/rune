@@ -89,7 +89,7 @@ itself.
 
 Rune searches earlier normal commands. It ignores local `/commands`, verbatim
 blocks, and earlier commands that still contain history expansion syntax. If
-any expansion has no match, Rune shows a warning and sends none of the submission.
+any expansion has no match, Rune shows a warning and skips that input line. Other lines in the submission still run.
 
 A line beginning with `/` is a local Rune command, so Rune does not perform
 history expansion anywhere on that line. It also does not perform history
@@ -200,13 +200,30 @@ UTF-8 and terminal controls. A rejected draft stays in the editor with its mode
 intact. Errors from an alias or slash command are reported normally; Rune continues
 with the following lines.
 
-The block is saved as one history entry after input hooks finish. Up or history
-search restores the block and its mode. History expansion uses the history from
-before this submission: `!` selects the most recent eligible command line, even
-when that line belongs to a saved batch. Local command lines bypass expansion.
-Input hooks run on each nonblank command line before any of the batch is dispatched.
-A hook returning `false`, a missing history match, or an invalid rewrite cancels the
-whole submission before history and echo. In Verbatim, hooks receive the whole draft.
+Each physical line passes through `input` hooks, then local echo and dispatch,
+before processing the next line. This applies to both modes. A hook returning
+`false`, a missing history match, or an invalid rewrite skips only the affected
+line. Hook replacements must stay on one line.
+
+After processing, Rune saves the accepted lines together as one history entry.
+Up or history search restores the block and its mode. History expansion uses a
+snapshot from before this submission: `!` selects the most recent eligible
+command line, even when it belongs to a saved batch. Local command lines bypass
+expansion. Explicit script calls to `rune.history.add` remain visible to normal
+history reads, but do not change that snapshot.
+
+A submission shares one script deadline. Rewritten text also counts toward the
+submission size limit. Exceeding either limit stops the remaining lines; commands
+already executed cannot be undone. `/quit` stops the remaining lines. `/reload`
+stays deferred until the submission finishes so it can safely replace the Lua VM.
+
+**Input hook compatibility:** Previously, input hooks received an entire Verbatim
+draft, could return multiline text, and ran before all submission processing.
+They now receive individual lines in both modes, and replacements cannot contain
+newlines. Returning `false` consumes only the current line. History is recorded
+after processing, so echo hooks and command handlers no longer see the current
+submission already in history. Scripts that intentionally send several lines can
+call `rune.send` or `rune.send_raw` and return `false` to consume the original line.
 
 Composer editing keys are handled locally rather than by Lua binds. `Up`/`Down`
 move through the draft's visual rows, `PageUp`/`PageDown` move by a composer

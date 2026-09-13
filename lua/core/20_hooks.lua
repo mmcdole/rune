@@ -227,7 +227,7 @@ function rune.hooks.call(event, ...)
 
     elseif event == "input" then
         -- Input is a pre-commit transform pass. Each handler sees the result
-        -- of the previous rewrite; false consumes the whole submission.
+        -- of the previous rewrite; false consumes this input line.
         local text = select(1, ...)
         local context = select(2, ...)
         local mode = context and context.mode or "command"
@@ -239,6 +239,10 @@ function rune.hooks.call(event, ...)
                 if result == false then
                     return false
                 elseif type(result) == "string" then
+                    if result:find("[\r\n]") then
+                        rune.echo(rune.style.red("[Error]") .. " Input hook rewrite must stay on one line")
+                        return false
+                    end
                     text = result
                 end
             end

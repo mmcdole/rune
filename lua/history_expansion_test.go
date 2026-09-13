@@ -73,17 +73,18 @@ func TestHistoryReplaysSingleCommandRepeatsWithLiteralBraces(t *testing.T) {
 	assertHistory(t, host, "#2 say {one;;two}")
 }
 
-// commitAndDispatchTestCommand mirrors Session's hook, history, and command
-// processing order for these Lua-focused tests; local echo is omitted. A
-// literal false cancels the submission before history and command processing.
+// commitAndDispatchTestCommand drives a single input line without local echo.
+// A literal false consumes the line before history and command processing.
 func commitAndDispatchTestCommand(t *testing.T, engine *Engine, host *MockHost, text string) bool {
 	t.Helper()
 	effective, proceed := engine.ApplyInputHooks(input.Command(text))
 	if !proceed {
 		return false
 	}
+	if err := engine.DispatchInputLine(effective); err != nil {
+		t.Fatal(err)
+	}
 	host.AddToHistory(effective.Text)
-	engine.DispatchSubmission(effective)
 	return true
 }
 
@@ -545,7 +546,7 @@ func TestVerbatimBangIsLiteral(t *testing.T) {
 	if !proceed || effective != input.Verbatim("!") {
 		t.Fatalf("verbatim transform = %+v proceed=%v", effective, proceed)
 	}
-	engine.DispatchSubmission(effective)
+	engine.DispatchInputLine(effective)
 
 	assertCommands(t, host, []string{"!"})
 }

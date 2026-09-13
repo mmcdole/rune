@@ -93,23 +93,14 @@ local function expand_commands(text, history, separator, marker)
 end
 
 local function expand_history(text, context)
-    if context.mode ~= "command" then return nil end
+    if context.mode ~= "command" or text:sub(1, 1) == "/" then return nil end
     local marker = rune.config.get("history_character")
     if marker == "" or not text:find(marker, 1, true) then return nil end
 
     local separator = rune.config.get("command_separator")
-    local history = rune._history.entries()
-    local lines = {}
-    -- An earlier hook may have expanded one command into several lines.
-    text = text:gsub("\r\n", "\n"):gsub("\r", "\n")
-    for line in (text .. "\n"):gmatch("(.-)\n") do
-        if line:sub(1, 1) ~= "/" and contains_designator(line, separator, marker) then
-            line = expand_commands(line, history, separator, marker)
-            if line == false then return false end
-        end
-        lines[#lines + 1] = line
+    if contains_designator(text, separator, marker) then
+        return expand_commands(text, rune._history.expansion_entries(), separator, marker)
     end
-    return table.concat(lines, "\n")
 end
 
 rune.hooks.on("input", expand_history, {

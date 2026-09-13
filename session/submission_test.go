@@ -49,7 +49,7 @@ func TestInputRewriteControlsEchoHistoryAndDispatch(t *testing.T) {
 	}
 	assertSessionLua(t, s.engine, `
 		assert(history_seen_by_input == 0)
-		assert(history_seen_by_echo == 1)
+		assert(history_seen_by_echo == 0)
 	`)
 }
 
@@ -162,7 +162,7 @@ func TestVerbatimSubmissionPreservesPhysicalLines(t *testing.T) {
 		}
 	}
 
-	if history := s.GetHistoryEntries(); len(history) != 1 || history[0] != input.Verbatim(text) {
+	if history := s.GetHistoryEntries(); len(history) != 1 || history[0] != input.Verbatim(strings.Join(want, "\n")) {
 		t.Fatalf("structured history = %+v, want one verbatim submission", history)
 	}
 	echoed := uiMock.drainEchoed()
@@ -213,7 +213,7 @@ func TestCommandBatchProcessesLinesAndKeepsHistory(t *testing.T) {
 	if got := net.drainSent(); !slices.Equal(got, []string{"answer 42", "answer 42", "look"}) {
 		t.Fatalf("batch output = %q", got)
 	}
-	if got := s.GetHistoryEntries(); !slices.Equal(got, []input.Submission{input.Command(source)}) {
+	if got := s.GetHistoryEntries(); !slices.Equal(got, []input.Submission{input.Command(strings.Join(input.Command(source).Lines(), "\n"))}) {
 		t.Fatalf("history = %+v", got)
 	}
 	if got := uiMock.drainEchoed(); len(got) != 4 {
@@ -229,5 +229,134 @@ func TestLongSingleLineLuaExecutesOnce(t *testing.T) {
 	s.handleSubmission(input.Command(source))
 	if got := net.drainSent(); !slices.Equal(got, []string{payload}) {
 		t.Fatalf("long command sent %q", got)
+	}
+}
+
+func TestSubmissionProcessesEachLineBeforeTheNextHook(t *testing.T) {
+	for _, mode := range []input.SubmissionMode{input.ModeCommand, input.ModeVerbatim} {
+		t.Run(mode.String(), func(t *testing.T) {
+			s, net, _ := newTestSession(t)
+			net.connected = true
+			if err := s.engine.DoString("line ordering", `
+				seen = {}
+				rune.hooks.on("input", function(line, context)
+					assert(not line:find("[\r\n]"))
+					assert(#rune.history.get() == 0)
+					seen[#seen + 1] = "input:" .. line
+					if line == "skip" then return false end
+					return line .. "!"
+				end, {priority = 10})
+				rune.hooks.on("echo", function(line)
+					assert(#rune.history.get() == 0)
+					seen[#seen + 1] = "echo:" .. line
+				end, {priority = 10})
+				local dispatch = rune.input._dispatch
+				function rune.input._dispatch(line, mode)
+					seen[#seen + 1] = "dispatch:" .. line
+					return dispatch(line, mode)
+				end
+			`); err != nil {
+				t.Fatal(err)
+			}
+			s.handleSubmission(input.Submission{Text: "first\nskip\nlast", Mode: mode})
+			if got := net.drainSent(); !slices.Equal(got, []string{"first!", "last!"}) {
+				t.Fatalf("sent %q", got)
+			}
+			assertSessionLua(t, s.engine, `assert(table.concat(seen, "|") == "input:first|echo:first!|dispatch:first!|input:skip|input:last|echo:last!|dispatch:last!")`)
+			want := []input.Submission{{Text: "first!\nlast!", Mode: mode}}
+			if got := s.GetHistoryEntries(); !slices.Equal(got, want) {
+				t.Fatalf("history = %+v", got)
+			}
+		})
+	}
+}
+
+func TestEarlierCommandCanInstallHookForFollowingLines(t *testing.T) {
+	s, net, _ := newTestSession(t)
+	net.connected = true
+	s.handleSubmission(input.Command("/lua rune.hooks.on('input', function(line) if line == 'look' then return 'score' end end)\nlook"))
+	if got := net.drainSent(); !slices.Equal(got, []string{"score"}) {
+		t.Fatalf("sent %q", got)
+	}
+}
+
+func TestHistoryExpansionUsesSubmissionSnapshot(t *testing.T) {
+	s, net, _ := newTestSession(t)
+	net.connected = true
+	s.AddToHistory("look")
+	s.handleSubmission(input.Command("/lua rune.history.add('score')\n!\n!missing\nnorth\n!"))
+	if got := net.drainSent(); !slices.Equal(got, []string{"look", "north", "look"}) {
+		t.Fatalf("sent %q", got)
+	}
+	want := []input.Submission{input.Command("look"), input.Command("score"), input.Command("/lua rune.history.add('score')\nlook\nnorth\nlook")}
+	if got := s.GetHistoryEntries(); !slices.Equal(got, want) {
+		t.Fatalf("history = %+v", got)
+	}
+}
+
+func TestSubmissionRejectsMultilineRewriteBeforeLaterHooks(t *testing.T) {
+	for _, mode := range []input.SubmissionMode{input.ModeCommand, input.ModeVerbatim} {
+		t.Run(mode.String(), func(t *testing.T) {
+			s, net, _ := newTestSession(t)
+			net.connected = true
+			if err := s.engine.DoString("invalid rewrite", `
+				rune.hooks.on("input", function(line) if line == "rewrite" then return "bad\ntext" end end, {priority = 10})
+				late_seen = {}
+                rune.hooks.on("input", function(line) late_seen[#late_seen + 1] = line end, {priority = 20})
+			`); err != nil {
+				t.Fatal(err)
+			}
+			s.handleSubmission(input.Submission{Text: "first\nrewrite\nlast", Mode: mode})
+			assertSessionLua(t, s.engine, `assert(table.concat(late_seen, "|") == "first|last")`)
+			if got := net.drainSent(); !slices.Equal(got, []string{"first", "last"}) {
+				t.Fatalf("sent %q", got)
+			}
+		})
+	}
+}
+
+func TestSubmissionRewriteBudgetIsCumulative(t *testing.T) {
+	s, net, _ := newTestSession(t)
+	net.connected = true
+	if err := s.engine.DoString("large rewrite", `rune.hooks.on("input", function() return string.rep("x", 140 * 1024) end)`); err != nil {
+		t.Fatal(err)
+	}
+	s.handleSubmission(input.Command("first\nsecond\nthird"))
+	if got := net.drainSent(); len(got) != 1 || len(got[0]) != 140*1024 {
+		t.Fatalf("sent %d lines", len(got))
+	}
+	if got := s.GetHistoryEntries(); len(got) != 1 || len(got[0].Text) != 140*1024 {
+		t.Fatal("history contains unexecuted lines")
+	}
+}
+
+func TestQuitStopsFollowingSubmissionLines(t *testing.T) {
+	s, net, _ := newTestSession(t)
+	net.connected = true
+	s.handleSubmission(input.Command("north\n/quit\nsouth"))
+	if got := net.drainSent(); !slices.Equal(got, []string{"north"}) {
+		t.Fatalf("sent %q", got)
+	}
+}
+
+func TestReloadWaitsUntilSubmissionFinishes(t *testing.T) {
+	s, net, _ := newTestSession(t)
+	net.connected = true
+	if err := s.engine.DoString("old alias", `rune.alias.exact("probe", "old")`); err != nil {
+		t.Fatal(err)
+	}
+	s.handleSubmission(input.Command("/reload\nprobe"))
+	if got := net.drainSent(); !slices.Equal(got, []string{"old"}) {
+		t.Fatalf("sent before reload %q", got)
+	}
+	select {
+	case event := <-s.internalEvents:
+		s.handleInternalEvent(event)
+	default:
+		t.Fatal("reload was not queued")
+	}
+	s.handleSubmission(input.Command("probe"))
+	if got := net.drainSent(); !slices.Equal(got, []string{"probe"}) {
+		t.Fatalf("sent after reload %q", got)
 	}
 }

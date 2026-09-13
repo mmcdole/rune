@@ -58,3 +58,19 @@ const (
 	MaxSubmissionBytes = 256 * 1024
 	MaxSubmissionLines = 1000
 )
+
+// Lines selects physical lines for processing. Blank command-batch lines are
+// ignored; Verbatim preserves them. An empty single-line Enter still runs.
+func (s Submission) Lines() []string {
+	lines := s.PhysicalLines()
+	if s.Mode == ModeCommand && len(lines) > 1 {
+		kept := lines[:0]
+		for _, line := range lines {
+			if strings.TrimSpace(line) != "" {
+				kept = append(kept, line)
+			}
+		}
+		return kept
+	}
+	return lines
+}

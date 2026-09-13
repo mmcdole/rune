@@ -51,6 +51,9 @@ type Engine struct {
 	// or violated a result contract. Reset for each VM generation.
 	coreBrokenReported bool
 
+	// Fixed history used only by expansion while Session processes a submission.
+	inputHistory []input.Submission
+
 	// True while dispatching the "error" event, so failures inside
 	// error handlers print directly instead of recursing.
 	reportingError bool
@@ -82,20 +85,23 @@ func (e *Engine) EngineBackend() string { return e.vm.Backend() }
 // event loop. Nested entries (Go APIs called from Lua that re-enter
 // the engine, e.g. rune._load) run under the outermost deadline.
 func (e *Engine) guard(fn func() error) error {
-	if e.inLua {
-		return fn()
+	if !e.inLua {
+		e.inLua = true
+		ctx, cancel := context.WithTimeout(context.Background(), e.CallTimeout)
+		e.guardCancel = cancel
+		e.vm.SetContext(ctx)
+		defer func() {
+			e.vm.RemoveContext()
+			e.guardCancel()
+			e.guardCancel = nil
+			e.inLua = false
+		}()
 	}
-	e.inLua = true
-	ctx, cancel := context.WithTimeout(context.Background(), e.CallTimeout)
-	e.guardCancel = cancel
-	e.vm.SetContext(ctx)
-	defer func() {
-		e.vm.RemoveContext()
-		e.guardCancel()
-		e.guardCancel = nil
-		e.inLua = false
-	}()
 
+	// A previous line may already have exhausted the shared deadline.
+	if lctx := e.vm.Context(); lctx != nil && lctx.Err() != nil {
+		return lctx.Err()
+	}
 	err := fn()
 	// The active context may have been replaced by pauseWatchdog, so consult
 	// the VM's current context rather than the original. Treat an expired
@@ -242,52 +248,23 @@ func (e *Engine) callHooks(nret int, args ...any) ([]script.Result, bool, error)
 	return results, found, err
 }
 
-// ApplyInputHooks runs the interactive pre-commit input pass. Lua may return
-// a replacement string or false to consume the submission. Interpretation
-// mode is owned by Go and cannot be rewritten by scripts.
-func (e *Engine) ApplyInputHooks(submission input.Submission) (input.Submission, bool) {
-	if !submission.WithinLimits() || (submission.Mode == input.ModeCommand && !input.ValidCommandText(submission.Text)) {
-		e.reportError("input", fmt.Errorf("invalid command text or submission limit exceeded"))
-		return submission, false
-	}
-	if submission.Mode == input.ModeVerbatim || !strings.ContainsAny(submission.Text, "\r\n") {
-		return e.applyInputLineHooks(submission)
-	}
-	// Finish every hook chain before committing history or dispatching. History
-	// expansion therefore sees the same prior history for every line.
-	lines := make([]string, 0)
-	hasCommand := false
-	totalBytes, totalLines := 0, 0
-	for _, line := range submission.PhysicalLines() {
-		if strings.TrimSpace(line) == "" {
-			lines = append(lines, line)
-			continue
-		}
-		hasCommand = true
-		effective, proceed := e.applyInputLineHooks(input.Command(line))
-		if !proceed {
-			return submission, false
-		}
-		totalBytes += len(effective.Text) + 1
-		totalLines += len(effective.PhysicalLines())
-		if totalBytes > input.MaxSubmissionBytes+1 || totalLines > input.MaxSubmissionLines {
-			e.reportError("input hooks", fmt.Errorf("submission limit exceeded"))
-			return submission, false
-		}
-		lines = append(lines, effective.Text)
-	}
-	if !hasCommand {
-		return submission, false
-	}
-	submission.Text = strings.Join(lines, "\n")
-	if !submission.WithinLimits() {
-		e.reportError("input hooks", fmt.Errorf("submission limit exceeded"))
-		return submission, false
-	}
-	return submission, true
+// RunInputBatch shares one script deadline and history snapshot across the
+// Session-owned line loop. Public history reads still see live history.
+func (e *Engine) RunInputBatch(run func() error) error {
+	previous := e.inputHistory
+	e.inputHistory = append([]input.Submission{}, e.host.GetHistoryEntries()...)
+	defer func() { e.inputHistory = previous }()
+	return e.guard(run)
 }
 
-func (e *Engine) applyInputLineHooks(submission input.Submission) (input.Submission, bool) {
+// ApplyInputHooks transforms one physical line. False consumes only that line.
+// Interpretation mode remains owned by Go.
+func (e *Engine) ApplyInputHooks(submission input.Submission) (input.Submission, bool) {
+	if strings.ContainsAny(submission.Text, "\r\n") || !submission.WithinLimits() ||
+		(submission.Mode == input.ModeCommand && !input.ValidCommandText(submission.Text)) {
+		e.reportError("input", fmt.Errorf("expected a valid input line within submission limits"))
+		return submission, false
+	}
 	ctx := script.Tree{V: map[string]any{"mode": submission.Mode.String()}}
 	results, found, err := e.callHooks(1, "input", submission.Text, ctx)
 	if err != nil {
@@ -306,6 +283,10 @@ func (e *Engine) applyInputLineHooks(submission input.Submission) (input.Submiss
 	case result.False():
 		return submission, false
 	case result.Kind == script.KindString:
+		if strings.ContainsAny(result.Str, "\r\n") {
+			e.reportError("input hooks", fmt.Errorf("input rewrite must stay on one line"))
+			return submission, false
+		}
 		if submission.Mode != input.ModeVerbatim && !input.ValidCommandText(result.Str) {
 			e.reportError("input hooks", fmt.Errorf(
 				"command rewrite must be valid command text; terminal controls are not allowed",
@@ -327,34 +308,26 @@ func (e *Engine) applyInputLineHooks(submission input.Submission) (input.Submiss
 	}
 }
 
-// DispatchSubmission routes a submission without running input hooks or
-// committing echo or history. If the Lua dispatcher is missing, a small Go
-// fallback preserves raw input and the /quit and /reload escape hatches. A
-// dispatcher that starts and then fails is never retried, because it may
-// already have produced side effects.
-func (e *Engine) DispatchSubmission(submission input.Submission) {
-	lines := submission.PhysicalLines()
-	for index, line := range lines {
-		if submission.Mode == input.ModeCommand && len(lines) > 1 && strings.TrimSpace(line) == "" {
-			continue
-		}
-		var found bool
-		err := e.guard(func() error {
-			var callErr error
-			_, found, callErr = e.vm.CallModule(
-				"rune.input", "_dispatch", 0, line, submission.Mode.String(),
-			)
-			return callErr
-		})
-		if err != nil {
-			e.reportError(fmt.Sprintf("input line %d", index+1), err)
-			return
-		}
-		if !found {
-			e.reportCoreBroken()
-			e.dispatchSubmissionFallback(input.Submission{Text: line, Mode: submission.Mode})
-		}
+// DispatchInputLine routes one physical line without hooks, history, or echo.
+// Ordinary command errors are handled by Lua. An internal dispatcher failure
+// is returned to Session and must never be retried after possible side effects.
+func (e *Engine) DispatchInputLine(line input.Submission) error {
+	var found bool
+	err := e.guard(func() error {
+		var callErr error
+		_, found, callErr = e.vm.CallModule(
+			"rune.input", "_dispatch", 0, line.Text, line.Mode.String(),
+		)
+		return callErr
+	})
+	if err != nil {
+		return err
 	}
+	if !found {
+		e.reportCoreBroken()
+		e.dispatchSubmissionFallback(line)
+	}
+	return nil
 }
 
 // The caller has already split physical lines for both modes.

@@ -12,15 +12,17 @@ func (e *Engine) registerHistoryFuncs() {
 		// rune._history.entries() - Returns structured history, oldest first.
 		// Mode is a stable string so Lua does not depend on Go enum values.
 		"entries": func(c *script.Call) error {
-			history := e.host.GetHistoryEntries()
-			arr := make([]any, len(history))
-			for i, entry := range history {
-				arr[i] = map[string]any{
-					"text": entry.Text,
-					"mode": entry.Mode.String(),
-				}
+			returnHistory(c, e.host.GetHistoryEntries())
+			return nil
+		},
+
+		// Internal snapshot for expansion; public history remains live.
+		"expansion_entries": func(c *script.Call) error {
+			history := e.inputHistory
+			if history == nil {
+				history = e.host.GetHistoryEntries()
 			}
-			c.Return(script.Tree{V: arr})
+			returnHistory(c, history)
 			return nil
 		},
 
@@ -34,4 +36,12 @@ func (e *Engine) registerHistoryFuncs() {
 			return nil
 		},
 	}, nil)
+}
+
+func returnHistory(c *script.Call, history []input.Submission) {
+	arr := make([]any, len(history))
+	for i, entry := range history {
+		arr[i] = map[string]any{"text": entry.Text, "mode": entry.Mode.String()}
+	}
+	c.Return(script.Tree{V: arr})
 }

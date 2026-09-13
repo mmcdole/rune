@@ -77,11 +77,13 @@ rune.history.get()     -- submitted text, oldest first
 rune.history.add(cmd)  -- append a normal command entry
 ```
 
-History survives `/reload`. Input hooks run before Rune stores the current
-submission. Rune stores the final non-empty text with its original command or
-verbatim mode. A canceled submission or an accepted rewrite to `""` is not
-added. Arrow navigation and `ctrl+r` restore the stored mode, so even a
-one-line verbatim entry returns to the composer. Consecutive entries are
+History survives `/reload`. After processing a submission, Rune stores the
+surviving lines together with their original Command or Verbatim mode. Consumed
+and invalid lines are omitted. An empty final history string is not added.
+Input hooks, echo hooks, and command handlers do not see the current submission
+in history while it is running. Explicit `add` calls remain visible immediately.
+Arrow navigation and `ctrl+r` restore the block and its stored mode, so even a
+one-line Verbatim entry returns to the composer. Consecutive entries are
 deduplicated only when both their text and mode match.
 
 `get()` returns the text-only view and does not expose the stored mode.

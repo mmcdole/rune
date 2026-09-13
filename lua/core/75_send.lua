@@ -45,7 +45,7 @@ function rune.send(input)
     send_impl(input, 0)
 end
 
--- INTERNAL: Route one submission after input hooks and history commit.
+-- INTERNAL: Route one physical line after input hooks and local echo.
 -- Programmatic rune.send deliberately enters below this boundary.
 function rune.input._dispatch(input, mode)
     if mode == "verbatim" then

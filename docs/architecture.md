@@ -118,7 +118,7 @@ implements by default and the LuaJIT backend implements under `-tags luajit`.
 
 - **Single Host interface:** The Engine depends on one `lua.Host` interface (`lua/host.go`). Session implements it, with the methods grouped by service area across `session/lua_*.go` (network, ui, timers, system, history, session, store, log, state). Tests substitute a mock Host.
 - **Reactivity:** The Engine updates a global `rune.state` table whenever system state changes (connection, scroll position), allowing scripts to reactively render UI elements.
-- **Pre-commit input:** The Engine first folds an interactive submission through `input` hooks. Strings rewrite and chain, `nil` or other values pass through, and `false` consumes before history, echo, or routing. In Command mode, input hooks run on each nonblank physical line before any batch dispatch. In Verbatim mode, the same input hooks receive the whole draft. Rewrites may contain newlines and tabs, but command results must exclude terminal controls and all results must fit submission limits. Session records and echoes the effective value, then the Engine invokes the separate internal command/verbatim dispatcher.
+- **Input lines:** Session validates and splits each submission with `input.Submission.Lines`, then runs hooks, echo, and dispatch for one line before advancing. The Engine invokes one-line operations; Lua hooks neither split nor assemble batches. `false` consumes only the current line. Replacements must stay single-line, and Command replacements exclude terminal controls. Session enforces cumulative rewritten size and records one effective history entry afterward. `Engine.RunInputBatch` supplies one watchdog deadline and an internal history snapshot for expansion; public history reads stay live.
 - **Staged config publication:** Go owns the typed config schema and defaults. Core scripts, user scripts, and ready hooks evaluate `rune.config.set` against a staged candidate during startup or reload; after they finish, Engine publishes one complete snapshot to Session. Later runtime updates publish immediately through a dedicated callback that does not re-enter Lua.
 
 ## 3. UI Architecture: The "Push" Model
@@ -261,11 +261,11 @@ spans alone.
 
 Every submission closes any active partial-line display, regardless of whether
 an input hook consumes it, whether it is a slash command, connection state, or
-a later send failure. Input hooks run against the prior history and fold their
-string rewrites in priority order. A `false` result suppresses history, local
-echo, and dispatch; otherwise the final effective text is recorded, echoed,
-and routed. All input hooks run before that final command/verbatim processing;
-priority only orders the hooks relative to one another. Separately, Lua actions
+a later send failure. Session processes each physical line through input hooks,
+echo, and dispatch. A `false` result suppresses that line's history, echo, and
+dispatch; later lines still run. Session records the surviving lines together
+after processing. History expansion reads a snapshot from before submission.
+Separately, Lua actions
 from aliases, triggers, timers, and other callbacks finish the partial line
 only when the connection accepts their game send. Deferring that finish to the
 end of the active batch keeps the wire write immediate while letting the
@@ -347,11 +347,12 @@ mode choice persists for the draft. The Go input controller handles `Alt+V`
 and applying accepted submissions atomically. The Model validates command text
 and draft limits before queueing, so rejection leaves the draft intact. The
 shared `input` admission policy also validates Lua hook rewrites and synthetic
-history. Session retains the effective block and mode as one history entry. Engine dispatch
-splits both modes into physical lines; Command skips blank batch lines and invokes
-normal Lua routing, while Verbatim sends literal lines. Visual wrapping never
-changes submitted text. Ordinary alias and command errors do not stop later lines. An internal
-dispatcher failure is never retried.
+history. Session records the effective lines as one history entry after processing.
+`input.Submission.Lines` owns physical splitting and blank-command-line selection.
+The same input hook chain runs per line in both modes. Session then echoes and
+routes that line before advancing. Ordinary alias and command errors do not stop
+later lines; an internal dispatcher failure is never retried. `/quit` cancels
+remaining lines; `/reload` stays queued until the submission finishes.
 
 ### JSON conversion
 

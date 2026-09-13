@@ -49,16 +49,16 @@ Handlers run in priority order (lower first, default 50).
 For `output`, `prompt`, `echo`, and `input`, a string, including `""`,
 replaces the text for subsequent handlers, so rewrites chain in priority
 order. `nil` and other values pass the current text through. `false` stops the
-chain: it gags output or a prompt, hides an echo, or cancels an input
-submission.
+chain: it gags output or a prompt, hides an echo, or consumes an input
+line.
 
-Input handlers run before Rune echoes, stores, or processes a submission. A
-canceled submission stops there. Otherwise Rune uses the final text for local
-echo and input processing, and adds it to history unless it is empty.
+Input handlers run before Rune echoes or processes each input line. A consumed
+line stops there; later lines still run. Rune saves the surviving text together
+as one history entry after the submission finishes.
 
 | Event | Handler receives | Fired |
 |---|---|---|
-| `input` | submitted text, context | Before local echo, history, and command or verbatim processing |
+| `input` | one physical line, context | Before that line is echoed or processed; both modes |
 | `output` | line object (`:raw()`, `:clean()`) | Once for every complete server line |
 | `prompt` | line object, `confirmed` boolean | On cumulative partial-line observations and GA/EOR-confirmed prompts |
 | `echo` | one display-safe physical line of final input | After input rewrites; skipped while the server has echo suppressed (passwords) |
@@ -109,33 +109,33 @@ text returned by the preceding handler:
 ```lua
 rune.hooks.on("input", function(text, context)
     if context.mode == "verbatim" then
-        -- The handler sees the whole submission once, line breaks included.
-        rune.echo("Sending verbatim block (" .. #text .. " bytes)")
+        -- The handler receives one line in either mode.
+        rune.echo("Sending verbatim line (" .. #text .. " bytes)")
     end
     return text:gsub("^l$", "look")
 end, { priority = 10 })
 ```
 
-Input hooks run before the current submission enters history, so a handler
-that calls `rune.history.get()` sees only earlier accepted submissions. A
-string rewrite controls the later local echo, history entry, and command
-processing.
-Existing one-argument handlers remain valid because Lua ignores the context
-argument. Echo hooks run after non-empty final text is recorded and can
-therefore observe its history entry. An accepted `""` rewrite still continues
-to local echo and input processing, but it is not added to history.
+In both modes, each physical line runs through the input hook chain, local echo,
+and dispatch before the next line begins. Command batches skip whitespace-only
+lines; Verbatim preserves them. An empty single-line Enter still invokes hooks.
+`false` consumes only the current line. Existing one-argument handlers remain
+valid because Lua ignores the context argument.
 
-In Command mode, hooks receive each nonblank physical line separately, in order.
-A replacement may contain newlines and tabs; its physical lines execute as separate
-commands after all hook chains finish. Rewritten lines are not fed back through
-input hooks. Invalid UTF-8, terminal controls, and results exceeding the submission
-limits cancel the whole submission before echo, history, or dispatch. A hook returning
-`false` also cancels the whole submission. Hook side effects cannot be undone.
+Replacements must remain single-line. A replacement containing LF or CR is
+rejected before subsequent handlers run. Final Command replacements must also
+exclude invalid UTF-8 and terminal controls. Invalid or oversized replacements
+skip the affected line. To send several lines deliberately, call `rune.send` or
+`rune.send_raw` and return `false` to consume the original line.
 
-In Verbatim mode, the same `input` hooks receive the whole draft, including
-line breaks. Both modes retain
-one effective history entry per submission. All command lines resolve history
-references against history from before the submission.
+History is saved after processing as one entry containing the surviving lines.
+Input hooks, echo hooks, and command handlers do not yet see that entry. Explicit
+script additions to history remain visible; history expansion alone uses a fixed
+snapshot from before the submission. An empty final history string is not saved.
+An accepted `""` replacement still reaches echo and dispatch.
+
+See the [input hook compatibility note](/interface/input/#multiline-verbatim-composer)
+for the changes from whole-draft Verbatim hooks and earlier history timing.
 
 All input handlers run in priority order, with lower numbers first. If none
 returns `false`, Rune processes the final text after the last handler finishes.

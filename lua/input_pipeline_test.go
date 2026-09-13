@@ -75,15 +75,29 @@ func TestMalformedInputHookResultCancelsSubmission(t *testing.T) {
 	}
 }
 
-// dispatchTestSubmission drives the two phases that Session separates with
-// echo and history commits. Tests focused on Lua routing do not need to model
-// those Session-owned commits.
+// Tests focused on Lua behavior omit Session-owned echo and history commits.
 func dispatchTestSubmission(engine *Engine, submission input.Submission) bool {
-	effective, proceed := engine.ApplyInputHooks(submission)
-	if proceed {
-		engine.DispatchSubmission(effective)
+	if !submission.WithinLimits() || (submission.Mode == input.ModeCommand && !input.ValidCommandText(submission.Text)) {
+		return false
 	}
-	return proceed
+	accepted := false
+	err := engine.RunInputBatch(func() error {
+		for _, text := range submission.Lines() {
+			effective, proceed := engine.ApplyInputHooks(input.Submission{Text: text, Mode: submission.Mode})
+			if !proceed {
+				continue
+			}
+			accepted = true
+			if err := engine.DispatchInputLine(effective); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		engine.reportError("input", err)
+	}
+	return accepted
 }
 
 func dispatchTestCommand(engine *Engine, text string) bool {
@@ -116,13 +130,11 @@ func TestCommandBatchContinuesAfterCommandErrors(t *testing.T) {
 	}
 }
 
-func TestCommandBatchValidatesBeforeDispatch(t *testing.T) {
-	for _, tc := range []struct{ name, setup, draft string }{
-		{"terminal control", "", "north\nsouth\x1b"},
-		{"missing history", "", "north\n!missing"},
-		{"invalid rewrite", `rune.hooks.on("input", function(line) if line == "south" then return string.char(27) end end)`, "north\nsouth"},
-		{"oversized rewrite", `rune.hooks.on("input", function() return string.rep("x", 256 * 1024 + 1) end)`, "north"},
-		{"combined rewrite limit", `rune.hooks.on("input", function() return string.rep("x", 140 * 1024) end)`, "north\nsouth"},
+func TestInputLineRejectsInvalidRewrites(t *testing.T) {
+	for _, tc := range []struct{ name, setup string }{
+		{"terminal control", `rune.hooks.on("input", function() return string.char(27) end)`},
+		{"multiline", `rune.hooks.on("input", function() return "north\nsouth" end)`},
+		{"oversized", `rune.hooks.on("input", function() return string.rep("x", 256 * 1024 + 1) end)`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			engine, host, cleanup := setupTest(t)
@@ -130,8 +142,8 @@ func TestCommandBatchValidatesBeforeDispatch(t *testing.T) {
 			if err := engine.DoString(tc.name, tc.setup); err != nil {
 				t.Fatal(err)
 			}
-			if dispatchTestCommand(engine, tc.draft) {
-				t.Fatal("invalid batch accepted")
+			if dispatchTestCommand(engine, "north") {
+				t.Fatal("invalid rewrite accepted")
 			}
 			if got := host.DrainNetworkCalls(); len(got) != 0 {
 				t.Fatalf("sent %q", got)
@@ -150,7 +162,7 @@ func TestCommandBatchHooksAndHistoryExpansion(t *testing.T) {
 			assert(context.mode == "command")
 			assert(#rune.history.get() == 1)
 			seen[#seen + 1] = line
-			if line == "rewrite" then return "say one;;two\n!" end
+			if line == "rewrite" then return "say one;;two;!" end
 		end, {priority = 50})
 	`); err != nil {
 		t.Fatal(err)

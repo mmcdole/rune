@@ -448,7 +448,7 @@ func TestVerbatimInputHookReceivesContextAndCanConsume(t *testing.T) {
 	assertCommands(t, host, nil)
 	assertLua(t, engine, `
 		assert(observed_mode == "verbatim")
-		assert(observed_text == "first;second\n/quit")
+		assert(observed_text == "/quit")
 	`)
 }
 
@@ -472,7 +472,7 @@ func TestInputHookCannotMutateVerbatimRouting(t *testing.T) {
 
 	dispatchTestSubmission(engine, input.Verbatim("first;second\n/quit"))
 
-	assertCommands(t, host, []string{"context-readonly", "first;second", "/quit"})
+	assertCommands(t, host, []string{"context-readonly", "first;second", "context-readonly", "/quit"})
 	if host.QuitCalled {
 		t.Fatal("mutating one hook context changed canonical verbatim routing")
 	}
@@ -484,19 +484,19 @@ func TestInputRewritePreservesVerbatimMode(t *testing.T) {
 
 	if err := engine.DoString("rewrite verbatim", `
 		rune.hooks.on("input", function()
-			return "first;second\nthird"
+			return "first;second"
 		end, { priority = 90 })
 	`); err != nil {
 		t.Fatal(err)
 	}
 
 	effective, proceed := engine.ApplyInputHooks(input.Verbatim("original"))
-	if !proceed || effective != input.Verbatim("first;second\nthird") {
+	if !proceed || effective != input.Verbatim("first;second") {
 		t.Fatalf("effective submission = %+v proceed=%v", effective, proceed)
 	}
-	engine.DispatchSubmission(effective)
+	engine.DispatchInputLine(effective)
 
-	assertCommands(t, host, []string{"first;second", "third"})
+	assertCommands(t, host, []string{"first;second"})
 }
 
 func TestOneArgumentInputHookStillObservesVerbatim(t *testing.T) {
@@ -514,7 +514,7 @@ func TestOneArgumentInputHookStillObservesVerbatim(t *testing.T) {
 	dispatchTestSubmission(engine, input.Verbatim("one\ntwo"))
 
 	assertCommands(t, host, []string{"one", "two"})
-	assertLua(t, engine, `assert(observed == "one\ntwo")`)
+	assertLua(t, engine, `assert(observed == "two")`)
 }
 
 func TestSendRawSplitsEmbeddedNewlines(t *testing.T) {
