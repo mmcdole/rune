@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmcdole/rune/input"
 	"github.com/mmcdole/rune/script"
 	"github.com/mmcdole/rune/text"
 	"github.com/mmcdole/rune/ui"
@@ -254,113 +253,6 @@ func (e *Engine) callHooks(nret int, args ...any) ([]script.Result, bool, error)
 		return callErr
 	})
 	return results, found, err
-}
-
-// ApplyInputHooks transforms a validated physical line. False with no error
-// means consumed; an error rejects the line. Mode remains owned by Go.
-func (e *Engine) ApplyInputHooks(line string, mode input.SubmissionMode) (string, bool, error) {
-	ctx := script.Tree{V: map[string]any{"mode": mode.String()}}
-	results, found, err := e.callHooks(1, "input", line, ctx)
-	if err != nil {
-		// Some handlers may already have rewritten input or produced side
-		// effects. Fail closed rather than dispatching the authored text and
-		// risking a duplicate send or bypassed interceptor.
-		return line, false, err
-	}
-	if !found {
-		e.reportCoreBroken()
-		return line, true, nil
-	}
-	result := results[0]
-	switch {
-	case result.False():
-		return line, false, nil
-	case result.Kind == script.KindString:
-		if strings.ContainsAny(result.Str, "\r\n") {
-			return line, false, fmt.Errorf("input rewrite must stay on one line")
-		}
-		if mode != input.ModeVerbatim && !input.ValidCommandText(result.Str) {
-			return line, false, fmt.Errorf(
-				"command rewrite must be valid command text; terminal controls are not allowed",
-			)
-		}
-		line = result.Str
-		if len(line) > input.MaxSubmissionBytes {
-			return line, false, fmt.Errorf("submission limit exceeded")
-		}
-		return line, true, nil
-	default:
-		e.reportCoreBroken()
-		return line, false, fmt.Errorf("expected a string or false, got %s", result.Kind)
-	}
-}
-
-// DispatchInputLine routes one physical line without hooks, history, or echo.
-// Ordinary command errors are handled by Lua. An internal dispatcher failure
-// is returned to Session and must never be retried after possible side effects.
-func (e *Engine) DispatchInputLine(line string, mode input.SubmissionMode) error {
-	var found bool
-	err := e.guard(func() error {
-		var callErr error
-		_, found, callErr = e.vm.CallModule(
-			"rune.input", "_dispatch", 0, line, mode.String(),
-		)
-		return callErr
-	})
-	if err != nil {
-		return err
-	}
-	if !found {
-		e.reportCoreBroken()
-		e.dispatchSubmissionFallback(input.Submission{Text: line, Mode: mode})
-	}
-	return nil
-}
-
-// The caller has already split physical lines for both modes.
-func (e *Engine) dispatchSubmissionFallback(submission input.Submission) {
-	if submission.Mode == input.ModeCommand {
-		switch submission.Text {
-		case "/quit":
-			e.host.Quit()
-			return
-		case "/reload":
-			e.host.Reload()
-			return
-		}
-	}
-	if err := e.host.Send(submission.Text); err != nil {
-		e.reportError("input fallback", err)
-	}
-}
-
-// OnEcho runs the echo hook. The core adds styling; user hooks may rewrite or
-// hide the result.
-func (e *Engine) OnEcho(in string) (string, bool, error) {
-	// Echo is a presentation boundary. Preserve canonical submission bytes
-	// elsewhere, but never let pasted terminal controls reach either Lua
-	// styling or the degraded Go fallback as executable sequences.
-	in = text.VisualizeTerminalControls(in, true)
-	fallback := text.Green("> " + in)
-
-	results, found, err := e.callHooks(2, "echo", in)
-	if errors.Is(err, ErrInterrupted) {
-		return "", false, err
-	}
-	if !found {
-		e.reportCoreBroken()
-		return fallback, true, nil
-	}
-	if err != nil {
-		e.reportError("echo dispatch", err)
-		return fallback, true, nil
-	}
-
-	modified, show := results[0], results[1]
-	if show.False() {
-		return "", false, nil
-	}
-	return modified.String(), true, nil
 }
 
 // OnOutput handles server text.

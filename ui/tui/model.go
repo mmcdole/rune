@@ -339,12 +339,8 @@ func (m *Model) appendMessage(text string) {
 // visible warning rather than blocking the render loop; false tells the
 // controller to retain the current local draft.
 func (m *Model) submit(msg ui.InputSubmittedMsg) bool {
-	if msg.Submission.Mode == input.ModeCommand && !input.ValidCommandText(msg.Submission.Text) {
-		m.appendMessage(text.Red("[WARNING] Command not run - invalid text or terminal controls. Use Alt+V for verbatim."))
-		return false
-	}
-	if !msg.Submission.WithinLimits() {
-		m.appendMessage(text.Red("[WARNING] Input not sent - limit is 1000 lines or 256 KiB"))
+	if err := msg.Submission.Validate(); err != nil {
+		m.appendMessage(text.Red("[WARNING] Input not sent - " + err.Error()))
 		return false
 	}
 	if m.tryPost(msg) {

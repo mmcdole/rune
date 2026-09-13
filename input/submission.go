@@ -49,7 +49,7 @@ func Verbatim(text string) Submission {
 	return Submission{Text: text, Mode: ModeVerbatim}
 }
 
-// WithinLimits applies the same resource limits before and after input hooks.
+// WithinLimits checks the byte and physical-line limits of a submission.
 func (s Submission) WithinLimits() bool {
 	return len(s.Text) <= MaxSubmissionBytes && len(s.PhysicalLines()) <= MaxSubmissionLines
 }
@@ -59,18 +59,22 @@ const (
 	MaxSubmissionLines = 1000
 )
 
-// Lines selects physical lines for processing. Blank command-batch lines are
+// ExecutionLine retains its one-based physical line number for diagnostics.
+type ExecutionLine struct {
+	Text   string
+	Number int
+}
+
+// ExecutionLines selects lines to execute. Blank command-batch lines are
 // ignored; Verbatim preserves them. An empty single-line Enter still runs.
-func (s Submission) Lines() []string {
+func (s Submission) ExecutionLines() []ExecutionLine {
 	lines := s.PhysicalLines()
-	if s.Mode == ModeCommand && len(lines) > 1 {
-		kept := make([]string, 0, len(lines))
-		for _, line := range lines {
-			if strings.TrimSpace(line) != "" {
-				kept = append(kept, line)
-			}
+	selected := make([]ExecutionLine, 0, len(lines))
+	for i, line := range lines {
+		if s.Mode == ModeCommand && len(lines) > 1 && strings.TrimSpace(line) == "" {
+			continue
 		}
-		return kept
+		selected = append(selected, ExecutionLine{Text: line, Number: i + 1})
 	}
-	return lines
+	return selected
 }

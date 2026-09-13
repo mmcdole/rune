@@ -349,15 +349,18 @@ history. See the [submission lifecycle](#submission-lifecycle) for execution.
 Session owns sequencing and application state; Engine owns safe Lua calls and
 result contracts; Lua core owns the meaning and presentation of each line.
 The pure `input` package defines admission rules and physical-line selection.
+`session/submission.go` owns the lifecycle; `lua/input.go` owns the Engine
+entry points. UI and Session both use `Submission.Validate` for admission.
 
 1. UI validates for feedback, then transfers `{Submission, NextDraft}` atomically.
 2. Session applies the draft transition, finishes the partial line, validates
    authoritatively, and snapshots history for expansion.
-3. Session splits with `input.Submission.Lines()` and processes each line under
+3. Session splits with `input.Submission.ExecutionLines()` and processes each line under
    one shared watchdog scope from `Engine.BeginBatch()`:
    - Engine `ApplyInputHooks(text, mode)` calls Lua `hooks.call("input")` and
-     returns rewritten text, consumption, or an error. Lua rejects multiline
-     replacements before later handlers; Go validates the completed chain.
+     returns rewritten text, consumption, or an error. Lua raises a rejection for multiline
+     replacements before later handlers; Go validates the completed chain with
+     `input.ValidateRewrite`. Returning false means intentional consumption.
      Each handler receives a fresh read-only context; mode never changes.
    - Session skips consumed lines, reports and skips failed lines, and stops
      immediately on `lua.ErrInterrupted`. It applies the cumulative effective
@@ -370,7 +373,9 @@ The pure `input` package defines admission rules and physical-line selection.
      never retried. Ordinary command errors remain local to the command.
 4. Session records effective lines as one history entry (attempted, not
    confirmed sends), including the attempted prefix on failure, and prints any
-   batch-stopping error. Deferred cleanup releases the watchdog and restores
+   batch-stopping error through the Lua error hook, or directly when interrupted.
+   Diagnostics retain authored physical line numbers even when blank lines are
+   skipped. Deferred cleanup releases the watchdog and restores
    the previous expansion snapshot.
 
 Input and echo hooks do not see the current history entry. Expansion reads the

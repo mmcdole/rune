@@ -272,7 +272,7 @@ func TestSendExpansionUsesConfiguredCommandSeparator(t *testing.T) {
 	})
 }
 
-func TestVerbatimInputPreservesLinesAndBypassesCommands(t *testing.T) {
+func TestVerbatimInputLineBypassesCommands(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 
@@ -282,8 +282,9 @@ func TestVerbatimInputPreservesLinesAndBypassesCommands(t *testing.T) {
 		t.Fatalf("setup failed: %v", err)
 	}
 
-	draft := "  indented;still one line;;  \n\n/quit\n#2 north\naliased\ntrailing  \n"
-	dispatchTestSubmission(engine, input.Verbatim(draft))
+	for _, line := range []string{"  indented;still one line;;  ", "", "/quit", "#2 north", "aliased", "trailing  ", ""} {
+		dispatchTestInputLine(engine, line, input.ModeVerbatim)
+	}
 
 	assertCommands(t, host, []string{
 		"  indented;still one line;;  ",
@@ -299,7 +300,7 @@ func TestVerbatimInputPreservesLinesAndBypassesCommands(t *testing.T) {
 	}
 }
 
-func TestVerbatimInputDegradedModePreservesPhysicalLines(t *testing.T) {
+func TestVerbatimInputLineDegradedModePreservesText(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 
@@ -307,7 +308,9 @@ func TestVerbatimInputDegradedModePreservesPhysicalLines(t *testing.T) {
 		t.Fatalf("sabotage failed: %v", err)
 	}
 
-	dispatchTestSubmission(engine, input.Verbatim("first\r\n\r/quit\r"))
+	for _, line := range []string{"first", "", "/quit", ""} {
+		dispatchTestInputLine(engine, line, input.ModeVerbatim)
+	}
 
 	assertCommands(t, host, []string{"first", "", "/quit", ""})
 	if host.QuitCalled {
@@ -319,7 +322,7 @@ func TestInputWithCommandContextKeepsNormalExpansion(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 
-	dispatchTestSubmission(engine, input.Command("look;#2 north"))
+	dispatchTestCommand(engine, "look;#2 north")
 
 	assertCommands(t, host, []string{"look", "north", "north"})
 }
@@ -442,8 +445,7 @@ func TestVerbatimInputHookReceivesContextAndCanConsume(t *testing.T) {
 		t.Fatalf("setup failed: %v", err)
 	}
 
-	draft := "first;second\n/quit"
-	dispatchTestSubmission(engine, input.Verbatim(draft))
+	dispatchTestInputLine(engine, "/quit", input.ModeVerbatim)
 
 	assertCommands(t, host, nil)
 	assertLua(t, engine, `
@@ -470,7 +472,8 @@ func TestInputHookCannotMutateVerbatimRouting(t *testing.T) {
 		t.Fatalf("setup failed: %v", err)
 	}
 
-	dispatchTestSubmission(engine, input.Verbatim("first;second\n/quit"))
+	dispatchTestInputLine(engine, "first;second", input.ModeVerbatim)
+	dispatchTestInputLine(engine, "/quit", input.ModeVerbatim)
 
 	assertCommands(t, host, []string{"context-readonly", "first;second", "context-readonly", "/quit"})
 	if host.QuitCalled {
@@ -511,9 +514,9 @@ func TestOneArgumentInputHookStillObservesVerbatim(t *testing.T) {
 		t.Fatalf("setup failed: %v", err)
 	}
 
-	dispatchTestSubmission(engine, input.Verbatim("one\ntwo"))
+	dispatchTestInputLine(engine, "two", input.ModeVerbatim)
 
-	assertCommands(t, host, []string{"one", "two"})
+	assertCommands(t, host, []string{"two"})
 	assertLua(t, engine, `assert(observed == "two")`)
 }
 

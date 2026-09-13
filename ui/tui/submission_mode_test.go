@@ -141,7 +141,7 @@ func TestRejectedCommandPreservesDraftAndCanBeSentVerbatim(t *testing.T) {
 	if m.input.Value() != "north\x1blook" || m.input.SubmissionMode() != input.ModeVerbatim {
 		t.Fatal("invalid command lost draft")
 	}
-	if m.output.buffer.Count() == 0 || !strings.Contains(m.output.buffer.At(0), "Command not run") {
+	if m.output.buffer.Count() == 0 || !strings.Contains(m.output.buffer.At(0), "terminal controls") {
 		t.Fatal("missing rejection feedback")
 	}
 	for len(events) > 0 {

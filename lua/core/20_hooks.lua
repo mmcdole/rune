@@ -196,8 +196,7 @@ local function input_chain(_, handlers, ...)
                 return false
             elseif type(result) == "string" then
                 if result:find("[\r\n]") then
-                    rune.echo(rune.style.red("[Error]") .. " Input hook rewrite must stay on one line")
-                    return false
+                    error("input rewrite must stay on one line", 0)
                 end
                 text = result
             end

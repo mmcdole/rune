@@ -280,7 +280,7 @@ func TestCommandBatchProcessesLinesAndKeepsHistory(t *testing.T) {
 	if got := net.drainSent(); !slices.Equal(got, []string{"answer 42", "answer 42", "look"}) {
 		t.Fatalf("batch output = %q", got)
 	}
-	if got := s.GetHistoryEntries(); !slices.Equal(got, []input.Submission{input.Command(strings.Join(input.Command(source).Lines(), "\n"))}) {
+	if got := s.GetHistoryEntries(); !slices.Equal(got, []input.Submission{input.Command("/lua rune.alias.exact('batch', 'answer 42')\n\tbatch\n/lua -- comment ends on this line\nbatch;look")}) {
 		t.Fatalf("history = %+v", got)
 	}
 	if got := uiMock.drainEchoed(); len(got) != 4 {
@@ -369,12 +369,19 @@ func TestSubmissionRejectsMultilineRewriteBeforeLaterHooks(t *testing.T) {
 			if err := s.engine.DoString("invalid rewrite", `
 				rune.hooks.on("input", function(line) if line == "rewrite" then return "bad\ntext" end end, {priority = 10})
 				late_seen = {}
+                rejected = {}
+                rune.hooks.on("error", function(message) rejected[#rejected + 1] = message end)
                 rune.hooks.on("input", function(line) late_seen[#late_seen + 1] = line end, {priority = 20})
 			`); err != nil {
 				t.Fatal(err)
 			}
 			s.handleSubmission(input.Submission{Text: "first\nrewrite\nlast", Mode: mode})
-			assertSessionLua(t, s.engine, `assert(table.concat(late_seen, "|") == "first|last")`)
+			assertSessionLua(t, s.engine, `
+                assert(table.concat(late_seen, "|") == "first|last")
+                assert(#rejected == 1)
+                assert(rejected[1]:find("input hooks at line 2", 1, true))
+                assert(rejected[1]:find("input rewrite must stay on one line", 1, true))
+            `)
 			if got := net.drainSent(); !slices.Equal(got, []string{"first", "last"}) {
 				t.Fatalf("sent %q", got)
 			}
@@ -383,17 +390,20 @@ func TestSubmissionRejectsMultilineRewriteBeforeLaterHooks(t *testing.T) {
 }
 
 func TestSubmissionRewriteBudgetIsCumulative(t *testing.T) {
-	s, net, _ := newTestSession(t)
+	s, net, uiMock := newTestSession(t)
 	net.connected = true
 	if err := s.engine.DoString("large rewrite", `rune.hooks.on("input", function() return string.rep("x", 140 * 1024) end)`); err != nil {
 		t.Fatal(err)
 	}
-	s.handleSubmission(input.Command("first\nsecond\nthird"))
+	s.handleSubmission(input.Command("first\n\nsecond\nthird"))
 	if got := net.drainSent(); len(got) != 1 || len(got[0]) != 140*1024 {
 		t.Fatalf("sent %d lines", len(got))
 	}
 	if got := s.GetHistoryEntries(); len(got) != 1 || len(got[0].Text) != 140*1024 {
 		t.Fatal("history contains unexecuted lines")
+	}
+	if printed := strings.Join(uiMock.drainPrinted(), "\n"); !strings.Contains(printed, "submission limit at line 3") {
+		t.Fatalf("missing authored line number: %q", printed)
 	}
 }
 
@@ -425,5 +435,103 @@ func TestReloadWaitsUntilSubmissionFinishes(t *testing.T) {
 	s.handleSubmission(input.Command("probe"))
 	if got := net.drainSent(); !slices.Equal(got, []string{"probe"}) {
 		t.Fatalf("sent after reload %q", got)
+	}
+}
+
+func TestMissingInputDispatcherUsesGoFallback(t *testing.T) {
+	s, net, _ := newTestSession(t)
+	net.connected = true
+
+	if err := s.engine.DoString("remove dispatcher", `rune.input._dispatch = nil`); err != nil {
+		t.Fatal(err)
+	}
+
+	s.handleSubmission(input.Command("north\neast\n\t\nwest"))
+	s.handleSubmission(input.Verbatim("one\r\ntwo"))
+	s.handleSubmission(input.Command("/reload"))
+	s.handleSubmission(input.Command("/quit"))
+
+	if got, want := net.drainSent(), []string{"north", "east", "west", "one", "two"}; !slices.Equal(got, want) {
+		t.Fatalf("fallback sends = %q, want %q", got, want)
+	}
+	if s.backgroundCtx.Err() == nil {
+		t.Fatal("fallback /quit did not cancel Session")
+	}
+	select {
+	case event := <-s.internalEvents:
+		if _, ok := event.(reloadRequested); !ok {
+			t.Fatalf("reload event = %T", event)
+		}
+	default:
+		t.Fatal("fallback /reload was not queued")
+	}
+}
+
+func TestFailingInputDispatcherIsNotRetried(t *testing.T) {
+	s, net, _ := newTestSession(t)
+	net.connected = true
+
+	if err := s.engine.DoString("broken dispatcher", `
+		function rune.input._dispatch(text)
+			rune.send_raw(text .. ":once")
+			error("dispatch failed after send")
+		end
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	s.handleSubmission(input.Command("north\nsouth"))
+	if got, want := net.drainSent(), []string{"north:once"}; !slices.Equal(got, want) {
+		t.Fatalf("dispatcher sends = %q, want no fallback duplicate %q", got, want)
+	}
+}
+
+func TestCommandBatchContinuesAfterCommandErrors(t *testing.T) {
+	for _, tc := range []struct{ name, setup, draft string }{
+		{"unknown command", "", "north\n/missing\nsouth"},
+		{"throwing command", `rune.command.add("broken", function() error("broken") end)`, "north\n/broken\nsouth"},
+		{"throwing alias", `rune.alias.exact("broken", function() error("broken") end)`, "north\nbroken\nsouth"},
+		{"invalid Lua", "", "north\n/lua invalid lua syntax\nsouth"},
+		{"Lua runtime error", "", "north\n/lua error('broken')\nsouth"},
+		{"alias recursion", `rune.alias.exact("loop", "loop")`, "north\nloop\nsouth"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, net, uiMock := newTestSession(t)
+			net.connected = true
+			if err := s.engine.DoString(tc.name, tc.setup); err != nil {
+				t.Fatal(err)
+			}
+			s.handleSubmission(input.Command(tc.draft))
+			if got := net.drainSent(); !slices.Equal(got, []string{"north", "south"}) {
+				t.Fatalf("sent %q", got)
+			}
+			if got := strings.Join(uiMock.drainPrinted(), "\n"); got == "" {
+				t.Fatalf("missing error: %s", got)
+			}
+		})
+	}
+}
+
+func TestCommandBatchHooksAndHistoryExpansion(t *testing.T) {
+	s, net, _ := newTestSession(t)
+	net.connected = true
+	s.historyEntries = []input.Submission{input.Command("look\nscore\n/echo ignored")}
+	if err := s.engine.DoString("batch hooks", `
+		seen = {}
+		rune.hooks.on("input", function(line, context)
+			assert(context.mode == "command")
+			assert(#rune.history.get() == 1)
+			seen[#seen + 1] = line
+			if line == "rewrite" then return "say one;;two;!" end
+		end, {priority = 50})
+	`); err != nil {
+		t.Fatal(err)
+	}
+	s.handleSubmission(input.Command("!\n/echo local\nrewrite\n\t\n!look"))
+	if got := net.drainSent(); !slices.Equal(got, []string{"score", "say one;two", "score", "look"}) {
+		t.Fatalf("sent %q", got)
+	}
+	if err := s.engine.DoString("observed hooks", `assert(table.concat(seen, "|") == "!|/echo local|rewrite|!look")`); err != nil {
+		t.Fatal(err)
 	}
 }

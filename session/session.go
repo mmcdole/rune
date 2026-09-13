@@ -4,13 +4,11 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/mmcdole/rune/input"
@@ -418,83 +416,6 @@ func (s *Session) handleUIEvent(event ui.UIEvent) {
 	case ui.CursorMovedMsg:
 		s.currentCursor = input.RuneCursorToByte(s.currentInput, event.Cursor)
 	}
-}
-
-func (s *Session) handleSubmission(submission input.Submission) {
-	// Accepted submissions commit the prompt even if validation or hooks reject.
-	s.finishPartialLine()
-	if !submission.WithinLimits() || (submission.Mode == input.ModeCommand && !input.ValidCommandText(submission.Text)) {
-		s.ui.Print(text.Red("[WARNING] Input not run - invalid text or submission limit exceeded"))
-		return
-	}
-
-	previous := s.expansionHistory
-	s.expansionHistory = s.GetHistoryEntries() // non-nil even for empty history
-	defer func() { s.expansionHistory = previous }()
-	end := s.engine.BeginBatch()
-	defer end()
-
-	var effective []string
-	// Bounds execution as well as the size of the eventual history entry.
-	effectiveBytes := 0
-	var stopErr error
-	for index, authored := range submission.Lines() {
-		if s.backgroundCtx.Err() != nil {
-			break
-		}
-		line, proceed, err := s.engine.ApplyInputHooks(authored, submission.Mode)
-		if errors.Is(err, lua.ErrInterrupted) {
-			stopErr = err
-			break
-		}
-		if err != nil {
-			s.engine.NotifyError("input hooks: " + err.Error())
-			continue
-		}
-		if !proceed {
-			continue
-		}
-		size := len(line)
-		if len(effective) > 0 {
-			size++ // newline between effective lines
-		}
-		if effectiveBytes+size > input.MaxSubmissionBytes {
-			stopErr = fmt.Errorf("input rewrite exceeds submission limit at line %d", index+1)
-			break
-		}
-		effective = append(effective, line)
-		effectiveBytes += size
-		if err := s.echoInput(line); err != nil {
-			stopErr = err
-			break
-		}
-		if err := s.engine.DispatchInputLine(line, submission.Mode); err != nil {
-			stopErr = fmt.Errorf("input line %d: %w", index+1, err)
-			break
-		}
-	}
-	// These are attempted effective lines, not confirmed successful sends.
-	// Always finalize the prefix, including when echo or dispatch failed.
-	if len(effective) > 0 {
-		s.addHistorySubmission(input.Submission{Text: strings.Join(effective, "\n"), Mode: submission.Mode})
-	}
-	if stopErr != nil {
-		s.ui.Print(text.Red("[Error] " + stopErr.Error()))
-	}
-}
-
-func (s *Session) echoInput(line string) error {
-	if !s.protocol.LocalEchoEnabled() {
-		return nil
-	}
-	styled, show, err := s.engine.OnEcho(line)
-	if err != nil {
-		return err
-	}
-	if show {
-		s.ui.Echo(styled)
-	}
-	return nil
 }
 
 // boot loads the VM state.
