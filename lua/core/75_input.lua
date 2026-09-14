@@ -1,12 +1,12 @@
 -- Input processing.
--- Session calls _prepare (history expansion, then input hooks), echoes the
--- result, then calls _dispatch. Session owns physical lines and history recording.
+-- Session prepares one physical line, echoes the result, then dispatches it.
+-- Session owns splitting submissions into lines and recording their history.
 -- Programmatic rune.send executes game commands without interactive preparation.
 
--- Send game text without alias processing. LF, CRLF, and bare CR separate
--- physical lines.
--- Echoes send failures (e.g. not connected) rather than raising.
--- Returns true, or nil + error message.
+-- Send literal game text, splitting LF, CRLF, and bare CR into physical lines.
+-- Bypasses history expansion, input hooks, aliases, repeats, and slash commands.
+-- Returns true on success; on send failure, echoes the error and returns nil
+-- plus its message. Stops at the first failed physical line.
 function rune.send_raw(text)
     if type(text) == "string" and text:find("[\r\n]") then
         text = text:gsub("\r\n", "\n"):gsub("\r", "\n")
@@ -30,6 +30,8 @@ end
 
 rune.history = {}
 
+-- Return history text oldest-first, including multiline and Verbatim entries.
+-- Mode metadata stays in Go; this public API returns only the text.
 function rune.history.get()
     local entries = rune._history.entries()
     local history = {}
@@ -39,12 +41,16 @@ function rune.history.get()
     return history
 end
 
+-- Record Command-mode text without sending it or running input processing.
+-- Go validates the text and applies the normal history storage rules.
 function rune.history.add(cmd)
     rune._history.add(cmd)
 end
 
--- Shared command boundaries for sending and history expansion. Keep the source
--- spelling alongside the decoded command so history can safely replay escapes.
+-- Iterate separator-delimited commands, yielding source text and decoded text.
+-- A doubled separator is literal: with ";", "say a;;b;look" first yields
+-- "say a;;b", "say a;b". Empty segments are preserved. History uses the source
+-- spelling so replay does not turn literal separators into command boundaries.
 local function commands(text, separator)
     local start = 1
     local doubled = separator .. separator
@@ -73,39 +79,46 @@ end
 -- Called once before input hooks. Programmatic sends and hook rewrites never
 -- re-enter expansion. Keep source spelling intact for echo, history, and replay.
 
-local function designator_spec(piece, marker, separator)
+-- Parse a history reference occupying a whole command segment. With "!":
+-- "!" and "!!" return "" (latest eligible line); "!nor" returns "nor".
+-- Return nil for ordinary text, including "say !!" or an escaped separator.
+local function parse_history_reference(piece, marker, separator)
     local token = piece:match("^%s*(.-)%s*$")
     if token:sub(1, #separator) == separator or token:sub(1, #marker) ~= marker then
         return nil
     end
 
-    local spec = token:sub(#marker + 1)
-    if spec:find("%s") then
+    local prefix = token:sub(#marker + 1)
+    if prefix:find("%s") then
         return nil
     end
-    if spec == marker then
+    if prefix == marker then
         return "" -- A doubled marker is equivalent to a bare marker.
     end
-    return spec
+    return prefix
 end
 
--- History-expansion syntax can enter history through rune.history.add or while
--- expansion uses a different character. Skip those entries rather than send
--- unresolved expansion text to the MUD.
-local function contains_designator(text, separator, marker)
+-- Return whether any command segment is a history reference. This also guards
+-- against replaying unresolved references stored by rune.history.add or under
+-- a different history character.
+local function has_history_reference(text, separator, marker)
     if not text:find(marker, 1, true) then
         return false
     end
 
     for piece in commands(text, separator) do
-        if designator_spec(piece, marker, separator) ~= nil then
+        if parse_history_reference(piece, marker, separator) ~= nil then
             return true
         end
     end
     return false
 end
 
-local function find_previous(spec, history, separator, marker)
+-- Find the newest eligible physical history line matching prefix; "" matches
+-- any prefix. Skip Verbatim entries, blank lines, slash-command lines, and lines
+-- containing unresolved history references. Return the original line, which may
+-- contain multiple separator-delimited commands, or nil when nothing matches.
+local function find_previous(prefix, history, separator, marker)
     for i = #history, 1, -1 do
         local entry = history[i]
         if entry.mode == "command" then
@@ -120,8 +133,8 @@ local function find_previous(spec, history, separator, marker)
                 local candidate = lines[j]:match("^%s*(.-)%s*$")
                 if candidate ~= ""
                     and lines[j]:sub(1, 1) ~= "/"
-                    and not contains_designator(lines[j], separator, marker)
-                    and (spec == "" or candidate:sub(1, #spec) == spec)
+                    and not has_history_reference(lines[j], separator, marker)
+                    and (prefix == "" or candidate:sub(1, #prefix) == prefix)
                 then
                     return lines[j]
                 end
@@ -130,12 +143,15 @@ local function find_previous(spec, history, separator, marker)
     end
 end
 
+-- Replace history-reference segments, retaining the source spelling elsewhere.
+-- Return the rebuilt text; if any reference has no match, print a diagnostic
+-- and return false so the whole input line is skipped before hooks or sending.
 local function expand_commands(text, history, separator, marker)
     local pieces = {}
     for piece in commands(text, separator) do
-        local spec = designator_spec(piece, marker, separator)
-        if spec ~= nil then
-            local replacement = find_previous(spec, history, separator, marker)
+        local prefix = parse_history_reference(piece, marker, separator)
+        if prefix ~= nil then
+            local replacement = find_previous(prefix, history, separator, marker)
             if not replacement then
                 local token = piece:match("^%s*(.-)%s*$")
                 rune.echo(rune.style.yellow("[History]") ..
@@ -161,14 +177,16 @@ local function expand_commands(text, history, separator, marker)
     return table.concat(pieces, separator)
 end
 
--- Returns resolved text, or false when a reference has no match.
+-- Expand history references in an interactive Command-mode line. Slash commands
+-- and disabled expansion pass through unchanged. Return text, or false if a
+-- reference has no match. Called before hooks, never again for their rewrites.
 local function expand_history(text)
     if text:sub(1, 1) == "/" then return text end
     local marker = rune.config.get("history_character")
     if marker == "" or not text:find(marker, 1, true) then return text end
 
     local separator = rune.config.get("command_separator")
-    if contains_designator(text, separator, marker) then
+    if has_history_reference(text, separator, marker) then
         return expand_commands(text, rune._history.entries(), separator, marker)
     end
     return text
@@ -178,6 +196,10 @@ end
 
 local MAX_RECURSION_DEPTH = 100
 
+-- Execute a game-command sequence: split separators, decode literal separators,
+-- apply #N repeats, then try aliases before sending each command. Alias text is
+-- processed recursively; an alias returning no text consumes the command.
+-- This does not interpret slash commands or perform interactive preparation.
 local function execute_commands(input, depth)
     if depth > MAX_RECURSION_DEPTH then
         rune.echo(rune.style.red("[Error]") .. " Alias loop detected (depth limit exceeded)")
@@ -206,14 +228,17 @@ local function execute_commands(input, depth)
     end
 end
 
--- PUBLIC: Execute game-command syntax and aliases, then send.
--- Interactive hooks, echo, history, and slash commands belong above this entry.
+-- Send programmatic game-command text through separators, repeats, and aliases.
+-- Does not run input hooks, expand history, echo input, record history, or dispatch
+-- slash commands. Send failures are reported by send_raw; no status is returned.
 function rune.send(input)
     execute_commands(input, 0)
 end
 
--- History resolves exactly once, before any user input handler.
-function rune.input._prepare(text, mode)
+-- Prepare one interactive physical line: expand history in Command mode, then
+-- run input hooks in either mode. Return text, or false to skip this line.
+-- Does not send, echo input, or record history; Session owns those steps.
+function rune.input._prepare_line(text, mode)
     if mode == "command" then
         text = expand_history(text)
         if text == false then return false end
@@ -225,7 +250,10 @@ function rune.input._prepare(text, mode)
     return rune.hooks.call("input", text, { mode = mode })
 end
 
-function rune.input._dispatch(input, mode)
+-- Route one prepared physical line: Verbatim sends literally; Command mode
+-- dispatches a leading slash command or executes game-command syntax.
+-- No input hooks, history expansion, input echo, or history recording here.
+function rune.input._dispatch_line(input, mode)
     if mode == "verbatim" then
         rune.send_raw(input) -- no alias or command interpretation
         return

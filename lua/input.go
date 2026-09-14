@@ -20,7 +20,7 @@ func (e *Engine) PrepareInputLine(line input.Line) (input.Line, bool) {
 	var found bool
 	err := e.guard(func() error {
 		var err error
-		results, found, err = e.vm.CallModule("rune.input", "_prepare", 1, line.Text, line.Mode.String())
+		results, found, err = e.vm.CallModule("rune.input", "_prepare_line", 1, line.Text, line.Mode.String())
 		return err
 	})
 	if err != nil {
@@ -68,7 +68,7 @@ func (e *Engine) DispatchInputLine(line input.Line) error {
 	err := e.guard(func() error {
 		var callErr error
 		_, found, callErr = e.vm.CallModule(
-			"rune.input", "_dispatch", 0, line.Text, line.Mode.String(),
+			"rune.input", "_dispatch_line", 0, line.Text, line.Mode.String(),
 		)
 		return callErr
 	})

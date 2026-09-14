@@ -327,7 +327,7 @@ func TestInputDispatchDoesNotRunInputHooks(t *testing.T) {
 		rune.hooks.on("input", function()
 			input_hook_calls = input_hook_calls + 1
 		end, {name = "dispatch-observer", priority = 1})
-		rune.input._dispatch("look;#2 north", "command")
+		rune.input._dispatch_line("look;#2 north", "command")
 		assert(input_hook_calls == 0)
 	`); err != nil {
 		t.Fatal(err)
@@ -341,7 +341,7 @@ func TestInputDispatchVerbatimBypassesCommandSyntax(t *testing.T) {
 	defer cleanup()
 
 	if err := engine.DoString("dispatch verbatim", `
-		rune.input._dispatch("/quit;#2 north", "verbatim")
+		rune.input._dispatch_line("/quit;#2 north", "verbatim")
 	`); err != nil {
 		t.Fatal(err)
 	}

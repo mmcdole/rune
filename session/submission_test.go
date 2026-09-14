@@ -251,8 +251,8 @@ func TestSubmissionProcessesEachLineBeforeTheNextHook(t *testing.T) {
 					assert(#rune.history.get() == 0)
 					seen[#seen + 1] = "echo:" .. line
 				end, {priority = 10})
-				local dispatch = rune.input._dispatch
-				function rune.input._dispatch(line, mode)
+				local dispatch = rune.input._dispatch_line
+				function rune.input._dispatch_line(line, mode)
 					seen[#seen + 1] = "dispatch:" .. line
 					return dispatch(line, mode)
 				end
@@ -367,7 +367,7 @@ func TestFailingInputDispatcherIsNotRetried(t *testing.T) {
 	net.connected = true
 
 	if err := s.engine.DoString("broken dispatcher", `
-		function rune.input._dispatch(text)
+		function rune.input._dispatch_line(text)
 			rune.send_raw(text .. ":once")
 			error("dispatch failed after send")
 		end

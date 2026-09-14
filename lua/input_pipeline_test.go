@@ -12,7 +12,7 @@ func TestMissingInputDispatcherUsesGoFallback(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 
-	if err := engine.DoString("remove dispatcher", `rune.input._dispatch = nil`); err != nil {
+	if err := engine.DoString("remove dispatcher", `rune.input._dispatch_line = nil`); err != nil {
 		t.Fatal(err)
 	}
 
@@ -94,7 +94,7 @@ func TestFailingInputPreparationIsNotRetried(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 	assertLua(t, engine, `
-        function rune.input._prepare(text)
+        function rune.input._prepare_line(text)
             rune.send_raw("once")
             error("preparation failed after send")
         end
