@@ -1,6 +1,6 @@
 package lua
 
-// Group master-switch semantics (25_groups.lua): an item fires only
+// Group master-switch semantics (20_registry.lua): an item fires only
 // if itself enabled AND its group enabled, across every registry.
 
 import "testing"
@@ -129,7 +129,7 @@ func TestGroupMasterSwitch(t *testing.T) {
 			name: "slash command group off",
 			setup: `
 				rune.alias.exact('k', 'kill', {group = 'combat'})
-				rune.input._dispatch('/group combat off', 'command')
+				rune.input._execute_input_line('/group combat off', 'command')
 			`,
 			input: "k orc",
 			want:  []string{"k orc"},
@@ -138,8 +138,8 @@ func TestGroupMasterSwitch(t *testing.T) {
 			name: "slash command group back on",
 			setup: `
 				rune.alias.exact('k', 'kill', {group = 'combat'})
-				rune.input._dispatch('/group combat off', 'command')
-				rune.input._dispatch('/group combat on', 'command')
+				rune.input._execute_input_line('/group combat off', 'command')
+				rune.input._execute_input_line('/group combat on', 'command')
 			`,
 			input: "k orc",
 			want:  []string{"kill orc"},

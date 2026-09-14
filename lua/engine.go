@@ -2,11 +2,11 @@ package lua
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/mmcdole/rune/input"
 	"github.com/mmcdole/rune/script"
 	"github.com/mmcdole/rune/text"
 	"github.com/mmcdole/rune/ui"
@@ -77,39 +77,51 @@ func NewEngine(host Host) *Engine {
 // with: "lunar" (default) or "luajit" (-tags luajit).
 func (e *Engine) EngineBackend() string { return e.vm.Backend() }
 
-// guard runs fn under the watchdog: a deadline context is attached to
-// the VM so runaway scripts are interrupted instead of hanging the
-// event loop. Nested entries (Go APIs called from Lua that re-enter
-// the engine, e.g. rune._load) run under the outermost deadline.
-func (e *Engine) guard(fn func() error) error {
-	if e.inLua {
-		return fn()
+// BeginExecution shares one watchdog deadline across a caller-owned sequence of
+// Lua calls. Call the returned function exactly once (normally in a defer) to
+// report deadline exhaustion and release the scope. Nested scopes reuse the
+// current deadline. Only the Session goroutine may use an execution scope.
+func (e *Engine) BeginExecution() func(error) error {
+	owner := !e.inLua
+	if owner {
+		e.inLua = true
+		ctx, cancel := context.WithTimeout(context.Background(), e.CallTimeout)
+		e.guardCancel = cancel
+		e.vm.SetContext(ctx)
 	}
-	e.inLua = true
-	ctx, cancel := context.WithTimeout(context.Background(), e.CallTimeout)
-	e.guardCancel = cancel
-	e.vm.SetContext(ctx)
-	defer func() {
-		e.vm.RemoveContext()
-		e.guardCancel()
-		e.guardCancel = nil
-		e.inLua = false
-	}()
-
-	err := fn()
-	// The active context may have been replaced by pauseWatchdog, so consult
-	// the VM's current context rather than the original. Treat an expired
-	// watchdog as an entry failure even if Lua pcall caught the interruption;
-	// otherwise backend-specific catch behavior could let a timed-out pipeline
-	// continue and dispatch.
-	if lctx := e.vm.Context(); lctx != nil && lctx.Err() != nil {
-		cause := err
-		if cause == nil {
-			cause = lctx.Err()
+	return func(err error) error {
+		if owner {
+			defer func() {
+				e.vm.RemoveContext()
+				e.guardCancel()
+				e.guardCancel = nil
+				e.inLua = false
+			}()
 		}
-		return fmt.Errorf("script interrupted after %v (runaway loop?): %w", e.CallTimeout, cause)
+		// An editor call can replace the context; always inspect the active one.
+		// pcall must not hide exhaustion of the shared deadline.
+		if ctx := e.vm.Context(); ctx != nil && ctx.Err() != nil {
+			// Preserve deadline identity for callers deciding whether to stop.
+			// Only the outer scope adds the user-facing interruption message.
+			if !errors.Is(err, ctx.Err()) {
+				err = errors.Join(err, ctx.Err())
+			}
+			if owner {
+				return fmt.Errorf("script interrupted after %v (runaway loop?): %w", e.CallTimeout, err)
+			}
+		}
+		return err
 	}
-	return err
+}
+
+// guard bounds a single Lua entry, reusing an enclosing execution scope.
+func (e *Engine) guard(fn func() error) (err error) {
+	finish := e.BeginExecution()
+	defer func() { err = finish(err) }()
+	if ctx := e.vm.Context(); ctx != nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return fn()
 }
 
 // pauseWatchdog runs fn with the watchdog deadline detached, then arms
@@ -240,95 +252,6 @@ func (e *Engine) callHooks(nret int, args ...any) ([]script.Result, bool, error)
 		return callErr
 	})
 	return results, found, err
-}
-
-// ApplyInputHooks runs the interactive pre-commit input pass. Lua may return
-// a replacement string or false to consume the submission. Interpretation
-// mode is owned by Go and cannot be rewritten by scripts.
-func (e *Engine) ApplyInputHooks(submission input.Submission) (input.Submission, bool) {
-	ctx := script.Tree{V: map[string]any{"mode": submission.Mode.String()}}
-	results, found, err := e.callHooks(1, "input", submission.Text, ctx)
-	if err != nil {
-		e.reportError("input hooks", err)
-		// Some handlers may already have rewritten input or produced side
-		// effects. Fail closed rather than dispatching the authored text and
-		// risking a duplicate send or bypassed interceptor.
-		return submission, false
-	}
-	if !found {
-		e.reportCoreBroken()
-		return submission, true
-	}
-	result := results[0]
-	switch {
-	case result.False():
-		return submission, false
-	case result.Kind == script.KindString:
-		if submission.Mode != input.ModeVerbatim && !input.ValidCommandText(result.Str) {
-			e.reportError("input hooks", fmt.Errorf(
-				"command rewrite must be valid command text; newlines and tabs require one /command, and terminal controls are not allowed",
-			))
-			return submission, false
-		}
-		submission.Text = result.Str
-		return submission, true
-	default:
-		e.reportError("input hooks", fmt.Errorf(
-			"expected a string or false, got %s", result.Kind,
-		))
-		e.reportCoreBroken()
-		return submission, false
-	}
-}
-
-// DispatchSubmission routes a submission without running input hooks or
-// committing echo or history. If the Lua dispatcher is missing, a small Go
-// fallback preserves raw input and the /quit and /reload escape hatches. A
-// dispatcher that starts and then fails is never retried, because it may
-// already have produced side effects.
-func (e *Engine) DispatchSubmission(submission input.Submission) {
-	var found bool
-	err := e.guard(func() error {
-		var callErr error
-		_, found, callErr = e.vm.CallModule(
-			"rune.input", "_dispatch", 0,
-			submission.Text, submission.Mode.String(),
-		)
-		return callErr
-	})
-	if err != nil {
-		e.reportError("input dispatch", err)
-		return
-	}
-	if found {
-		return
-	}
-
-	e.reportCoreBroken()
-	e.dispatchSubmissionFallback(submission)
-}
-
-func (e *Engine) dispatchSubmissionFallback(submission input.Submission) {
-	if submission.Mode == input.ModeVerbatim {
-		for _, line := range submission.PhysicalLines() {
-			if err := e.host.Send(line); err != nil {
-				e.reportError("input fallback", err)
-				return
-			}
-		}
-		return
-	}
-
-	switch submission.Text {
-	case "/quit":
-		e.host.Quit()
-	case "/reload":
-		e.host.Reload()
-	default:
-		if err := e.host.Send(submission.Text); err != nil {
-			e.reportError("input fallback", err)
-		}
-	}
 }
 
 // OnEcho runs the echo hook. The core adds styling; user hooks may rewrite or

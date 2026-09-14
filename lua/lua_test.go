@@ -4,6 +4,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/mmcdole/rune/input"
 	"github.com/mmcdole/rune/text"
 )
 
@@ -110,4 +111,30 @@ func assertCommands(t *testing.T, host *MockHost, expected []string) {
 			t.Errorf("command %d: expected %q, got %q", i, exp, actualCommands[i])
 		}
 	}
+}
+
+// dispatchTestLine exercises the Engine's one-line preparation and dispatch boundary.
+// Submission iteration, budgets, echo, and history are tested through Session.
+func dispatchTestLine(engine *Engine, line input.Line) bool {
+	effective, proceed := processTestLine(engine, line)
+	if !proceed {
+		return false
+	}
+	if err := engine.ExecuteInputLine(effective); err != nil {
+		engine.reportError("input", err)
+		return false
+	}
+	return true
+}
+
+func dispatchTestCommand(engine *Engine, text string) bool {
+	return dispatchTestLine(engine, input.Line{Text: text, Mode: input.ModeCommand})
+}
+
+func processTestLine(engine *Engine, line input.Line) (input.Line, bool) {
+	result, keep, err := engine.ProcessSubmittedLine(line)
+	if err != nil {
+		engine.reportError("submitted line", err)
+	}
+	return result, keep
 }

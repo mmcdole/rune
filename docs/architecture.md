@@ -105,8 +105,8 @@ that channel; every event is offered with the same non-blocking send. An
 `InputSubmittedMsg` atomically carries both the immutable authored submission
 and the editable draft that should follow it. Once Session accepts the event,
 the UI applies that same post-submit state locally; Session mirrors it and
-calls the `input_changed` hook when the draft text changed, before processing
-the submission. If the queue is full,
+finishes the partial prompt, then calls `input_changed` when the draft text
+changed, before processing the submitted lines. If the queue is full,
 the UI leaves a submission in the editor and shows a warning. Other rejected
 events are dropped with a warning. This keeps the UI responsive without
 silently losing typed input.
@@ -118,7 +118,7 @@ implements by default and the LuaJIT backend implements under `-tags luajit`.
 
 - **Single Host interface:** The Engine depends on one `lua.Host` interface (`lua/host.go`). Session implements it, with the methods grouped by service area across `session/lua_*.go` (network, ui, timers, system, history, session, store, log, state). Tests substitute a mock Host.
 - **Reactivity:** The Engine updates a global `rune.state` table whenever system state changes (connection, scroll position), allowing scripts to reactively render UI elements.
-- **Pre-commit input:** The Engine first folds an interactive submission through `input` hooks. Strings rewrite and chain, `nil` or other values pass through, and `false` consumes before history, echo, or routing. A command-mode result must still satisfy the shared command admission rule (one-line game input or a local `/command` with multiline arguments, without terminal controls); verbatim results may remain structured. Session records and echoes the effective value, then the Engine invokes the separate internal command/verbatim dispatcher.
+- **Submitted lines:** Session owns `submit` in `session/submission.go`. Its loop calls `Engine.ProcessSubmittedLine`, echoes the surviving text, then calls `Engine.ExecuteInputLine`. Lua expands history and runs input hooks in the first call, and executes local commands or game sends in the second. The pause between them lets Go echo the actual text before execution produces effects. See the submission flow below.
 - **Staged config publication:** Go owns the typed config schema and defaults. Core scripts, user scripts, and ready hooks evaluate `rune.config.set` against a staged candidate during startup or reload; after they finish, Engine publishes one complete snapshot to Session. Later runtime updates publish immediately through a dedicated callback that does not re-enter Lua.
 
 ## 3. UI Architecture: The "Push" Model
@@ -165,9 +165,9 @@ Bar registrations survive layout replacement but are rebuilt on reload.
 ### 3.2 Key Bindings
 
 - **Registration:** Lua registers a bind: `rune.bind("ctrl+r", fn)`.
-- **Sync:** The Session pushes a `map[string]bool` of bound keys to the UI (`UpdateBindsMsg`).
+- **Sync:** Session pushes an `input.Bindings` snapshot to the UI (`UpdateBindsMsg`).
 - **Detection:** When a key is pressed, the UI checks this map.
-  - **If Bound:** The UI suppresses default behavior and sends an `ExecuteBindMsg` to the Session.
+  - **If Bound:** Within the current context, the UI executes named editor actions locally or sends callbacks as an `ExecuteBindMsg` to Session. Disabled bindings are consumed.
   - **If Unbound:** The UI handles it normally (for example, typing text).
 
 ### 3.3 The Generic Picker
@@ -261,11 +261,11 @@ spans alone.
 
 Every submission closes any active partial-line display, regardless of whether
 an input hook consumes it, whether it is a slash command, connection state, or
-a later send failure. Input hooks run against the prior history and fold their
-string rewrites in priority order. A `false` result suppresses history, local
-echo, and dispatch; otherwise the final effective text is recorded, echoed,
-and routed. All input hooks run before that final command/verbatim processing;
-priority only orders the hooks relative to one another. Separately, Lua actions
+a later send failure. Session processes each physical line through input hooks,
+echo, and dispatch. A `false` result suppresses that line's history, echo, and
+dispatch; later lines still run. Session records the surviving lines together
+after processing. History expansion reads current history, including explicit script additions.
+Separately, Lua actions
 from aliases, triggers, timers, and other callbacks finish the partial line
 only when the connection accepts their game send. Deferring that finish to the
 end of the active batch keeps the wire write immediate while letting the
@@ -337,18 +337,73 @@ carry the Lua generation that created their callback; a result from before
   - `tui/`: Bubble Tea implementation
   - `tui/widget/`: Reusable widgets (Input, Picker, Viewport, Pane, Bar)
 
-### Draft interpretation and editing
+### Drafts, submissions, and lines
 
-The input widget owns the draft text, cursor, selection, and submission mode.
-The lossless composer is an editing surface; its presence does not determine
-interpretation. Structured text initially selects Verbatim, while an explicit
-mode choice persists for the draft. The Go input controller handles `Alt+V`
-(toggle, opening the composer if needed) and `Alt+Enter` (one-off Command submission), preserving overlay capture
-and applying accepted submissions atomically. The Model validates command text
-and draft limits before queueing, so rejection leaves the draft intact. The
-shared `input` admission policy also validates Lua hook rewrites and synthetic
-history. Session retains text and mode in history; Lua dispatch receives a
-multiline local command once with its arguments intact.
+A **draft** is the editable text, cursor, and Command/Verbatim mode owned by the
+UI. A **submission** is the immutable block the user asked Rune to execute.
+A **line** is one physical line selected from that block. Session mirrors draft
+text and cursor so Lua can inspect them without calling the UI goroutine.
+
+`Session.submit` is the complete accepted-submission sequence:
+
+1. Mirror the draft left after Enter, then finish the displayed partial prompt.
+2. Notify `input_changed` observers if the draft text changed.
+3. Select physical lines with `Submission.Lines`: multiline Command input skips
+   blank lines; Verbatim preserves them; an empty single-line Enter still runs.
+4. For each line, call `ProcessSubmittedLine`: Lua's `_process_submitted_line`
+   expands history in Command mode, then runs the input hooks in either mode.
+   A string replaces the text; `false` consumes that line. Record surviving
+   text for history, echo it, then call `ExecuteInputLine`.
+5. Save the surviving lines as one history entry with the submission's mode.
+
+`ExecuteInputLine` calls Lua's `_execute_input_line`: Verbatim sends literally,
+a leading slash command runs locally, and other text goes through `rune.send`.
+`rune.send` executes separators, repeats, and aliases. `rune.send_raw` splits
+literal physical lines and stops at the first send failure. Neither public
+send API runs interactive history expansion, input hooks, input echo, or
+history recording.
+
+The whole draft notification and line loop share one watchdog budget through
+`Engine.BeginExecution`. Preparation errors are separate from consumed lines:
+line-local errors are reported and later lines continue; deadline exhaustion
+stops the submission. Ordinary command errors are isolated in Lua. An internal
+execution failure stops the remaining lines and is never retried, since it may
+already have sent commands. Missing Lua entry points retain the small recovery
+fallback. `/quit` stops subsequent lines; `/reload` waits until submission ends.
+History is saved after execution, even if a send failed. Hooks do not see the
+current entry; expansion and public reads do see explicit script additions.
+
+Draft callbacks and state acknowledgments have separate purposes:
+
+- User edits travel UI → Session; Session mirrors the text/cursor and notifies
+  `input_changed` observers.
+- Script edits update Session's mirror and queue a UI update. The Lua primitive
+  then notifies observers synchronously if the text changed. The UI acknowledges
+  applied text and cursor with `DraftAppliedMsg`, which only updates the mirror.
+  This reconciles older typing already queued behind the script callback;
+  it never invokes observers again.
+- External-editor results use the same update and acknowledgment, with notification
+  explicit in the Session event handler. Submission carries its following draft
+  atomically, so it needs no separate UI change event.
+
+Script draft edits normalize CRLF and CR to LF using the same rule as the
+rune-based editor. Observers can edit the draft again; nested callbacks execute
+synchronously under the enclosing watchdog. The `input_changed` event name and
+public `rune.input` APIs remain unchanged.
+
+The lossless composer is an editing surface, not an interpretation mode.
+Structured text initially selects Verbatim; an explicit mode choice persists
+for the draft. `rune.bind` registers callbacks and named editor actions in one
+registry. The controller resolves the editor action once per key from the same
+binding snapshot used for callback membership and hints. Modal overlays capture
+keys; the composer retains its editing mechanics. Missing core bindings use Go
+recovery defaults; a successful empty snapshot means no bindings.
+
+The UI validates Command text before queueing so rejected submissions retain
+their draft. Session also validates admission, and the Engine checks hook
+results at the scripting boundary. `input.Line` carries one physical line and
+its unchanged mode. Physical newlines in hook replacements are rejected before
+later handlers run; final Command replacements must be valid command text.
 
 ### JSON conversion
 
@@ -358,7 +413,7 @@ bounded conversion; GMCP and storage select their existing compatibility
 policy. GMCP still owns raw-control-byte repair and its protocol-specific
 nesting check.
 
-`lua/core/08_json.lua` owns the public null value and private weak table-kind
+`lua/core/10_json.lua` owns the public null value and private weak table-kind
 marks. Its Go boundary uses tagged container trees so the existing script
 backend interface can carry nulls and empty arrays without losing their
 identity. Lua scalars cross directly. `lua/api_json.go` adapts those trees to

@@ -49,9 +49,8 @@ type PaneClearMsg struct {
 
 // --- Push-based UI Messages (Session -> UI) ---
 
-// UpdateBindsMsg pushes the current set of bound keys from Session to UI.
-// UI uses this to check if a key should be sent to Session for execution.
-type UpdateBindsMsg map[string]bool
+// UpdateBindsMsg replaces the UI snapshot used for action routing and hints.
+type UpdateBindsMsg input.Bindings
 
 // UpdateBarsMsg pushes rendered bar content from Session to UI.
 // Session runs Lua bar renderers and sends the result; UI just displays it.
@@ -88,8 +87,14 @@ type InputSubmittedMsg struct {
 
 func (InputSubmittedMsg) uiEvent() {}
 
+// OpenEditorMsg asks Session to edit this draft while the TUI is suspended.
+// It carries the UI's text snapshot instead of relying on Lua input state.
+type OpenEditorMsg struct{ Text string }
+
+func (OpenEditorMsg) uiEvent() {}
+
 // ExecuteBindMsg requests Session to execute a Lua key binding.
-// Sent when UI detects a key that's in the boundKeys map.
+// Sent when the UI routes a registry binding to Lua.
 type ExecuteBindMsg string
 
 func (ExecuteBindMsg) uiEvent() {}
@@ -128,6 +133,16 @@ type InputChangedMsg struct {
 }
 
 func (InputChangedMsg) uiEvent() {}
+
+// DraftAppliedMsg acknowledges a Session-requested editor update. It reconciles
+// the mirror after any older user edits already queued in Events. Unlike
+// InputChangedMsg it never runs Lua observers: the request already did that.
+type DraftAppliedMsg struct {
+	Text   string
+	Cursor int // zero-based rune offset, like InputChangedMsg
+}
+
+func (DraftAppliedMsg) uiEvent() {}
 
 // CursorMovedMsg notifies Session of cursor position changes without a text
 // change. Cursor is a zero-based rune offset from the input widget.

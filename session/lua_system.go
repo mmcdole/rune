@@ -8,6 +8,7 @@ import (
 
 // Quit implements lua.Host.
 func (s *Session) Quit() {
+	s.cancelBackgroundWork()
 	s.ui.Quit()
 }
 

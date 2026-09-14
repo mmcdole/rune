@@ -1,7 +1,6 @@
 package widget
 
 import (
-	"strings"
 	"unicode"
 
 	tea "charm.land/bubbletea/v2"
@@ -30,13 +29,6 @@ func newComposer(text string, cursor int) *composer {
 	return c
 }
 
-// normalizeComposerText gives the draft one internal newline convention.
-// Ordering matters: replacing lone CR first would turn CRLF into two lines.
-func normalizeComposerText(text string) string {
-	text = strings.ReplaceAll(text, "\r\n", "\n")
-	return strings.ReplaceAll(text, "\r", "\n")
-}
-
 // RequiresComposer reports whether the neutral input policy requires the
 // lossless editor. Kept as a widget-level name for the local call sites; the
 // admission rule itself belongs to the input package.
@@ -53,7 +45,7 @@ func (c *composer) Position() int {
 }
 
 func (c *composer) Set(text string, cursor int) {
-	c.text = []rune(normalizeComposerText(text))
+	c.text = []rune(input.NormalizeDraftText(text))
 	c.SetCursor(cursor)
 	c.goalCol = -1
 	c.topRow = 0
@@ -69,7 +61,7 @@ func (c *composer) CursorEnd() {
 }
 
 func (c *composer) Insert(text string) {
-	runes := []rune(normalizeComposerText(text))
+	runes := []rune(input.NormalizeDraftText(text))
 	if len(runes) == 0 {
 		return
 	}
@@ -194,9 +186,9 @@ func (c *composer) DeleteToLineEnd() {
 	c.goalCol = -1
 }
 
-// Update applies keys that have local editing meaning in compose mode. It
-// deliberately leaves plain Enter, Escape, Ctrl+C, and Ctrl+E unhandled so
-// the controller can submit/cancel/delegate to the external-editor binding.
+// Update applies keys that have local editing meaning in compose mode. The
+// controller handles configured editor actions first. Escape, Ctrl+C, and
+// Ctrl+E remain available for cancellation and Lua bindings.
 func (c *composer) Update(msg tea.KeyPressMsg, widgetWidth int) bool {
 	if msg.Text != "" {
 		c.Insert(msg.Text)
@@ -204,12 +196,8 @@ func (c *composer) Update(msg tea.KeyPressMsg, widgetWidth int) bool {
 	}
 
 	switch {
-	case matchesKey(msg, 'j', tea.ModCtrl), matchesEnterKey(msg, tea.ModCtrl):
-		c.Insert("\n")
-		return true
 	case matchesEnterKey(msg, 0):
-		// Plain Enter submits; modified Enter chords remain available to the
-		// controller for bind dispatch.
+		// Enter has no editing meaning unless handled by a configured action.
 		return false
 	case matchesKey(msg, tea.KeyTab, 0):
 		c.Insert("\t")

@@ -18,7 +18,7 @@ type UI interface {
 
 	// Updates
 	UpdateBars(content map[string]BarContent)
-	UpdateBinds(keys map[string]bool)
+	UpdateBinds(keys input.Bindings)
 	UpdateLayout(layout LayoutTree)
 	UpdateConfig(cfg Config)
 

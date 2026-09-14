@@ -21,17 +21,17 @@ func (m SubmissionMode) String() string {
 	return "command"
 }
 
-// Submission holds text at one input-pipeline stage and its interpretation
-// mode. Lua may rewrite Text; Mode remains Go-owned and immutable by policy.
+// Submission is a whole authored input block or a saved history entry.
+// Session processes its physical lines individually; hooks never receive a block.
 type Submission struct {
 	Text string
 	Mode SubmissionMode
 }
 
-// PhysicalLines splits verbatim input on LF, CRLF, and bare CR. Command input
-// remains one logical command.
+// PhysicalLines splits either mode on LF, CRLF, and bare CR.
+// Visual wrapping is not part of the submitted text.
 func (s Submission) PhysicalLines() []string {
-	if s.Mode != ModeVerbatim || !strings.ContainsAny(s.Text, "\r\n") {
+	if !strings.ContainsAny(s.Text, "\r\n") {
 		return []string{s.Text}
 	}
 	text := strings.ReplaceAll(s.Text, "\r\n", "\n")
@@ -47,4 +47,20 @@ func Command(text string) Submission {
 // Verbatim creates a submission that bypasses command processing.
 func Verbatim(text string) Submission {
 	return Submission{Text: text, Mode: ModeVerbatim}
+}
+
+// Lines selects physical lines for processing. Blank command-batch lines are
+// ignored; Verbatim preserves them. An empty single-line Enter still runs.
+func (s Submission) Lines() []string {
+	lines := s.PhysicalLines()
+	if s.Mode == ModeCommand && len(lines) > 1 {
+		kept := lines[:0]
+		for _, line := range lines {
+			if strings.TrimSpace(line) != "" {
+				kept = append(kept, line)
+			}
+		}
+		return kept
+	}
+	return lines
 }

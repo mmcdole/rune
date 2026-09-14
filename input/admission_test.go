@@ -36,15 +36,15 @@ func TestValidCommandTextRejectsInvalidUTF8(t *testing.T) {
 	if !ValidCommandText("look") {
 		t.Fatal("ordinary command text was rejected")
 	}
-	if ValidCommandText("one\ntwo") {
-		t.Fatal("structured command text was accepted")
+	if !ValidCommandText("one\ntwo") {
+		t.Fatal("multiline command text was rejected")
 	}
 	if ValidCommandText(string([]byte{'l', 0xff, 'k'})) {
 		t.Fatal("invalid UTF-8 command text was accepted")
 	}
 }
 
-func TestCommandAdmissionAllowsStructuredArgumentsOnlyForLocalCommands(t *testing.T) {
+func TestCommandAdmissionAllowsLinesAndTabs(t *testing.T) {
 	for _, tc := range []struct {
 		text  string
 		valid bool
@@ -52,10 +52,10 @@ func TestCommandAdmissionAllowsStructuredArgumentsOnlyForLocalCommands(t *testin
 		{"/lua -- comment\n\trune.echo('hello')", true},
 		{"/lua\r\nrune.echo('hello')", true},
 		{"/echo first\n/quit", true},
-		{"look\neast", false},
-		{"say\thello", false},
-		{"/\nquit", false},
-		{" /lua\nprint('hello')", false},
+		{"look\neast", true},
+		{"say\thello", true},
+		{"/\nquit", true},
+		{" /lua\nprint('hello')", true},
 		{"/lua print('\x1b')", false},
 		{"/lua --\u202e\nprint('hello')", false},
 	} {

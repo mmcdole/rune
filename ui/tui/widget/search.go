@@ -315,8 +315,11 @@ func (s *Search) queryLine(width int) string {
 	return clipRow(left+strings.Repeat(" ", pad)+s.styles.Muted.Render(count), width)
 }
 
-func (s *Search) footerLine(width int) string {
-	help := "↑ older  ↓ newer  Enter keep  Esc cancel"
+func (s *Search) footerLine(width int, cancel string) string {
+	help := "↑ older  ↓ newer  Enter keep"
+	if cancel != "" {
+		help += "  " + cancel + " cancel"
+	}
 	if s.notice != "" {
 		help = s.notice + "  ·  " + help
 	}

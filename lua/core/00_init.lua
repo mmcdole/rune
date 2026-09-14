@@ -143,29 +143,6 @@ end
 
 -- Core function wrappers around Go primitives (rune._*)
 
--- Send game text without alias processing. LF, CRLF, and bare CR separate
--- physical lines.
--- Echoes send failures (e.g. not connected) rather than raising.
--- Returns true, or nil + error message.
-function rune.send_raw(text)
-    if type(text) == "string" and text:find("[\r\n]") then
-        text = text:gsub("\r\n", "\n"):gsub("\r", "\n")
-        local ok, err
-        for line in (text .. "\n"):gmatch("(.-)\n") do
-            ok, err = rune.send_raw(line)
-            if not ok then
-                return ok, err
-            end
-        end
-        return ok, err
-    end
-    local ok, err = rune._send_raw(text)
-    if not ok then
-        rune.echo(rune.style.red("[Error]") .. " " .. tostring(err))
-    end
-    return ok, err
-end
-
 function rune.echo(text)
     rune._echo(text)
 end
@@ -247,23 +224,6 @@ end
 
 function rune.store.delete(key)
     return rune._store.delete(key)
-end
-
--- Input history (Go owns the ring buffer so it survives reloads)
-
-rune.history = {}
-
-function rune.history.get()
-    local entries = rune._history.entries()
-    local history = {}
-    for i, entry in ipairs(entries) do
-        history[i] = entry.text
-    end
-    return history
-end
-
-function rune.history.add(cmd)
-    rune._history.add(cmd)
 end
 
 -- UI namespace

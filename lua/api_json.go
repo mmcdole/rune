@@ -42,7 +42,7 @@ func (e *Engine) registerJSONFuncs() {
 // packJSON prepares decoded JSON for Lua. The usual Go-to-Lua conversion
 // turns nil into Lua nil, losing null table entries, and turns both empty
 // arrays and empty objects into {}. Wrappers such as {"array", items} and
-// {"null"} preserve those distinctions until 08_json.lua restores the values.
+// {"null"} preserve those distinctions until 10_json.lua restores the values.
 // This function modifies the supplied maps and slices, which belong to this
 // decode call and are not shared with other callers.
 func packJSON(value any) any {
@@ -64,7 +64,7 @@ func packJSON(value any) any {
 	}
 }
 
-// unpackJSON removes the wrappers built by 08_json.lua before the shared
+// unpackJSON removes the wrappers built by 10_json.lua before the shared
 // Go encoder writes JSON. Check the limits here too because scripts can
 // call the internal primitive directly, bypassing the public Lua function.
 func unpackJSON(value script.Value, depth int, nodes *int) (any, error) {

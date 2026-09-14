@@ -35,8 +35,8 @@ type searchEffects interface {
 // the active picker's Lua callback, and the invariant that every path
 // out of a picker mode resets the mode, hides the overlay, and settles
 // the callback (exactly one PickerSelectMsg per shown picker). It is
-// also the single place that reports input text changes to the session,
-// so the session's tracked input (rune.input.get) can never go stale.
+// also reports user edits and applied-state acknowledgments so Session can
+// keep its draft mirror aligned without repeating script callbacks.
 type inputController struct {
 	input *widget.Input
 
@@ -46,28 +46,25 @@ type inputController struct {
 	historyRecall bool   // unmodified composed entry restored from history
 	keepOnSubmit  bool   // keep_input: keep the sent command selected
 
-	notify  func(ui.UIEvent)                // state and actions sent to the session
-	submit  func(ui.InputSubmittedMsg) bool // atomically transfer submission and following draft
-	isBound func(key string) bool           // key has a Lua bind
-	scroll  func(tea.KeyPressMsg) bool      // Go scroll-key fallback; true if handled
-	search  searchEffects                   // viewport side of scrollback search
+	notify func(ui.UIEvent)                // state and actions sent to the session
+	submit func(ui.InputSubmittedMsg) bool // atomically transfer submission and following draft
+	scroll func(tea.KeyPressMsg) bool      // Go scroll-key fallback; true if handled
+	search searchEffects                   // viewport side of scrollback search
 }
 
 func newInputController(
 	input *widget.Input,
 	notify func(ui.UIEvent),
 	submit func(ui.InputSubmittedMsg) bool,
-	isBound func(string) bool,
 	scroll func(tea.KeyPressMsg) bool,
 	search searchEffects,
 ) *inputController {
 	return &inputController{
-		input:   input,
-		notify:  notify,
-		submit:  submit,
-		isBound: isBound,
-		scroll:  scroll,
-		search:  search,
+		input:  input,
+		notify: notify,
+		submit: submit,
+		scroll: scroll,
+		search: search,
 	}
 }
 
@@ -89,74 +86,75 @@ func (c *inputController) mode() inputMode {
 
 // HandleKey routes key presses.
 //
-// Key policy: Go owns editing mechanics while a UI-internal mode is active
-// (picker capture/cancel and lossless composer editing), plus paste safety and
-// Enter-to-submit. Application actions remain Lua binds. In normal mode a bound
-// non-printable key always goes to Lua; a bound printable key goes to
-// Lua only when the input is empty (so "j" can be a hotkey without
-// breaking typing). Unbound scroll keys fall back to Go so scrollback
-// stays usable even in degraded mode.
+// Cancel resolves in every context; modal overlays capture other actions.
+// The UI handles editing and asks Session to submit or open the editor.
+// Callback bindings go to Session and Lua. Normal input protects text-bearing keys
+// while a draft is being typed. The composer owns ordinary editing mechanics.
+// Unbound scroll keys retain a Go fallback for degraded-core operation.
 func (c *inputController) HandleKey(msg tea.KeyPressMsg) {
 	msg = normalizeNumpadText(msg)
-	isEscape := matchesKey(msg, tea.KeyEsc, 0)
-	if c.mode() == modeCompose && !isEscape {
+	action := c.editorAction(msg)
+	cancel := action == "input.cancel"
+	if c.mode() == modeCompose && !cancel {
 		c.input.ContinueCompose()
 	}
-
-	// Picker modes capture Ctrl+C/Esc as "cancel". In normal mode they
-	// fall through so the Lua binds decide (clear input, double-tap quit,
-	// ...). Compose mode owns Escape because it is an internal cancel.
-	isCancel := isEscape || matchesKey(msg, 'c', tea.ModCtrl)
-	if isCancel {
-		if c.mode() == modePickerModal || c.mode() == modePickerInline {
+	// Ctrl+C remains an overlay interrupt; the configured cancel action works
+	// in every context, including modal pickers and scrollback search.
+	overlay := c.mode() == modePickerModal || c.mode() == modePickerInline || c.mode() == modeSearch
+	if cancel || (overlay && matchesKey(msg, 'c', tea.ModCtrl)) {
+		switch c.mode() {
+		case modePickerModal, modePickerInline:
 			c.closePicker(false, "")
-			return
-		}
-		if c.mode() == modeSearch {
+		case modeSearch:
 			c.closeSearch(false)
-			return
-		}
-		if c.mode() == modeCompose && isEscape {
+		case modeCompose:
 			if c.input.ConfirmDiscard() {
 				c.cancelCompose()
 			}
-			return
+		default:
+			oldText, oldCursor := c.input.Value(), c.input.Position()
+			c.historyRecall = false
+			c.input.Reset()
+			c.reportInputUpdate(oldText, oldCursor)
 		}
+		return
 	}
 
-	// Interpretation shortcuts belong to the draft, never an overlay query.
+	// Other editor actions never act on a modal picker or search query.
 	if c.mode() != modePickerModal && c.mode() != modeSearch {
-		toggle := matchesKey(msg, 'v', tea.ModAlt)
-		runCommand := matchesEnterKey(msg, tea.ModAlt)
-		if toggle || runCommand {
+		if action == "input.open_editor" {
 			if c.mode() == modePickerInline {
 				c.closePicker(false, "")
 			}
-			if toggle {
-				c.input.ToggleSubmissionMode()
-				c.historyRecall = false
-			} else {
-				c.submitInput(input.ModeCommand)
+			c.notify(ui.OpenEditorMsg{Text: c.input.Value()})
+			return
+		}
+
+		if action == "input.toggle_mode" {
+			if c.mode() == modePickerInline {
+				c.closePicker(false, "")
 			}
+			c.input.ToggleSubmissionMode()
+			c.historyRecall = false
 			return
 		}
 	}
 
 	switch c.mode() {
 	case modeCompose:
-		c.handleComposeKey(msg)
+		c.handleComposeKey(msg, action)
 	case modePickerModal:
 		c.handleModalKey(msg)
 	case modePickerInline:
-		c.handleInlineKey(msg)
+		c.handleInlineKey(msg, action)
 	case modeSearch:
 		c.handleSearchKey(msg)
 	default:
-		c.handleNormalKey(msg)
+		c.handleNormalKey(msg, action)
 	}
 }
 
-// SetText replaces the input content (rune.input.set). Lua editing
+// SetText applies a Session-owned edit and acknowledges its state. Lua editing
 // binds (ctrl+u, ctrl+w) change input while the inline picker is open;
 // keep its filter in sync, and close the picker (cancelling its
 // callback) when the input is cleared.
@@ -169,7 +167,7 @@ func (c *inputController) SetText(text string) {
 	wasInline := c.mode() == modePickerInline
 	c.input.SetValue(text)
 	c.input.CursorEnd()
-	c.notify(ui.InputChangedMsg{Text: c.input.Value(), Cursor: c.input.Position()})
+	c.notify(ui.DraftAppliedMsg{Text: c.input.Value(), Cursor: c.input.Position()})
 
 	if c.input.IsComposing() {
 		if wasPicker {
@@ -179,12 +177,10 @@ func (c *inputController) SetText(text string) {
 	}
 	if wasInline {
 		c.syncInlineFilter()
-		return
 	}
-
 }
 
-// SetSubmission restores a history entry with explicit interpretation.
+// SetSubmission applies and acknowledges a Session-owned history recall.
 // Unlike SetText, an explicit command entry exits sticky compose mode, while
 // verbatim is forced even for one safe, non-empty physical line.
 func (c *inputController) SetSubmission(submission input.Submission) {
@@ -202,21 +198,11 @@ func (c *inputController) SetSubmission(submission input.Submission) {
 		c.input.SetValue(submission.Text)
 		c.input.CursorEnd()
 	}
-	c.notify(ui.InputChangedMsg{Text: c.input.Value(), Cursor: c.input.Position()})
 
+	c.notify(ui.DraftAppliedMsg{Text: c.input.Value(), Cursor: c.input.Position()})
 	if wasPicker {
 		c.closePicker(false, "")
 	}
-
-}
-
-func (c *inputController) dispatchNumpadEnterBind(msg tea.KeyPressMsg) bool {
-	info, ok := numpadKey(msg)
-	if !ok || info.name != "numpad_enter" || msg.Mod&keyModifiers != 0 || !c.isBound(info.name) {
-		return false
-	}
-	c.notify(ui.ExecuteBindMsg(info.name))
-	return true
 }
 
 // tryNormalBind applies normal mode's typing-safety rule. Text-bearing
@@ -224,7 +210,7 @@ func (c *inputController) dispatchNumpadEnterBind(msg tea.KeyPressMsg) bool {
 // remain useful as movement binds while a command is being composed.
 func (c *inputController) tryNormalBind(msg tea.KeyPressMsg) bool {
 	key := keyToString(msg)
-	if key == "" || !c.isBound(key) {
+	if key == "" || !c.input.Bindings().Has(key) {
 		return false
 	}
 	if msg.Text != "" && c.input.Value() != "" && !c.input.Selected() {
@@ -234,18 +220,14 @@ func (c *inputController) tryNormalBind(msg tea.KeyPressMsg) bool {
 	return true
 }
 
-func (c *inputController) handleNormalKey(msg tea.KeyPressMsg) {
-	if c.dispatchNumpadEnterBind(msg) {
-		return
-	}
-	// Accept both portable Ctrl+J and disambiguated Ctrl+Enter as the explicit
-	// way to start a multiline draft without pasting.
-	if isComposerNewline(msg) {
+func (c *inputController) handleNormalKey(msg tea.KeyPressMsg, action string) {
+	// Newline opens the composer when the draft is still single-line.
+	if action == "input.newline" {
 		c.insertComposerText("\n")
 		return
 	}
-	if matchesEnterKey(msg, 0) {
-		c.submitInput(c.input.SubmissionMode())
+	if action == "input.submit" {
+		c.submitInput()
 		return
 	}
 
@@ -269,12 +251,13 @@ func (c *inputController) handleNormalKey(msg tea.KeyPressMsg) {
 	c.forwardToInput(msg)
 }
 
-func (c *inputController) handleComposeKey(msg tea.KeyPressMsg) {
-	if c.dispatchNumpadEnterBind(msg) {
+func (c *inputController) handleComposeKey(msg tea.KeyPressMsg, action string) {
+	if action == "input.newline" {
+		c.insertComposerText("\n")
 		return
 	}
-	if matchesEnterKey(msg, 0) {
-		c.submitInput(c.input.SubmissionMode())
+	if action == "input.submit" {
+		c.submitInput()
 		return
 	}
 
@@ -297,7 +280,7 @@ func (c *inputController) handleComposeKey(msg tea.KeyPressMsg) {
 		case matchesKey(msg, tea.KeyDown, 0):
 			key, delta = "down", 1
 		}
-		if key != "" && !c.input.CanMoveComposerVertically(delta) && c.isBound(key) {
+		if key != "" && !c.input.CanMoveComposerVertically(delta) && c.input.Bindings().Has(key) {
 			c.notify(ui.ExecuteBindMsg(key))
 			return
 		}
@@ -313,14 +296,14 @@ func (c *inputController) handleComposeKey(msg tea.KeyPressMsg) {
 		return
 	}
 
-	if physicalModified && physicalKey != "" && c.isBound(physicalKey) {
+	if physicalModified && physicalKey != "" && c.input.Bindings().Has(physicalKey) {
 		c.notify(ui.ExecuteBindMsg(physicalKey))
 		return
 	}
 
 	// Non-editing chords remain scriptable in compose mode. In
 	// particular, Ctrl+E keeps using the existing external-editor bind.
-	if keyStr := keyToString(msg); keyStr != "" && c.isBound(keyStr) {
+	if keyStr := keyToString(msg); keyStr != "" && c.input.Bindings().Has(keyStr) {
 		c.notify(ui.ExecuteBindMsg(keyStr))
 	}
 }
@@ -376,10 +359,26 @@ func (c *inputController) cancelCompose() {
 	c.notify(ui.InputChangedMsg{Text: "", Cursor: 0})
 }
 
-// isComposerNewline accepts the portable Ctrl+J representation as well as the
-// distinct Ctrl+Enter event reported by terminals with key disambiguation.
-func isComposerNewline(msg tea.KeyPressMsg) bool {
-	return matchesKey(msg, 'j', tea.ModCtrl) || matchesEnterKey(msg, tea.ModCtrl)
+// Exact physical bindings win; unbound keypad Enter shares ordinary Enter.
+// Printable actions obey the same typing protection as callbacks.
+func (c *inputController) editorAction(msg tea.KeyPressMsg) string {
+	msg.Mod &= keyModifiers
+	if msg.Text != "" && (c.mode() == modeCompose ||
+		(c.mode() == modeNormal && c.input.Value() != "" && !c.input.Selected())) {
+		return ""
+	}
+	binding, found := c.input.Bindings()[keyToString(msg)]
+	if !found {
+		if isEnterKey(msg) {
+			msg.Code = tea.KeyEnter
+			msg.BaseCode = 0
+		}
+		binding = c.input.Bindings()[msg.Keystroke()]
+	}
+	if !binding.Enabled {
+		return ""
+	}
+	return binding.Action
 }
 
 // forwardToInput passes an editing key to the text input and reports
@@ -419,13 +418,15 @@ func (c *inputController) SetKeepOnSubmit(on bool) {
 // submitInput transfers the current submission and its following draft as one
 // event, then applies that same transition locally only after Session accepts
 // ownership.
-func (c *inputController) submitInput(mode input.SubmissionMode) {
-	submission := input.Submission{Text: c.input.Value(), Mode: mode}
+func (c *inputController) submitInput() {
+	submission := input.Submission{Text: c.input.Value(), Mode: c.input.SubmissionMode()}
 	keep := c.keepOnSubmit && submission.Mode == input.ModeCommand && submission.Text != ""
 	nextDraft := ""
 	if keep {
 		nextDraft = submission.Text
 	}
+	// Hand off the text and its following draft together. If Session cannot
+	// accept them, leave the editor untouched so the user can try again.
 	if !c.submit(ui.InputSubmittedMsg{Submission: submission, NextDraft: nextDraft}) {
 		return
 	}

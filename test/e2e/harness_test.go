@@ -212,7 +212,7 @@ func (m *mockUI) SetInputSubmission(submission input.Submission) {
 }
 
 func (m *mockUI) UpdateBars(content map[string]ui.BarContent) {}
-func (m *mockUI) UpdateBinds(keys map[string]bool)            {}
+func (m *mockUI) UpdateBinds(keys input.Bindings)             {}
 func (m *mockUI) UpdateLayout(layout ui.LayoutTree)           {}
 func (m *mockUI) UpdateConfig(cfg ui.Config)                  {}
 func (m *mockUI) ShowPicker(opts ui.ShowPickerMsg)            {}

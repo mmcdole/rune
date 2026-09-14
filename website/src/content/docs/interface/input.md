@@ -83,13 +83,12 @@ saves `kill rat` in history, not `!k`.
 
 You can use one of these forms anywhere a complete command can appear. With the
 default `;` command separator, `north;!` sends `north` followed by the command
-that came before it. Every expansion on the line searches the history that
-existed before you pressed `Enter`, so the line cannot accidentally repeat
-itself.
+that came before it. Expansion searches current history. The submitted block
+is saved only after processing finishes, so it cannot accidentally repeat itself.
 
 Rune searches earlier normal commands. It ignores local `/commands`, verbatim
 blocks, and earlier commands that still contain history expansion syntax. If
-any expansion has no match, Rune shows a warning and sends none of the line.
+any expansion has no match, Rune shows a warning and skips that input line. Other lines in the submission still run.
 
 A line beginning with `/` is a local Rune command, so Rune does not perform
 history expansion anywhere on that line. It also does not perform history
@@ -139,15 +138,17 @@ for native text selection.
 A plain one-line paste stays in normal input. Pasting structured text opens
 the multiline composer. Newlines, tabs, blank lines, indentation, trailing spaces, and
 terminal control bytes are kept in the draft; CRLF and bare CR line endings are
-normalized to LF. You can also press `Ctrl+Enter` to insert the first newline
+normalized to LF. You can also press `Ctrl+J` to insert the first newline
 and enter the composer.
 
 The multiline composer displays `COMMAND` or `VERBATIM` and its physical line
-count on the left, with `Alt+V command` or `Alt+V verbatim` on the right.
-The footer shows Enter to submit and `Ctrl+J newline` in both modes.
-Verbatim also shows `Alt+Enter run`; `Esc×2 discard` describes the two-press
-discard action. When space permits, `Ctrl+E editor` appears if its binding
-is present. Narrow layouts omit secondary hints and then the line count
+count on the left, with the configured mode-toggle hint on the right
+(`Alt+V command` or `Alt+V verbatim` by default).
+The footer shows the primary submit and newline bindings in both modes,
+with “run” for Command and “send” for Verbatim. Defaults are Enter and Ctrl+J.
+Cancel and external-editor hints come from their active action bindings too:
+`Esc×2 discard` and `Ctrl+E editor` by default. Disabled or unbound actions
+have no hint. Narrow layouts omit secondary hints and then the line count
 to keep essential actions visible; hints are never cut mid-label.
 
 Ordinary single-line input keeps plain borders. Pressing `Alt+V` opens the
@@ -157,18 +158,19 @@ submission or discard closes it unless `keep_input` retains the command.
 The editor and interpretation are independent: multiline text can be a command,
 and a single line can be sent verbatim.
 
-| Key | Action |
+| Default key | Action |
 |---|---|
 | `Alt+V` | Toggle Command/Verbatim without changing text, cursor, or selection |
 | `Enter` | Submit using the displayed mode |
-| `Alt+Enter` | Run this draft as a command once, without changing its mode |
-| `Ctrl+Enter` or `Ctrl+J` | Insert a newline |
+| `Ctrl+J`, `Shift+Enter`, or `Ctrl+Enter` | Insert a newline (modified Enter requires terminal support) |
 | `Tab` in the composer | Insert a literal tab |
 | `Ctrl+E` | Edit the whole draft in `$EDITOR` |
 | `Escape` twice in the composer | First press shows `Esc again to discard`; the second discards the draft |
 
-A different key cancels discard confirmation and performs its usual action;
-for example, Enter still submits.
+A key that is not bound to cancel dismisses discard confirmation and performs
+its usual action; for example, Enter still submits. A binding update also
+dismisses confirmation. See the [input action table](/reference/api/input/#input-bindings)
+for rebinding and cancel behavior across all input contexts.
 
 Structured paste initially chooses Verbatim. Once you explicitly switch modes,
 your choice stays with that draft through edits, additional pastes, and external
@@ -179,30 +181,61 @@ Verbatim submission treats LF, CRLF, and bare CR as line breaks and sends each
 physical line without command processing. Aliases, command separators, `#N`
 repeats, and slash-looking lines such as `/quit` are all literal data.
 
-Command mode interprets commands and aliases. A multiline draft must be one
-local `/command`: its arguments retain their newlines and tabs. For example,
-paste this, then press `Alt+Enter` (or `Alt+V`, then `Enter`):
+Command mode executes each physical line in order. Each line supports aliases,
+command separators, repeats, and local `/commands`. For example, paste this,
+press `Alt+V` to select Command, then press `Enter`:
 
-```lua
-/lua -- this comment ends at the newline
-local timer = rune.timer.after(60, function() rune.echo("Timer fired") end)
-rune.echo("Timer created")
+```text
+north
+look;score
+/echo Finished
 ```
 
-Rune passes the whole Lua source to `/lua`; it does not join lines or execute
-each line as a separate command. Ordinary game commands must stay on one line;
-use the configured command separator for a command sequence. Command mode
-rejects terminal control characters. A rejected submission leaves your draft
-and its mode intact so you can edit it or switch to Verbatim.
+LF, CRLF, and bare CR separate commands. Blank and whitespace-only lines are
+ignored in a batch; tabs are allowed. Verbatim preserves blank lines and whitespace.
+A long command that wraps across display rows is still one command. This includes
+`/lua`: its full single-line source is passed intact, however many rows it occupies.
+An actual newline starts another command, including after a slash command.
+
+Rune checks the complete draft before running it. Command mode rejects invalid
+UTF-8 and terminal controls. A rejected draft stays in the editor with its mode
+intact. Errors from an alias or slash command are reported normally; Rune continues
+with the following lines.
+
+For each physical line, Rune expands history in Command mode, runs `input` hooks,
+then echoes and dispatches the result before advancing. Verbatim skips expansion.
+A hook returning
+`false`, a missing history match, or an invalid rewrite skips only the affected
+line. Hook replacements must stay on one line.
+
+After processing, Rune saves the accepted lines together as one history entry.
+Up or history search restores the block and its mode. `!` selects the most recent
+eligible command line in current history, even when it belongs to a saved batch.
+Local command lines bypass expansion. Explicit calls to `rune.history.add` take
+effect immediately: later input lines can expand against those additions.
+
+For example, after submitting `north` and `look` on separate lines, `!!` repeats
+only `look`; Up recalls both lines. After submitting `north;look` on one line,
+`!!` repeats both commands. Expansion selects a physical line, including any
+separator-chained commands on that line. `!prefix` searches backward through
+the lines of each saved command submission for the newest eligible match.
+
+A submission shares one script deadline. Exceeding it stops the remaining lines;
+commands already executed cannot be undone. `/quit` stops the remaining lines. `/reload`
+stays deferred until the submission finishes so it can safely replace the Lua VM.
+
+**Input hook compatibility:** Previously, input hooks received an entire Verbatim
+draft, could return multiline text, and ran before all submission processing.
+They now receive individual lines in both modes, and replacements cannot contain
+newlines. Returning `false` consumes only the current line. History is recorded
+after processing, so echo hooks and command handlers no longer see the current
+submission already in history. Scripts that intentionally send several lines can
+call `rune.send` or `rune.send_raw` and return `false` to consume the original line.
 
 Composer editing keys are handled locally rather than by Lua binds. `Up`/`Down`
 move through the draft's visual rows, `PageUp`/`PageDown` move by a composer
 page, and the mouse wheel still scrolls output when mouse capture is enabled.
 The ordinary one-line input and its bindings return after the composer closes.
-
-A submission in either mode is limited to 1,000 physical lines and 256 KiB. If either
-limit is exceeded, Rune rejects the submission, leaves the draft open, and
-shows a warning.
 
 Recalling a verbatim entry from history restores the composer, even when that
 entry contains only one physical line. History retains both the text and the
@@ -228,8 +261,8 @@ Lua. Replacing a draft with one non-empty line preserves its mode.
 
 Application actions such as history, completion, and `Ctrl+E` are registered
 with `rune.bind` in the core scripts and can be rebound or removed in
-`init.lua`. Paste handling, composer editing, mode switching with `Alt+V`,
-`Ctrl+Enter`/`Ctrl+J`, and submission with `Enter`/`Alt+Enter` keep their built-in behavior. The full policy and default table are in
+`init.lua`. Newline, mode toggle, and submission are named editor actions
+registered through the same [`rune.bind`](/reference/api/bind/) API. The full policy and default table are in
 the [Key Bindings guide](/scripting/keybindings/#where-binds-run).
 
 **Related:** [rune.input reference](/reference/api/input/),

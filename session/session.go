@@ -372,17 +372,15 @@ func (s *Session) handleUIEvent(event ui.UIEvent) {
 	defer s.flushPresentation()
 	switch event := event.(type) {
 	case ui.InputSubmittedMsg:
-		// The accepted event carries both the immutable submission and the
-		// editor draft that follows it. Apply them as one transition before
-		// input hooks inspect rune.input state. Post-submit drafts always put
-		// the cursor at the end, so Session's byte offset is simply len.
-		draftChanged := s.currentInput != event.NextDraft
-		s.currentInput = event.NextDraft
-		s.currentCursor = len(event.NextDraft)
-		if draftChanged {
-			s.engine.NotifyInputChanged(event.NextDraft)
+		s.submit(event)
+	case ui.OpenEditorMsg:
+		if result, ok := s.ui.OpenEditor(event.Text); ok {
+			changed := s.currentInput != input.NormalizeDraftText(result)
+			s.SetInput(result)
+			if changed {
+				s.engine.NotifyDraftChanged(s.currentInput)
+			}
 		}
-		s.handleSubmission(event.Submission)
 	case ui.ExecuteBindMsg:
 		s.engine.HandleKeyBind(string(event))
 	case ui.WindowSizeChangedMsg:
@@ -411,33 +409,15 @@ func (s *Session) handleUIEvent(event ui.UIEvent) {
 	case ui.InputChangedMsg:
 		s.currentInput = event.Text
 		s.currentCursor = input.RuneCursorToByte(event.Text, event.Cursor)
-		s.engine.NotifyInputChanged(event.Text)
+		s.engine.NotifyDraftChanged(event.Text)
+	case ui.DraftAppliedMsg:
+		// The editor has applied our change, possibly after older queued typing.
+		// Match what it now shows without calling draft observers a second time.
+		s.currentInput = event.Text
+		s.currentCursor = input.RuneCursorToByte(event.Text, event.Cursor)
 	case ui.CursorMovedMsg:
 		s.currentCursor = input.RuneCursorToByte(s.currentInput, event.Cursor)
 	}
-}
-
-func (s *Session) handleSubmission(submission input.Submission) {
-	// Every submission closes any active partial-line display, even when an
-	// input hook later consumes it or dispatch produces no network send.
-	s.finishPartialLine()
-
-	effective, proceed := s.engine.ApplyInputHooks(submission)
-	if !proceed {
-		return
-	}
-
-	s.addHistorySubmission(effective)
-
-	if s.protocol.LocalEchoEnabled() {
-		for _, line := range effective.PhysicalLines() {
-			if styled, show := s.engine.OnEcho(line); show {
-				s.ui.Echo(styled)
-			}
-		}
-	}
-
-	s.engine.DispatchSubmission(effective)
 }
 
 // boot loads the VM state.
@@ -478,7 +458,9 @@ func (s *Session) boot() error {
 	if s.connectTarget != "" {
 		target := s.connectTarget
 		s.connectTarget = ""
-		s.engine.DispatchSubmission(input.Command("/connect " + target))
+		if err := s.engine.ExecuteInputLine(input.Line{Text: "/connect " + target, Mode: input.ModeCommand}); err != nil {
+			s.ui.Print(text.Red("[Error] " + err.Error()))
+		}
 	}
 	s.flushPresentation()
 	return nil
@@ -559,12 +541,11 @@ func (s *Session) pushBarUpdates() {
 
 // pushBindsAndLayout pushes current bindings and layout config to UI.
 func (s *Session) pushBindsAndLayout() {
-	keys := s.engine.GetBoundKeys()
-	bindsMap := make(map[string]bool, len(keys))
-	for _, key := range keys {
-		bindsMap[key] = true
+	bindings := s.engine.GetBindings()
+	if bindings == nil {
+		bindings = input.DefaultBindings()
 	}
-	s.ui.UpdateBinds(bindsMap)
+	s.ui.UpdateBinds(bindings)
 
 	s.ui.UpdateLayout(s.engine.GetLayout())
 }

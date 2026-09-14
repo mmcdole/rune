@@ -3,13 +3,13 @@ title: rune.bind
 description: Signatures, options, and registry management for key bindings.
 ---
 
-Key bindings run Lua callbacks on key presses. For a task-oriented
+Key bindings run named editor actions or Lua callbacks on key presses. For a task-oriented
 introduction, see [Keybindings](/scripting/keybindings/).
 
 ## Quick reference
 
 ```lua
-rune.bind(key, callback, opts?)   -- bind a key; rebinding replaces (upsert by key)
+rune.bind(key, action, opts?)   -- bind a key; rebinding replaces (upsert by key)
 rune.unbind(key)                  -- remove a binding; true if one existed
 rune.binds.get(key)               -- the binding's handle, or nil
 ```
@@ -23,6 +23,25 @@ the key without calling the callback.
 ```lua
 rune.bind("f1", function() rune.send("north") end, {group = "combat"})
 ```
+
+The [input action table](/reference/api/input/#input-bindings) lists the five
+named actions: `input.submit`, `input.newline`, `input.toggle_mode`,
+`input.open_editor`, and `input.cancel`, including their defaults and context rules.
+Unknown action strings are errors. Action names are not commands to send.
+
+```lua
+local handles = rune.bind({"shift+enter", "ctrl+j"}, "input.newline")
+handles[1]:remove() -- removes Shift+Enter only
+rune.bind("ctrl+s", "input.submit") -- adds another submit key
+rune.unbind("enter") -- removes the default submit key
+```
+
+A key array is shorthand for separate registrations and returns an array of
+handles. The entire key array and options type are checked before registration.
+A single key still returns one handle. Existing callback bindings are unchanged.
+`:action()` returns the registered function or action string; only functions can
+be called directly. Hints use the earliest registered active alias for each
+editor action and disappear when none remain.
 
 To extend a default rather than discard it, capture its action first:
 

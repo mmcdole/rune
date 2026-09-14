@@ -50,7 +50,6 @@ type Model struct {
 	searchView searchViewState
 
 	// Push-based state from Session
-	boundKeys  map[string]bool
 	layout     ui.LayoutTree
 	layoutPlan layoutPlan
 
@@ -80,7 +79,7 @@ func NewModel(events chan<- ui.UIEvent) *Model {
 		styles: styles,
 		layout: ui.DefaultLayoutTree(),
 	}
-	m.inputCtl = newInputController(input, m.notifySession, m.submit, m.isBound, m.handleScrollKey, m)
+	m.inputCtl = newInputController(input, m.notifySession, m.submit, m.handleScrollKey, m)
 
 	return m
 }
@@ -146,6 +145,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Input primitives (from Lua)
 	case ui.InputSetCursorMsg:
 		m.input.SetCursor(int(msg))
+		m.notifySession(ui.DraftAppliedMsg{Text: m.input.Value(), Cursor: m.input.Position()})
 		return m, nil
 
 	// Clipboard (from Lua). OSC 52 asks the terminal emulator to set
@@ -197,8 +197,7 @@ func (m *Model) handleTick(msg tickMsg) (tea.Model, tea.Cmd) {
 func (m *Model) handleConfigUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case ui.UpdateBindsMsg:
-		m.boundKeys = msg
-		m.input.SetEditorAvailable(msg["ctrl+e"])
+		m.input.SetBindings(input.Bindings(msg))
 	case ui.UpdateBarsMsg:
 		m.syncBars(msg)
 	case ui.UpdateLayoutMsg:
@@ -335,19 +334,16 @@ func (m *Model) appendMessage(text string) {
 }
 
 // submit offers a submission and its following draft to the session as one
-// transition. It rejects invalid or oversized drafts or a busy engine with a
+// transition. It rejects invalid command text or a busy engine with a
 // visible warning rather than blocking the render loop; false tells the
 // controller to retain the current local draft.
 func (m *Model) submit(msg ui.InputSubmittedMsg) bool {
 	if msg.Submission.Mode == input.ModeCommand && !input.ValidCommandText(msg.Submission.Text) {
-		m.appendMessage(text.Red("[WARNING] Command not run - newlines and tabs require one /command; terminal controls are not allowed. Use Alt+V for verbatim."))
-		return false
-	}
-	// Count physical lines for either interpretation; a multiline command is
-	// still one dispatch, but consumes the same draft resources as verbatim.
-	lineCount := len(input.Verbatim(msg.Submission.Text).PhysicalLines())
-	if len(msg.Submission.Text) > maxSubmissionBytes || lineCount > maxSubmissionLines {
-		m.appendMessage(text.Red("[WARNING] Input not sent - limit is 1000 lines or 256 KiB"))
+		warning := "[WARNING] Command not run - invalid text or terminal controls."
+		if key := m.input.Bindings().Hint("toggle_mode"); key != "" {
+			warning += " Use " + key + " for verbatim."
+		}
+		m.appendMessage(text.Red(warning))
 		return false
 	}
 	if m.tryPost(msg) {
@@ -355,15 +351,6 @@ func (m *Model) submit(msg ui.InputSubmittedMsg) bool {
 	}
 	m.showWarning("Input not sent - engine lagging")
 	return false
-}
-
-const (
-	maxSubmissionBytes = 256 * 1024
-	maxSubmissionLines = 1000
-)
-
-func (m *Model) isBound(key string) bool {
-	return m.boundKeys[key]
 }
 
 func (m *Model) tryPost(event ui.UIEvent) bool {

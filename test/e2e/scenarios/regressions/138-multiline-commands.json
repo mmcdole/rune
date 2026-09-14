@@ -1,0 +1,26 @@
+{
+  "description": "Command mode executes pasted physical lines, including aliases and local commands.",
+  "scenarios": [
+    {
+      "name": "multiline aliases execute in command mode",
+      "issue": "https://github.com/mmcdole/rune/issues/138",
+      "steps": [
+        {
+          "connect": true
+        },
+        {
+          "type": "/lua rune.alias.exact('batchalias', 'E2E-batch-alias')"
+        },
+        {
+          "type": "batchalias\r\n/echo E2E-batch-local\n\t\nbatchalias;look\n#2 batchalias\nbatchalias\nbatchalias\n"
+        },
+        {
+          "expect_sent_bytes": [69, 50, 69, 45, 98, 97, 116, 99, 104, 45, 97, 108, 105, 97, 115, 13, 10, 69, 50, 69, 45, 98, 97, 116, 99, 104, 45, 97, 108, 105, 97, 115, 13, 10, 108, 111, 111, 107, 13, 10, 69, 50, 69, 45, 98, 97, 116, 99, 104, 45, 97, 108, 105, 97, 115, 13, 10, 69, 50, 69, 45, 98, 97, 116, 99, 104, 45, 97, 108, 105, 97, 115, 13, 10, 69, 50, 69, 45, 98, 97, 116, 99, 104, 45, 97, 108, 105, 97, 115, 13, 10, 69, 50, 69, 45, 98, 97, 116, 99, 104, 45, 97, 108, 105, 97, 115, 13, 10]
+        },
+        {
+          "expect_printed": "E2E-batch-local"
+        }
+      ]
+    }
+  ]
+}

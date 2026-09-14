@@ -56,6 +56,7 @@ func (s *Session) GetInput() string {
 
 // SetInput implements lua.Host.
 func (s *Session) SetInput(text string) {
+	text = input.NormalizeDraftText(text)
 	s.ui.SetInput(text)
 	s.currentInput = text
 	s.currentCursor = len(text)
@@ -65,6 +66,7 @@ func (s *Session) SetInput(text string) {
 // interpretation as well as text, including one-line verbatim drafts that
 // would otherwise look like ordinary command input.
 func (s *Session) SetInputSubmission(submission input.Submission) {
+	submission.Text = input.NormalizeDraftText(submission.Text)
 	s.ui.SetInputSubmission(submission)
 	s.currentInput = submission.Text
 	s.currentCursor = len(submission.Text)

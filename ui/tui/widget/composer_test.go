@@ -91,40 +91,33 @@ func TestComposerLocalKeySemantics(t *testing.T) {
 	in := newComposerInput(50)
 	in.BeginCompose("one\ntwo", len([]rune("one\ntwo")))
 
-	if !in.UpdateComposer(tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl}) {
-		t.Fatal("Ctrl+J should be handled as newline")
+	for _, msg := range []tea.KeyPressMsg{
+		{Code: 'j', Mod: tea.ModCtrl},
+		{Code: tea.KeyEnter, Mod: tea.ModCtrl},
+		{Code: tea.KeyEnter, Mod: tea.ModShift},
+		{Code: tea.KeyKpEnter, Mod: tea.ModCtrl},
+	} {
+		if in.UpdateComposer(msg) {
+			t.Fatal("newline actions belong to the controller")
+		}
 	}
-	if got := in.Value(); got != "one\ntwo\n" {
-		t.Fatalf("after Ctrl+J Value = %q", got)
-	}
-	if !in.UpdateComposer(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModCtrl}) {
-		t.Fatal("Ctrl+Enter should be handled as newline")
-	}
-	if got := in.Value(); got != "one\ntwo\n\n" {
-		t.Fatalf("after Ctrl+Enter Value = %q", got)
-	}
-	if !in.UpdateComposer(tea.KeyPressMsg{Code: tea.KeyKpEnter, Mod: tea.ModCtrl}) {
-		t.Fatal("Ctrl+keypad Enter should be handled as newline")
-	}
-	if got := in.Value(); got != "one\ntwo\n\n\n" {
-		t.Fatalf("after Ctrl+keypad Enter Value = %q", got)
-	}
+
 	if in.UpdateComposer(tea.KeyPressMsg{Code: tea.KeyEnter}) {
 		t.Fatal("plain Enter belongs to the submit controller")
 	}
 	if in.UpdateComposer(tea.KeyPressMsg{Code: tea.KeyKpEnter}) {
 		t.Fatal("keypad Enter belongs to the submit controller")
 	}
-	if got := in.Value(); got != "one\ntwo\n\n\n" {
+	if got := in.Value(); got != "one\ntwo" {
 		t.Fatalf("plain Enter mutated draft: %q", got)
 	}
 	if in.UpdateComposer(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl}) {
 		t.Fatal("Ctrl+E must remain available to the external-editor binding")
 	}
 	if in.UpdateComposer(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt}) {
-		t.Fatal("Alt+Enter should remain available as an alternate-submit chord")
+		t.Fatal("Alt+Enter should remain available as an Lua binding")
 	}
-	if got := in.Value(); got != "one\ntwo\n\n\n" {
+	if got := in.Value(); got != "one\ntwo" {
 		t.Fatalf("after Alt+Enter Value = %q", got)
 	}
 }

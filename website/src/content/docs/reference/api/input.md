@@ -26,7 +26,11 @@ them with cursor moves and are what the default `ctrl+w`,
 `alt+left`/`alt+right` binds call. The `"input_changed"`
 [hook event](/reference/api/hooks/) fires whenever the buffer changes,
 including typing, history or completion, `rune.input.set`, and the draft left
-after submission.
+after submission. Script edits notify observers before `rune.input.set` returns;
+setting the same text again does not notify. Observers may edit the draft again,
+so these callbacks can nest under the script watchdog. CRLF and bare CR in
+script edits become LF, matching the editor's newline convention. Applying a
+script edit in the UI does not fire a second notification.
 
 Cursor positions are zero-based UTF-8 byte offsets, using the same byte units
 as Lua 5.1 string operations. `set_cursor` clamps positions to the input and
@@ -40,6 +44,70 @@ the draft with one non-empty plain line preserves its mode; setting it to `""`
 clears the draft and resets to Command. See
 [Multiline verbatim composer](/interface/input/#multiline-verbatim-composer)
 for its submission semantics and limits.
+
+## Input bindings
+
+[`rune.bind`](/reference/api/bind/) accepts either a Lua callback or a named
+internal action:
+
+```lua
+-- Arbitrary Lua behavior
+rune.bind("f1", function() rune.send("look") end)
+
+-- Internal action, resolved in the current input context
+rune.bind("enter", "input.submit")
+rune.bind({"ctrl+j", "shift+enter", "ctrl+enter"}, "input.newline")
+```
+
+| Internal action | Behavior | Default keys |
+|---|---|---|
+| `input.submit` | Submit the draft using its current Command/Verbatim mode | Enter |
+| `input.newline` | Insert a newline, opening the composer if necessary | Ctrl+J, Shift+Enter, Ctrl+Enter |
+| `input.toggle_mode` | Switch Command/Verbatim interpretation | Alt+V |
+| `input.open_editor` | Edit the current draft in `$EDITOR`; apply a successful result without submitting | Ctrl+E |
+| `input.cancel` | Cancel according to the current input context, as below | Esc |
+
+| Cancel context | Behavior |
+|---|---|
+| Normal input | Clear the draft |
+| Multiline composer | First press requests confirmation; a second cancel press discards the draft |
+| Inline or modal picker | Close without accepting; preserve the draft |
+| Scrollback search | Cancel search and restore the previous view |
+
+Any intervening non-cancel key or binding update dismisses multiline discard
+confirmation. Rebinding cancel changes it across all these contexts. Ctrl+C also
+remains an overlay interrupt; outside overlays it keeps its existing Lua binding.
+Modal pickers and search capture other actions. Printable bindings retain the
+input contexts' typing protection; prefer non-printable keys for editor actions.
+
+A new key adds an alias; an existing key replaces its assignment. To move an
+action, bind the new key and explicitly unbind the old one:
+
+```lua
+rune.bind("f2", "input.open_editor")
+rune.unbind("ctrl+e")
+rune.bind("ctrl+g", "input.cancel")
+rune.unbind("esc")
+```
+
+Arrays create independent bindings and return an array of handles. A single key
+returns one handle. Removing one alias leaves the others intact. Disabling a
+binding or its group prevents its action. Defaults are ordinary registrations;
+unbinding them does not reveal a hidden default.
+
+Multiline hints use the earliest registered active binding for each action;
+search uses the same cancel binding for its hint. If no active binding remains,
+its hint disappears. Shift+Enter and Ctrl+Enter require distinct terminal key
+reporting; Ctrl+J is the portable newline alternative.
+
+Callbacks execute through Session and Lua. Internal actions are resolved by the
+TUI; submission proceeds to Session for processing, and opening the external
+editor asks Session to suspend the terminal and apply the edited result. No Lua
+callback or Lua watchdog is involved in a named editor action. Action strings
+are identifiers, not commands to send or Lua expressions; unknown names are errors.
+
+The `input.open_editor` binding edits the current draft automatically. The Lua
+function below instead returns text to its caller, which decides how to use it.
 
 ### rune.input.open_editor
 
@@ -77,19 +145,20 @@ rune.history.get()     -- submitted text, oldest first
 rune.history.add(cmd)  -- append a normal command entry
 ```
 
-History survives `/reload`. Input hooks run before Rune stores the current
-submission. Rune stores the final non-empty text with its original command or
-verbatim mode. A canceled submission or an accepted rewrite to `""` is not
-added. Arrow navigation and `ctrl+r` restore the stored mode, so even a
-one-line verbatim entry returns to the composer. Consecutive entries are
+History survives `/reload`. After processing a submission, Rune stores the
+surviving lines together with their original Command or Verbatim mode. Consumed
+and invalid lines are omitted. An empty final history string is not added.
+Input hooks, echo hooks, and command handlers do not see the current submission
+in history while it is running. Explicit `add` calls remain visible immediately.
+Arrow navigation and `ctrl+r` restore the block and its stored mode, so even a
+one-line Verbatim entry returns to the composer. Consecutive entries are
 deduplicated only when both their text and mode match.
 
 `get()` returns the text-only view and does not expose the stored mode.
 `add(cmd)` adds a normal command entry for scripts that want a synthetic
 command (one sent by an alias, say) to be recallable. Because it creates a
-normal command entry, `cmd` must be valid command text: ordinary game commands
-stay on one line, while local `/commands` may have multiline, tab-indented
-arguments. Terminal controls are rejected. Verbatim history entries come only
+normal command entry, `cmd` may contain several newline-separated commands
+and tabs. Invalid UTF-8 and terminal controls are rejected. Verbatim history entries come only
 from submitted verbatim input.
 
 **Related:** [Input & History guide](/interface/input/) ·

@@ -40,6 +40,11 @@ func TestSendRawFailureIsReportedNotRaised(t *testing.T) {
 func TestSendExpansion(t *testing.T) {
 	runFeatureCases(t, []featureCase{
 		{
+			name:  "repeated command beginning with braces",
+			input: "#2 {north};look",
+			want:  []string{"{north}", "{north}", "look"},
+		},
+		{
 			name:  "single command",
 			input: "north",
 			want:  []string{"north"},
@@ -181,27 +186,6 @@ func TestSendEscapesConfiguredSeparator(t *testing.T) {
 	}
 }
 
-func TestRepeatBlocksReportMigrationErrorWithoutSendingFragments(t *testing.T) {
-	for _, text := range []string{
-		"#2 {kill rat;loot}",
-		"look;#2 {kill rat;loot};west",
-		"#2 {kill rat;loot",
-		"#2{north}",
-		"#2 {}",
-	} {
-		t.Run(text, func(t *testing.T) {
-			engine, host, cleanup := setupTest(t)
-			defer cleanup()
-
-			assertLua(t, engine, fmt.Sprintf(`rune.send(%q)`, text))
-			assertCommands(t, host, nil)
-			if output := strings.Join(host.DrainPrintCalls(), "\n"); !strings.Contains(output, "repeat an alias with #N name instead") {
-				t.Fatalf("missing migration guidance: %q", output)
-			}
-		})
-	}
-}
-
 func TestRepeatedAliasReceivesDecodedArgumentsEachTime(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
@@ -272,54 +256,11 @@ func TestSendExpansionUsesConfiguredCommandSeparator(t *testing.T) {
 	})
 }
 
-func TestVerbatimInputPreservesLinesAndBypassesCommands(t *testing.T) {
-	engine, host, cleanup := setupTest(t)
-	defer cleanup()
-
-	if err := engine.DoString("setup", `
-		rune.alias.exact("aliased", "expanded")
-	`); err != nil {
-		t.Fatalf("setup failed: %v", err)
-	}
-
-	draft := "  indented;still one line;;  \n\n/quit\n#2 north\naliased\ntrailing  \n"
-	dispatchTestSubmission(engine, input.Verbatim(draft))
-
-	assertCommands(t, host, []string{
-		"  indented;still one line;;  ",
-		"",
-		"/quit",
-		"#2 north",
-		"aliased",
-		"trailing  ",
-		"",
-	})
-	if host.QuitCalled {
-		t.Fatal("verbatim /quit must be sent as data")
-	}
-}
-
-func TestVerbatimInputDegradedModePreservesPhysicalLines(t *testing.T) {
-	engine, host, cleanup := setupTest(t)
-	defer cleanup()
-
-	if err := engine.DoString("sabotage", "rune.hooks = nil"); err != nil {
-		t.Fatalf("sabotage failed: %v", err)
-	}
-
-	dispatchTestSubmission(engine, input.Verbatim("first\r\n\r/quit\r"))
-
-	assertCommands(t, host, []string{"first", "", "/quit", ""})
-	if host.QuitCalled {
-		t.Fatal("degraded verbatim /quit must be sent as data")
-	}
-}
-
 func TestInputWithCommandContextKeepsNormalExpansion(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 
-	dispatchTestSubmission(engine, input.Command("look;#2 north"))
+	dispatchTestCommand(engine, "look;#2 north")
 
 	assertCommands(t, host, []string{"look", "north", "north"})
 }
@@ -386,7 +327,7 @@ func TestInputDispatchDoesNotRunInputHooks(t *testing.T) {
 		rune.hooks.on("input", function()
 			input_hook_calls = input_hook_calls + 1
 		end, {name = "dispatch-observer", priority = 1})
-		rune.input._dispatch("look;#2 north", "command")
+		rune.input._execute_input_line("look;#2 north", "command")
 		assert(input_hook_calls == 0)
 	`); err != nil {
 		t.Fatal(err)
@@ -400,12 +341,12 @@ func TestInputDispatchVerbatimBypassesCommandSyntax(t *testing.T) {
 	defer cleanup()
 
 	if err := engine.DoString("dispatch verbatim", `
-		rune.input._dispatch("first;second\n/quit", "verbatim")
+		rune.input._execute_input_line("/quit;#2 north", "verbatim")
 	`); err != nil {
 		t.Fatal(err)
 	}
 
-	assertCommands(t, host, []string{"first;second", "/quit"})
+	assertCommands(t, host, []string{"/quit;#2 north"})
 	if host.QuitCalled {
 		t.Fatal("verbatim dispatcher interpreted /quit")
 	}
@@ -442,13 +383,12 @@ func TestVerbatimInputHookReceivesContextAndCanConsume(t *testing.T) {
 		t.Fatalf("setup failed: %v", err)
 	}
 
-	draft := "first;second\n/quit"
-	dispatchTestSubmission(engine, input.Verbatim(draft))
+	dispatchTestLine(engine, input.Line{Text: "/quit", Mode: input.ModeVerbatim})
 
 	assertCommands(t, host, nil)
 	assertLua(t, engine, `
 		assert(observed_mode == "verbatim")
-		assert(observed_text == "first;second\n/quit")
+		assert(observed_text == "/quit")
 	`)
 }
 
@@ -470,9 +410,9 @@ func TestInputHookCannotMutateVerbatimRouting(t *testing.T) {
 		t.Fatalf("setup failed: %v", err)
 	}
 
-	dispatchTestSubmission(engine, input.Verbatim("first;second\n/quit"))
+	dispatchTestLine(engine, input.Line{Text: "/quit", Mode: input.ModeVerbatim})
 
-	assertCommands(t, host, []string{"context-readonly", "first;second", "/quit"})
+	assertCommands(t, host, []string{"context-readonly", "/quit"})
 	if host.QuitCalled {
 		t.Fatal("mutating one hook context changed canonical verbatim routing")
 	}
@@ -484,19 +424,19 @@ func TestInputRewritePreservesVerbatimMode(t *testing.T) {
 
 	if err := engine.DoString("rewrite verbatim", `
 		rune.hooks.on("input", function()
-			return "first;second\nthird"
+			return "first;second"
 		end, { priority = 90 })
 	`); err != nil {
 		t.Fatal(err)
 	}
 
-	effective, proceed := engine.ApplyInputHooks(input.Verbatim("original"))
-	if !proceed || effective != input.Verbatim("first;second\nthird") {
+	effective, proceed := processTestLine(engine, input.Line{Text: "original", Mode: input.ModeVerbatim})
+	if !proceed || effective != (input.Line{Text: "first;second", Mode: input.ModeVerbatim}) {
 		t.Fatalf("effective submission = %+v proceed=%v", effective, proceed)
 	}
-	engine.DispatchSubmission(effective)
+	engine.ExecuteInputLine(effective)
 
-	assertCommands(t, host, []string{"first;second", "third"})
+	assertCommands(t, host, []string{"first;second"})
 }
 
 func TestOneArgumentInputHookStillObservesVerbatim(t *testing.T) {
@@ -511,10 +451,10 @@ func TestOneArgumentInputHookStillObservesVerbatim(t *testing.T) {
 		t.Fatalf("setup failed: %v", err)
 	}
 
-	dispatchTestSubmission(engine, input.Verbatim("one\ntwo"))
+	dispatchTestLine(engine, input.Line{Text: "two", Mode: input.ModeVerbatim})
 
-	assertCommands(t, host, []string{"one", "two"})
-	assertLua(t, engine, `assert(observed == "one\ntwo")`)
+	assertCommands(t, host, []string{"two"})
+	assertLua(t, engine, `assert(observed == "two")`)
 }
 
 func TestSendRawSplitsEmbeddedNewlines(t *testing.T) {

@@ -1,8 +1,7 @@
 package lua
 
-// The named `history-expansion` input hook (72_history_expansion.lua) runs
-// before history is recorded and the command is processed. Programmatic
-// rune.send remains separate from interactive input history.
+// Interactive history resolves before input hooks, echo, recording, and dispatch.
+// Programmatic sends and hook rewrites do not re-enter expansion.
 
 import (
 	"fmt"
@@ -73,17 +72,18 @@ func TestHistoryReplaysSingleCommandRepeatsWithLiteralBraces(t *testing.T) {
 	assertHistory(t, host, "#2 say {one;;two}")
 }
 
-// commitAndDispatchTestCommand mirrors Session's hook, history, and command
-// processing order for these Lua-focused tests; local echo is omitted. A
-// literal false cancels the submission before history and command processing.
+// commitAndDispatchTestCommand drives a single input line without local echo.
+// A literal false consumes the line before history and command processing.
 func commitAndDispatchTestCommand(t *testing.T, engine *Engine, host *MockHost, text string) bool {
 	t.Helper()
-	effective, proceed := engine.ApplyInputHooks(input.Command(text))
+	effective, proceed := processTestLine(engine, input.Line{Text: text, Mode: input.ModeCommand})
 	if !proceed {
 		return false
 	}
+	if err := engine.ExecuteInputLine(effective); err != nil {
+		t.Fatal(err)
+	}
 	host.AddToHistory(effective.Text)
-	engine.DispatchSubmission(effective)
 	return true
 }
 
@@ -109,7 +109,7 @@ func TestHistoryExpansionPreservesStoredSurroundingWhitespace(t *testing.T) {
 	defer cleanup()
 
 	host.HistoryEntries = []input.Submission{input.Command("  kill rat  ")}
-	effective, proceed := engine.ApplyInputHooks(input.Command("!ki"))
+	effective, proceed := processTestLine(engine, input.Line{Text: "!ki", Mode: input.ModeCommand})
 	if !proceed || effective.Text != "  kill rat  " {
 		t.Fatalf("submit = (%q, %v), want exact stored command", effective.Text, proceed)
 	}
@@ -123,7 +123,7 @@ func TestHistoryExpansionSkipsWhitespaceOnlyHistory(t *testing.T) {
 		input.Command("north"),
 		input.Command("   "),
 	}
-	effective, proceed := engine.ApplyInputHooks(input.Command("!"))
+	effective, proceed := processTestLine(engine, input.Line{Text: "!", Mode: input.ModeCommand})
 	if !proceed || effective.Text != "north" {
 		t.Fatalf("submit = (%q, %v), want prior non-blank command", effective.Text, proceed)
 	}
@@ -240,19 +240,16 @@ func TestBangOnEmptyHistoryWarns(t *testing.T) {
 	}
 }
 
-func TestBangInputHookIsRemovable(t *testing.T) {
+func TestHistoryExpansionSurvivesClearingInputHooks(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
-
-	if err := engine.DoString("setup", `assert(rune.hooks.remove("history-expansion"))`); err != nil {
-		t.Fatal(err)
-	}
-	commitAndDispatchTestCommand(t, engine, host, "n")
+	assertLua(t, engine, `
+        assert(rune.hooks.get("history-expansion") == nil)
+        rune.hooks.clear("input")
+    `)
+	commitAndDispatchTestCommand(t, engine, host, "north")
 	commitAndDispatchTestCommand(t, engine, host, "!")
-
-	// With the input transform removed, `!` goes to the server untouched.
-	assertCommands(t, host, []string{"n", "!"})
-	assertHistory(t, host, "n", "!")
+	assertCommands(t, host, []string{"north", "north"})
 }
 
 func TestBangExpandsCommandSeparatorComponentsAtomically(t *testing.T) {
@@ -330,14 +327,14 @@ func TestHistoryExpansionUsesConfiguredCharacterLiterally(t *testing.T) {
 				{text: "east;" + test.marker + "lo", want: "east;look"},
 				{text: "!", want: "!"},
 			} {
-				effective, proceed := engine.ApplyInputHooks(input.Command(rewrite.text))
+				effective, proceed := processTestLine(engine, input.Line{Text: rewrite.text, Mode: input.ModeCommand})
 				if !proceed || effective.Text != rewrite.want {
 					t.Fatalf("submit %q = (%q, %v), want (%q, true)",
 						rewrite.text, effective.Text, proceed, rewrite.want)
 				}
 			}
 
-			if _, proceed := engine.ApplyInputHooks(input.Command(test.marker + "missing")); proceed {
+			if _, proceed := processTestLine(engine, input.Line{Text: test.marker + "missing", Mode: input.ModeCommand}); proceed {
 				t.Fatal("unmatched configured history designator was accepted")
 			}
 			warning := "no matching command: " + test.marker + "missing"
@@ -389,7 +386,7 @@ func TestHistoryExpansionFiltersStoredEntriesByCurrentCharacter(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	effective, proceed := engine.ApplyInputHooks(input.Command("^"))
+	effective, proceed := processTestLine(engine, input.Line{Text: "^", Mode: input.ModeCommand})
 	if !proceed || effective.Text != "!old" {
 		t.Fatalf("caret submit = (%q, %v), want old literal bang entry", effective.Text, proceed)
 	}
@@ -398,7 +395,7 @@ func TestHistoryExpansionFiltersStoredEntriesByCurrentCharacter(t *testing.T) {
 		`rune.config.set("history_character", "!")`); err != nil {
 		t.Fatal(err)
 	}
-	effective, proceed = engine.ApplyInputHooks(input.Command("!"))
+	effective, proceed = processTestLine(engine, input.Line{Text: "!", Mode: input.ModeCommand})
 	if !proceed || effective.Text != "^staged" {
 		t.Fatalf("bang submit = (%q, %v), want old literal caret entry", effective.Text, proceed)
 	}
@@ -414,7 +411,7 @@ func TestCommandSeparatorTakesPrecedenceOverDoubledHistoryCharacter(t *testing.T
 	}
 	host.HistoryEntries = []input.Submission{input.Command("look")}
 
-	effective, proceed := engine.ApplyInputHooks(input.Command("!!"))
+	effective, proceed := processTestLine(engine, input.Line{Text: "!!", Mode: input.ModeCommand})
 	if !proceed || effective.Text != "!!" {
 		t.Fatalf("submit = (%q, %v), want separator text unchanged", effective.Text, proceed)
 	}
@@ -478,25 +475,53 @@ func TestBangDoesNotExpandInsideSlashSubmission(t *testing.T) {
 	assertHistory(t, host, "north", "/echo marker;!")
 }
 
-func TestBangTransformsAtPriorityOneHundred(t *testing.T) {
+func TestHistoryExpansionPrecedesEveryInputHook(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
+	host.HistoryEntries = []input.Submission{input.Command("kill goblin")}
+	assertLua(t, engine, `
+        seen = {}
+        rune.hooks.on("input", function(text)
+            seen[#seen + 1] = text
+        end, {priority = -100})
+        rune.hooks.on("input", function(text)
+            seen[#seen + 1] = text
+        end, {priority = 150})
+    `)
+	commitAndDispatchTestCommand(t, engine, host, "north;!!;look")
+	assertCommands(t, host, []string{"north", "kill goblin", "look"})
+	assertLua(t, engine, `
+        assert(#seen == 2)
+        assert(seen[1] == "north;kill goblin;look")
+        assert(seen[2] == seen[1])
+    `)
+}
 
-	commitAndDispatchTestCommand(t, engine, host, "north")
-	if err := engine.DoString("priority", `
-		rune.hooks.on("input", function(text)
-			if text == "again" then return "!" end
-		end, {name = "before-repeat", priority = 90})
-		rune.hooks.on("input", function(text)
-			seen_after_repeat = text
-		end, {name = "after-repeat", priority = 110})
-	`); err != nil {
-		t.Fatal(err)
+func TestInputRewriteDoesNotReenterHistoryExpansion(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+	host.HistoryEntries = []input.Submission{input.Command("north")}
+	assertLua(t, engine, `
+        rune.hooks.on("input", function() return "!!" end, {priority = -100})
+    `)
+	dispatchTestCommand(engine, "again")
+	assertCommands(t, host, []string{"!!"})
+}
+
+func TestMissingHistoryMatchDoesNotRunInputHooks(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+	assertLua(t, engine, `
+        rune.hooks.on("input", function() error("must not run") end, {priority = -100})
+    `)
+	if dispatchTestCommand(engine, "north;!missing") {
+		t.Fatal("unresolved history was accepted")
 	}
-	commitAndDispatchTestCommand(t, engine, host, "again")
-
-	assertCommands(t, host, []string{"north", "north"})
-	assertLua(t, engine, `assert(seen_after_repeat == "north")`)
+	assertCommands(t, host, nil)
+	printed := strings.Join(host.DrainPrintCalls(), "\n")
+	if !strings.Contains(printed, "no matching command") || strings.Contains(printed, "must not run") {
+		t.Fatalf("unexpected errors: %s", printed)
+	}
 }
 
 func TestProgrammaticSendDoesNotExpandHistory(t *testing.T) {
@@ -541,11 +566,11 @@ func TestVerbatimBangIsLiteral(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 
-	effective, proceed := engine.ApplyInputHooks(input.Verbatim("!"))
-	if !proceed || effective != input.Verbatim("!") {
+	effective, proceed := processTestLine(engine, input.Line{Text: "!", Mode: input.ModeVerbatim})
+	if !proceed || effective != (input.Line{Text: "!", Mode: input.ModeVerbatim}) {
 		t.Fatalf("verbatim transform = %+v proceed=%v", effective, proceed)
 	}
-	engine.DispatchSubmission(effective)
+	engine.ExecuteInputLine(effective)
 
 	assertCommands(t, host, []string{"!"})
 }

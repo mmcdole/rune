@@ -1,5 +1,5 @@
 -- Slash Command System
--- Built on rune.registry (15_registry.lua), so commands get the same
+-- Built on rune.registry (20_registry.lua), so commands get the same
 -- upsert-by-name, source attribution, and failure quarantine as every
 -- other callback registry. A command that keeps throwing is disabled
 -- individually - it can never take the terminal input dispatcher down with it.
@@ -28,7 +28,7 @@ local registry = rune.registry.new{
 
 rune.command = {}
 
--- Add a slash command. opts: group (see 15_registry.lua).
+-- Add a slash command. opts: group (see 20_registry.lua).
 -- Returns a handle with :enable/:disable/:remove.
 function rune.command.add(name, handler, description, opts)
     if type(name) ~= "string" then

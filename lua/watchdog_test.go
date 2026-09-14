@@ -4,7 +4,79 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/mmcdole/rune/script"
 )
+
+func TestExecutionScopeSharesOneWatchdogDeadline(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+	engine.CallTimeout = 100 * time.Millisecond
+	engine.vm.RegisterModule("batchprobe", map[string]script.GoFunc{
+		"pause": func(c *script.Call) error {
+			time.Sleep(60 * time.Millisecond) // Each call fits; the complete batch does not.
+			return nil
+		},
+	}, nil)
+	err := func() (err error) {
+		finish := engine.BeginExecution()
+		defer func() { err = finish(err) }()
+		for range 3 {
+			if err := engine.DoString("batch line", `batchprobe.pause(); rune.send_raw("line")`); err != nil {
+				return err
+			}
+		}
+		return nil
+	}()
+	if err == nil || !strings.Contains(err.Error(), "interrupted") {
+		t.Fatalf("batch deadline: %v", err)
+	}
+	if got := host.DrainNetworkCalls(); len(got) >= 3 {
+		t.Fatalf("all lines executed: %q", got)
+	}
+	if err := engine.DoString("after batch", `rune.send_raw("still usable")`); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNestedExecutionScopeKeepsOuterDeadline(t *testing.T) {
+	engine, _, cleanup := setupTest(t)
+	defer cleanup()
+	outer := engine.BeginExecution()
+	ctx := engine.vm.Context()
+	inner := engine.BeginExecution()
+	if err := inner(nil); err != nil {
+		t.Fatal(err)
+	}
+	if engine.vm.Context() != ctx {
+		t.Fatal("nested scope replaced or removed outer deadline")
+	}
+	engine.guardCancel()
+	if err := engine.DoString("expired outer", "error('must not execute')"); err == nil {
+		t.Fatal("nested scope lost the outer deadline")
+	}
+	if err := outer(nil); err == nil {
+		t.Fatal("scope exit hid deadline exhaustion")
+	}
+	if err := engine.DoString("fresh execution", "assert(true)"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestExecutionScopeDoesNotEnterLuaAfterDeadline(t *testing.T) {
+	engine, _, cleanup := setupTest(t)
+	defer cleanup()
+	called := false
+	err := func() (err error) {
+		finish := engine.BeginExecution()
+		defer func() { err = finish(err) }()
+		engine.guardCancel()
+		return engine.guard(func() error { called = true; return nil })
+	}()
+	if err == nil || called {
+		t.Fatalf("expired batch entered Lua: called=%v err=%v", called, err)
+	}
+}
 
 // runawayLoop returns an infinite loop the active backend's watchdog
 // can actually interrupt. Lunar polls its installed context at bounded
