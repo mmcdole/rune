@@ -1,6 +1,6 @@
 package lua
 
-// GMCP policy tests (70_gmcp.lua): dispatch, decoding, handshake,
+// GMCP policy tests (60_gmcp.lua): dispatch, decoding, handshake,
 // quarantine, and the send bridge, driven against MockHost. The e2e
 // wiring proof lives in test/e2e/scenarios/gmcp.json.
 

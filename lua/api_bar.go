@@ -5,7 +5,7 @@ import (
 	"github.com/mmcdole/rune/ui"
 )
 
-// Bar renderers are owned by the Lua bar module (35_bars.lua), which
+// Bar renderers are owned by the Lua bar module (32_bars.lua), which
 // also applies the standard failure quarantine. Go's role is calling
 // rune.bars._render_all on the tick and marshaling the result.
 

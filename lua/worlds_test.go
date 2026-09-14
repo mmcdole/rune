@@ -1,7 +1,7 @@
 package lua
 
-// World bookmarks and connect-target resolution (65_worlds.lua and the
-// /connect and /reconnect commands in 55_commands.lua), driven against
+// World bookmarks and connect-target resolution (56_worlds.lua and the
+// /connect and /reconnect commands in 48_commands.lua), driven against
 // MockHost. The e2e wiring proofs live in
 // test/e2e/scenarios/connection.json.
 

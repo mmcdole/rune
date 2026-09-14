@@ -20,7 +20,7 @@
 --   enabled  -- individual switch (see reg:active)
 --   priority -- opts.priority or 50, lower runs first
 --   name     -- opts.name, unique: adding a duplicate replaces the old
---   group    -- opts.group, master-switch membership (25_groups.lua)
+--   group    -- opts.group, master-switch membership (24_groups.lua)
 --   once     -- opts.once, module removes the item after first fire
 --   _handle  -- back-reference to the handle
 --

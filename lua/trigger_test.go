@@ -1,6 +1,6 @@
 package lua
 
-// Trigger semantics (50_triggers.lua): the variant matrix for match
+// Trigger semantics (44_triggers.lua): the variant matrix for match
 // types, handles, raw/ANSI matching, capture substitution, and
 // rewrite chaining. Span triggers live in span_test.go; registry
 // semantics (upsert, priority, once) in registry_test.go; the e2e

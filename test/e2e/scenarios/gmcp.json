@@ -1,5 +1,5 @@
 {
-  "description": "GMCP (70_gmcp.lua policy over the Go option-201 transport): handshake, handler dispatch, and survival of malformed data. Handler semantics (quarantine, case-insensitivity, subscriptions) live at the lua/ layer.",
+  "description": "GMCP (60_gmcp.lua policy over the Go option-201 transport): handshake, handler dispatch, and survival of malformed data. Handler semantics (quarantine, case-insensitivity, subscriptions) live at the lua/ layer.",
   "scenarios": [
     {
       "name": "GMCP handshake and package handler dispatch",

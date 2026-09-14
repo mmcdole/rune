@@ -6,7 +6,7 @@ Status: implemented; current ownership is documented in `docs/architecture.md`
 
 `/reload` tears down the Lua VM and re-runs core scripts plus `init.lua` while the
 network connection stays up. GMCP negotiation state, however, is cached inside the VM:
-`70_gmcp.lua` keeps a local `enabled` flag that is set by the `gmcp_enabled` hook and
+`60_gmcp.lua` keeps a local `enabled` flag that is set by the `gmcp_enabled` hook and
 cleared on `disconnected`. Go fires `gmcp_enabled` on an inactive-to-active transition
 in the connection's Session-owned `network.Protocol`.
 

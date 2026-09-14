@@ -6,7 +6,7 @@ import (
 )
 
 // registerInputFuncs registers rune._input.* primitives.
-// The public rune.input API is defined in Lua (90_input.lua).
+// The public rune.input API is defined in Lua (80_editor.lua).
 func (e *Engine) registerInputFuncs() {
 	e.vm.RegisterModule("rune._input", map[string]script.GoFunc{
 		"get": func(c *script.Call) error {

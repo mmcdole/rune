@@ -1,6 +1,6 @@
 package lua
 
-// Group master-switch semantics (25_groups.lua): an item fires only
+// Group master-switch semantics (24_groups.lua): an item fires only
 // if itself enabled AND its group enabled, across every registry.
 
 import "testing"

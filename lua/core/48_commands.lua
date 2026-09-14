@@ -1,10 +1,10 @@
 -- Slash Command System
--- Built on rune.registry (15_registry.lua), so commands get the same
+-- Built on rune.registry (16_registry.lua), so commands get the same
 -- upsert-by-name, source attribution, and failure quarantine as every
 -- other callback registry. A command that keeps throwing is disabled
 -- individually - it can never take the terminal input dispatcher down with it.
 
--- Styling shorthands (see 05_style.lua)
+-- Styling shorthands (see 04_style.lua)
 local green, red, yellow, cyan, dim =
     rune.style.green, rune.style.red, rune.style.yellow,
     rune.style.cyan, rune.style.gray
@@ -28,7 +28,7 @@ local registry = rune.registry.new{
 
 rune.command = {}
 
--- Add a slash command. opts: group (see 15_registry.lua).
+-- Add a slash command. opts: group (see 16_registry.lua).
 -- Returns a handle with :enable/:disable/:remove.
 function rune.command.add(name, handler, description, opts)
     if type(name) ~= "string" then
@@ -109,7 +109,7 @@ function rune.command.list()
 end
 
 -- /connect - three forms, resolved in order:
---   no args              -> picker over saved worlds (65_worlds.lua)
+--   no args              -> picker over saved worlds (56_worlds.lua)
 --   <world name>         -> saved world's address
 --   <host> <port> [tls|tls+insecure], or a bare address ("host:port",
 --                           optionally with a scheme) -> direct

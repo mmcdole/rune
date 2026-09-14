@@ -69,7 +69,7 @@ local registry = rune.registry.new{
 -- handler receives (data, package): data is the decoded JSON value
 -- (table/string/number/boolean, or nil when the message had no body),
 -- package is the name as the server sent it.
--- opts: name, group, priority (see 15_registry.lua).
+-- opts: name, group, priority (see 16_registry.lua).
 -- Returns a handle with :enable/:disable/:remove.
 function rune.gmcp.on(package, handler, opts)
     return registry:add({

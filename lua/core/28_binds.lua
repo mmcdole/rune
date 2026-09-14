@@ -1,5 +1,5 @@
 -- Key Binding System
--- Built on rune.registry (15_registry.lua), so binds get the same
+-- Built on rune.registry (16_registry.lua), so binds get the same
 -- names, groups, source attribution, quarantine, and listings as
 -- hooks/triggers/aliases/timers.
 --
@@ -11,7 +11,7 @@
 --
 -- The key is the registry name, so rune.binds.disable("ctrl+g") and
 -- rune.binds.get("ctrl+g") address a bind by the same string you bound.
--- Options: group (see 15_registry.lua). Once the UI routes a key to a
+-- Options: group (see 16_registry.lua). Once the UI routes a key to a
 -- disabled bind (or disabled group), it is consumed without a callback.
 --
 -- Go's role is transport only: the UI forwards keys present in

@@ -1,5 +1,5 @@
 {
-  "description": "Timers (40_timers.lua): a wiring smoke test. Scheduling semantics live in timer/ and the lua/ layer.",
+  "description": "Timers (36_timers.lua): a wiring smoke test. Scheduling semantics live in timer/ and the lua/ layer.",
   "scenarios": [
     {
       "name": "a scheduled timer runs its action",

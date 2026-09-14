@@ -2,7 +2,7 @@
 -- Named servers, stored durably in rune.store under the "worlds" key
 -- (so they live in <config>/store.json and survive restarts).
 -- /connect resolves world names before host:port parsing, and with no
--- arguments opens a picker over the saved worlds (see 55_commands.lua).
+-- arguments opens a picker over the saved worlds (see 48_commands.lua).
 
 local green, red, yellow, dim =
     rune.style.green, rune.style.red, rune.style.yellow, rune.style.gray
