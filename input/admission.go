@@ -1,6 +1,7 @@
 package input
 
 import (
+	"strings"
 	"unicode/utf8"
 
 	"github.com/mmcdole/rune/text"
@@ -34,4 +35,13 @@ func RequiresStructuredEditor(value string) bool {
 		}
 	}
 	return false
+}
+
+// NormalizeDraftText gives editor text one newline convention and replaces
+// invalid UTF-8 as the rune-based widgets do. Session and UI share this rule
+// so script observers see the same canonical text that the UI will display.
+func NormalizeDraftText(value string) string {
+	value = strings.ReplaceAll(value, "\r\n", "\n")
+	value = strings.ReplaceAll(value, "\r", "\n")
+	return string([]rune(value))
 }

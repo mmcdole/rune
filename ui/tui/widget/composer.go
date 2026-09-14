@@ -1,7 +1,6 @@
 package widget
 
 import (
-	"strings"
 	"unicode"
 
 	tea "charm.land/bubbletea/v2"
@@ -30,13 +29,6 @@ func newComposer(text string, cursor int) *composer {
 	return c
 }
 
-// normalizeComposerText gives the draft one internal newline convention.
-// Ordering matters: replacing lone CR first would turn CRLF into two lines.
-func normalizeComposerText(text string) string {
-	text = strings.ReplaceAll(text, "\r\n", "\n")
-	return strings.ReplaceAll(text, "\r", "\n")
-}
-
 // RequiresComposer reports whether the neutral input policy requires the
 // lossless editor. Kept as a widget-level name for the local call sites; the
 // admission rule itself belongs to the input package.
@@ -53,7 +45,7 @@ func (c *composer) Position() int {
 }
 
 func (c *composer) Set(text string, cursor int) {
-	c.text = []rune(normalizeComposerText(text))
+	c.text = []rune(input.NormalizeDraftText(text))
 	c.SetCursor(cursor)
 	c.goalCol = -1
 	c.topRow = 0
@@ -69,7 +61,7 @@ func (c *composer) CursorEnd() {
 }
 
 func (c *composer) Insert(text string) {
-	runes := []rune(normalizeComposerText(text))
+	runes := []rune(input.NormalizeDraftText(text))
 	if len(runes) == 0 {
 		return
 	}

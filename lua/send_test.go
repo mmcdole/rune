@@ -327,7 +327,7 @@ func TestInputDispatchDoesNotRunInputHooks(t *testing.T) {
 		rune.hooks.on("input", function()
 			input_hook_calls = input_hook_calls + 1
 		end, {name = "dispatch-observer", priority = 1})
-		rune.input._dispatch_line("look;#2 north", "command")
+		rune.input._execute_input_line("look;#2 north", "command")
 		assert(input_hook_calls == 0)
 	`); err != nil {
 		t.Fatal(err)
@@ -341,7 +341,7 @@ func TestInputDispatchVerbatimBypassesCommandSyntax(t *testing.T) {
 	defer cleanup()
 
 	if err := engine.DoString("dispatch verbatim", `
-		rune.input._dispatch_line("/quit;#2 north", "verbatim")
+		rune.input._execute_input_line("/quit;#2 north", "verbatim")
 	`); err != nil {
 		t.Fatal(err)
 	}
@@ -430,11 +430,11 @@ func TestInputRewritePreservesVerbatimMode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	effective, proceed := engine.PrepareInputLine(input.Line{Text: "original", Mode: input.ModeVerbatim})
+	effective, proceed := processTestLine(engine, input.Line{Text: "original", Mode: input.ModeVerbatim})
 	if !proceed || effective != (input.Line{Text: "first;second", Mode: input.ModeVerbatim}) {
 		t.Fatalf("effective submission = %+v proceed=%v", effective, proceed)
 	}
-	engine.DispatchInputLine(effective)
+	engine.ExecuteInputLine(effective)
 
 	assertCommands(t, host, []string{"first;second"})
 }

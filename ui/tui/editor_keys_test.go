@@ -130,7 +130,6 @@ func TestNamedActionRespectsTypingAndPhysicalKeypad(t *testing.T) {
 	bindings["j"] = input.Binding{Action: "input.submit", Enabled: true}
 	bindings["numpad_enter"] = input.Binding{Action: "input.newline", Enabled: true}
 	h.ctl.input.SetBindings(bindings)
-	h.bound["numpad_enter"] = true
 	h.ctl.SetText("draft")
 	h.ctl.HandleKey(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	if h.ctl.input.Value() != "draftj" || len(h.submitted) != 0 {

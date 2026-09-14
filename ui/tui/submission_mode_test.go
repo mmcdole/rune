@@ -69,7 +69,7 @@ func TestAltEnterDoesNotOverrideSubmissionMode(t *testing.T) {
 
 func TestMultilineCommandHistoryRestoresModeAndNavigation(t *testing.T) {
 	h := newControllerHarness()
-	h.bound["down"] = true
+	h.ctl.input.Bindings()["down"] = input.Binding{Enabled: true}
 	draft := input.Command("/lua -- comment\nrune.echo('hello')")
 	h.ctl.SetSubmission(draft)
 	h.ctl.HandleKey(keyPress(tea.KeyDown))

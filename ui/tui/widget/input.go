@@ -244,12 +244,12 @@ func (i *Input) SetValue(s string) {
 	if i.composer != nil {
 		// Preserve the editing surface and interpretation when an edit
 		// replaces the draft with one non-empty physical line.
-		i.composer.Set(s, len([]rune(normalizeComposerText(s))))
+		i.composer.Set(s, len([]rune(input.NormalizeDraftText(s))))
 		i.discardPending = false
 		return
 	}
 	if RequiresComposer(s) {
-		i.BeginCompose(s, len([]rune(normalizeComposerText(s))))
+		i.BeginCompose(s, len([]rune(input.NormalizeDraftText(s))))
 		return
 	}
 	i.textinput.SetValue(s)
@@ -344,7 +344,7 @@ func (i *Input) InsertPaste(text string) tea.Cmd {
 		i.Deselect()
 	}
 	i.discardPending = false
-	text = normalizeComposerText(text)
+	text = input.NormalizeDraftText(text)
 	if i.composer != nil {
 		i.composer.Insert(text)
 		return nil

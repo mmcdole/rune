@@ -52,15 +52,15 @@ var inlinePickerLocalKeys = map[string]bool{
 	"enter": true,
 }
 
-func (c *inputController) handleInlineKey(msg tea.KeyPressMsg) {
+func (c *inputController) handleInlineKey(msg tea.KeyPressMsg, action string) {
 	// The newline action transitions from single-line completion into a structured
 	// draft. Treat it like a bracketed newline paste so the input update is
 	// visible to Lua before the picker callback is cancelled.
-	if c.editorKey(msg, "newline") {
+	if action == "input.newline" {
 		c.handlePaste("\n")
 		return
 	}
-	if c.editorKey(msg, "submit") {
+	if action == "input.submit" {
 		if item, ok := c.input.Picker().Selected(); ok {
 			c.closePicker(true, item.GetValue())
 		} else {
@@ -72,7 +72,7 @@ func (c *inputController) handleInlineKey(msg tea.KeyPressMsg) {
 	// An exact physical numpad bind wins in the inline picker. Without one,
 	// the NumLock-off form becomes the local navigation key engraved on it.
 	if info, ok := numpadNavigation(msg); ok {
-		if key := keyToString(msg); key != "" && c.isBound(key) {
+		if key := keyToString(msg); key != "" && c.input.Bindings().Has(key) {
 			c.notify(ui.ExecuteBindMsg(key))
 			return
 		}
@@ -80,7 +80,7 @@ func (c *inputController) handleInlineKey(msg tea.KeyPressMsg) {
 	}
 	keyStr := keyToString(msg)
 	// Don't send picker navigation keys to Lua - handle them locally
-	if keyStr != "" && c.isBound(keyStr) && !inlinePickerLocalKeys[keyStr] {
+	if keyStr != "" && c.input.Bindings().Has(keyStr) && !inlinePickerLocalKeys[keyStr] {
 		c.notify(ui.ExecuteBindMsg(keyStr))
 		return
 	}

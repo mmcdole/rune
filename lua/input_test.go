@@ -2,8 +2,7 @@ package lua
 
 // Tests for 90_editor.lua: history navigation, word operations, and
 // tab completion. The MockHost input state stands in for the real
-// input widget; input_changed hooks are fired manually where the real
-// UI would emit them.
+// input widget. Only simulated user edits notify draft changes manually.
 
 import (
 	"fmt"
@@ -19,7 +18,7 @@ import (
 // then the UI notifies the session, which fires input_changed.
 func typeInput(engine *Engine, host *MockHost, text string) {
 	host.SetInput(text)
-	engine.NotifyInputChanged(text)
+	engine.NotifyDraftChanged(text)
 }
 
 func assertInput(t *testing.T, host *MockHost, want string) {
@@ -331,9 +330,6 @@ func TestTabCompletionCyclesByRecency(t *testing.T) {
 	for _, step := range steps {
 		engine.HandleKeyBind(step.key)
 		assertInput(t, host, step.want)
-		// The real UI reports the text Tab just set; the identity
-		// check must keep the cycling session alive.
-		engine.NotifyInputChanged(host.GetInput())
 	}
 }
 
@@ -346,7 +342,6 @@ func TestTabCompletionResetsWhenTypingContinues(t *testing.T) {
 	typeInput(engine, host, "go")
 	engine.HandleKeyBind("tab")
 	assertInput(t, host, "goblin ") // most recent match wins
-	engine.NotifyInputChanged(host.GetInput())
 
 	// Typing something new abandons the cycle and re-matches.
 	typeInput(engine, host, "gox")
@@ -421,7 +416,7 @@ func TestCompletionMidLineInsertsWithoutTrailingSpace(t *testing.T) {
 	// Complete in the middle of the line: "kill gob| now".
 	host.SetInput("kill gob now")
 	host.InputSetCursor(8)
-	engine.NotifyInputChanged(host.GetInput())
+	engine.NotifyDraftChanged(host.GetInput())
 
 	engine.HandleKeyBind("tab")
 	// Mid-line completions get no trailing space.
@@ -437,9 +432,57 @@ func TestCompletionMidLineWithMultibyteInput(t *testing.T) {
 
 	host.SetInput("café gob now")
 	host.InputSetCursor(len("café gob"))
-	engine.NotifyInputChanged(host.GetInput())
+	engine.NotifyDraftChanged(host.GetInput())
 
 	engine.HandleKeyBind("tab")
 	assertInput(t, host, "café goblin now")
 	assertCursor(t, host, len("café goblin"))
+}
+
+func TestScriptDraftChangesNotifyBeforeReturning(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+	assertLua(t, engine, `
+  local seen = {}
+  rune.hooks.on("input_changed", function(text)
+   assert(rune.input.get() == text)
+   seen[#seen + 1] = text
+  end)
+  rune.input.set("first")
+  assert(#seen == 1 and seen[1] == "first")
+  rune.input.set("first")
+  assert(#seen == 1, "unchanged text notified twice")
+  rune.input.set("second")
+  assert(#seen == 2 and seen[2] == "second")
+ `)
+	assertInput(t, host, "second")
+}
+
+func TestDraftObserverCanEditDraftSynchronously(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+	assertLua(t, engine, `
+  local seen = {}
+  rune.hooks.on("input_changed", function(text)
+   seen[#seen + 1] = text
+   if text == "first" then rune.input.set("second") end
+  end)
+  rune.input.set("first")
+  assert(table.concat(seen, "|") == "first|second")
+  assert(rune.input.get() == "second")
+ `)
+	assertInput(t, host, "second")
+}
+
+func TestScriptDraftObserversSeeCanonicalText(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+	assertLua(t, engine, `
+  local seen
+  rune.hooks.on("input_changed", function(text) seen = text end)
+  rune.input.set("one\r\ntwo\rthree")
+  assert(seen == "one\ntwo\nthree")
+  assert(rune.input.get() == seen)
+ `)
+	assertInput(t, host, "one\ntwo\nthree")
 }

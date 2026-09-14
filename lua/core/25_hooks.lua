@@ -185,9 +185,7 @@ end
 
 -- Input chains physical lines. Reject newlines before subsequent handlers
 -- can act on them, and isolate each handler's view of the canonical mode.
-local function input_chain(_, handlers, ...)
-    if #handlers == 0 then return ... end
-    local text, context = ...
+local function run_input_hooks(_, handlers, text, context)
     local mode = context and context.mode or "command"
     for _, entry in ipairs(handlers) do
         if registry:active(entry) then
@@ -221,7 +219,7 @@ local chains = {
     output = line_chain,
     prompt = line_chain,
     echo = text_chain,
-    input = input_chain,
+    input = run_input_hooks,
 }
 
 -- Snapshot membership before calling user code. Additions wait for the next

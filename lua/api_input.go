@@ -15,8 +15,14 @@ func (e *Engine) registerInputFuncs() {
 		},
 
 		"set": func(c *script.Call) error {
-			text := c.Str(1)
+			// Store the same text the editor will show, then notify scripts now.
+			// A callback can read or change the draft before this call returns.
+			text := input.NormalizeDraftText(c.Str(1))
+			changed := e.host.GetInput() != text
 			e.host.SetInput(text)
+			if changed {
+				e.NotifyDraftChanged(text)
+			}
 			return nil
 		},
 
@@ -25,7 +31,7 @@ func (e *Engine) registerInputFuncs() {
 		// script edits preserve the current UI mode, while history recall needs
 		// to distinguish equal command and verbatim entries.
 		"restore": func(c *script.Call) error {
-			text := c.Str(1)
+			text := input.NormalizeDraftText(c.Str(1))
 			modeName := c.Str(2)
 			mode := input.ModeCommand
 			switch modeName {
@@ -35,7 +41,11 @@ func (e *Engine) registerInputFuncs() {
 			default:
 				return c.Errorf("bad argument #%d (%s)", 2, "mode must be 'command' or 'verbatim'")
 			}
+			changed := e.host.GetInput() != text
 			e.host.SetInputSubmission(input.Submission{Text: text, Mode: mode})
+			if changed {
+				e.NotifyDraftChanged(text)
+			}
 			return nil
 		},
 

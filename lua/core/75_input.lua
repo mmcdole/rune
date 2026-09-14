@@ -1,7 +1,7 @@
 -- Input processing.
--- Session prepares one physical line, echoes the result, then dispatches it.
+-- Session processes one submitted line, echoes the result, then executes it.
 -- Session owns splitting submissions into lines and recording their history.
--- Programmatic rune.send executes game commands without interactive preparation.
+-- Programmatic rune.send executes game commands without history expansion or input hooks.
 
 -- Send literal game text, splitting LF, CRLF, and bare CR into physical lines.
 -- Bypasses history expansion, input hooks, aliases, repeats, and slash commands.
@@ -235,10 +235,10 @@ function rune.send(input)
     execute_commands(input, 0)
 end
 
--- Prepare one interactive physical line: expand history in Command mode, then
+-- Process one submitted line: expand history in Command mode, then
 -- run input hooks in either mode. Return text, or false to skip this line.
 -- Does not send, echo input, or record history; Session owns those steps.
-function rune.input._prepare_line(text, mode)
+function rune.input._process_submitted_line(text, mode)
     if mode == "command" then
         text = expand_history(text)
         if text == false then return false end
@@ -250,19 +250,19 @@ function rune.input._prepare_line(text, mode)
     return rune.hooks.call("input", text, { mode = mode })
 end
 
--- Route one prepared physical line: Verbatim sends literally; Command mode
--- dispatches a leading slash command or executes game-command syntax.
+-- Execute one processed line: Verbatim sends literally; Command mode
+-- runs a leading slash command or executes game-command syntax.
 -- No input hooks, history expansion, input echo, or history recording here.
-function rune.input._dispatch_line(input, mode)
+function rune.input._execute_input_line(text, mode)
     if mode == "verbatim" then
-        rune.send_raw(input) -- no alias or command interpretation
+        rune.send_raw(text) -- no alias or command interpretation
         return
     end
 
     -- Check for slash command first. Dispatch runs the handler under
     -- its own quarantine, so a broken command is disabled individually
     -- instead of breaking the terminal dispatcher.
-    local cmd, args = input:match("^/(%S+)%s*(.*)")
+    local cmd, args = text:match("^/(%S+)%s*(.*)")
     if cmd then
         if not rune.command.dispatch(cmd, args) then
             rune.echo(rune.style.red("[Error]") .. " Unknown command: /" .. cmd)
@@ -270,5 +270,5 @@ function rune.input._dispatch_line(input, mode)
         return
     end
 
-    rune.send(input)
+    rune.send(text)
 end

@@ -40,7 +40,6 @@ type controllerHarness struct {
 	events     []ui.UIEvent
 	submitted  []input.Submission
 	nextDrafts []string
-	bound      map[string]bool
 	accept     bool
 	fx         *recordingSearchEffects
 	buf        *widget.ScrollbackBuffer
@@ -48,7 +47,6 @@ type controllerHarness struct {
 
 func newControllerHarness() *controllerHarness {
 	h := &controllerHarness{
-		bound:  make(map[string]bool),
 		accept: true,
 		fx:     &recordingSearchEffects{},
 		buf:    widget.NewScrollbackBuffer(100),
@@ -63,7 +61,6 @@ func newControllerHarness() *controllerHarness {
 			h.nextDrafts = append(h.nextDrafts, msg.NextDraft)
 			return h.accept
 		},
-		func(key string) bool { return h.bound[key] },
 		func(tea.KeyPressMsg) bool { return false },
 		h.fx,
 	)
@@ -208,7 +205,6 @@ func TestPickerCallbackSettledOnEveryExit(t *testing.T) {
 		{
 			name:     "inline enter accepts and submits",
 			inline:   true,
-			setup:    func(h *controllerHarness) { h.bound["enter"] = true },
 			key:      keyPress(tea.KeyEnter),
 			accepted: true,
 			value:    "/connect",
@@ -216,7 +212,6 @@ func TestPickerCallbackSettledOnEveryExit(t *testing.T) {
 		{
 			name:     "inline keypad enter accepts and submits",
 			inline:   true,
-			setup:    func(h *controllerHarness) { h.bound["enter"] = true },
 			key:      keyPress(tea.KeyKpEnter),
 			accepted: true,
 			value:    "/connect",
@@ -258,7 +253,6 @@ func TestPickerCallbackSettledOnEveryExit(t *testing.T) {
 // so a second InputChangedMsg would duplicate it.
 func TestAcceptedSubmissionClearsLocalDraftOnce(t *testing.T) {
 	h := newControllerHarness()
-	h.bound["enter"] = true
 	h.ctl.SetText("look north")
 	h.events = nil
 
@@ -291,7 +285,6 @@ func TestKeypadEnterSubmitsNormalAndComposerInput(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h := newControllerHarness()
-			h.bound["enter"] = true
 			h.ctl.SetText(tt.draft)
 			h.events = nil
 
@@ -320,7 +313,7 @@ func TestNumpadBindUsesSameNameAcrossInputEncodings(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h := newControllerHarness()
-			h.bound["numpad8"] = true
+			h.ctl.input.Bindings()["numpad8"] = input.Binding{Enabled: true}
 
 			h.ctl.HandleKey(tt.msg)
 
@@ -355,7 +348,7 @@ func TestModifiedNumpadBindUsesSameNameAcrossInputEncodings(t *testing.T) {
 		for _, mode := range modes {
 			t.Run(encoding.name+"/"+mode.name, func(t *testing.T) {
 				h := newControllerHarness()
-				h.bound["ctrl+numpad8"] = true
+				h.ctl.input.Bindings()["ctrl+numpad8"] = input.Binding{Enabled: true}
 				h.ctl.SetText(mode.draft)
 				h.events = nil
 
@@ -374,8 +367,8 @@ func TestModifiedNumpadBindUsesSameNameAcrossInputEncodings(t *testing.T) {
 
 func TestNormalBoundKpNavigationWinsWithDraft(t *testing.T) {
 	h := newControllerHarness()
-	h.bound["numpad8"] = true
-	h.bound["up"] = true
+	h.ctl.input.Bindings()["numpad8"] = input.Binding{Enabled: true}
+	h.ctl.input.Bindings()["up"] = input.Binding{Enabled: true}
 	h.ctl.SetText("look")
 	h.events = nil
 	wantCursor := h.ctl.input.Position()
@@ -396,7 +389,7 @@ func TestNormalBoundKpNavigationWinsWithDraft(t *testing.T) {
 func TestUnboundKpNavigationActsAsNavigationKey(t *testing.T) {
 	t.Run("bound base key dispatches", func(t *testing.T) {
 		h := newControllerHarness()
-		h.bound["up"] = true
+		h.ctl.input.Bindings()["up"] = input.Binding{Enabled: true}
 
 		h.ctl.HandleKey(keyPress(tea.KeyKpUp))
 
@@ -427,7 +420,7 @@ func TestUnboundKpNavigationActsAsNavigationKey(t *testing.T) {
 func TestComposerKpNavigationUsesEditingBeforeBinds(t *testing.T) {
 	t.Run("unmodified key stays local", func(t *testing.T) {
 		h := newControllerHarness()
-		h.bound["numpad8"] = true
+		h.ctl.input.Bindings()["numpad8"] = input.Binding{Enabled: true}
 		h.ctl.input.SetSize(80, 0)
 		h.ctl.SetText("one\ntwo")
 		h.events = nil
@@ -447,7 +440,7 @@ func TestComposerKpNavigationUsesEditingBeforeBinds(t *testing.T) {
 
 	t.Run("consumed modified key stays local", func(t *testing.T) {
 		h := newControllerHarness()
-		h.bound["ctrl+numpad7"] = true
+		h.ctl.input.Bindings()["ctrl+numpad7"] = input.Binding{Enabled: true}
 		h.ctl.SetText("one\ntwo")
 		h.events = nil
 
@@ -463,8 +456,8 @@ func TestComposerKpNavigationUsesEditingBeforeBinds(t *testing.T) {
 
 	t.Run("unconsumed modified key keeps physical bind", func(t *testing.T) {
 		h := newControllerHarness()
-		h.bound["ctrl+numpad8"] = true
-		h.bound["ctrl+up"] = true
+		h.ctl.input.Bindings()["ctrl+numpad8"] = input.Binding{Enabled: true}
+		h.ctl.input.Bindings()["ctrl+up"] = input.Binding{Enabled: true}
 		h.ctl.SetText("one\ntwo")
 		h.events = nil
 		wantCursor := h.ctl.input.Position()
@@ -481,7 +474,7 @@ func TestComposerKpNavigationUsesEditingBeforeBinds(t *testing.T) {
 
 	t.Run("unconsumed unmodified key does not delegate", func(t *testing.T) {
 		h := newControllerHarness()
-		h.bound["numpad5"] = true
+		h.ctl.input.Bindings()["numpad5"] = input.Binding{Enabled: true}
 		h.ctl.SetText("one\ntwo")
 		h.events = nil
 
@@ -494,7 +487,7 @@ func TestComposerKpNavigationUsesEditingBeforeBinds(t *testing.T) {
 
 	t.Run("unconsumed chord falls back to base bind", func(t *testing.T) {
 		h := newControllerHarness()
-		h.bound["ctrl+up"] = true
+		h.ctl.input.Bindings()["ctrl+up"] = input.Binding{Enabled: true}
 		h.ctl.SetText("one\ntwo")
 		h.events = nil
 
@@ -509,8 +502,8 @@ func TestComposerKpNavigationUsesEditingBeforeBinds(t *testing.T) {
 func TestPickerKpNavigationFollowsModePolicy(t *testing.T) {
 	t.Run("inline physical bind wins", func(t *testing.T) {
 		h := newControllerHarness()
-		h.bound["numpad2"] = true
-		h.bound["down"] = true
+		h.ctl.input.Bindings()["numpad2"] = input.Binding{Enabled: true}
+		h.ctl.input.Bindings()["down"] = input.Binding{Enabled: true}
 		h.ctl.ShowPicker(ui.ShowPickerMsg{Items: pickerTestItems, CallbackID: "cb", Inline: true})
 		h.events = nil
 
@@ -527,7 +520,7 @@ func TestPickerKpNavigationFollowsModePolicy(t *testing.T) {
 
 	t.Run("inline unbound key navigates locally", func(t *testing.T) {
 		h := newControllerHarness()
-		h.bound["down"] = true
+		h.ctl.input.Bindings()["down"] = input.Binding{Enabled: true}
 		h.ctl.ShowPicker(ui.ShowPickerMsg{Items: pickerTestItems, CallbackID: "cb", Inline: true})
 		h.events = nil
 
@@ -544,8 +537,8 @@ func TestPickerKpNavigationFollowsModePolicy(t *testing.T) {
 
 	t.Run("modal always navigates locally", func(t *testing.T) {
 		h := newControllerHarness()
-		h.bound["numpad2"] = true
-		h.bound["down"] = true
+		h.ctl.input.Bindings()["numpad2"] = input.Binding{Enabled: true}
+		h.ctl.input.Bindings()["down"] = input.Binding{Enabled: true}
 		h.ctl.ShowPicker(ui.ShowPickerMsg{Items: pickerTestItems, CallbackID: "cb"})
 		h.events = nil
 
@@ -568,10 +561,10 @@ func TestSearchModeTreatsKpNavigationAsNavigation(t *testing.T) {
 	h.buf.Append("thief one")
 	h.buf.Append("quiet row")
 	h.buf.Append("thief two")
-	h.bound["numpad8"] = true
-	h.bound["numpad2"] = true
-	h.bound["up"] = true
-	h.bound["down"] = true
+	h.ctl.input.Bindings()["numpad8"] = input.Binding{Enabled: true}
+	h.ctl.input.Bindings()["numpad2"] = input.Binding{Enabled: true}
+	h.ctl.input.Bindings()["up"] = input.Binding{Enabled: true}
+	h.ctl.input.Bindings()["down"] = input.Binding{Enabled: true}
 	h.ctl.ShowSearch(ui.ShowSearchMsg{Query: "thief"})
 	h.events = nil
 
@@ -623,7 +616,7 @@ func TestBoundNumpadEnterPrecedesSubmit(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h := newControllerHarness()
-			h.bound["numpad_enter"] = true
+			h.ctl.input.Bindings()["numpad_enter"] = input.Binding{Enabled: true}
 			h.ctl.SetText(tt.draft)
 			h.events = nil
 
@@ -644,7 +637,7 @@ func TestBoundNumpadEnterPrecedesSubmit(t *testing.T) {
 
 func TestBoundCtrlNumpadEnterOverridesDefaultNewline(t *testing.T) {
 	h := newControllerHarness()
-	h.bound["ctrl+numpad_enter"] = true
+	h.ctl.input.Bindings()["ctrl+numpad_enter"] = input.Binding{Enabled: true}
 	h.ctl.SetText("hello")
 	h.events = nil
 
@@ -663,7 +656,7 @@ func TestBoundCtrlNumpadEnterOverridesDefaultNewline(t *testing.T) {
 // key is configured as a hotkey for an empty input line.
 func TestBracketedPasteBypassesPrintableBind(t *testing.T) {
 	h := newControllerHarness()
-	h.bound["j"] = true
+	h.ctl.input.Bindings()["j"] = input.Binding{Enabled: true}
 
 	h.ctl.HandlePaste("j")
 
@@ -771,7 +764,7 @@ func TestAltGrTextIsTypedInEveryInputMode(t *testing.T) {
 
 	t.Run("normal", func(t *testing.T) {
 		h := newControllerHarness()
-		h.bound["ctrl+alt+q"] = true
+		h.ctl.input.Bindings()["ctrl+alt+q"] = input.Binding{Enabled: true}
 		h.ctl.SetText("say ")
 		h.events = nil
 
@@ -839,7 +832,6 @@ func TestAltGrTextIsTypedInEveryInputMode(t *testing.T) {
 // visible composer instead of submitting it or delegating to Lua.
 func TestCtrlJInsertsComposerNewline(t *testing.T) {
 	h := newControllerHarness()
-	h.bound["ctrl+j"] = true
 	h.ctl.SetText("hello")
 	h.events = nil
 
@@ -1091,7 +1083,6 @@ func TestModifiedEscapeDoesNotCancelInternalModes(t *testing.T) {
 // TestCtrlEInComposerRequestsEditor verifies the current draft reaches Session.
 func TestCtrlEInComposerRequestsEditor(t *testing.T) {
 	h := newControllerHarness()
-	h.bound["ctrl+e"] = true
 	draft := "one\ntwo"
 	h.ctl.SetText(draft)
 	h.events = nil
@@ -1135,8 +1126,8 @@ func TestSetSubmissionForcesOneLineVerbatimComposer(t *testing.T) {
 
 func TestRecalledVerbatimHistoryFallsThroughAtVisualBoundaries(t *testing.T) {
 	h := newControllerHarness()
-	h.bound["up"] = true
-	h.bound["down"] = true
+	h.ctl.input.Bindings()["up"] = input.Binding{Enabled: true}
+	h.ctl.input.Bindings()["down"] = input.Binding{Enabled: true}
 	h.ctl.input.SetSize(40, 0)
 	h.ctl.SetSubmission(input.Verbatim("one\ntwo"))
 	h.events = nil
@@ -1169,7 +1160,7 @@ func TestRecalledVerbatimHistoryFallsThroughAtVisualBoundaries(t *testing.T) {
 
 func TestEditingRecalledVerbatimKeepsArrowsLocal(t *testing.T) {
 	h := newControllerHarness()
-	h.bound["up"] = true
+	h.ctl.input.Bindings()["up"] = input.Binding{Enabled: true}
 	h.ctl.SetSubmission(input.Verbatim("one line"))
 	h.events = nil
 
@@ -1250,7 +1241,7 @@ func TestInlineTabReportsCompletedInput(t *testing.T) {
 // are never gated on empty input).
 func TestReboundHomeOverridesInputCursor(t *testing.T) {
 	h := newControllerHarness()
-	h.bound["home"] = true
+	h.ctl.input.Bindings()["home"] = input.Binding{Enabled: true}
 
 	h.ctl.HandleKey(textPress("look"))
 	h.ctl.HandleKey(keyPress(tea.KeyHome))
@@ -1369,8 +1360,8 @@ func TestSearchOpensWithPreviewAndSteps(t *testing.T) {
 func TestSearchTrapsBoundKeys(t *testing.T) {
 	h := newControllerHarness()
 	h.buf.Append("j marks the spot")
-	h.bound["j"] = true
-	h.bound["ctrl+t"] = true
+	h.ctl.input.Bindings()["j"] = input.Binding{Enabled: true}
+	h.ctl.input.Bindings()["ctrl+t"] = input.Binding{Enabled: true}
 
 	h.ctl.ShowSearch(ui.ShowSearchMsg{})
 	h.ctl.HandleKey(textPress("j"))
@@ -1530,7 +1521,7 @@ func TestKeepOnSubmitPasteReplacesSelection(t *testing.T) {
 // fully selected line counts as empty, so printable hotkeys keep firing.
 func TestKeepOnSubmitSelectedFiresPrintableBind(t *testing.T) {
 	h := submitKept(t, "north")
-	h.bound["n"] = true
+	h.ctl.input.Bindings()["n"] = input.Binding{Enabled: true}
 
 	h.ctl.HandleKey(textPress("n"))
 
@@ -1646,7 +1637,7 @@ func TestShiftBackspaceBindingPrecedence(t *testing.T) {
 	for _, mode := range []string{"normal", "inline", "compose"} {
 		t.Run(mode, func(t *testing.T) {
 			h := newControllerHarness()
-			h.bound["shift+backspace"] = true
+			h.ctl.input.Bindings()["shift+backspace"] = input.Binding{Enabled: true}
 			h.ctl.input.SetValue("HELLO")
 			h.ctl.input.CursorEnd()
 			if mode == "inline" {

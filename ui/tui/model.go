@@ -79,7 +79,7 @@ func NewModel(events chan<- ui.UIEvent) *Model {
 		styles: styles,
 		layout: ui.DefaultLayoutTree(),
 	}
-	m.inputCtl = newInputController(input, m.notifySession, m.submit, m.isBound, m.handleScrollKey, m)
+	m.inputCtl = newInputController(input, m.notifySession, m.submit, m.handleScrollKey, m)
 
 	return m
 }
@@ -145,6 +145,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Input primitives (from Lua)
 	case ui.InputSetCursorMsg:
 		m.input.SetCursor(int(msg))
+		m.notifySession(ui.DraftAppliedMsg{Text: m.input.Value(), Cursor: m.input.Position()})
 		return m, nil
 
 	// Clipboard (from Lua). OSC 52 asks the terminal emulator to set
@@ -350,11 +351,6 @@ func (m *Model) submit(msg ui.InputSubmittedMsg) bool {
 	}
 	m.showWarning("Input not sent - engine lagging")
 	return false
-}
-
-func (m *Model) isBound(key string) bool {
-	_, ok := m.input.Bindings()[key]
-	return ok
 }
 
 func (m *Model) tryPost(event ui.UIEvent) bool {

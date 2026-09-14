@@ -139,3 +139,22 @@ func TestNamedEditorAppliesOnlySuccessfulResults(t *testing.T) {
 		})
 	}
 }
+
+func TestAppliedDraftReconcilesQueuedTypingWithoutNotifyingAgain(t *testing.T) {
+	s, _, _ := newTestSession(t)
+	assertSessionLua(t, s.engine, `
+  changes = {}
+  rune.hooks.on("input_changed", function(text) changes[#changes + 1] = text end)
+  rune.input.set("script edit")
+  rune.input.set_cursor(3)
+ `)
+	// The UI had already queued typing before it received the script's edit.
+	s.handleUIEvent(ui.InputChangedMsg{Text: "older typing", Cursor: 12})
+	// Its applied edit and cursor then arrive in UI order, without callbacks.
+	s.handleUIEvent(ui.DraftAppliedMsg{Text: "script edit", Cursor: 11})
+	s.handleUIEvent(ui.DraftAppliedMsg{Text: "script edit", Cursor: 3})
+	if s.GetInput() != "script edit" || s.InputGetCursor() != 3 {
+		t.Fatalf("mirror = %q at %d", s.GetInput(), s.InputGetCursor())
+	}
+	assertSessionLua(t, s.engine, `assert(table.concat(changes, "|") == "script edit|older typing")`)
+}

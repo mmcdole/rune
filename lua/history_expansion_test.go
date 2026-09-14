@@ -76,11 +76,11 @@ func TestHistoryReplaysSingleCommandRepeatsWithLiteralBraces(t *testing.T) {
 // A literal false consumes the line before history and command processing.
 func commitAndDispatchTestCommand(t *testing.T, engine *Engine, host *MockHost, text string) bool {
 	t.Helper()
-	effective, proceed := engine.PrepareInputLine(input.Line{Text: text, Mode: input.ModeCommand})
+	effective, proceed := processTestLine(engine, input.Line{Text: text, Mode: input.ModeCommand})
 	if !proceed {
 		return false
 	}
-	if err := engine.DispatchInputLine(effective); err != nil {
+	if err := engine.ExecuteInputLine(effective); err != nil {
 		t.Fatal(err)
 	}
 	host.AddToHistory(effective.Text)
@@ -109,7 +109,7 @@ func TestHistoryExpansionPreservesStoredSurroundingWhitespace(t *testing.T) {
 	defer cleanup()
 
 	host.HistoryEntries = []input.Submission{input.Command("  kill rat  ")}
-	effective, proceed := engine.PrepareInputLine(input.Line{Text: "!ki", Mode: input.ModeCommand})
+	effective, proceed := processTestLine(engine, input.Line{Text: "!ki", Mode: input.ModeCommand})
 	if !proceed || effective.Text != "  kill rat  " {
 		t.Fatalf("submit = (%q, %v), want exact stored command", effective.Text, proceed)
 	}
@@ -123,7 +123,7 @@ func TestHistoryExpansionSkipsWhitespaceOnlyHistory(t *testing.T) {
 		input.Command("north"),
 		input.Command("   "),
 	}
-	effective, proceed := engine.PrepareInputLine(input.Line{Text: "!", Mode: input.ModeCommand})
+	effective, proceed := processTestLine(engine, input.Line{Text: "!", Mode: input.ModeCommand})
 	if !proceed || effective.Text != "north" {
 		t.Fatalf("submit = (%q, %v), want prior non-blank command", effective.Text, proceed)
 	}
@@ -327,14 +327,14 @@ func TestHistoryExpansionUsesConfiguredCharacterLiterally(t *testing.T) {
 				{text: "east;" + test.marker + "lo", want: "east;look"},
 				{text: "!", want: "!"},
 			} {
-				effective, proceed := engine.PrepareInputLine(input.Line{Text: rewrite.text, Mode: input.ModeCommand})
+				effective, proceed := processTestLine(engine, input.Line{Text: rewrite.text, Mode: input.ModeCommand})
 				if !proceed || effective.Text != rewrite.want {
 					t.Fatalf("submit %q = (%q, %v), want (%q, true)",
 						rewrite.text, effective.Text, proceed, rewrite.want)
 				}
 			}
 
-			if _, proceed := engine.PrepareInputLine(input.Line{Text: test.marker + "missing", Mode: input.ModeCommand}); proceed {
+			if _, proceed := processTestLine(engine, input.Line{Text: test.marker + "missing", Mode: input.ModeCommand}); proceed {
 				t.Fatal("unmatched configured history designator was accepted")
 			}
 			warning := "no matching command: " + test.marker + "missing"
@@ -386,7 +386,7 @@ func TestHistoryExpansionFiltersStoredEntriesByCurrentCharacter(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	effective, proceed := engine.PrepareInputLine(input.Line{Text: "^", Mode: input.ModeCommand})
+	effective, proceed := processTestLine(engine, input.Line{Text: "^", Mode: input.ModeCommand})
 	if !proceed || effective.Text != "!old" {
 		t.Fatalf("caret submit = (%q, %v), want old literal bang entry", effective.Text, proceed)
 	}
@@ -395,7 +395,7 @@ func TestHistoryExpansionFiltersStoredEntriesByCurrentCharacter(t *testing.T) {
 		`rune.config.set("history_character", "!")`); err != nil {
 		t.Fatal(err)
 	}
-	effective, proceed = engine.PrepareInputLine(input.Line{Text: "!", Mode: input.ModeCommand})
+	effective, proceed = processTestLine(engine, input.Line{Text: "!", Mode: input.ModeCommand})
 	if !proceed || effective.Text != "^staged" {
 		t.Fatalf("bang submit = (%q, %v), want old literal caret entry", effective.Text, proceed)
 	}
@@ -411,7 +411,7 @@ func TestCommandSeparatorTakesPrecedenceOverDoubledHistoryCharacter(t *testing.T
 	}
 	host.HistoryEntries = []input.Submission{input.Command("look")}
 
-	effective, proceed := engine.PrepareInputLine(input.Line{Text: "!!", Mode: input.ModeCommand})
+	effective, proceed := processTestLine(engine, input.Line{Text: "!!", Mode: input.ModeCommand})
 	if !proceed || effective.Text != "!!" {
 		t.Fatalf("submit = (%q, %v), want separator text unchanged", effective.Text, proceed)
 	}
@@ -566,11 +566,11 @@ func TestVerbatimBangIsLiteral(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 
-	effective, proceed := engine.PrepareInputLine(input.Line{Text: "!", Mode: input.ModeVerbatim})
+	effective, proceed := processTestLine(engine, input.Line{Text: "!", Mode: input.ModeVerbatim})
 	if !proceed || effective != (input.Line{Text: "!", Mode: input.ModeVerbatim}) {
 		t.Fatalf("verbatim transform = %+v proceed=%v", effective, proceed)
 	}
-	engine.DispatchInputLine(effective)
+	engine.ExecuteInputLine(effective)
 
 	assertCommands(t, host, []string{"!"})
 }

@@ -134,6 +134,16 @@ type InputChangedMsg struct {
 
 func (InputChangedMsg) uiEvent() {}
 
+// DraftAppliedMsg acknowledges a Session-requested editor update. It reconciles
+// the mirror after any older user edits already queued in Events. Unlike
+// InputChangedMsg it never runs Lua observers: the request already did that.
+type DraftAppliedMsg struct {
+	Text   string
+	Cursor int // zero-based rune offset, like InputChangedMsg
+}
+
+func (DraftAppliedMsg) uiEvent() {}
+
 // CursorMovedMsg notifies Session of cursor position changes without a text
 // change. Cursor is a zero-based rune offset from the input widget.
 type CursorMovedMsg struct {

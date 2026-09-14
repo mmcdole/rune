@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mmcdole/rune/input"
 	runetext "github.com/mmcdole/rune/text"
@@ -66,7 +67,7 @@ func TestConsumedInputHasNoEchoHistoryOrDispatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s.handleSubmission(input.Command("north"))
+	submitTestSubmission(s, input.Command("north"))
 
 	if sent := net.drainSent(); len(sent) != 0 {
 		t.Fatalf("consumed input sent %q", sent)
@@ -94,7 +95,7 @@ func TestControlCommandRewriteHasNoEchoHistoryOrDispatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s.handleSubmission(input.Command("north"))
+	submitTestSubmission(s, input.Command("north"))
 
 	if sent := net.drainSent(); len(sent) != 0 {
 		t.Fatalf("structured command rewrite sent %q", sent)
@@ -150,7 +151,7 @@ func TestVerbatimSubmissionPreservesPhysicalLines(t *testing.T) {
 	assertSessionLua(t, s.engine, `rune.alias.exact("aliased", "expanded")`)
 
 	text := "  say hi;look  \r\n\t#2 north\r\n\r/quit\naliased\ntrailing  \n"
-	s.handleSubmission(input.Verbatim(text))
+	submitTestSubmission(s, input.Verbatim(text))
 
 	want := []string{"  say hi;look  ", "\t#2 north", "", "/quit", "aliased", "trailing  ", ""}
 	got := net.drainSent()
@@ -187,7 +188,7 @@ func TestSubmissionEchoVisualizesControlsWithoutChangingWireData(t *testing.T) {
 	net.connected = true
 
 	raw := "safe\x1b]52;c;payload\a\tend\nnext\x00"
-	s.handleSubmission(input.Verbatim(raw))
+	submitTestSubmission(s, input.Verbatim(raw))
 
 	wantSent := []string{"safe\x1b]52;c;payload\a\tend", "next\x00"}
 	if got := net.drainSent(); len(got) != len(wantSent) || got[0] != wantSent[0] || got[1] != wantSent[1] {
@@ -210,7 +211,7 @@ func TestCommandBatchProcessesLinesAndKeepsHistory(t *testing.T) {
 	s, net, uiMock := newTestSession(t)
 	net.connected = true
 	source := "/lua rune.alias.exact('batch', 'answer 42')\n\tbatch\n/lua -- comment ends on this line\nbatch;look\n\n"
-	s.handleSubmission(input.Command(source))
+	submitTestSubmission(s, input.Command(source))
 	if got := net.drainSent(); !slices.Equal(got, []string{"answer 42", "answer 42", "look"}) {
 		t.Fatalf("batch output = %q", got)
 	}
@@ -227,7 +228,7 @@ func TestLongSingleLineLuaExecutesOnce(t *testing.T) {
 	net.connected = true
 	payload := strings.Repeat("wrapped text ", 40)
 	source := "/lua rune.send_raw('" + payload + "')"
-	s.handleSubmission(input.Command(source))
+	submitTestSubmission(s, input.Command(source))
 	if got := net.drainSent(); !slices.Equal(got, []string{payload}) {
 		t.Fatalf("long command sent %q", got)
 	}
@@ -251,15 +252,15 @@ func TestSubmissionProcessesEachLineBeforeTheNextHook(t *testing.T) {
 					assert(#rune.history.get() == 0)
 					seen[#seen + 1] = "echo:" .. line
 				end, {priority = 10})
-				local dispatch = rune.input._dispatch_line
-				function rune.input._dispatch_line(line, mode)
+				local dispatch = rune.input._execute_input_line
+				function rune.input._execute_input_line(line, mode)
 					seen[#seen + 1] = "dispatch:" .. line
 					return dispatch(line, mode)
 				end
 			`); err != nil {
 				t.Fatal(err)
 			}
-			s.handleSubmission(input.Submission{Text: "first\nskip\nlast", Mode: mode})
+			submitTestSubmission(s, input.Submission{Text: "first\nskip\nlast", Mode: mode})
 			if got := net.drainSent(); !slices.Equal(got, []string{"first!", "last!"}) {
 				t.Fatalf("sent %q", got)
 			}
@@ -275,7 +276,7 @@ func TestSubmissionProcessesEachLineBeforeTheNextHook(t *testing.T) {
 func TestEarlierCommandCanInstallHookForFollowingLines(t *testing.T) {
 	s, net, _ := newTestSession(t)
 	net.connected = true
-	s.handleSubmission(input.Command("/lua rune.hooks.on('input', function(line) if line == 'look' then return 'score' end end)\nlook"))
+	submitTestSubmission(s, input.Command("/lua rune.hooks.on('input', function(line) if line == 'look' then return 'score' end end)\nlook"))
 	if got := net.drainSent(); !slices.Equal(got, []string{"score"}) {
 		t.Fatalf("sent %q", got)
 	}
@@ -285,7 +286,7 @@ func TestHistoryExpansionSeesScriptHistoryAdditions(t *testing.T) {
 	s, net, _ := newTestSession(t)
 	net.connected = true
 	s.AddToHistory("look")
-	s.handleSubmission(input.Command("/lua rune.history.add('score')\n!\n!missing\nnorth\n!"))
+	submitTestSubmission(s, input.Command("/lua rune.history.add('score')\n!\n!missing\nnorth\n!"))
 	if got := net.drainSent(); !slices.Equal(got, []string{"score", "north", "score"}) {
 		t.Fatalf("sent %q", got)
 	}
@@ -307,7 +308,7 @@ func TestSubmissionRejectsMultilineRewriteBeforeLaterHooks(t *testing.T) {
 			`); err != nil {
 				t.Fatal(err)
 			}
-			s.handleSubmission(input.Submission{Text: "first\nrewrite\nlast", Mode: mode})
+			submitTestSubmission(s, input.Submission{Text: "first\nrewrite\nlast", Mode: mode})
 			assertSessionLua(t, s.engine, `assert(table.concat(late_seen, "|") == "first|last")`)
 			if got := net.drainSent(); !slices.Equal(got, []string{"first", "last"}) {
 				t.Fatalf("sent %q", got)
@@ -320,7 +321,7 @@ func TestLargeInputRewritesReachDispatchAndHistory(t *testing.T) {
 	s, net, _ := newTestSession(t)
 	net.connected = true
 	assertSessionLua(t, s.engine, `rune.hooks.on("input", function() return string.rep("x", 300 * 1024) end)`)
-	s.handleSubmission(input.Command("first\nsecond\nthird"))
+	submitTestSubmission(s, input.Command("first\nsecond\nthird"))
 	line := strings.Repeat("x", 300*1024)
 	want := []string{line, line, line}
 	if got := net.drainSent(); !slices.Equal(got, want) {
@@ -334,7 +335,7 @@ func TestLargeInputRewritesReachDispatchAndHistory(t *testing.T) {
 func TestQuitStopsFollowingSubmissionLines(t *testing.T) {
 	s, net, _ := newTestSession(t)
 	net.connected = true
-	s.handleSubmission(input.Command("north\n/quit\nsouth"))
+	submitTestSubmission(s, input.Command("north\n/quit\nsouth"))
 	if got := net.drainSent(); !slices.Equal(got, []string{"north"}) {
 		t.Fatalf("sent %q", got)
 	}
@@ -346,7 +347,7 @@ func TestReloadWaitsUntilSubmissionFinishes(t *testing.T) {
 	if err := s.engine.DoString("old alias", `rune.alias.exact("probe", "old")`); err != nil {
 		t.Fatal(err)
 	}
-	s.handleSubmission(input.Command("/reload\nprobe"))
+	submitTestSubmission(s, input.Command("/reload\nprobe"))
 	if got := net.drainSent(); !slices.Equal(got, []string{"old"}) {
 		t.Fatalf("sent before reload %q", got)
 	}
@@ -356,7 +357,7 @@ func TestReloadWaitsUntilSubmissionFinishes(t *testing.T) {
 	default:
 		t.Fatal("reload was not queued")
 	}
-	s.handleSubmission(input.Command("probe"))
+	submitTestSubmission(s, input.Command("probe"))
 	if got := net.drainSent(); !slices.Equal(got, []string{"probe"}) {
 		t.Fatalf("sent after reload %q", got)
 	}
@@ -367,7 +368,7 @@ func TestFailingInputDispatcherIsNotRetried(t *testing.T) {
 	net.connected = true
 
 	if err := s.engine.DoString("broken dispatcher", `
-		function rune.input._dispatch_line(text)
+		function rune.input._execute_input_line(text)
 			rune.send_raw(text .. ":once")
 			error("dispatch failed after send")
 		end
@@ -375,7 +376,7 @@ func TestFailingInputDispatcherIsNotRetried(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s.handleSubmission(input.Command("north\nsouth"))
+	submitTestSubmission(s, input.Command("north\nsouth"))
 	if got, want := net.drainSent(), []string{"north:once"}; !slices.Equal(got, want) {
 		t.Fatalf("dispatcher sends = %q, want no fallback duplicate %q", got, want)
 	}
@@ -396,7 +397,7 @@ func TestCommandBatchContinuesAfterCommandErrors(t *testing.T) {
 			if err := s.engine.DoString(tc.name, tc.setup); err != nil {
 				t.Fatal(err)
 			}
-			s.handleSubmission(input.Command(tc.draft))
+			submitTestSubmission(s, input.Command(tc.draft))
 			if got := net.drainSent(); !slices.Equal(got, []string{"north", "south"}) {
 				t.Fatalf("sent %q", got)
 			}
@@ -422,7 +423,7 @@ func TestCommandBatchHooksAndHistoryExpansion(t *testing.T) {
 	`); err != nil {
 		t.Fatal(err)
 	}
-	s.handleSubmission(input.Command("!\n/echo local\nrewrite\n\t\n!look"))
+	submitTestSubmission(s, input.Command("!\n/echo local\nrewrite\n\t\n!look"))
 	if got := net.drainSent(); !slices.Equal(got, []string{"score", "say one;two", "!", "look"}) {
 		t.Fatalf("sent %q", got)
 	}
@@ -442,12 +443,12 @@ func TestHistoryReplaySelectsPhysicalLine(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			s, net, _ := newTestSession(t)
 			net.connected = true
-			s.handleSubmission(input.Command(tt.previous))
+			submitTestSubmission(s, input.Command(tt.previous))
 			net.drainSent()
 			if got := s.GetHistoryEntries(); !slices.Equal(got, []input.Submission{input.Command(tt.previous)}) {
 				t.Fatalf("history = %+v, want whole submission", got)
 			}
-			s.handleSubmission(input.Command(tt.command))
+			submitTestSubmission(s, input.Command(tt.command))
 			if got := net.drainSent(); !slices.Equal(got, tt.want) {
 				t.Fatalf("replayed %q, want %q", got, tt.want)
 			}
@@ -459,11 +460,67 @@ func TestVerbatimSubmissionWithMissingHooks(t *testing.T) {
 	s, net, _ := newTestSession(t)
 	net.connected = true
 	assertSessionLua(t, s.engine, "rune.hooks = nil")
-	s.handleSubmission(input.Verbatim("first\r\n\r/quit\r"))
+	submitTestSubmission(s, input.Verbatim("first\r\n\r/quit\r"))
 	if got := net.drainSent(); !slices.Equal(got, []string{"first", "", "/quit", ""}) {
 		t.Fatalf("verbatim fallback sends = %q", got)
 	}
 	if s.backgroundCtx.Err() != nil {
 		t.Fatal("verbatim /quit was executed")
+	}
+}
+
+func TestSubmissionFinishesPromptBeforeDraftObservers(t *testing.T) {
+	s, _, display := newTestSession(t)
+	s.currentInput = "north"
+	serverData(s, "HP>")
+	assertSessionLua(t, s.engine, `
+  rune.hooks.on("input_changed", function(text)
+   assert(text == "" and rune.input.get() == "")
+   rune.echo("draft cleared")
+  end)
+ `)
+	display.drainDisplayEvents()
+	s.handleUIEvent(ui.InputSubmittedMsg{Submission: input.Command("north")})
+	events := display.drainDisplayEvents()
+	if len(events) < 2 || events[0] != "commit:HP>" || events[1] != "print:draft cleared" {
+		t.Fatalf("submission display order = %q", events)
+	}
+}
+
+func TestSubmissionStopsAfterInputHookDeadline(t *testing.T) {
+	s, net, display := newTestSession(t)
+	net.connected = true
+	assertSessionLua(t, s.engine, `
+  rune.hooks.on("input", function(text)
+   if text == "stall" then
+    while true do rune._strip_ansi("x") end
+   end
+  end, {priority = 1})
+ `)
+	s.engine.CallTimeout = 100 * time.Millisecond
+	submitTestSubmission(s, input.Command("first\nstall\n"+strings.Repeat("later\n", 100)))
+	if got := net.drainSent(); !slices.Equal(got, []string{"first"}) {
+		t.Fatalf("sends after deadline = %q", got)
+	}
+	if got := s.GetHistoryEntries(); !slices.Equal(got, []input.Submission{input.Command("first")}) {
+		t.Fatalf("history after deadline = %+v", got)
+	}
+	printed := display.drainPrinted()
+	// LuaJIT may let pcall report the interrupted handler before the Go
+	// guard observes the deadline. Session must still report only once,
+	// rather than retrying and reporting every remaining physical line.
+	reports := 0
+	for _, line := range printed {
+		if strings.Contains(line, "[Error]") && strings.Contains(line, "interrupted") {
+			reports++
+		}
+	}
+	if reports != 1 || len(printed) > 2 {
+		t.Fatalf("expected one submission interruption, got %q", printed)
+	}
+	s.engine.CallTimeout = time.Second
+	submitTestSubmission(s, input.Command("recovered"))
+	if got := net.drainSent(); !slices.Equal(got, []string{"recovered"}) {
+		t.Fatalf("next submission = %q", got)
 	}
 }

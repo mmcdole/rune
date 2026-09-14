@@ -7,6 +7,7 @@ import (
 	"github.com/mmcdole/rune/input"
 	"github.com/mmcdole/rune/lua"
 	"github.com/mmcdole/rune/network"
+	"github.com/mmcdole/rune/ui"
 )
 
 // newTestSession boots a Session against mocks with the real embedded
@@ -30,7 +31,7 @@ func newTestSession(t *testing.T) (*Session, *mockNetwork, *mockUI) {
 }
 
 func userInput(s *Session, text string) {
-	s.handleSubmission(input.Command(text))
+	submitTestSubmission(s, input.Command(text))
 }
 
 func serverData(s *Session, data string) {
@@ -79,4 +80,8 @@ func assertSessionLua(t *testing.T, engine *lua.Engine, code string) {
 	if err := engine.DoString("assert", code); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func submitTestSubmission(s *Session, submission input.Submission) {
+	s.handleUIEvent(ui.InputSubmittedMsg{Submission: submission})
 }

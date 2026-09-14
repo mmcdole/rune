@@ -47,8 +47,8 @@ func (e *Engine) NotifyWindowSizeChanged(width, height int) {
 	e.notify("window_size_changed", width, height)
 }
 
-// NotifyInputChanged notifies Lua that the input's current text changed.
-func (e *Engine) NotifyInputChanged(text string) {
+// NotifyDraftChanged notifies Lua that the input's current text changed.
+func (e *Engine) NotifyDraftChanged(text string) {
 	e.notify("input_changed", text)
 }
 

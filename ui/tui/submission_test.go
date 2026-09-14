@@ -147,3 +147,24 @@ func TestSetInputSubmissionMessageForcesVerbatimMode(t *testing.T) {
 		t.Fatalf("input = %q", got)
 	}
 }
+
+func TestPushedDraftAcknowledgesStateWithoutReportingUserEdit(t *testing.T) {
+	m := newBareModel(t)
+	events := make(chan ui.UIEvent, 10)
+	m.events = events
+	m.Update(ui.SetInputMsg("script edit"))
+	m.Update(ui.InputSetCursorMsg(3))
+	for _, cursor := range []int{11, 3} {
+		select {
+		case event := <-events:
+			if event != (ui.DraftAppliedMsg{Text: "script edit", Cursor: cursor}) {
+				t.Fatalf("pushed editor state produced %#v", event)
+			}
+		default:
+			t.Fatal("missing applied-state acknowledgment")
+		}
+	}
+	if m.input.Value() != "script edit" || m.input.Position() != 3 {
+		t.Fatalf("draft = %q at %d", m.input.Value(), m.input.Position())
+	}
+}

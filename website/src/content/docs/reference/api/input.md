@@ -26,7 +26,11 @@ them with cursor moves and are what the default `ctrl+w`,
 `alt+left`/`alt+right` binds call. The `"input_changed"`
 [hook event](/reference/api/hooks/) fires whenever the buffer changes,
 including typing, history or completion, `rune.input.set`, and the draft left
-after submission.
+after submission. Script edits notify observers before `rune.input.set` returns;
+setting the same text again does not notify. Observers may edit the draft again,
+so these callbacks can nest under the script watchdog. CRLF and bare CR in
+script edits become LF, matching the editor's newline convention. Applying a
+script edit in the UI does not fire a second notification.
 
 Cursor positions are zero-based UTF-8 byte offsets, using the same byte units
 as Lua 5.1 string operations. `set_cursor` clamps positions to the input and

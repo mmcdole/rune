@@ -372,20 +372,14 @@ func (s *Session) handleUIEvent(event ui.UIEvent) {
 	defer s.flushPresentation()
 	switch event := event.(type) {
 	case ui.InputSubmittedMsg:
-		// The accepted event carries both the immutable submission and the
-		// editor draft that follows it. Apply them as one transition before
-		// input hooks inspect rune.input state. Post-submit drafts always put
-		// the cursor at the end, so Session's byte offset is simply len.
-		draftChanged := s.currentInput != event.NextDraft
-		s.currentInput = event.NextDraft
-		s.currentCursor = len(event.NextDraft)
-		if draftChanged {
-			s.engine.NotifyInputChanged(event.NextDraft)
-		}
-		s.handleSubmission(event.Submission)
+		s.submit(event)
 	case ui.OpenEditorMsg:
 		if result, ok := s.ui.OpenEditor(event.Text); ok {
+			changed := s.currentInput != input.NormalizeDraftText(result)
 			s.SetInput(result)
+			if changed {
+				s.engine.NotifyDraftChanged(s.currentInput)
+			}
 		}
 	case ui.ExecuteBindMsg:
 		s.engine.HandleKeyBind(string(event))
@@ -415,7 +409,12 @@ func (s *Session) handleUIEvent(event ui.UIEvent) {
 	case ui.InputChangedMsg:
 		s.currentInput = event.Text
 		s.currentCursor = input.RuneCursorToByte(event.Text, event.Cursor)
-		s.engine.NotifyInputChanged(event.Text)
+		s.engine.NotifyDraftChanged(event.Text)
+	case ui.DraftAppliedMsg:
+		// The editor has applied our change, possibly after older queued typing.
+		// Match what it now shows without calling draft observers a second time.
+		s.currentInput = event.Text
+		s.currentCursor = input.RuneCursorToByte(event.Text, event.Cursor)
 	case ui.CursorMovedMsg:
 		s.currentCursor = input.RuneCursorToByte(s.currentInput, event.Cursor)
 	}
@@ -459,7 +458,7 @@ func (s *Session) boot() error {
 	if s.connectTarget != "" {
 		target := s.connectTarget
 		s.connectTarget = ""
-		if err := s.engine.DispatchInputLine(input.Line{Text: "/connect " + target, Mode: input.ModeCommand}); err != nil {
+		if err := s.engine.ExecuteInputLine(input.Line{Text: "/connect " + target, Mode: input.ModeCommand}); err != nil {
 			s.ui.Print(text.Red("[Error] " + err.Error()))
 		}
 	}

@@ -29,6 +29,12 @@ func DefaultBindings() Bindings {
 	}
 }
 
+// Has includes disabled bindings: the UI must still consume their keys.
+func (b Bindings) Has(key string) bool {
+	_, found := b[key]
+	return found
+}
+
 func (b Bindings) Matches(action, key string) bool {
 	binding := b[key]
 	return binding.Enabled && binding.Action == "input."+action

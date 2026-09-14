@@ -2,6 +2,7 @@ package lua
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -100,11 +101,14 @@ func (e *Engine) BeginExecution() func(error) error {
 		// An editor call can replace the context; always inspect the active one.
 		// pcall must not hide exhaustion of the shared deadline.
 		if ctx := e.vm.Context(); ctx != nil && ctx.Err() != nil {
-			cause := err
-			if cause == nil {
-				cause = ctx.Err()
+			// Preserve deadline identity for callers deciding whether to stop.
+			// Only the outer scope adds the user-facing interruption message.
+			if !errors.Is(err, ctx.Err()) {
+				err = errors.Join(err, ctx.Err())
 			}
-			return fmt.Errorf("script interrupted after %v (runaway loop?): %w", e.CallTimeout, cause)
+			if owner {
+				return fmt.Errorf("script interrupted after %v (runaway loop?): %w", e.CallTimeout, err)
+			}
 		}
 		return err
 	}
