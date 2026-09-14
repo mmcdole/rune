@@ -1,9 +1,9 @@
 ---
 title: Key Bindings
-description: Bind keys and chords to Lua callbacks. The default keymap is a script too.
+description: Bind keys and chords to editor actions or Lua callbacks. The default keymap is a script too.
 ---
 
-A bind attaches a Lua callback to a key or chord, so a keypress can do what
+A bind attaches an editor action or Lua callback to a key or chord, so a keypress can do what
 would otherwise take a typed command. The default keymap (history, completion,
 scrolling, `$EDITOR`) is built from the same function, so anything it binds you
 can rebind.
@@ -14,8 +14,9 @@ rune.bind("ctrl+g", function() rune.pane.toggle("map") end)
 rune.unbind("f1")
 ```
 
-The callback is always a function; binds don't take command strings the way
-aliases and triggers do. Call `rune.send` inside the callback.
+A binding accepts a function or a named editor action such as `"input.submit"`.
+To send a command, call `rune.send` inside a callback. Strings are action names,
+not commands to send.
 
 ## Key names
 
@@ -88,29 +89,66 @@ rune.bind("numpad3", function() rune.send("down") end)
 `numpad8` always means the 8 key on the number pad. The number-row key remains
 `8`.
 
-### Reserved input keys
+### Editor action keys
 
 | Key | Normal input | Composer |
 |---|---|---|
 | `enter` | Submit the command | Submit using the displayed mode |
 | `alt+v` | Open the composer in Verbatim mode | Toggle Command/Verbatim |
-| `alt+enter` | Run this draft as a command once | Run this draft as a command once |
-| `ctrl+enter`, `ctrl+j` | Start a composer newline | Insert a newline |
+| `ctrl+j`, `shift+enter`, `ctrl+enter` | Start a composer newline | Insert a newline |
+| `ctrl+e` | Edit the draft in `$EDITOR` | Edit the draft in `$EDITOR` |
+| `esc` | Clear the draft | Confirm, then discard on the second press |
 
-These actions are built in and do not dispatch Lua binds. Terminals that cannot
-distinguish Ctrl+Enter report it as Ctrl+J. Picker and search behavior is shown
-in the context table below. The inline picker closes before `alt+v` or
-`alt+enter` acts on the draft; modal pickers and search capture those keys.
+These are ordinary bindings to named editor actions:
+
+```lua
+rune.bind("enter", "input.submit")
+rune.bind({"ctrl+j", "shift+enter", "ctrl+enter"}, "input.newline")
+rune.bind("alt+v", "input.toggle_mode")
+rune.bind("ctrl+e", "input.open_editor")
+rune.bind("esc", "input.cancel")
+```
+
+A new key adds an alias; rebinding an existing key replaces its assignment.
+To move submit to Ctrl+S, remove Enter explicitly:
+
+```lua
+rune.bind("ctrl+s", "input.submit")
+rune.unbind("enter")
+```
+
+Arrays create independent bindings and return an array of handles. Removing one
+alias leaves the others intact. Defaults load before user scripts, so removal
+also works for defaults; there is no hidden default underneath an unbound key.
+
+Composer hints show the earliest registered active binding for each action.
+Removing or disabling that binding promotes the next alias. An action with no
+active bindings has no hint. To prefer Shift+Enter while keeping Ctrl+J, rebind
+Ctrl+J after the default Shift+Enter binding:
+
+```lua
+rune.bind("ctrl+j", "input.newline")
+```
+
+Submit always uses the displayed mode. Alt+Enter has no built-in override.
+Modified Enter requires terminal support; Ctrl+J remains the portable alternative.
+The cancel action works in every input context; modal pickers and search capture
+other actions. See the [complete action table](/reference/api/input/#input-bindings). Inline pickers close
+when toggling mode or inserting a newline; Enter still accepts a selection when
+submit is rebound. The UI resolves named actions, with Session handling submission and external-editor
+requests. Callbacks run through Lua. An explicit
+physical keypad-Enter binding wins over the ordinary Enter binding, including
+modified keypad Enter.
 
 ## Where binds run
 
 | Context | Rune handles locally | Lua binds |
 |---|---|---|
-| Normal input | `enter` submits; `ctrl+enter`/`ctrl+j` starts a composer newline; paste is atomic | Non-printable binds run. A printable bind runs only when the input is empty or fully selected; otherwise the character is typed |
-| Inline picker | `esc`/`ctrl+c` cancel; `up`/`down` navigate; `tab` accepts; `enter` accepts and submits; `ctrl+enter`/`ctrl+j` starts the composer; unbound text filters | Any other bound key runs, including printable keys |
-| Modal picker | All keypresses | None |
-| Scrollback search | All keypresses | None |
-| Composer | Text entry, editing and navigation, literal `tab`, submit, newline, and two-step `esc` discard | Unused chords can run, including the default `ctrl+e` editor bind |
+| Normal input | Configured input actions; paste is atomic | Non-printable binds run. A printable bind runs only when the input is empty or fully selected; otherwise the character is typed |
+| Inline picker | Configured cancel or `ctrl+c` closes; `up`/`down` navigate; `tab` accepts; `enter` accepts; configured submit accepts and submits; newline starts the composer; editor closes the picker and edits the draft; unbound text filters | Any other bound key runs, including printable keys |
+| Modal picker | Configured cancel closes; all other keys stay in the picker | None |
+| Scrollback search | Configured cancel closes; all other keys stay in search | None |
+| Composer | Text entry, editing and navigation, literal `tab`, submit, newline, external editor, and two-step configured cancel | Unused chords can run |
 
 This lets a printable hotkey coexist with typing: type `jump` normally, but
 press a bound `j` on an empty line and its callback runs. A fully selected
@@ -133,7 +171,7 @@ string you bound.
 
 To extend a default instead of discarding it, capture its action first.
 `rune.binds.get(key)` returns the handle; `:action()` is the raw
-callback:
+callback or named action string. This example wraps a callback:
 
 ```lua
 local scroll = assert(rune.binds.get("pgup")):action()

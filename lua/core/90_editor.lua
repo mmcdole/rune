@@ -260,11 +260,6 @@ function rune.input.delete_word()
     rune.input.set_cursor(newPos)
 end
 
--- Escape: clear input
-rune.bind("esc", function()
-    rune.input.set("")
-end)
-
 -- Line editing
 rune.bind("ctrl+u", function() rune.input.set("") end)
 
@@ -278,15 +273,6 @@ rune.bind("ctrl+right", function() rune.input.word_right() end)
 -- ctrl+h, so that combination cannot be bound distinctly.
 rune.bind("ctrl+w", function() rune.input.delete_word() end)
 rune.bind("alt+backspace", function() rune.input.delete_word() end)
-
--- Editor mode (Ctrl+E opens $EDITOR)
-rune.bind("ctrl+e", function()
-    local current = rune.input.get()
-    local result, ok = rune.input.open_editor(current)
-    if ok then
-        rune.input.set(result)
-    end
-end)
 
 -- ============================================================
 -- TAB COMPLETION

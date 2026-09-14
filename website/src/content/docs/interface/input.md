@@ -138,15 +138,17 @@ for native text selection.
 A plain one-line paste stays in normal input. Pasting structured text opens
 the multiline composer. Newlines, tabs, blank lines, indentation, trailing spaces, and
 terminal control bytes are kept in the draft; CRLF and bare CR line endings are
-normalized to LF. You can also press `Ctrl+Enter` to insert the first newline
+normalized to LF. You can also press `Ctrl+J` to insert the first newline
 and enter the composer.
 
 The multiline composer displays `COMMAND` or `VERBATIM` and its physical line
-count on the left, with `Alt+V command` or `Alt+V verbatim` on the right.
-The footer shows Enter to submit and `Ctrl+J newline` in both modes.
-Verbatim also shows `Alt+Enter run`; `Esc×2 discard` describes the two-press
-discard action. When space permits, `Ctrl+E editor` appears if its binding
-is present. Narrow layouts omit secondary hints and then the line count
+count on the left, with the configured mode-toggle hint on the right
+(`Alt+V command` or `Alt+V verbatim` by default).
+The footer shows the primary submit and newline bindings in both modes,
+with “run” for Command and “send” for Verbatim. Defaults are Enter and Ctrl+J.
+Cancel and external-editor hints come from their active action bindings too:
+`Esc×2 discard` and `Ctrl+E editor` by default. Disabled or unbound actions
+have no hint. Narrow layouts omit secondary hints and then the line count
 to keep essential actions visible; hints are never cut mid-label.
 
 Ordinary single-line input keeps plain borders. Pressing `Alt+V` opens the
@@ -156,18 +158,19 @@ submission or discard closes it unless `keep_input` retains the command.
 The editor and interpretation are independent: multiline text can be a command,
 and a single line can be sent verbatim.
 
-| Key | Action |
+| Default key | Action |
 |---|---|
 | `Alt+V` | Toggle Command/Verbatim without changing text, cursor, or selection |
 | `Enter` | Submit using the displayed mode |
-| `Alt+Enter` | Run this draft as a command once, without changing its mode |
-| `Ctrl+Enter` or `Ctrl+J` | Insert a newline |
+| `Ctrl+J`, `Shift+Enter`, or `Ctrl+Enter` | Insert a newline (modified Enter requires terminal support) |
 | `Tab` in the composer | Insert a literal tab |
 | `Ctrl+E` | Edit the whole draft in `$EDITOR` |
 | `Escape` twice in the composer | First press shows `Esc again to discard`; the second discards the draft |
 
-A different key cancels discard confirmation and performs its usual action;
-for example, Enter still submits.
+A key that is not bound to cancel dismisses discard confirmation and performs
+its usual action; for example, Enter still submits. A binding update also
+dismisses confirmation. See the [input action table](/reference/api/input/#input-bindings)
+for rebinding and cancel behavior across all input contexts.
 
 Structured paste initially chooses Verbatim. Once you explicitly switch modes,
 your choice stays with that draft through edits, additional pastes, and external
@@ -258,8 +261,8 @@ Lua. Replacing a draft with one non-empty line preserves its mode.
 
 Application actions such as history, completion, and `Ctrl+E` are registered
 with `rune.bind` in the core scripts and can be rebound or removed in
-`init.lua`. Paste handling, composer editing, mode switching with `Alt+V`,
-`Ctrl+Enter`/`Ctrl+J`, and submission with `Enter`/`Alt+Enter` keep their built-in behavior. The full policy and default table are in
+`init.lua`. Newline, mode toggle, and submission are named editor actions
+registered through the same [`rune.bind`](/reference/api/bind/) API. The full policy and default table are in
 the [Key Bindings guide](/scripting/keybindings/#where-binds-run).
 
 **Related:** [rune.input reference](/reference/api/input/),

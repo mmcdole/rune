@@ -194,9 +194,9 @@ func (c *composer) DeleteToLineEnd() {
 	c.goalCol = -1
 }
 
-// Update applies keys that have local editing meaning in compose mode. It
-// deliberately leaves plain Enter, Escape, Ctrl+C, and Ctrl+E unhandled so
-// the controller can submit/cancel/delegate to the external-editor binding.
+// Update applies keys that have local editing meaning in compose mode. The
+// controller handles configured editor actions first. Escape, Ctrl+C, and
+// Ctrl+E remain available for cancellation and Lua bindings.
 func (c *composer) Update(msg tea.KeyPressMsg, widgetWidth int) bool {
 	if msg.Text != "" {
 		c.Insert(msg.Text)
@@ -204,12 +204,8 @@ func (c *composer) Update(msg tea.KeyPressMsg, widgetWidth int) bool {
 	}
 
 	switch {
-	case matchesKey(msg, 'j', tea.ModCtrl), matchesEnterKey(msg, tea.ModCtrl):
-		c.Insert("\n")
-		return true
 	case matchesEnterKey(msg, 0):
-		// Plain Enter submits; modified Enter chords remain available to the
-		// controller for bind dispatch.
+		// Enter has no editing meaning unless handled by a configured action.
 		return false
 	case matchesKey(msg, tea.KeyTab, 0):
 		c.Insert("\t")

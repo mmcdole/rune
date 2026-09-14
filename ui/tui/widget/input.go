@@ -27,6 +27,7 @@ const (
 
 // Input handles the input area including text entry, picker overlay, and borders.
 type Input struct {
+	keys      input.Bindings
 	textinput textinput.Model
 	composer  *composer
 	picker    *Picker
@@ -34,14 +35,13 @@ type Input struct {
 	styles    style.Styles
 
 	// State
-	submissionMode  input.SubmissionMode
-	editorAvailable bool // Ctrl+E binding is present
-	modeExplicit    bool // user choice or history restoration, retained for this draft
-	overlay         inputOverlay
-	discardPending  bool
-	selected        bool // whole line selected (keep-input resend state)
-	width           int
-	height          int
+	submissionMode input.SubmissionMode
+	modeExplicit   bool // user choice or history restoration, retained for this draft
+	overlay        inputOverlay
+	discardPending bool
+	selected       bool // whole line selected (keep-input resend state)
+	width          int
+	height         int
 }
 
 // NewInput creates the input surface. Search supplies transcript matches and
@@ -67,6 +67,7 @@ func NewInput(styles style.Styles, search *Search) *Input {
 	ti.Focus()
 
 	return &Input{
+		keys:      input.DefaultBindings(),
 		textinput: ti,
 		picker: NewPicker(PickerConfig{
 			MaxVisible: 10,
@@ -144,7 +145,7 @@ func (i *Input) View() string {
 			copy(rows[plan.results.Min.Y:plan.results.Max.Y], i.search.resultLines(plan.results.Dx(), plan.results.Dy()))
 		}
 		if plan.help >= 0 {
-			rows[plan.help] = i.search.footerLine(i.width)
+			rows[plan.help] = i.search.footerLine(i.width, i.keys.Hint("cancel"))
 		}
 		if !plan.body.Empty() {
 			rows[plan.body.Min.Y] = i.search.queryLine(plan.body.Dx())
@@ -316,9 +317,6 @@ func (i *Input) ToggleSubmissionMode() {
 	}
 }
 
-// SetEditorAvailable controls the optional external-editor shortcut hint.
-func (i *Input) SetEditorAvailable(available bool) { i.editorAvailable = available }
-
 // IsComposing reports whether the lossless structured-text editor is active.
 func (i *Input) IsComposing() bool {
 	return i.composer != nil
@@ -388,7 +386,7 @@ func (i *Input) UpdateComposer(msg tea.KeyPressMsg) bool {
 	return handled
 }
 
-// ConfirmDiscard arms the first Escape and reports true only on the second.
+// ConfirmDiscard arms the first cancel action and confirms on the second.
 // Large composed drafts should never disappear from one accidental keypress.
 func (i *Input) ConfirmDiscard() bool {
 	if i.discardPending {
@@ -477,3 +475,10 @@ func (i *Input) PickerInline() bool { return i.overlay == overlayPickerInline }
 func (i *Input) Picker() *Picker { return i.picker }
 
 func (i *Input) Search() *Search { return i.search }
+
+// SetBindings installs a registry snapshot used for matching and hints.
+func (i *Input) SetBindings(keys input.Bindings) {
+	i.keys = keys
+	i.discardPending = false
+}
+func (i *Input) Bindings() input.Bindings { return i.keys }

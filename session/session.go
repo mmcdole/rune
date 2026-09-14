@@ -383,6 +383,10 @@ func (s *Session) handleUIEvent(event ui.UIEvent) {
 			s.engine.NotifyInputChanged(event.NextDraft)
 		}
 		s.handleSubmission(event.Submission)
+	case ui.OpenEditorMsg:
+		if result, ok := s.ui.OpenEditor(event.Text); ok {
+			s.SetInput(result)
+		}
 	case ui.ExecuteBindMsg:
 		s.engine.HandleKeyBind(string(event))
 	case ui.WindowSizeChangedMsg:
@@ -538,12 +542,11 @@ func (s *Session) pushBarUpdates() {
 
 // pushBindsAndLayout pushes current bindings and layout config to UI.
 func (s *Session) pushBindsAndLayout() {
-	keys := s.engine.GetBoundKeys()
-	bindsMap := make(map[string]bool, len(keys))
-	for _, key := range keys {
-		bindsMap[key] = true
+	bindings := s.engine.GetBindings()
+	if bindings == nil {
+		bindings = input.DefaultBindings()
 	}
-	s.ui.UpdateBinds(bindsMap)
+	s.ui.UpdateBinds(bindings)
 
 	s.ui.UpdateLayout(s.engine.GetLayout())
 }

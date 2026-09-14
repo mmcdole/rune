@@ -213,16 +213,16 @@ func (i *Input) composerRows(bodyHeight int) []string {
 // composeLabels fits complete labels in the available cells. Mode switching
 // takes precedence over line count; submit and newline precede secondary actions.
 func (i *Input) composeLabels(lines, width int) (header, toggle, footer string) {
-	mode, destination, submit := "COMMAND", "verbatim", "Enter run"
+	mode, destination, submit := "COMMAND", "verbatim", i.actionHint("submit", "run")
 	if i.SubmissionMode() == input.ModeVerbatim {
-		mode, destination, submit = "VERBATIM", "command", "Enter send"
+		mode, destination, submit = "VERBATIM", "command", i.actionHint("submit", "send")
 	}
 	word := "lines"
 	if lines == 1 {
 		word = "line"
 	}
 	title := fmt.Sprintf("%s · %d %s", mode, lines, word)
-	toggle = "Alt+V " + destination
+	toggle = i.actionHint("toggle_mode", destination)
 	header = title
 	if ansi.StringWidth(header)+3+ansi.StringWidth(toggle) > width {
 		header = mode
@@ -234,21 +234,20 @@ func (i *Input) composeLabels(lines, width int) (header, toggle, footer string) 
 			header = fitComposerHints(width, mode)
 		}
 	}
-	hints := []string{submit, "Ctrl+J newline"}
-	if i.SubmissionMode() == input.ModeVerbatim {
-		hints = append(hints, "Alt+Enter run")
+	hints := []string{submit, i.actionHint("newline", "newline")}
+	cancel := i.keys.Hint("cancel")
+	if cancel != "" {
+		hints = append(hints, cancel+"×2 discard")
 	}
-	hints = append(hints, "Esc×2 discard")
-	if i.editorAvailable {
-		hints = append(hints, "Ctrl+E editor")
-	}
+	hints = append(hints, i.actionHint("open_editor", "editor"))
 	footer = fitComposerHints(width, hints...)
-	if i.discardPending {
-		footer = fitComposerHints(width, "Esc again to discard")
+	if i.discardPending && cancel != "" {
+		footer = fitComposerHints(width, cancel+" again to discard")
 		if footer == "" {
-			footer = fitComposerHints(width, "Esc to discard")
+			footer = fitComposerHints(width, cancel+" to discard")
 		}
 	}
+
 	return header, toggle, footer
 }
 
@@ -256,6 +255,9 @@ func (i *Input) composeLabels(lines, width int) (header, toggle, footer string) 
 func fitComposerHints(width int, hints ...string) string {
 	var fitted string
 	for _, hint := range hints {
+		if hint == "" {
+			continue
+		}
 		candidate := hint
 		if fitted != "" {
 			candidate = fitted + " · " + hint
@@ -303,4 +305,12 @@ func (i *Input) renderComposerRow(layout composerLayout, rowIndex int) string {
 		view += strings.Repeat(" ", padding)
 	}
 	return clipRow(view, i.width)
+}
+
+func (i *Input) actionHint(action, label string) string {
+	key := i.keys.Hint(action)
+	if key == "" {
+		return ""
+	}
+	return key + " " + label
 }

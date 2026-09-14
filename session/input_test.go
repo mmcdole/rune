@@ -68,3 +68,74 @@ func TestSearchStateIsIndependentFromScrollState(t *testing.T) {
 		t.Fatal("search-close UI event left client state active")
 	}
 }
+
+func TestEditorBindingsReachUI(t *testing.T) {
+	s, _, uiMock := newTestSession(t)
+	assertSessionLua(t, s.engine, `rune.unbind("ctrl+j")`)
+	s.flushPresentation()
+	if uiMock.pushedBinds().Hint("newline") != "Shift+Enter" {
+		t.Fatal("editor bindings did not reach UI")
+	}
+}
+
+func TestBindingEnableChangesReachUI(t *testing.T) {
+	s, _, uiMock := newTestSession(t)
+	assertSessionLua(t, s.engine, `rune.bind("f1", "input.submit", {group="editing"})`)
+	s.flushPresentation()
+	for _, code := range []string{`rune.binds.get("f1"):disable()`, `rune.binds.get("f1"):enable(); rune.group.disable("editing")`} {
+		assertSessionLua(t, s.engine, code)
+		s.flushPresentation()
+		if uiMock.pushedBinds()["f1"].Enabled {
+			t.Fatal("inactive binding published as active")
+		}
+	}
+	assertSessionLua(t, s.engine, `rune.group.enable("editing")`)
+	s.flushPresentation()
+	if !uiMock.pushedBinds()["f1"].Enabled {
+		t.Fatal("enabled group did not update UI")
+	}
+}
+
+func TestEmptyBindingsDoNotUseDegradedCoreDefaults(t *testing.T) {
+	s, _, uiMock := newTestSession(t)
+	assertSessionLua(t, s.engine, `rune.binds.clear()`)
+	s.pushBindsAndLayout()
+	if len(uiMock.pushedBinds()) != 0 {
+		t.Fatal("clearing bindings restored defaults")
+	}
+	assertSessionLua(t, s.engine, `rune.binds = nil`)
+	s.pushBindsAndLayout()
+	if !uiMock.pushedBinds().Matches("submit", "enter") {
+		t.Fatal("unavailable core did not restore fallback editing")
+	}
+}
+
+func TestNamedEditorAppliesOnlySuccessfulResults(t *testing.T) {
+	for _, tc := range []struct {
+		name, result string
+		ok           bool
+	}{
+		{"multiline", "north\neast\n\tkill goblin  ", true},
+		{"empty", "", true},
+		{"cancelled", "ignored", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _, display := newTestSession(t)
+			s.currentInput = "keep me"
+			display.openEditorFn = func(initial string) (string, bool) {
+				if initial != "UI draft" {
+					t.Fatalf("editor received %q", initial)
+				}
+				return tc.result, tc.ok
+			}
+			s.handleUIEvent(ui.OpenEditorMsg{Text: "UI draft"})
+			want := "keep me"
+			if tc.ok {
+				want = tc.result
+			}
+			if s.currentInput != want {
+				t.Fatalf("draft %q, want %q", s.currentInput, want)
+			}
+		})
+	}
+}

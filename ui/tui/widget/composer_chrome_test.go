@@ -16,7 +16,6 @@ func TestComposerLabelsPrioritizeEssentialActions(t *testing.T) {
 			in := newTestInput(100)
 			in.BeginCompose("first\nsecond", 0)
 			in.SetSubmissionMode(mode)
-			in.SetEditorAvailable(true)
 			for _, width := range []int{32, 40, 60, 80, 100} {
 				t.Run(fmt.Sprint(width), func(t *testing.T) {
 					in.SetSize(width, 0)
@@ -52,12 +51,11 @@ func TestComposerLabelsPrioritizeEssentialActions(t *testing.T) {
 func TestComposerLabelsStayCompleteAndInsideTheirRules(t *testing.T) {
 	in := newTestInput(100)
 	in.BeginCompose("first\nsecond", 0)
-	in.SetEditorAvailable(true)
 	complete := map[string]bool{
 		"COMMAND": true, "VERBATIM": true, "COMMAND · 2 lines": true, "VERBATIM · 2 lines": true,
 		"Alt+V command": true, "Alt+V verbatim": true,
 		"Enter run": true, "Enter send": true, "Ctrl+J newline": true,
-		"Alt+Enter run": true, "Esc×2 discard": true, "Ctrl+E editor": true,
+		"Esc×2 discard": true, "Ctrl+E editor": true,
 		"Esc again to discard": true, "Esc to discard": true,
 	}
 	for _, mode := range []input.SubmissionMode{input.ModeCommand, input.ModeVerbatim} {

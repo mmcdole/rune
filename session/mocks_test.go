@@ -129,11 +129,12 @@ type mockUI struct {
 	inputCursor   []int
 	bars          map[string]ui.BarContent // last UpdateBars payload
 	barPushes     int                      // UpdateBars call count
-	bindsPushed   map[string]bool          // last UpdateBinds payload
+	bindsPushed   input.Bindings           // last UpdateBinds payload
 	layoutPushes  int                      // UpdateLayout call count
 	layout        ui.LayoutTree            // last UpdateLayout payload
 	config        ui.Config                // last UpdateConfig payload
 	configPushes  []ui.Config              // every UpdateConfig payload
+	openEditorFn  func(string) (string, bool)
 	events        chan ui.UIEvent
 	done          chan struct{}
 }
@@ -212,7 +213,7 @@ func (m *mockUI) UpdateBars(content map[string]ui.BarContent) {
 	m.bars = content
 	m.barPushes++
 }
-func (m *mockUI) UpdateBinds(keys map[string]bool) {
+func (m *mockUI) UpdateBinds(keys input.Bindings) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.bindsPushed = keys
@@ -267,7 +268,7 @@ func (m *mockUI) pushedLayout() ui.LayoutTree {
 	return m.layout
 }
 
-func (m *mockUI) pushedBinds() map[string]bool {
+func (m *mockUI) pushedBinds() input.Bindings {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.bindsPushed
@@ -286,7 +287,12 @@ func (m *mockUI) InputSetCursor(pos int) {
 	defer m.mu.Unlock()
 	m.inputCursor = append(m.inputCursor, pos)
 }
-func (m *mockUI) OpenEditor(initial string) (string, bool) { return "", false }
+func (m *mockUI) OpenEditor(initial string) (string, bool) {
+	if m.openEditorFn != nil {
+		return m.openEditorFn(initial)
+	}
+	return "", false
+}
 
 func (m *mockUI) PaneScrollUp(name string, lines int)   {}
 func (m *mockUI) PaneScrollDown(name string, lines int) {}

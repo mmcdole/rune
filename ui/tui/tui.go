@@ -178,7 +178,7 @@ func (b *BubbleTeaUI) UpdateBars(content map[string]ui.BarContent) {
 }
 
 // UpdateBinds sends the current set of bound keys from Session to UI.
-func (b *BubbleTeaUI) UpdateBinds(keys map[string]bool) {
+func (b *BubbleTeaUI) UpdateBinds(keys input.Bindings) {
 	b.send(ui.UpdateBindsMsg(keys))
 }
 

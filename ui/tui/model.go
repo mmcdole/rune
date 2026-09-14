@@ -50,7 +50,6 @@ type Model struct {
 	searchView searchViewState
 
 	// Push-based state from Session
-	boundKeys  map[string]bool
 	layout     ui.LayoutTree
 	layoutPlan layoutPlan
 
@@ -197,8 +196,7 @@ func (m *Model) handleTick(msg tickMsg) (tea.Model, tea.Cmd) {
 func (m *Model) handleConfigUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case ui.UpdateBindsMsg:
-		m.boundKeys = msg
-		m.input.SetEditorAvailable(msg["ctrl+e"])
+		m.input.SetBindings(input.Bindings(msg))
 	case ui.UpdateBarsMsg:
 		m.syncBars(msg)
 	case ui.UpdateLayoutMsg:
@@ -340,7 +338,11 @@ func (m *Model) appendMessage(text string) {
 // controller to retain the current local draft.
 func (m *Model) submit(msg ui.InputSubmittedMsg) bool {
 	if msg.Submission.Mode == input.ModeCommand && !input.ValidCommandText(msg.Submission.Text) {
-		m.appendMessage(text.Red("[WARNING] Command not run - invalid text or terminal controls. Use Alt+V for verbatim."))
+		warning := "[WARNING] Command not run - invalid text or terminal controls."
+		if key := m.input.Bindings().Hint("toggle_mode"); key != "" {
+			warning += " Use " + key + " for verbatim."
+		}
+		m.appendMessage(text.Red(warning))
 		return false
 	}
 	if m.tryPost(msg) {
@@ -351,7 +353,8 @@ func (m *Model) submit(msg ui.InputSubmittedMsg) bool {
 }
 
 func (m *Model) isBound(key string) bool {
-	return m.boundKeys[key]
+	_, ok := m.input.Bindings()[key]
+	return ok
 }
 
 func (m *Model) tryPost(event ui.UIEvent) bool {

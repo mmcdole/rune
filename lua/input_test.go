@@ -294,51 +294,9 @@ func TestClearInputBinds(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 
-	host.SetInput("half-typed command")
-	engine.HandleKeyBind("esc")
-	assertInput(t, host, "")
-
 	host.SetInput("another one")
 	engine.HandleKeyBind("ctrl+u")
 	assertInput(t, host, "")
-}
-
-func TestEditorBindPreservesEditedText(t *testing.T) {
-	engine, host, cleanup := setupTest(t)
-	defer cleanup()
-
-	host.OpenEditorFn = func(initial string) (string, bool) {
-		if initial != "draft" {
-			t.Errorf("editor got initial %q, want %q", initial, "draft")
-		}
-		return "north\neast\n\tkill goblin  ", true
-	}
-	host.SetInput("draft")
-
-	engine.HandleKeyBind("ctrl+e")
-	assertInput(t, host, "north\neast\n\tkill goblin  ")
-}
-
-func TestEditorBindCanClearInput(t *testing.T) {
-	engine, host, cleanup := setupTest(t)
-	defer cleanup()
-
-	host.OpenEditorFn = func(string) (string, bool) { return "", true }
-	host.SetInput("discard me")
-
-	engine.HandleKeyBind("ctrl+e")
-	assertInput(t, host, "")
-}
-
-func TestCancelledEditorRetainsInput(t *testing.T) {
-	engine, host, cleanup := setupTest(t)
-	defer cleanup()
-
-	host.OpenEditorFn = func(string) (string, bool) { return "", false }
-	host.SetInput("keep me")
-
-	engine.HandleKeyBind("ctrl+e")
-	assertInput(t, host, "keep me")
 }
 
 func TestTabCompletionFromServerOutput(t *testing.T) {

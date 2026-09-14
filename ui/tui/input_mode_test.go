@@ -642,7 +642,7 @@ func TestBoundNumpadEnterPrecedesSubmit(t *testing.T) {
 	}
 }
 
-func TestBoundCtrlNumpadEnterKeepsReservedNewline(t *testing.T) {
+func TestBoundCtrlNumpadEnterOverridesDefaultNewline(t *testing.T) {
 	h := newControllerHarness()
 	h.bound["ctrl+numpad_enter"] = true
 	h.ctl.SetText("hello")
@@ -650,11 +650,11 @@ func TestBoundCtrlNumpadEnterKeepsReservedNewline(t *testing.T) {
 
 	h.ctl.HandleKey(ctrlPress(tea.KeyKpEnter))
 
-	if got := h.ctl.input.Value(); got != "hello\n" {
-		t.Fatalf("input after Ctrl+numpad Enter = %q, want %q", got, "hello\n")
+	if got := h.ctl.input.Value(); got != "hello" {
+		t.Fatalf("input after Ctrl+numpad Enter = %q, want %q", got, "hello")
 	}
-	if binds := h.executeBinds(); len(binds) != 0 {
-		t.Fatalf("Ctrl+numpad Enter delegated to Lua: %v", binds)
+	if binds := h.executeBinds(); len(binds) != 1 || binds[0] != ui.ExecuteBindMsg("ctrl+numpad_enter") {
+		t.Fatalf("Ctrl+numpad Enter binding: %v", binds)
 	}
 }
 
@@ -1088,9 +1088,8 @@ func TestModifiedEscapeDoesNotCancelInternalModes(t *testing.T) {
 	}
 }
 
-// TestCtrlEInComposerDelegatesToEditorBind verifies compose-local editing
-// does not swallow the existing external-editor binding.
-func TestCtrlEInComposerDelegatesToEditorBind(t *testing.T) {
+// TestCtrlEInComposerRequestsEditor verifies the current draft reaches Session.
+func TestCtrlEInComposerRequestsEditor(t *testing.T) {
 	h := newControllerHarness()
 	h.bound["ctrl+e"] = true
 	draft := "one\ntwo"
@@ -1099,10 +1098,10 @@ func TestCtrlEInComposerDelegatesToEditorBind(t *testing.T) {
 
 	h.ctl.HandleKey(ctrlPress('e'))
 
-	binds := h.executeBinds()
-	if len(binds) != 1 || binds[0] != ui.ExecuteBindMsg("ctrl+e") {
-		t.Fatalf("execute binds = %v, want [ctrl+e]", binds)
+	if len(h.events) != 1 || h.events[0] != (ui.OpenEditorMsg{Text: draft}) {
+		t.Fatalf("editor events = %v", h.events)
 	}
+
 	if got := h.ctl.input.Value(); got != draft {
 		t.Fatalf("Ctrl+E changed draft to %q, want %q", got, draft)
 	}

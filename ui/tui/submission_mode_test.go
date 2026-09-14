@@ -54,22 +54,16 @@ func TestExplicitCommandModeSurvivesStructuredEdits(t *testing.T) {
 	}
 }
 
-func TestRunAsCommandIsOneOffAndRetainsRejectedDraft(t *testing.T) {
+func TestAltEnterDoesNotOverrideSubmissionMode(t *testing.T) {
 	h := newControllerHarness()
-	h.ctl.HandlePaste("/lua -- comment\nrune.echo('hello')")
-	h.ctl.input.SetCursor(5)
-	h.accept = false
+	h.ctl.HandlePaste("first\nsecond")
 	h.ctl.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt})
-	if len(h.submitted) != 1 || h.submitted[0].Mode != input.ModeCommand {
-		t.Fatalf("override = %+v", h.submitted)
+	if len(h.submitted) != 0 || h.ctl.input.SubmissionMode() != input.ModeVerbatim {
+		t.Fatal("Alt+Enter must not submit or change mode")
 	}
-	if h.ctl.input.Value() != h.submitted[0].Text || h.ctl.input.Position() != 5 || h.ctl.input.SubmissionMode() != input.ModeVerbatim {
-		t.Fatal("rejected override changed the draft")
-	}
-	h.accept = true
 	h.ctl.HandleKey(keyPress(tea.KeyEnter))
-	if len(h.submitted) != 2 || h.submitted[1].Mode != input.ModeVerbatim {
-		t.Fatal("override changed subsequent Enter interpretation")
+	if len(h.submitted) != 1 || h.submitted[0] != input.Verbatim("first\nsecond") {
+		t.Fatalf("submit = %+v", h.submitted)
 	}
 }
 
@@ -137,8 +131,9 @@ func TestRejectedCommandPreservesDraftAndCanBeSentVerbatim(t *testing.T) {
 	events := make(chan ui.UIEvent, 20)
 	m := NewModel(events)
 	m.inputCtl.HandlePaste("north\x1blook")
-	m.inputCtl.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt})
-	if m.input.Value() != "north\x1blook" || m.input.SubmissionMode() != input.ModeVerbatim {
+	m.inputCtl.HandleKey(tea.KeyPressMsg{Code: 'v', Mod: tea.ModAlt})
+	m.inputCtl.HandleKey(keyPress(tea.KeyEnter))
+	if m.input.Value() != "north\x1blook" || m.input.SubmissionMode() != input.ModeCommand {
 		t.Fatal("invalid command lost draft")
 	}
 	if m.output.buffer.Count() == 0 || !strings.Contains(m.output.buffer.At(0), "Command not run") {
@@ -149,6 +144,7 @@ func TestRejectedCommandPreservesDraftAndCanBeSentVerbatim(t *testing.T) {
 			t.Fatal("invalid command was queued")
 		}
 	}
+	m.inputCtl.HandleKey(tea.KeyPressMsg{Code: 'v', Mod: tea.ModAlt})
 	m.inputCtl.HandleKey(keyPress(tea.KeyEnter))
 	msg, ok := (<-events).(ui.InputSubmittedMsg)
 	if !ok || msg.Submission != input.Verbatim("north\x1blook") {
@@ -161,7 +157,7 @@ func TestComposerEditorHintTracksBindingUpdates(t *testing.T) {
 	m.input.SetSize(100, 0)
 	m.inputCtl.HandlePaste("first\nsecond")
 	for _, available := range []bool{false, true, false} {
-		m.Update(ui.UpdateBindsMsg{"ctrl+e": available})
+		m.Update(ui.UpdateBindsMsg{"ctrl+e": {Action: "input.open_editor", Enabled: available}})
 		var labels string
 		for _, rule := range m.input.Rules(100, 4) {
 			for _, label := range rule.Labels {

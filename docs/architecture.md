@@ -165,9 +165,9 @@ Bar registrations survive layout replacement but are rebuilt on reload.
 ### 3.2 Key Bindings
 
 - **Registration:** Lua registers a bind: `rune.bind("ctrl+r", fn)`.
-- **Sync:** The Session pushes a `map[string]bool` of bound keys to the UI (`UpdateBindsMsg`).
+- **Sync:** Session pushes an `input.Bindings` snapshot to the UI (`UpdateBindsMsg`).
 - **Detection:** When a key is pressed, the UI checks this map.
-  - **If Bound:** The UI suppresses default behavior and sends an `ExecuteBindMsg` to the Session.
+  - **If Bound:** Within the current context, the UI executes named editor actions locally or sends callbacks as an `ExecuteBindMsg` to Session. Disabled bindings are consumed.
   - **If Unbound:** The UI handles it normally (for example, typing text).
 
 ### 3.3 The Generic Picker
@@ -342,9 +342,18 @@ carry the Lua generation that created their callback; a result from before
 The input widget owns the draft text, cursor, selection, and submission mode.
 The lossless composer is an editing surface; its presence does not determine
 interpretation. Structured text initially selects Verbatim, while an explicit
-mode choice persists for the draft. The Go input controller handles `Alt+V`
-(toggle, opening the composer if needed) and `Alt+Enter` (one-off Command submission), preserving overlay capture
-and applying accepted submissions atomically. The Model validates command text
+mode choice persists for the draft. The Go input controller owns configurable submit, newline, and mode-toggle actions,
+preserving overlay capture
+and applying accepted submissions atomically. `rune.bind` registers callbacks and named editor actions in one Lua registry.
+Session publishes its bindings (action, enabled state, registration order) to the
+UI; action routing, composer hints, and the search cancel hint read this same snapshot.
+Cancel resolves locally by input context. Opening the external editor sends an
+`OpenEditorMsg` containing the draft to Session, which calls the existing terminal
+suspension adapter and applies successful results through `SetInput`. This path
+does not enter Lua or its watchdog; the Lua `rune.input.open_editor` API remains
+available for scripts that need to use the returned text themselves. Callbacks
+round-trip through Session to Lua. An unavailable core retains Go fallback editor
+bindings; a successful empty snapshot removes all bindings. Submit always uses the displayed mode. The Model validates command text
 before queueing, so rejection leaves the draft intact. The
 shared `input.ValidCommandText` check also validates Command hook rewrites;
 `input.Line` keeps the Engine boundary single-line. Session records the effective lines as one history entry after processing.

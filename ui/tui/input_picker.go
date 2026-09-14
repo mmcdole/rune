@@ -53,11 +53,20 @@ var inlinePickerLocalKeys = map[string]bool{
 }
 
 func (c *inputController) handleInlineKey(msg tea.KeyPressMsg) {
-	// Ctrl+Enter transitions from single-line completion into a structured
+	// The newline action transitions from single-line completion into a structured
 	// draft. Treat it like a bracketed newline paste so the input update is
 	// visible to Lua before the picker callback is cancelled.
-	if isComposerNewline(msg) {
+	if c.editorKey(msg, "newline") {
 		c.handlePaste("\n")
+		return
+	}
+	if c.editorKey(msg, "submit") {
+		if item, ok := c.input.Picker().Selected(); ok {
+			c.closePicker(true, item.GetValue())
+		} else {
+			c.closePicker(false, "")
+		}
+		c.submitInput()
 		return
 	}
 	// An exact physical numpad bind wins in the inline picker. Without one,
@@ -104,7 +113,6 @@ func (c *inputController) handleInlineKey(msg tea.KeyPressMsg) {
 		} else {
 			c.closePicker(false, "")
 		}
-		c.submitInput(c.input.SubmissionMode())
 		return
 	}
 

@@ -41,11 +41,13 @@ Handle.__index = Handle
 
 function Handle:enable()
     self._data.enabled = true
+    rune._ui.presentation_changed()
     return self
 end
 
 function Handle:disable()
     self._data.enabled = false
+    rune._ui.presentation_changed()
     return self
 end
 
@@ -308,12 +310,14 @@ end
 function rune.group.disable(group_name)
     if not group_name then return end
     group_states[group_name] = false
+    rune._ui.presentation_changed()
 end
 
 -- Enable a group (master switch on)
 function rune.group.enable(group_name)
     if not group_name then return end
     group_states[group_name] = true
+    rune._ui.presentation_changed()
 end
 
 -- List all known groups (aggregated from every registry that honors
