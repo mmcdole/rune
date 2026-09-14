@@ -91,7 +91,7 @@ rune.hooks.on("echo", function(text)
     rune._log.write(raw_mode and text or rune._strip_ansi(text))
 end, { name = "log-echo", priority = 200 })
 
--- /log - registered here rather than in 48_commands.lua so the whole
+-- /log - registered here rather than in 55_commands.lua so the whole
 -- logging feature lives in one file.
 rune.command.add("log", function(args)
     local sub, rest = args:match("^(%S*)%s*(.*)$")

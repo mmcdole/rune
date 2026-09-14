@@ -1,6 +1,6 @@
 package lua
 
-// Tests for the single-identity rule (16_registry.lua): a registry entry
+// Tests for the single-identity rule (20_registry.lua): a registry entry
 // with a natural key (a bind's key, a bar's layout name, a command's name,
 // an exact alias's phrase) is registered under that key as its name, so
 // the whole management suite addresses it by the string the user typed.

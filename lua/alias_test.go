@@ -1,6 +1,6 @@
 package lua
 
-// Alias semantics (40_aliases.lua): the variant matrix for exact and
+// Alias semantics (45_aliases.lua): the variant matrix for exact and
 // regex forms, argument handling, nesting, and handles. Registry
 // semantics (upsert, once) live in registry_test.go; the e2e wiring
 // proof in test/e2e/scenarios/aliases.json.

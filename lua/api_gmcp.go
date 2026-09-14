@@ -6,7 +6,7 @@ import (
 
 // registerGMCPFuncs registers rune._gmcp.* primitives.
 // The public rune.gmcp API (handlers, subscriptions, the Core.Hello
-// handshake) is defined in Lua (60_gmcp.lua). Encoding goes through
+// handshake) is defined in Lua (70_gmcp.lua). Encoding goes through
 // the shared script-tree/JSON bridge (see api_store.go).
 func (e *Engine) registerGMCPFuncs() {
 	e.vm.RegisterModule("rune._gmcp", map[string]script.GoFunc{

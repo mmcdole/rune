@@ -1,6 +1,6 @@
 -- Trigger System
 -- Triggers match server output and execute actions.
--- Built on rune.registry (16_registry.lua).
+-- Built on rune.registry (20_registry.lua).
 --
 -- API (literal matching):
 --   rune.trigger.exact(line, action, opts?)      -- Exact line match (literal)
@@ -457,3 +457,21 @@ end
 function rune.trigger.remove_group(group_name)
     return registry:remove_group(group_name)
 end
+
+-- Register output handler
+rune.hooks.on("output", function(line)
+    local modified, show = rune.trigger._process_output(line)
+    if not show then
+        return false
+    end
+    return modified
+end, { priority = 100 })
+
+-- Prompt triggers opt into partial lines, which may repeat as they grow.
+rune.hooks.on("prompt", function(line, confirmed)
+    local modified, show = rune.trigger._process_prompt(line, confirmed)
+    if not show then
+        return false
+    end
+    return modified
+end, { priority = 100 })

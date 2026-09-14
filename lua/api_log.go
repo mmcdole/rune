@@ -4,7 +4,7 @@ import "github.com/mmcdole/rune/script"
 
 // registerLogFuncs registers rune._log.* primitives.
 // The public rune.log API and the hooks that decide what gets written
-// are defined in Lua (52_log.lua). Go only owns the file handle, so an
+// are defined in Lua (60_log.lua). Go only owns the file handle, so an
 // active log survives /reload.
 func (e *Engine) registerLogFuncs() {
 	e.vm.RegisterModule("rune._log", map[string]script.GoFunc{

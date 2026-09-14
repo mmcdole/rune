@@ -255,7 +255,7 @@ logs/2026-07-17_20-18-40.log                  # not connected (today's behavior)
 
 "Where are my logs?" has a one-word answer; `ls logs/` is the whole history, sorted;
 concurrent sessions can never share a file. `rune.log.start(path)` is untouched. Pure
-Lua change (`52_log.lua`).
+Lua change (`60_log.lua`).
 
 ## Migration
 

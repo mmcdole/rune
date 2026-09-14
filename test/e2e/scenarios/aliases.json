@@ -1,5 +1,5 @@
 {
-  "description": "Aliases (40_aliases.lua): one wiring proof. Alias forms and edge cases live in lua/alias_test.go.",
+  "description": "Aliases (45_aliases.lua): one wiring proof. Alias forms and edge cases live in lua/alias_test.go.",
   "scenarios": [
     {
       "name": "aliases expand before sending",

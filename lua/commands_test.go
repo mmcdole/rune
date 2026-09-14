@@ -1,6 +1,6 @@
 package lua
 
-// Smoke tests for the listing slash commands (48_commands.lua): each
+// Smoke tests for the listing slash commands (55_commands.lua): each
 // must run without error and mention what was registered. These guard
 // the /listing surface that has no other coverage - a formatting typo
 // in a listing otherwise only surfaces when a user types it.
@@ -138,7 +138,7 @@ func TestCommandRegistrationRejectsInvalidName(t *testing.T) {
 	}
 }
 
-// TestErrorTagIsRed pins the presentation convention (04_style.lua):
+// TestErrorTagIsRed pins the presentation convention (05_style.lua):
 // [Error] tags are red, tag only, message plain - checked on the two
 // highest-traffic paths, the default error handler and unknown
 // commands.

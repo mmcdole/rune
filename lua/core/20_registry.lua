@@ -20,7 +20,7 @@
 --   enabled  -- individual switch (see reg:active)
 --   priority -- opts.priority or 50, lower runs first
 --   name     -- opts.name, unique: adding a duplicate replaces the old
---   group    -- opts.group, master-switch membership (24_groups.lua)
+--   group    -- opts.group, master-switch membership (rune.group)
 --   once     -- opts.once, module removes the item after first fire
 --   _handle  -- back-reference to the handle
 --
@@ -279,12 +279,84 @@ function Registry:remove_group(group_name)
     return #handles
 end
 
+-- Group System (Control Only)
+-- Manages the master enable/disable state for groups.
+-- Item deletion is handled by each module (alias, trigger, timer, hooks).
+--
+-- Two-level enable/disable:
+--   - Group level: master switch (rune.group.disable/enable)
+--   - Item level: individual state (handle:disable/enable)
+--
+-- An item fires only if BOTH are enabled.
+-- Group disable doesn't mutate individual states - they're preserved for re-enable.
+
+rune.group = {}
+
+-- Master switch state: group_name -> bool (nil = enabled)
+local group_states = {}
+
+-- Check if a group is enabled (used by alias/trigger/timer modules)
+function rune.group.is_enabled(group_name)
+    if not group_name then return true end
+    if group_states[group_name] == false then
+        return false
+    end
+    return true
+end
+
+-- Disable a group (master switch off)
+function rune.group.disable(group_name)
+    if not group_name then return end
+    group_states[group_name] = false
+end
+
+-- Enable a group (master switch on)
+function rune.group.enable(group_name)
+    if not group_name then return end
+    group_states[group_name] = true
+end
+
+-- List all known groups (aggregated from every registry that honors
+-- group switches: aliases, triggers, timers, hooks, binds, bars,
+-- commands). Returns array of {name, enabled}.
+function rune.group.list()
+    local seen = {}
+
+    local modules = {
+        rune.alias, rune.trigger, rune.timer, rune.hooks,
+        rune.binds, rune.bars, rune.command,
+    }
+    for _, mod in ipairs(modules) do
+        if mod and mod.list then
+            for _, item in ipairs(mod.list()) do
+                if item.group then
+                    seen[item.group] = true
+                end
+            end
+        end
+    end
+
+    -- Also include any explicitly toggled groups (even if empty)
+    for group_name in pairs(group_states) do
+        seen[group_name] = true
+    end
+
+    local result = {}
+    for group_name in pairs(seen) do
+        table.insert(result, {
+            name = group_name,
+            enabled = rune.group.is_enabled(group_name),
+        })
+    end
+    table.sort(result, function(a, b) return a.name < b.name end)
+    return result
+end
+
 -- An item fires only if it has not been removed, is individually
--- enabled, AND its group's master switch is on. rune.group loads
--- after this file but exists by the time anything dispatches.
+-- enabled, and its group's master switch is on.
 function Registry:active(data)
     if data.removed or not data.enabled then
         return false
     end
-    return not rune.group or rune.group.is_enabled(data.group)
+    return rune.group.is_enabled(data.group)
 end

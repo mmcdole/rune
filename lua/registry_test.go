@@ -1,6 +1,6 @@
 package lua
 
-// Tests for the shared registry factory (16_registry.lua), exercised
+// Tests for the shared registry factory (20_registry.lua), exercised
 // through the public trigger/alias/hook APIs the way user scripts use
 // it: upsert-by-name, priority ordering, once, and mutation during
 // dispatch (the snapshot guarantee).

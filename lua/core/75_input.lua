@@ -3,6 +3,46 @@
 -- result, then calls _dispatch. Session owns physical lines and history recording.
 -- Programmatic rune.send executes game commands without interactive preparation.
 
+-- Send game text without alias processing. LF, CRLF, and bare CR separate
+-- physical lines.
+-- Echoes send failures (e.g. not connected) rather than raising.
+-- Returns true, or nil + error message.
+function rune.send_raw(text)
+    if type(text) == "string" and text:find("[\r\n]") then
+        text = text:gsub("\r\n", "\n"):gsub("\r", "\n")
+        local ok, err
+        for line in (text .. "\n"):gmatch("(.-)\n") do
+            ok, err = rune.send_raw(line)
+            if not ok then
+                return ok, err
+            end
+        end
+        return ok, err
+    end
+    local ok, err = rune._send_raw(text)
+    if not ok then
+        rune.echo(rune.style.red("[Error]") .. " " .. tostring(err))
+    end
+    return ok, err
+end
+
+-- Input history (Go owns storage so it survives reloads)
+
+rune.history = {}
+
+function rune.history.get()
+    local entries = rune._history.entries()
+    local history = {}
+    for i, entry in ipairs(entries) do
+        history[i] = entry.text
+    end
+    return history
+end
+
+function rune.history.add(cmd)
+    rune._history.add(cmd)
+end
+
 -- Shared command boundaries for sending and history expansion. Keep the source
 -- spelling alongside the decoded command so history can safely replay escapes.
 local function commands(text, separator)

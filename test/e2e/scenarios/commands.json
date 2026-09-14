@@ -1,5 +1,5 @@
 {
-  "description": "Slash command dispatch (48_commands.lua): commands are consumed locally, unknown commands report cleanly.",
+  "description": "Slash command dispatch (55_commands.lua): commands are consumed locally, unknown commands report cleanly.",
   "scenarios": [
     {
       "name": "slash commands never reach the server",
