@@ -319,6 +319,9 @@ func TestSubmissionRejectsMultilineRewriteBeforeLaterHooks(t *testing.T) {
 
 func TestLargeInputRewritesReachDispatchAndHistory(t *testing.T) {
 	s, net, _ := newTestSession(t)
+	// This checks large rewrites, not execution speed. Leave room for race
+	// and coverage overhead; the watchdog has its own test below.
+	s.engine.CallTimeout = 30 * time.Second
 	net.connected = true
 	assertSessionLua(t, s.engine, `rune.hooks.on("input", function() return string.rep("x", 300 * 1024) end)`)
 	submitTestSubmission(s, input.Command("first\nsecond\nthird"))
