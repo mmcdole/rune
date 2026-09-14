@@ -141,10 +141,9 @@ All input handlers run in priority order, with lower numbers first. If none
 returns `false`, Rune processes the final text after the last handler finishes.
 Command mode applies slash commands, command separators, `#N` repeats, and
 aliases. Verbatim mode sends each line without any of that command processing.
-Even a handler with a priority above 100 still runs before Rune processes or
-sends the command.
+All input handlers finish before Rune echoes or dispatches the result.
 
-The named core input hook `history-expansion` runs at priority 100. With the
+History expansion is a fixed stage before all input hooks. With the
 default history character, `!` and `!!` repeat the last command, while
 `!prefix` repeats the newest command beginning with `prefix`. These forms also
 work as complete commands in a separator-chained line. Rune ignores local
@@ -159,10 +158,14 @@ rune.config.set("history_character", "")
 
 Only commands typed in normal input use history expansion. `rune.send` does
 not perform it, and verbatim input bypasses command processing entirely.
-Hooks below priority 100 see the text before expansion; hooks above 100 see the
-expanded command. If you are replacing the feature with your own input hook,
-you can remove the built-in `history-expansion` handler instead of merely
-disabling it.
+Every input hook sees resolved text, regardless of priority. Hook rewrites do
+not re-enter history expansion. Clearing input hooks does not disable expansion;
+use `history_character` to configure or disable it.
+
+**Migration:** The `history-expansion` hook no longer exists. Hooks that previously
+inspected or produced history references before priority 100 now run after
+expansion. To implement custom history syntax, disable built-in expansion and
+resolve that syntax in your own input hook.
 
 For `output`, `prompt`, and `echo`, the core handlers remain at priority 100:
 trigger processing on `output`/`prompt` and the `> ` styling on `echo`.
@@ -215,8 +218,7 @@ changes.
 Handlers the core registers under stable names, so you can disable or
 replace them: `log-output`, `log-echo` (logging policy, priority 200),
 `gmcp-hello` (the GMCP handshake), `gmcp-reset`, `first-run-welcome`,
-`history-expansion` (interactive history expansion, priority 100), and
-`_completion_cache` / `_completion_input` (tab-completion word harvesting,
+and `_completion_cache` / `_completion_input` (tab-completion word harvesting,
 priority 200).
 
 ## Managing

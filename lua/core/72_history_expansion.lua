@@ -1,8 +1,7 @@
 -- Interactive history expansion.
 --
--- This is an input transform, not an alias: successful expansion becomes the
--- text stored in history and processed as input. Programmatic rune.send calls
--- do not use interactive submission history.
+-- Called once before input hooks. Programmatic sends and hook rewrites never
+-- re-enter expansion. Keep source spelling intact for echo, history, and replay.
 
 local function designator_spec(piece, marker, separator)
     local token = piece:match("^%s*(.-)%s*$")
@@ -92,18 +91,15 @@ local function expand_commands(text, history, separator, marker)
     return table.concat(pieces, separator)
 end
 
-local function expand_history(text, context)
-    if context.mode ~= "command" or text:sub(1, 1) == "/" then return nil end
+-- Returns resolved text, or false when a reference has no match.
+function rune.input._expand_history(text)
+    if text:sub(1, 1) == "/" then return text end
     local marker = rune.config.get("history_character")
-    if marker == "" or not text:find(marker, 1, true) then return nil end
+    if marker == "" or not text:find(marker, 1, true) then return text end
 
     local separator = rune.config.get("command_separator")
     if contains_designator(text, separator, marker) then
         return expand_commands(text, rune._history.entries(), separator, marker)
     end
+    return text
 end
-
-rune.hooks.on("input", expand_history, {
-    name = "history-expansion",
-    priority = 100,
-})

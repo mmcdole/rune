@@ -36,7 +36,7 @@ func (s *Session) processSubmission(submission input.Submission) (history []stri
 		if s.backgroundCtx.Err() != nil {
 			break
 		}
-		effective, proceed := s.engine.ApplyInputHooks(input.Line{Text: authored, Mode: submission.Mode})
+		effective, proceed := s.engine.PrepareInputLine(input.Line{Text: authored, Mode: submission.Mode})
 		if !proceed {
 			continue
 		}

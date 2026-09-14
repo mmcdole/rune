@@ -76,3 +76,31 @@ func TestInputLineRejectsInvalidRewrites(t *testing.T) {
 		})
 	}
 }
+
+func TestMissingInputPreparationUsesGoFallback(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+	assertLua(t, engine, `rune.input = nil`)
+	dispatchTestCommand(engine, "north")
+	dispatchTestCommand(engine, "/quit")
+	dispatchTestCommand(engine, "/reload")
+	assertCommands(t, host, []string{"north"})
+	if !host.QuitCalled || host.ReloadCalls != 1 {
+		t.Fatal("missing input module disabled recovery commands")
+	}
+}
+
+func TestFailingInputPreparationIsNotRetried(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+	assertLua(t, engine, `
+        function rune.input._prepare(text)
+            rune.send_raw("once")
+            error("preparation failed after send")
+        end
+    `)
+	if dispatchTestCommand(engine, "north") {
+		t.Fatal("failed preparation was accepted")
+	}
+	assertCommands(t, host, []string{"once"})
+}

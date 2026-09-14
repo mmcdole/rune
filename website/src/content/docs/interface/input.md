@@ -199,8 +199,9 @@ UTF-8 and terminal controls. A rejected draft stays in the editor with its mode
 intact. Errors from an alias or slash command are reported normally; Rune continues
 with the following lines.
 
-Each physical line passes through `input` hooks, then local echo and dispatch,
-before processing the next line. This applies to both modes. A hook returning
+For each physical line, Rune expands history in Command mode, runs `input` hooks,
+then echoes and dispatches the result before advancing. Verbatim skips expansion.
+A hook returning
 `false`, a missing history match, or an invalid rewrite skips only the affected
 line. Hook replacements must stay on one line.
 

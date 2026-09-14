@@ -96,10 +96,9 @@ All input handlers run in priority order, with lower numbers first. If none
 returns `false`, Rune processes the final text after the last handler finishes.
 In command mode that means slash commands, command separators, `#N` repeats,
 and aliases. Verbatim input sends each line without any of that command
-processing. Even a handler with a priority above 100 still runs before Rune
-processes or sends the command.
+processing. All input handlers finish before Rune echoes or dispatches the result.
 
-The named core input hook `history-expansion` runs at priority 100. With the
+History expansion runs once before all input hooks. With the
 default history character, it expands interactive command components such as
 `!`, `!!`, and `!k`; see [Input & History](/interface/input/#history) for the
 full behavior. If your game uses bang commands, choose another character or
@@ -156,10 +155,10 @@ The core's output, prompt, and echo handlers sit at priority 100. Run before
 them to see the pre-trigger/pre-style value, or after them to see their result;
 the session logger, for example, is `log-output` at priority 200.
 
-The named `history-expansion` input handler uses priority 100. Lower-priority
-handlers run before expansion and higher-priority handlers see its result. All
-continue to run unless an earlier input handler returns `false`; Rune processes
-the final text only after they finish.
+Input priorities order user handlers after history expansion. Every handler sees
+resolved input; a rewrite containing `!!` does not expand again. Expansion is not
+a registered hook and cannot be removed through hook management. Disable it with
+`rune.config.set("history_character", "")` when implementing custom history syntax.
 
 ## Options
 

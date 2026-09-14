@@ -423,10 +423,10 @@ func TestCommandBatchHooksAndHistoryExpansion(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.handleSubmission(input.Command("!\n/echo local\nrewrite\n\t\n!look"))
-	if got := net.drainSent(); !slices.Equal(got, []string{"score", "say one;two", "score", "look"}) {
+	if got := net.drainSent(); !slices.Equal(got, []string{"score", "say one;two", "!", "look"}) {
 		t.Fatalf("sent %q", got)
 	}
-	assertSessionLua(t, s.engine, `assert(table.concat(seen, "|") == "!|/echo local|rewrite|!look")`)
+	assertSessionLua(t, s.engine, `assert(table.concat(seen, "|") == "score|/echo local|rewrite|look")`)
 }
 
 func TestHistoryReplaySelectsPhysicalLine(t *testing.T) {

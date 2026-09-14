@@ -113,10 +113,10 @@ func assertCommands(t *testing.T, host *MockHost, expected []string) {
 	}
 }
 
-// dispatchTestLine exercises the Engine's one-line hook and dispatch boundary.
+// dispatchTestLine exercises the Engine's one-line preparation and dispatch boundary.
 // Submission iteration, budgets, echo, and history are tested through Session.
 func dispatchTestLine(engine *Engine, line input.Line) bool {
-	effective, proceed := engine.ApplyInputHooks(line)
+	effective, proceed := engine.PrepareInputLine(line)
 	if !proceed {
 		return false
 	}

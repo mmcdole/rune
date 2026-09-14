@@ -8,17 +8,23 @@ import (
 	"github.com/mmcdole/rune/script"
 )
 
-// ApplyInputHooks transforms one physical line. False consumes only that line.
+// PrepareInputLine expands interactive history, then runs input hooks.
+// False consumes only this physical line.
 // Interpretation mode remains owned by Go.
-func (e *Engine) ApplyInputHooks(line input.Line) (input.Line, bool) {
+func (e *Engine) PrepareInputLine(line input.Line) (input.Line, bool) {
 	if !line.Valid() {
 		e.reportError("input", fmt.Errorf("expected a valid input line"))
 		return line, false
 	}
-	ctx := script.Tree{V: map[string]any{"mode": line.Mode.String()}}
-	results, found, err := e.callHooks(1, "input", line.Text, ctx)
+	var results []script.Result
+	var found bool
+	err := e.guard(func() error {
+		var err error
+		results, found, err = e.vm.CallModule("rune.input", "_prepare", 1, line.Text, line.Mode.String())
+		return err
+	})
 	if err != nil {
-		e.reportError("input hooks", err)
+		e.reportError("input preparation", err)
 		// Some handlers may already have rewritten input or produced side
 		// effects. Fail closed rather than dispatching the authored text and
 		// risking a duplicate send or bypassed interceptor.
@@ -34,11 +40,11 @@ func (e *Engine) ApplyInputHooks(line input.Line) (input.Line, bool) {
 		return line, false
 	case result.Kind == script.KindString:
 		if strings.ContainsAny(result.Str, "\r\n") {
-			e.reportError("input hooks", fmt.Errorf("input rewrite must stay on one line"))
+			e.reportError("input preparation", fmt.Errorf("input rewrite must stay on one line"))
 			return line, false
 		}
 		if line.Mode != input.ModeVerbatim && !input.ValidCommandText(result.Str) {
-			e.reportError("input hooks", fmt.Errorf(
+			e.reportError("input preparation", fmt.Errorf(
 				"command rewrite must be valid command text; terminal controls are not allowed",
 			))
 			return line, false
@@ -46,7 +52,7 @@ func (e *Engine) ApplyInputHooks(line input.Line) (input.Line, bool) {
 		line.Text = result.Str
 		return line, true
 	default:
-		e.reportError("input hooks", fmt.Errorf(
+		e.reportError("input preparation", fmt.Errorf(
 			"expected a string or false, got %s", result.Kind,
 		))
 		e.reportCoreBroken()
