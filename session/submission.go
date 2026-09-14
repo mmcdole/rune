@@ -1,98 +1,54 @@
 package session
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/mmcdole/rune/input"
-	"github.com/mmcdole/rune/lua"
 	"github.com/mmcdole/rune/text"
 )
 
+// handleSubmission owns the whole input lifecycle. Lua only sees one line at
+// a time, and all effects of that line occur before the next line's hooks.
 func (s *Session) handleSubmission(submission input.Submission) {
-	// Accepted submissions commit the prompt even if validation or hooks reject.
+	// Even consumed or invalid submissions finish the active partial display.
 	s.finishPartialLine()
-	if err := submission.Validate(); err != nil {
-		s.ui.Print(text.Red("[WARNING] Input not run - " + err.Error()))
+	if submission.Mode == input.ModeCommand && !input.ValidCommandText(submission.Text) {
+		s.ui.Print(text.Red("[WARNING] Input not run - invalid command text"))
 		return
 	}
 
-	previous := s.expansionHistory
-	s.expansionHistory = s.GetHistoryEntries() // non-nil even for empty history
-	defer func() { s.expansionHistory = previous }()
-	end := s.engine.BeginBatch()
-	defer end()
-
-	var effective []string
-	// Bounds execution as well as the size of the eventual history entry.
-	effectiveBytes := 0
-	var stopErr error
-	for _, authored := range submission.ExecutionLines() {
-		if s.backgroundCtx.Err() != nil {
-			break
-		}
-		line, proceed, err := s.engine.ApplyInputHooks(authored.Text, submission.Mode)
-		if errors.Is(err, lua.ErrInterrupted) {
-			stopErr = err
-			break
-		}
-		if err != nil {
-			s.reportSubmissionError(fmt.Errorf("input hooks at line %d: %w", authored.Number, err))
-			continue
-		}
-		if !proceed {
-			continue
-		}
-		size := len(line)
-		if len(effective) > 0 {
-			size++ // newline between effective lines
-		}
-		if effectiveBytes+size > input.MaxSubmissionBytes {
-			stopErr = fmt.Errorf("input rewrite exceeds submission limit at line %d", authored.Number)
-			break
-		}
-		effective = append(effective, line)
-		effectiveBytes += size
-		if err := s.echoInput(line); err != nil {
-			stopErr = err
-			break
-		}
-		if err := s.engine.DispatchInputLine(line, submission.Mode); err != nil {
-			stopErr = fmt.Errorf("input line %d: %w", authored.Number, err)
-			break
-		}
-	}
-	// These are attempted effective lines, not confirmed successful sends.
-	// Always finalize the prefix, including when echo or dispatch failed.
+	effective, err := s.processSubmission(submission)
 	if len(effective) > 0 {
 		s.addHistorySubmission(input.Submission{Text: strings.Join(effective, "\n"), Mode: submission.Mode})
 	}
-	if stopErr != nil {
-		s.reportSubmissionError(stopErr)
-	}
-}
-
-func (s *Session) echoInput(line string) error {
-	if !s.protocol.LocalEchoEnabled() {
-		return nil
-	}
-	styled, show, err := s.engine.OnEcho(line)
 	if err != nil {
-		return err
+		s.ui.Print(text.Red("[Error] " + err.Error()))
 	}
-	if show {
-		s.ui.Echo(styled)
-	}
-	return nil
 }
 
-// reportSubmissionError owns reporting for rejected lines and stopped batches.
-// An interrupted VM cannot safely run the Lua error hook.
-func (s *Session) reportSubmissionError(err error) {
-	if errors.Is(err, lua.ErrInterrupted) {
-		s.ui.Print(text.Red("[Error] " + err.Error()))
-		return
+// processSubmission sequences physical lines under one execution deadline.
+// Effective history is collected before dispatch, independently of send success.
+func (s *Session) processSubmission(submission input.Submission) (history []string, err error) {
+	finish := s.engine.BeginExecution()
+	defer func() { err = finish(err) }()
+	for index, authored := range submission.Lines() {
+		if s.backgroundCtx.Err() != nil {
+			break
+		}
+		effective, proceed := s.engine.ApplyInputHooks(input.Line{Text: authored, Mode: submission.Mode})
+		if !proceed {
+			continue
+		}
+		history = append(history, effective.Text)
+		if s.protocol.LocalEchoEnabled() {
+			if styled, show := s.engine.OnEcho(effective.Text); show {
+				s.ui.Echo(styled)
+			}
+		}
+		if err := s.engine.DispatchInputLine(effective); err != nil {
+			return history, fmt.Errorf("input line %d: %w", index+1, err)
+		}
 	}
-	s.engine.NotifyError(err.Error())
+	return history, nil
 }

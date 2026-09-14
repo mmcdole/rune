@@ -16,12 +16,6 @@ func (e *Engine) registerHistoryFuncs() {
 			return nil
 		},
 
-		// Internal snapshot for expansion; public history remains live.
-		"expansion_entries": func(c *script.Call) error {
-			returnHistory(c, e.host.GetExpansionHistory())
-			return nil
-		},
-
 		// rune._history.add(cmd) - Add a command to history
 		"add": func(c *script.Call) error {
 			cmd := c.Str(1)

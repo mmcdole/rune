@@ -2,7 +2,6 @@ package lua
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -18,9 +17,10 @@ import (
 // error instead of hanging the event loop forever.
 const DefaultCallTimeout = 5 * time.Second
 
-// Engine invokes Lua and validates its results through the engine-neutral script
-// seam, including deadlines and degraded-core recovery. Session owns application
-// state, submission sequencing, and the Engine's lifetime on its event loop.
+// Engine drives Rune's scripting environment through the engine-neutral
+// script seam. It is a pure mechanism: it knows how to run Lua code and
+// expose APIs. It does NOT know about core scripts, config dirs, or
+// boot sequences.
 type Engine struct {
 	vm   script.Engine
 	host Host
@@ -76,53 +76,48 @@ func NewEngine(host Host) *Engine {
 // with: "lunar" (default) or "luajit" (-tags luajit).
 func (e *Engine) EngineBackend() string { return e.vm.Backend() }
 
-// guard runs fn under the watchdog: a deadline context is attached to
-// the VM so runaway scripts are interrupted instead of hanging the
-// event loop. Nested entries (Go APIs called from Lua that re-enter
-// the engine, e.g. rune._load) run under the outermost deadline.
-func (e *Engine) guard(fn func() error) error {
-	end := e.BeginBatch()
-	defer end()
-	if err := e.interruption(nil); err != nil {
+// BeginExecution shares one watchdog deadline across a caller-owned sequence of
+// Lua calls. Call the returned function exactly once (normally in a defer) to
+// report deadline exhaustion and release the scope. Nested scopes reuse the
+// current deadline. Only the Session goroutine may use an execution scope.
+func (e *Engine) BeginExecution() func(error) error {
+	owner := !e.inLua
+	if owner {
+		e.inLua = true
+		ctx, cancel := context.WithTimeout(context.Background(), e.CallTimeout)
+		e.guardCancel = cancel
+		e.vm.SetContext(ctx)
+	}
+	return func(err error) error {
+		if owner {
+			defer func() {
+				e.vm.RemoveContext()
+				e.guardCancel()
+				e.guardCancel = nil
+				e.inLua = false
+			}()
+		}
+		// An editor call can replace the context; always inspect the active one.
+		// pcall must not hide exhaustion of the shared deadline.
+		if ctx := e.vm.Context(); ctx != nil && ctx.Err() != nil {
+			cause := err
+			if cause == nil {
+				cause = ctx.Err()
+			}
+			return fmt.Errorf("script interrupted after %v (runaway loop?): %w", e.CallTimeout, cause)
+		}
 		return err
 	}
-	err := fn()
-	// Check again even if Lua pcall swallowed an interruption.
-	if interrupted := e.interruption(err); interrupted != nil {
-		return interrupted
-	}
-	return err
 }
 
-// ErrInterrupted identifies an exhausted or cancelled script watchdog.
-var ErrInterrupted = errors.New("script interrupted")
-
-// BeginBatch shares one watchdog across synchronous Engine calls. The caller
-// must defer the returned cleanup immediately. Nested scopes borrow the active
-// deadline; only the outer scope cleans it up.
-func (e *Engine) BeginBatch() (end func()) {
-	if e.inLua {
-		return func() {}
-	}
-	e.inLua = true
-	ctx, cancel := context.WithTimeout(context.Background(), e.CallTimeout)
-	e.guardCancel = cancel
-	e.vm.SetContext(ctx)
-	return func() {
-		e.vm.RemoveContext()
-		// pauseWatchdog may have replaced the original context and cancel.
-		e.guardCancel()
-		e.guardCancel = nil
-		e.inLua = false
-	}
-}
-
-func (e *Engine) interruption(cause error) error {
+// guard bounds a single Lua entry, reusing an enclosing execution scope.
+func (e *Engine) guard(fn func() error) (err error) {
+	finish := e.BeginExecution()
+	defer func() { err = finish(err) }()
 	if ctx := e.vm.Context(); ctx != nil && ctx.Err() != nil {
-		return fmt.Errorf("%w after %v (runaway loop?): %w",
-			ErrInterrupted, e.CallTimeout, errors.Join(ctx.Err(), cause))
+		return ctx.Err()
 	}
-	return nil
+	return fn()
 }
 
 // pauseWatchdog runs fn with the watchdog deadline detached, then arms
@@ -253,6 +248,32 @@ func (e *Engine) callHooks(nret int, args ...any) ([]script.Result, bool, error)
 		return callErr
 	})
 	return results, found, err
+}
+
+// OnEcho runs the echo hook. The core adds styling; user hooks may rewrite or
+// hide the result.
+func (e *Engine) OnEcho(in string) (string, bool) {
+	// Echo is a presentation boundary. Preserve canonical submission bytes
+	// elsewhere, but never let pasted terminal controls reach either Lua
+	// styling or the degraded Go fallback as executable sequences.
+	in = text.VisualizeTerminalControls(in, true)
+	fallback := text.Green("> " + in)
+
+	results, found, err := e.callHooks(2, "echo", in)
+	if !found {
+		e.reportCoreBroken()
+		return fallback, true
+	}
+	if err != nil {
+		e.reportError("echo dispatch", err)
+		return fallback, true
+	}
+
+	modified, show := results[0], results[1]
+	if show.False() {
+		return "", false
+	}
+	return modified.String(), true
 }
 
 // OnOutput handles server text.

@@ -2,23 +2,13 @@
 
 local MAX_RECURSION_DEPTH = 100
 
-local function send_impl(input, depth)
+local function execute_commands(input, depth)
     if depth > MAX_RECURSION_DEPTH then
         rune.echo(rune.style.red("[Error]") .. " Alias loop detected (depth limit exceeded)")
         return
     end
 
     local separator = rune.config.get("command_separator")
-    -- Reject the removed repeat-block syntax before sending any of this input.
-    -- Otherwise saved scripts could execute fragments of their former bodies.
-    for source in rune.input._commands(input, separator) do
-        if source:match("^%s*#%d+%s*{") then
-            rune.echo(rune.style.red("[Error]") ..
-                " Command blocks are not supported; repeat an alias with #N name instead")
-            return
-        end
-    end
-
     for source, command in rune.input._commands(input, separator) do
         command = command:match("^%s*(.-)%s*$")
         -- Recognize the prefix before decoding can introduce a literal '#'.
@@ -33,36 +23,15 @@ local function send_impl(input, depth)
                 if not processed then
                     rune.send_raw(line)
                 elseif result then
-                    send_impl(result, depth + 1) -- alias result is new command text
+                    execute_commands(result, depth + 1) -- alias result is new command text
                 end
             end
         end
     end
 end
 
--- PUBLIC: Send commands to the MUD
+-- PUBLIC: Execute game-command syntax and aliases, then send.
+-- Interactive hooks, echo, history, and slash commands belong above this entry.
 function rune.send(input)
-    send_impl(input, 0)
-end
-
--- INTERNAL: Route one physical line after input hooks and local echo.
--- Programmatic rune.send deliberately enters below this boundary.
-function rune.input._dispatch(input, mode)
-    if mode == "verbatim" then
-        rune.send_raw(input) -- no alias or command interpretation
-        return
-    end
-
-    -- Check for slash command first. Dispatch runs the handler under
-    -- its own quarantine, so a broken command is disabled individually
-    -- instead of breaking the terminal dispatcher.
-    local cmd, args = input:match("^/(%S+)%s*(.*)")
-    if cmd then
-        if not rune.command.dispatch(cmd, args) then
-            rune.echo(rune.style.red("[Error]") .. " Unknown command: /" .. cmd)
-        end
-        return
-    end
-
-    rune.send(input)
+    execute_commands(input, 0)
 end

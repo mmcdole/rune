@@ -25,18 +25,18 @@ func TestSubmissionPhysicalLines(t *testing.T) {
 	}
 }
 
-func TestSubmissionExecutionLines(t *testing.T) {
+func TestSubmissionProcessingLines(t *testing.T) {
 	for _, tc := range []struct {
 		submission Submission
-		want       []ExecutionLine
+		want       []string
 	}{
-		{Command("north\r\n\t\rlook\n"), []ExecutionLine{{"north", 1}, {"look", 3}}},
-		{Verbatim("north\r\n\t\rlook\n"), []ExecutionLine{{"north", 1}, {"\t", 2}, {"look", 3}, {"", 4}}},
-		{Command(""), []ExecutionLine{{"", 1}}},
-		{Command("\n\t\n"), []ExecutionLine{}},
+		{Command("north\r\n\t\rlook\n"), []string{"north", "look"}},
+		{Verbatim("north\r\n\t\rlook\n"), []string{"north", "\t", "look", ""}},
+		{Command(""), []string{""}},
+		{Command("\n\t\n"), []string{}},
 	} {
-		if got := tc.submission.ExecutionLines(); !slices.Equal(got, tc.want) {
-			t.Errorf("%+v: lines = %+v, want %+v", tc.submission, got, tc.want)
+		if got := tc.submission.Lines(); !slices.Equal(got, tc.want) {
+			t.Errorf("%+v: lines = %q, want %q", tc.submission, got, tc.want)
 		}
 	}
 }

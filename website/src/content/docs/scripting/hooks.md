@@ -42,14 +42,14 @@ The same `input` hooks receive one physical line in both Command and Verbatim
 mode. Each line completes hooks, echo, and dispatch before the next begins.
 A replacement must also be one line: LF and CR are rejected before later
 handlers see the replacement. Tabs are allowed. Final Command replacements
-must exclude invalid UTF-8 and terminal controls. Invalid or oversized rewrites
+must exclude invalid UTF-8 and terminal controls. Invalid rewrites
 skip the affected line. Scripts intentionally sending several lines can call
 `rune.send` or `rune.send_raw`, then return `false`.
 
 Rune saves surviving lines together as one history entry after processing.
 Input hooks, echo hooks, and command handlers do not yet see that entry.
-History expansion uses a snapshot taken before submission; explicit script
-additions still appear in ordinary history reads.
+Explicit script additions appear immediately in both history reads and later
+history expansion.
 
 **Compatibility:** Input hooks previously received the whole draft in Verbatim
 mode and could return multiline replacements. Both modes now call hooks per

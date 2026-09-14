@@ -99,7 +99,7 @@ local function expand_history(text, context)
 
     local separator = rune.config.get("command_separator")
     if contains_designator(text, separator, marker) then
-        return expand_commands(text, rune._history.expansion_entries(), separator, marker)
+        return expand_commands(text, rune._history.entries(), separator, marker)
     end
 end
 

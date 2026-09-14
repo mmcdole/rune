@@ -83,9 +83,8 @@ saves `kill rat` in history, not `!k`.
 
 You can use one of these forms anywhere a complete command can appear. With the
 default `;` command separator, `north;!` sends `north` followed by the command
-that came before it. Every expansion on the line searches the history that
-existed before you pressed `Enter`, so the line cannot accidentally repeat
-itself.
+that came before it. Expansion searches current history. The submitted block
+is saved only after processing finishes, so it cannot accidentally repeat itself.
 
 Rune searches earlier normal commands. It ignores local `/commands`, verbatim
 blocks, and earlier commands that still contain history expansion syntax. If
@@ -206,15 +205,19 @@ before processing the next line. This applies to both modes. A hook returning
 line. Hook replacements must stay on one line.
 
 After processing, Rune saves the accepted lines together as one history entry.
-Up or history search restores the block and its mode. History expansion uses a
-snapshot from before this submission: `!` selects the most recent eligible
-command line, even when it belongs to a saved batch. Local command lines bypass
-expansion. Explicit script calls to `rune.history.add` remain visible to normal
-history reads, but do not change that snapshot.
+Up or history search restores the block and its mode. `!` selects the most recent
+eligible command line in current history, even when it belongs to a saved batch.
+Local command lines bypass expansion. Explicit calls to `rune.history.add` take
+effect immediately: later input lines can expand against those additions.
 
-A submission shares one script deadline. Rewritten text also counts toward the
-submission size limit. Exceeding either limit stops the remaining lines; commands
-already executed cannot be undone. `/quit` stops the remaining lines. `/reload`
+For example, after submitting `north` and `look` on separate lines, `!!` repeats
+only `look`; Up recalls both lines. After submitting `north;look` on one line,
+`!!` repeats both commands. Expansion selects a physical line, including any
+separator-chained commands on that line. `!prefix` searches backward through
+the lines of each saved command submission for the newest eligible match.
+
+A submission shares one script deadline. Exceeding it stops the remaining lines;
+commands already executed cannot be undone. `/quit` stops the remaining lines. `/reload`
 stays deferred until the submission finishes so it can safely replace the Lua VM.
 
 **Input hook compatibility:** Previously, input hooks received an entire Verbatim
@@ -229,10 +232,6 @@ Composer editing keys are handled locally rather than by Lua binds. `Up`/`Down`
 move through the draft's visual rows, `PageUp`/`PageDown` move by a composer
 page, and the mouse wheel still scrolls output when mouse capture is enabled.
 The ordinary one-line input and its bindings return after the composer closes.
-
-A submission in either mode is limited to 1,000 physical lines and 256 KiB. If either
-limit is exceeded, Rune rejects the submission, leaves the draft open, and
-shows a warning.
 
 Recalling a verbatim entry from history restores the composer, even when that
 entry contains only one physical line. History retains both the text and the

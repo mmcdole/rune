@@ -21,8 +21,8 @@ func (m SubmissionMode) String() string {
 	return "command"
 }
 
-// Submission holds text at one input-pipeline stage and its interpretation
-// mode. Lua may rewrite Text; Mode remains Go-owned and immutable by policy.
+// Submission is a whole authored input block or a saved history entry.
+// Session processes its physical lines individually; hooks never receive a block.
 type Submission struct {
 	Text string
 	Mode SubmissionMode
@@ -49,32 +49,18 @@ func Verbatim(text string) Submission {
 	return Submission{Text: text, Mode: ModeVerbatim}
 }
 
-// WithinLimits checks the byte and physical-line limits of a submission.
-func (s Submission) WithinLimits() bool {
-	return len(s.Text) <= MaxSubmissionBytes && len(s.PhysicalLines()) <= MaxSubmissionLines
-}
-
-const (
-	MaxSubmissionBytes = 256 * 1024
-	MaxSubmissionLines = 1000
-)
-
-// ExecutionLine retains its one-based physical line number for diagnostics.
-type ExecutionLine struct {
-	Text   string
-	Number int
-}
-
-// ExecutionLines selects lines to execute. Blank command-batch lines are
+// Lines selects physical lines for processing. Blank command-batch lines are
 // ignored; Verbatim preserves them. An empty single-line Enter still runs.
-func (s Submission) ExecutionLines() []ExecutionLine {
+func (s Submission) Lines() []string {
 	lines := s.PhysicalLines()
-	selected := make([]ExecutionLine, 0, len(lines))
-	for i, line := range lines {
-		if s.Mode == ModeCommand && len(lines) > 1 && strings.TrimSpace(line) == "" {
-			continue
+	if s.Mode == ModeCommand && len(lines) > 1 {
+		kept := lines[:0]
+		for _, line := range lines {
+			if strings.TrimSpace(line) != "" {
+				kept = append(kept, line)
+			}
 		}
-		selected = append(selected, ExecutionLine{Text: line, Number: i + 1})
+		return kept
 	}
-	return selected
+	return lines
 }

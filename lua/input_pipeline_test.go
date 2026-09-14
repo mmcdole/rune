@@ -1,13 +1,35 @@
 package lua
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/mmcdole/rune/input"
 )
 
-func TestMalformedInputHookResultRejectsLine(t *testing.T) {
+func TestMissingInputDispatcherUsesGoFallback(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	if err := engine.DoString("remove dispatcher", `rune.input._dispatch = nil`); err != nil {
+		t.Fatal(err)
+	}
+
+	dispatchTestCommand(engine, "north")
+	dispatchTestLine(engine, input.Line{Text: "/quit", Mode: input.ModeVerbatim})
+	dispatchTestCommand(engine, "/quit")
+	dispatchTestCommand(engine, "/reload")
+
+	if got, want := host.DrainNetworkCalls(), []string{"north", "/quit"}; !slices.Equal(got, want) {
+		t.Fatalf("fallback sends = %q, want %q", got, want)
+	}
+	if !host.QuitCalled || host.ReloadCalls != 1 {
+		t.Fatalf("fallback escape hatches: quit=%v reload=%d", host.QuitCalled, host.ReloadCalls)
+	}
+}
+
+func TestMalformedInputHookResultCancelsLine(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 
@@ -34,35 +56,10 @@ func TestMalformedInputHookResultRejectsLine(t *testing.T) {
 	}
 }
 
-// dispatchTestInputLine exercises the Engine's one-line hook/dispatch boundary.
-// Submission ordering, budgets, history, and cancellation are tested in Session.
-func dispatchTestInputLine(engine *Engine, text string, mode input.SubmissionMode) bool {
-	if strings.ContainsAny(text, "\r\n") {
-		panic("Lua test helper requires one physical line")
-	}
-	line, proceed, err := engine.ApplyInputHooks(text, mode)
-	if err != nil {
-		engine.reportError("input", err)
-		return false
-	}
-	if !proceed {
-		return false
-	}
-	if err := engine.DispatchInputLine(line, mode); err != nil {
-		engine.reportError("input", err)
-	}
-	return true
-}
-
-func dispatchTestCommand(engine *Engine, text string) bool {
-	return dispatchTestInputLine(engine, text, input.ModeCommand)
-}
-
 func TestInputLineRejectsInvalidRewrites(t *testing.T) {
 	for _, tc := range []struct{ name, setup string }{
 		{"terminal control", `rune.hooks.on("input", function() return string.char(27) end)`},
 		{"multiline", `rune.hooks.on("input", function() return "north\nsouth" end)`},
-		{"oversized", `rune.hooks.on("input", function() return string.rep("x", 256 * 1024 + 1) end)`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			engine, host, cleanup := setupTest(t)

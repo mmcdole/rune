@@ -40,6 +40,11 @@ func TestSendRawFailureIsReportedNotRaised(t *testing.T) {
 func TestSendExpansion(t *testing.T) {
 	runFeatureCases(t, []featureCase{
 		{
+			name:  "repeated command beginning with braces",
+			input: "#2 {north};look",
+			want:  []string{"{north}", "{north}", "look"},
+		},
+		{
 			name:  "single command",
 			input: "north",
 			want:  []string{"north"},
@@ -181,27 +186,6 @@ func TestSendEscapesConfiguredSeparator(t *testing.T) {
 	}
 }
 
-func TestRepeatBlocksReportMigrationErrorWithoutSendingFragments(t *testing.T) {
-	for _, text := range []string{
-		"#2 {kill rat;loot}",
-		"look;#2 {kill rat;loot};west",
-		"#2 {kill rat;loot",
-		"#2{north}",
-		"#2 {}",
-	} {
-		t.Run(text, func(t *testing.T) {
-			engine, host, cleanup := setupTest(t)
-			defer cleanup()
-
-			assertLua(t, engine, fmt.Sprintf(`rune.send(%q)`, text))
-			assertCommands(t, host, nil)
-			if output := strings.Join(host.DrainPrintCalls(), "\n"); !strings.Contains(output, "repeat an alias with #N name instead") {
-				t.Fatalf("missing migration guidance: %q", output)
-			}
-		})
-	}
-}
-
 func TestRepeatedAliasReceivesDecodedArgumentsEachTime(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
@@ -270,52 +254,6 @@ func TestSendExpansionUsesConfiguredCommandSeparator(t *testing.T) {
 	assertCommands(t, host, []string{
 		"look", "north", "north", "east", "east", "west", "say #3 cheers",
 	})
-}
-
-func TestVerbatimInputLineBypassesCommands(t *testing.T) {
-	engine, host, cleanup := setupTest(t)
-	defer cleanup()
-
-	if err := engine.DoString("setup", `
-		rune.alias.exact("aliased", "expanded")
-	`); err != nil {
-		t.Fatalf("setup failed: %v", err)
-	}
-
-	for _, line := range []string{"  indented;still one line;;  ", "", "/quit", "#2 north", "aliased", "trailing  ", ""} {
-		dispatchTestInputLine(engine, line, input.ModeVerbatim)
-	}
-
-	assertCommands(t, host, []string{
-		"  indented;still one line;;  ",
-		"",
-		"/quit",
-		"#2 north",
-		"aliased",
-		"trailing  ",
-		"",
-	})
-	if host.QuitCalled {
-		t.Fatal("verbatim /quit must be sent as data")
-	}
-}
-
-func TestVerbatimInputLineDegradedModePreservesText(t *testing.T) {
-	engine, host, cleanup := setupTest(t)
-	defer cleanup()
-
-	if err := engine.DoString("sabotage", "rune.hooks = nil"); err != nil {
-		t.Fatalf("sabotage failed: %v", err)
-	}
-
-	for _, line := range []string{"first", "", "/quit", ""} {
-		dispatchTestInputLine(engine, line, input.ModeVerbatim)
-	}
-
-	assertCommands(t, host, []string{"first", "", "/quit", ""})
-	if host.QuitCalled {
-		t.Fatal("degraded verbatim /quit must be sent as data")
-	}
 }
 
 func TestInputWithCommandContextKeepsNormalExpansion(t *testing.T) {
@@ -403,12 +341,12 @@ func TestInputDispatchVerbatimBypassesCommandSyntax(t *testing.T) {
 	defer cleanup()
 
 	if err := engine.DoString("dispatch verbatim", `
-		rune.input._dispatch("first;second\n/quit", "verbatim")
+		rune.input._dispatch("/quit;#2 north", "verbatim")
 	`); err != nil {
 		t.Fatal(err)
 	}
 
-	assertCommands(t, host, []string{"first;second", "/quit"})
+	assertCommands(t, host, []string{"/quit;#2 north"})
 	if host.QuitCalled {
 		t.Fatal("verbatim dispatcher interpreted /quit")
 	}
@@ -445,7 +383,7 @@ func TestVerbatimInputHookReceivesContextAndCanConsume(t *testing.T) {
 		t.Fatalf("setup failed: %v", err)
 	}
 
-	dispatchTestInputLine(engine, "/quit", input.ModeVerbatim)
+	dispatchTestLine(engine, input.Line{Text: "/quit", Mode: input.ModeVerbatim})
 
 	assertCommands(t, host, nil)
 	assertLua(t, engine, `
@@ -472,10 +410,9 @@ func TestInputHookCannotMutateVerbatimRouting(t *testing.T) {
 		t.Fatalf("setup failed: %v", err)
 	}
 
-	dispatchTestInputLine(engine, "first;second", input.ModeVerbatim)
-	dispatchTestInputLine(engine, "/quit", input.ModeVerbatim)
+	dispatchTestLine(engine, input.Line{Text: "/quit", Mode: input.ModeVerbatim})
 
-	assertCommands(t, host, []string{"context-readonly", "first;second", "context-readonly", "/quit"})
+	assertCommands(t, host, []string{"context-readonly", "/quit"})
 	if host.QuitCalled {
 		t.Fatal("mutating one hook context changed canonical verbatim routing")
 	}
@@ -493,11 +430,11 @@ func TestInputRewritePreservesVerbatimMode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	effective, proceed, err := engine.ApplyInputHooks("original", input.ModeVerbatim)
-	if err != nil || !proceed || effective != "first;second" {
+	effective, proceed := engine.ApplyInputHooks(input.Line{Text: "original", Mode: input.ModeVerbatim})
+	if !proceed || effective != (input.Line{Text: "first;second", Mode: input.ModeVerbatim}) {
 		t.Fatalf("effective submission = %+v proceed=%v", effective, proceed)
 	}
-	engine.DispatchInputLine(effective, input.ModeVerbatim)
+	engine.DispatchInputLine(effective)
 
 	assertCommands(t, host, []string{"first;second"})
 }
@@ -514,7 +451,7 @@ func TestOneArgumentInputHookStillObservesVerbatim(t *testing.T) {
 		t.Fatalf("setup failed: %v", err)
 	}
 
-	dispatchTestInputLine(engine, "two", input.ModeVerbatim)
+	dispatchTestLine(engine, input.Line{Text: "two", Mode: input.ModeVerbatim})
 
 	assertCommands(t, host, []string{"two"})
 	assertLua(t, engine, `assert(observed == "two")`)

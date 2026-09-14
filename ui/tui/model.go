@@ -335,12 +335,12 @@ func (m *Model) appendMessage(text string) {
 }
 
 // submit offers a submission and its following draft to the session as one
-// transition. It rejects invalid or oversized drafts or a busy engine with a
+// transition. It rejects invalid command text or a busy engine with a
 // visible warning rather than blocking the render loop; false tells the
 // controller to retain the current local draft.
 func (m *Model) submit(msg ui.InputSubmittedMsg) bool {
-	if err := msg.Submission.Validate(); err != nil {
-		m.appendMessage(text.Red("[WARNING] Input not sent - " + err.Error()))
+	if msg.Submission.Mode == input.ModeCommand && !input.ValidCommandText(msg.Submission.Text) {
+		m.appendMessage(text.Red("[WARNING] Command not run - invalid text or terminal controls. Use Alt+V for verbatim."))
 		return false
 	}
 	if m.tryPost(msg) {
@@ -349,11 +349,6 @@ func (m *Model) submit(msg ui.InputSubmittedMsg) bool {
 	m.showWarning("Input not sent - engine lagging")
 	return false
 }
-
-const (
-	maxSubmissionBytes = input.MaxSubmissionBytes
-	maxSubmissionLines = input.MaxSubmissionLines
-)
 
 func (m *Model) isBound(key string) bool {
 	return m.boundKeys[key]

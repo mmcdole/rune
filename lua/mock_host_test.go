@@ -74,8 +74,7 @@ type MockHost struct {
 	InputMode   input.SubmissionMode
 
 	// Command history, oldest first.
-	HistoryEntries   []input.Submission
-	ExpansionHistory []input.Submission
+	HistoryEntries []input.Submission
 }
 
 // MockHTTPCall records one Host.HTTPRequest invocation.
@@ -452,13 +451,4 @@ func (m *MockHost) DrainScheduledTimers() []struct {
 	timers := m.ScheduledTimers
 	m.ScheduledTimers = nil
 	return timers
-}
-
-func (m *MockHost) GetExpansionHistory() []input.Submission {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.ExpansionHistory != nil {
-		return append([]input.Submission{}, m.ExpansionHistory...)
-	}
-	return append([]input.Submission{}, m.HistoryEntries...)
 }

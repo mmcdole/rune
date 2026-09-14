@@ -77,11 +77,10 @@ type Session struct {
 	protocol     *network.Protocol // Session-confined Telnet state
 
 	// Input and history
-	currentInput     string // Tracked so Lua can query via rune.input.get()
-	currentCursor    int    // Zero-based UTF-8 byte offset exposed to Lua
-	historyEntries   []input.Submission
-	expansionHistory []input.Submission
-	historyLimit     int
+	currentInput   string // Tracked so Lua can query via rune.input.get()
+	currentCursor  int    // Zero-based UTF-8 byte offset exposed to Lua
+	historyEntries []input.Submission
+	historyLimit   int
 
 	// Inbound text and its display lifecycle.
 	// activeBatch is set only while one event batch is being applied, so a
@@ -456,7 +455,7 @@ func (s *Session) boot() error {
 	if s.connectTarget != "" {
 		target := s.connectTarget
 		s.connectTarget = ""
-		if err := s.engine.DispatchInputLine("/connect "+target, input.ModeCommand); err != nil {
+		if err := s.engine.DispatchInputLine(input.Line{Text: "/connect " + target, Mode: input.ModeCommand}); err != nil {
 			s.ui.Print(text.Red("[Error] " + err.Error()))
 		}
 	}

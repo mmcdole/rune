@@ -124,14 +124,14 @@ valid because Lua ignores the context argument.
 
 Replacements must remain single-line. A replacement containing LF or CR is
 rejected before subsequent handlers run. Final Command replacements must also
-exclude invalid UTF-8 and terminal controls. Invalid or oversized replacements
+exclude invalid UTF-8 and terminal controls. Invalid replacements
 skip the affected line. To send several lines deliberately, call `rune.send` or
 `rune.send_raw` and return `false` to consume the original line.
 
 History is saved after processing as one entry containing the surviving lines.
 Input hooks, echo hooks, and command handlers do not yet see that entry. Explicit
-script additions to history remain visible; history expansion alone uses a fixed
-snapshot from before the submission. An empty final history string is not saved.
+script additions are immediately visible to both history reads and later history
+expansion. An empty final history string is not saved.
 An accepted `""` replacement still reaches echo and dispatch.
 
 See the [input hook compatibility note](/interface/input/#multiline-verbatim-composer)

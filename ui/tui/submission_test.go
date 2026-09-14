@@ -135,51 +135,6 @@ func TestFullUIEventQueueReportsDroppedOrdinaryEvent(t *testing.T) {
 	}
 }
 
-func TestOversizedVerbatimSubmissionIsRejectedAtomically(t *testing.T) {
-	m := newBareModel(t)
-
-	tooManyLines := input.Verbatim(strings.Repeat("\n", maxSubmissionLines))
-	if m.submit(ui.InputSubmittedMsg{Submission: tooManyLines}) {
-		t.Fatal("over-line-limit verbatim submission was accepted")
-	}
-	tooManyBytes := input.Verbatim(strings.Repeat("x", maxSubmissionBytes+1))
-	if m.submit(ui.InputSubmittedMsg{Submission: tooManyBytes}) {
-		t.Fatal("over-byte-limit verbatim submission was accepted")
-	}
-	tooManyCRLines := input.Verbatim(strings.Repeat("\r", maxSubmissionLines))
-	if m.submit(ui.InputSubmittedMsg{Submission: tooManyCRLines}) {
-		t.Fatal("over-line-limit bare-CR verbatim submission was accepted")
-	}
-
-	if got := m.output.buffer.Count(); got != 3 {
-		t.Fatalf("warning count = %d, want 3", got)
-	}
-	for n := 0; n < m.output.buffer.Count(); n++ {
-		if warning := m.output.buffer.At(n); !strings.Contains(warning, "Input not sent") {
-			t.Fatalf("warning %d = %q", n, warning)
-		}
-	}
-}
-
-func TestVerbatimSubmissionAtLimitsIsAccepted(t *testing.T) {
-	events := make(chan ui.UIEvent, 1)
-	m := NewModel(events)
-	text := strings.Repeat("x", maxSubmissionBytes-(maxSubmissionLines-1)) +
-		strings.Repeat("\n", maxSubmissionLines-1)
-	submission := input.Verbatim(text)
-
-	if len(text) != maxSubmissionBytes {
-		t.Fatalf("test setup bytes = %d, want %d", len(text), maxSubmissionBytes)
-	}
-	if !m.submit(ui.InputSubmittedMsg{Submission: submission}) {
-		t.Fatal("at-limit verbatim submission was rejected")
-	}
-	got, ok := (<-events).(ui.InputSubmittedMsg)
-	if !ok || got.Submission != submission {
-		t.Fatalf("queued event = %#v, want submission %+v", got, submission)
-	}
-}
-
 func TestSetInputSubmissionMessageForcesVerbatimMode(t *testing.T) {
 	m := newBareModel(t)
 	next, _ := m.Update(ui.SetInputSubmissionMsg(input.Verbatim("one line;still data")))

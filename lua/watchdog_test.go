@@ -1,17 +1,14 @@
 package lua
 
 import (
-	"context"
-	"errors"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/mmcdole/rune/input"
 	"github.com/mmcdole/rune/script"
 )
 
-func TestInputBatchSharesOneWatchdogDeadline(t *testing.T) {
+func TestExecutionScopeSharesOneWatchdogDeadline(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 	engine.CallTimeout = 100 * time.Millisecond
@@ -21,16 +18,17 @@ func TestInputBatchSharesOneWatchdogDeadline(t *testing.T) {
 			return nil
 		},
 	}, nil)
-	end := engine.BeginBatch()
-	var err error
-	for range 3 {
-		err = engine.DispatchInputLine(`/lua batchprobe.pause(); rune.send_raw("line")`, input.ModeCommand)
-		if err != nil {
-			break
+	err := func() (err error) {
+		finish := engine.BeginExecution()
+		defer func() { err = finish(err) }()
+		for range 3 {
+			if err := engine.DoString("batch line", `batchprobe.pause(); rune.send_raw("line")`); err != nil {
+				return err
+			}
 		}
-	}
-	end()
-	if !errors.Is(err, ErrInterrupted) || !errors.Is(err, context.DeadlineExceeded) {
+		return nil
+	}()
+	if err == nil || !strings.Contains(err.Error(), "interrupted") {
 		t.Fatalf("batch deadline: %v", err)
 	}
 	if got := host.DrainNetworkCalls(); len(got) >= 3 {
@@ -41,56 +39,42 @@ func TestInputBatchSharesOneWatchdogDeadline(t *testing.T) {
 	}
 }
 
-func TestInputBatchDoesNotEnterLuaAfterDeadline(t *testing.T) {
+func TestNestedExecutionScopeKeepsOuterDeadline(t *testing.T) {
 	engine, _, cleanup := setupTest(t)
 	defer cleanup()
-	if err := engine.DoString("observe dispatch", `
-		function rune.input._dispatch()
-			dispatch_calls = (dispatch_calls or 0) + 1
-		end
-	`); err != nil {
+	outer := engine.BeginExecution()
+	ctx := engine.vm.Context()
+	inner := engine.BeginExecution()
+	if err := inner(nil); err != nil {
 		t.Fatal(err)
 	}
-	end := engine.BeginBatch()
+	if engine.vm.Context() != ctx {
+		t.Fatal("nested scope replaced or removed outer deadline")
+	}
 	engine.guardCancel()
-	err := engine.DispatchInputLine("first", input.ModeCommand)
-	end()
-	if err == nil {
-		t.Fatal("expired batch was accepted")
+	if err := engine.DoString("expired outer", "error('must not execute')"); err == nil {
+		t.Fatal("nested scope lost the outer deadline")
 	}
-	assertLua(t, engine, `assert(dispatch_calls == nil)`)
-}
-
-func TestBatchScopeCleanupAfterWatchdogReplacement(t *testing.T) {
-	engine, _, cleanup := setupTest(t)
-	defer cleanup()
-	end := engine.BeginBatch()
-	outer := engine.vm.Context()
-	nestedEnd := engine.BeginBatch()
-	nestedEnd()
-	if engine.vm.Context() != outer || outer.Err() != nil {
-		t.Fatal("nested cleanup changed the outer watchdog")
+	if err := outer(nil); err == nil {
+		t.Fatal("scope exit hid deadline exhaustion")
 	}
-	engine.pauseWatchdog(func() {})
-	replacement := engine.vm.Context()
-	end()
-	if outer.Err() == nil || replacement.Err() == nil || engine.inLua {
-		t.Fatal("scope cleanup did not release the replaced watchdog")
+	if err := engine.DoString("fresh execution", "assert(true)"); err != nil {
+		t.Fatal(err)
 	}
 }
 
-func TestInterruptionPreservesLuaErrorAndContextCause(t *testing.T) {
+func TestExecutionScopeDoesNotEnterLuaAfterDeadline(t *testing.T) {
 	engine, _, cleanup := setupTest(t)
 	defer cleanup()
-	cause := errors.New("Lua failure")
-	err := engine.guard(func() error {
+	called := false
+	err := func() (err error) {
+		finish := engine.BeginExecution()
+		defer func() { err = finish(err) }()
 		engine.guardCancel()
-		return cause
-	})
-	for _, want := range []error{ErrInterrupted, context.Canceled, cause} {
-		if !errors.Is(err, want) {
-			t.Fatalf("%v does not wrap %v", err, want)
-		}
+		return engine.guard(func() error { called = true; return nil })
+	}()
+	if err == nil || called {
+		t.Fatalf("expired batch entered Lua: called=%v err=%v", called, err)
 	}
 }
 

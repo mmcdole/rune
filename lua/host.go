@@ -67,7 +67,6 @@ type Host interface {
 
 	// History
 	GetHistoryEntries() []input.Submission
-	GetExpansionHistory() []input.Submission
 	AddToHistory(cmd string)
 
 	// Session store: a small Go-owned string store that survives

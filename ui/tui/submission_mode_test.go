@@ -141,7 +141,7 @@ func TestRejectedCommandPreservesDraftAndCanBeSentVerbatim(t *testing.T) {
 	if m.input.Value() != "north\x1blook" || m.input.SubmissionMode() != input.ModeVerbatim {
 		t.Fatal("invalid command lost draft")
 	}
-	if m.output.buffer.Count() == 0 || !strings.Contains(m.output.buffer.At(0), "terminal controls") {
+	if m.output.buffer.Count() == 0 || !strings.Contains(m.output.buffer.At(0), "Command not run") {
 		t.Fatal("missing rejection feedback")
 	}
 	for len(events) > 0 {
@@ -153,15 +153,6 @@ func TestRejectedCommandPreservesDraftAndCanBeSentVerbatim(t *testing.T) {
 	msg, ok := (<-events).(ui.InputSubmittedMsg)
 	if !ok || msg.Submission != input.Verbatim("north\x1blook") {
 		t.Fatalf("verbatim retry = %#v", msg)
-	}
-}
-
-func TestOversizedMultilineCommandCannotBypassDraftLimits(t *testing.T) {
-	m := newBareModel(t)
-	for _, draft := range []string{"/lua " + strings.Repeat("\n", maxSubmissionLines), "/lua " + strings.Repeat("x", maxSubmissionBytes)} {
-		if m.submit(ui.InputSubmittedMsg{Submission: input.Command(draft)}) {
-			t.Fatal("oversized command accepted")
-		}
 	}
 }
 
