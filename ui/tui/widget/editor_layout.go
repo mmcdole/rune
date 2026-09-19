@@ -2,6 +2,7 @@ package widget
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -33,7 +34,6 @@ type editorLayout struct {
 	rows       []editorRow
 	cursorRow  int
 	cursorCol  int
-	lineCount  int
 	gutterSize int
 }
 
@@ -41,14 +41,7 @@ type editorLayout struct {
 // Source tabs remain one rune but expand to cells at classic 8-column stops.
 // Every source insertion offset is retained on exactly one visual row so
 // vertical movement and cursor rendering never need to reverse-map strings.
-func buildEditorLayout(content []rune, cursor, width int) editorLayout {
-	lineCount := 1
-	for _, r := range content {
-		if r == '\n' {
-			lineCount++
-		}
-	}
-
+func buildEditorLayout(content []rune, width, lineCount, rowLimit int) editorLayout {
 	gutter := editorGutterSize(lineCount, width)
 	contentWidth := width - gutter
 	if contentWidth < 1 {
@@ -56,9 +49,7 @@ func buildEditorLayout(content []rune, cursor, width int) editorLayout {
 	}
 
 	layout := editorLayout{
-		lineCount:  lineCount,
 		gutterSize: gutter,
-		cursorRow:  -1,
 	}
 
 	line := 0
@@ -81,10 +72,6 @@ func buildEditorLayout(content []rune, cursor, width int) editorLayout {
 		}
 		addPoint := func(offset int) {
 			layout.rows[rowIndex].points = append(layout.rows[rowIndex].points, editorPoint{offset: offset, col: col})
-			if offset == cursor {
-				layout.cursorRow = rowIndex
-				layout.cursorCol = col
-			}
 		}
 		appendGlyph := func(g editorGlyph) {
 			if g.width > contentWidth {
@@ -105,6 +92,9 @@ func buildEditorLayout(content []rune, cursor, width int) editorLayout {
 
 		remaining := string(content[lineStart:lineEnd])
 		for offset := lineStart; offset < lineEnd; {
+			if rowLimit > 0 && len(layout.rows) >= rowLimit {
+				return layout
+			}
 			if col >= contentWidth {
 				newContinuation()
 			}
@@ -146,18 +136,31 @@ func buildEditorLayout(content []rune, cursor, width int) editorLayout {
 		}
 		addPoint(lineEnd)
 
-		if lineEnd == len(content) {
+		if lineEnd == len(content) || (rowLimit > 0 && len(layout.rows) >= rowLimit) {
 			break
 		}
 		line++
 		lineStart = lineEnd + 1
 	}
 
-	if layout.cursorRow < 0 {
-		layout.cursorRow = len(layout.rows) - 1
-		layout.cursorCol = 0
-	}
 	return layout
+}
+
+// Source offsets are ordered within each row. Tab expansion can leave rows
+// without insertion points; skip those when locating the cursor.
+func (l editorLayout) withCursor(cursor int) editorLayout {
+	for rowIndex, row := range l.rows {
+		if len(row.points) == 0 || row.points[len(row.points)-1].offset < cursor {
+			continue
+		}
+		n := sort.Search(len(row.points), func(n int) bool { return row.points[n].offset >= cursor })
+		if n < len(row.points) && row.points[n].offset == cursor {
+			l.cursorRow, l.cursorCol = rowIndex, row.points[n].col
+			return l
+		}
+	}
+	l.cursorRow, l.cursorCol = len(l.rows)-1, 0
+	return l
 }
 
 func editorGutterSize(lineCount, width int) int {

@@ -22,8 +22,9 @@ type editor struct {
 	goalCol int // retained display column during vertical movement; -1 = unset
 	topRow  int // first visual row shown by the input window
 
-	cached                    editorLayout
-	layoutWidth, layoutCursor int
+	cached      editorLayout
+	layoutWidth int
+	lineCount   int
 }
 
 func newEditor(text string, cursor int) *editor {
@@ -42,7 +43,7 @@ func (c *editor) Position() int {
 
 func (c *editor) Set(text string, cursor int) {
 	c.text = []rune(input.NormalizeDraftText(text))
-	c.cached.rows = nil
+	c.invalidate()
 	c.SetCursor(cursor)
 	c.goalCol = -1
 	c.topRow = 0
@@ -64,7 +65,7 @@ func (c *editor) Insert(text string) {
 	}
 
 	tail := append([]rune(nil), c.text[c.cursor:]...)
-	c.cached.rows = nil
+	c.invalidate()
 	c.text = append(c.text[:c.cursor], runes...)
 	c.cursor += len(runes)
 	c.text = append(c.text, tail...)
@@ -75,7 +76,7 @@ func (c *editor) Backspace() {
 	if c.cursor == 0 {
 		return
 	}
-	c.cached.rows = nil
+	c.invalidate()
 	c.text = append(c.text[:c.cursor-1], c.text[c.cursor:]...)
 	c.cursor--
 	c.goalCol = -1
@@ -85,7 +86,7 @@ func (c *editor) Delete() {
 	if c.cursor >= len(c.text) {
 		return
 	}
-	c.cached.rows = nil
+	c.invalidate()
 	c.text = append(c.text[:c.cursor], c.text[c.cursor+1:]...)
 	c.goalCol = -1
 }
@@ -154,7 +155,7 @@ func (c *editor) DeleteWordBack() {
 	if c.cursor == end {
 		return
 	}
-	c.cached.rows = nil
+	c.invalidate()
 	c.text = append(c.text[:c.cursor], c.text[end:]...)
 	c.goalCol = -1
 }
@@ -165,7 +166,7 @@ func (c *editor) DeleteToLineStart() {
 	if c.cursor == end {
 		return
 	}
-	c.cached.rows = nil
+	c.invalidate()
 	c.text = append(c.text[:c.cursor], c.text[end:]...)
 	c.goalCol = -1
 }
@@ -184,7 +185,7 @@ func (c *editor) DeleteToLineEnd() {
 			return
 		}
 	}
-	c.cached.rows = nil
+	c.invalidate()
 	c.text = append(c.text[:start], c.text[end:]...)
 	c.goalCol = -1
 }
@@ -326,9 +327,38 @@ func absInt(value int) int {
 // layout shares the same shaped draft across measurement, rendering, and
 // navigation. Text edits invalidate it; an unchanged draft needs no reshaping.
 func (c *editor) layout(width int) editorLayout {
-	if c.cached.rows == nil || c.layoutWidth != width || c.layoutCursor != c.cursor {
-		c.cached = buildEditorLayout(c.text, c.cursor, width)
-		c.layoutWidth, c.layoutCursor = width, c.cursor
+	if c.cached.rows == nil || c.layoutWidth != width {
+		c.cached = buildEditorLayout(c.text, width, c.lines(), 0)
+		c.layoutWidth = width
 	}
-	return c.cached
+	return c.cached.withCursor(c.cursor)
+}
+
+func (c *editor) invalidate() {
+	c.cached.rows = nil
+	c.lineCount = 0
+}
+
+func (c *editor) lines() int {
+	if c.lineCount == 0 {
+		c.lineCount = 1
+		for _, r := range c.text {
+			if r == '\n' {
+				c.lineCount++
+			}
+		}
+	}
+	return c.lineCount
+}
+
+// Measurement must not evict the layout at the actual editing width. Most
+// large drafts already reach the height cap without examining their wrapping.
+func (c *editor) measureRows(width int) int {
+	if c.lines() >= maxEditorBodyRows {
+		return maxEditorBodyRows
+	}
+	if c.cached.rows != nil && c.layoutWidth == width {
+		return min(len(c.cached.rows), maxEditorBodyRows)
+	}
+	return min(len(buildEditorLayout(c.text, width, c.lines(), maxEditorBodyRows).rows), maxEditorBodyRows)
 }

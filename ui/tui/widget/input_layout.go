@@ -79,7 +79,7 @@ func (i *Input) Rules(width, height int) []Rule {
 	}
 	plan := i.layout(width, height)
 	if i.editor != nil && !i.SearchActive() && (!i.PickerActive() || i.PickerInline()) {
-		header, toggle, footer := i.editorLabels(i.editor.layout(width).lineCount, width-4)
+		header, toggle, footer := i.editorLabels(i.editor.lines(), width-4)
 		for n := range plan.rules {
 			rule := &plan.rules[n]
 			if rule.Vertical {

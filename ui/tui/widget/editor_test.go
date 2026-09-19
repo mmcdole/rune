@@ -258,7 +258,7 @@ func TestEditorHonorsAllocatedHeight(t *testing.T) {
 
 func TestEditorFullWidthEndCursorUsesContinuationRow(t *testing.T) {
 	// Width 10 gives a 4-cell gutter and 6 cells of draft content.
-	layout := buildEditorLayout([]rune("abcdef\nx"), 6, 10)
+	layout := newEditor("abcdef\nx", 6).layout(10)
 	if layout.cursorRow != 1 || layout.cursorCol != 0 {
 		t.Fatalf("full-width end cursor = row %d col %d, want continuation row 1 col 0",
 			layout.cursorRow, layout.cursorCol)
@@ -269,7 +269,7 @@ func TestEditorFullWidthEndCursorUsesContinuationRow(t *testing.T) {
 }
 
 func TestEditorWideRunesWrapWithoutOverflow(t *testing.T) {
-	layout := buildEditorLayout([]rune("abcd界x"), len([]rune("abcd界x")), 10)
+	layout := newEditor("abcd界x", len([]rune("abcd界x"))).layout(10)
 	if len(layout.rows) < 2 || !layout.rows[1].continuation {
 		t.Fatalf("wide-rune line did not soft-wrap: %+v", layout.rows)
 	}
@@ -285,7 +285,7 @@ func TestEditorWideRunesWrapWithoutOverflow(t *testing.T) {
 
 func TestEditorGraphemesShareTerminalCellWidths(t *testing.T) {
 	for _, value := range []string{"❤️", "👩‍💻", "1️⃣", "🇺🇸"} {
-		layout := buildEditorLayout([]rune(value), len([]rune(value)), 40)
+		layout := newEditor(value, len([]rune(value))).layout(40)
 		if layout.cursorCol != 2 {
 			t.Errorf("cursor after %q = %d, want 2", value, layout.cursorCol)
 		}

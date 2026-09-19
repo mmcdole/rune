@@ -216,8 +216,7 @@ func (i *Input) MeasureHeight(width, limit int) int {
 
 	h := 3 // normal: top border + input + bottom border
 	if i.editor != nil {
-		layout := i.editor.layout(width)
-		bodyRows := clampInt(len(layout.rows), 1, maxEditorBodyRows)
+		bodyRows := i.editor.measureRows(width)
 		h = bodyRows + 2 // status header + content + key footer
 	}
 	if i.PickerActive() {
