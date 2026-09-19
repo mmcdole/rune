@@ -35,42 +35,6 @@ func TestPaneRegistryAppliesLifecycleToReservedOutput(t *testing.T) {
 	}
 }
 
-func TestOutputClearInvalidatesOldBatchAndPreservesPrompt(t *testing.T) {
-	output := newOutputController(style.DefaultStyles())
-	output.setFallbackGeometry(20, 4)
-	output.setPrompt("HP> ")
-
-	oldGeneration, scheduled := output.printServer("old one")
-	if !scheduled {
-		t.Fatal("first old row did not schedule a batch tick")
-	}
-	output.printServer("old two")
-	output.Clear()
-
-	newGeneration, scheduled := output.printServer("new one")
-	if !scheduled || newGeneration == oldGeneration {
-		t.Fatal("post-clear output did not start a new batch generation")
-	}
-	output.printServer("new two")
-
-	if output.tick(oldGeneration) {
-		t.Fatal("stale tick was not ignored")
-	}
-	if len(output.pendingRows) != 1 || output.pendingRows[0] != "new two" {
-		t.Fatalf("stale tick disturbed new pending rows: %q", output.pendingRows)
-	}
-	if !output.tick(newGeneration) {
-		t.Fatal("current tick did not flush and rearm")
-	}
-	if output.buffer.Count() != 2 || output.buffer.At(0) != "new one" || output.buffer.At(1) != "new two" {
-		t.Fatalf("post-clear buffer = [%q, %q], want only new rows", output.buffer.At(0), output.buffer.At(1))
-	}
-	output.SetSize(20, 4)
-	if got := output.View(); !strings.HasSuffix(got, "HP> ") {
-		t.Fatalf("clear removed live prompt: %q", got)
-	}
-}
-
 func TestOutputRetainsLastPlacementGeometryWhileHidden(t *testing.T) {
 	output := newOutputController(style.DefaultStyles())
 	output.setFallbackGeometry(80, 24)

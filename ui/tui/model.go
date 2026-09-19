@@ -14,21 +14,17 @@ import (
 	"github.com/mmcdole/rune/ui/tui/widget"
 )
 
-// tickMsg closes one generation of the 16ms output batch window. The first server line
-// after an idle period renders immediately and opens the window; lines
-// arriving inside it are batched to prevent excessive renders on fast
-// MUD output. Ticks are scheduled on demand only - an idle client has
-// no standing timer and zero wakeups.
-type tickMsg struct {
-	generation uint64
-}
+// defaultFrameInterval bounds screen composition to about 60 frames a second.
+const defaultFrameInterval = 16 * time.Millisecond
 
-// doTick returns a command that closes the batch window after 16ms.
-func doTick(generation uint64) tea.Cmd {
-	return tea.Tick(16*time.Millisecond, func(time.Time) tea.Msg {
-		return tickMsg{generation: generation}
-	})
-}
+// frameMsg closes the current frame. Bubble Tea calls View after every
+// message, and composing the screen is the one expensive step, so Model
+// composes at most once per frame: the first change after an idle period
+// composes immediately and opens a frame; changes arriving inside it apply
+// to state at once and are composed together when the frame closes. Frames
+// are scheduled on demand only - an idle client has no standing timer and
+// zero wakeups - and at most one frameMsg is ever outstanding.
+type frameMsg struct{}
 
 // Model is the main Bubble Tea model for the TUI. It routes messages
 // between the session and the widgets; input-mode policy lives in the
@@ -53,10 +49,18 @@ type Model struct {
 	layout     ui.LayoutTree
 	layoutPlan layoutPlan
 
-	// Content is cached between model updates. Buffered output changes no
-	// visible state; all other updates conservatively invalidate the cache.
+	// Frame clock. Every message but frameMsg marks the screen stale; see
+	// frameMsg for when a stale screen is composed. A zero frameInterval
+	// composes on every View instead.
+	frameInterval   time.Duration
+	frameOpen       bool
+	stale           bool
 	renderedContent string
-	contentValid    bool
+	compositions    int
+
+	// A server line inside an open frame reports scroll state when the frame
+	// closes, so a flood reports once per frame rather than once per line.
+	scrollReportDue bool
 
 	// State
 	width        int
@@ -89,36 +93,49 @@ func NewModel(events chan<- ui.UIEvent) *Model {
 	return m
 }
 
-// Init implements tea.Model. No standing tick: batch-window ticks are
-// scheduled on demand when server output arrives.
+// Init implements tea.Model. No standing tick: frames are scheduled on
+// demand when something changes.
 func (m *Model) Init() tea.Cmd {
 	return nil
 }
 
-// Update implements tea.Model.
+// Update implements tea.Model: apply the message, finalize geometry once and
+// the navigation that depends on it, then let the frame clock decide whether
+// to compose. View only returns the composed screen; it never changes
+// session-visible scroll state.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if line, ok := msg.(ui.PrintLineMsg); ok && m.output.flushScheduled {
-		// Only pendingRows changes. Leave layout and the composed screen alone
-		// until the batch is flushed, even though Bubble Tea calls View after
-		// every message. Do not mark an as-yet unrendered screen valid here.
-		m.output.printServer(string(line))
-		return m, nil
+	_, cmd := m.dispatch(msg)
+
+	previousOutput := m.layoutPlan.output
+	changed := m.applyLayout()
+	if m.applySearchPosition(previousOutput != m.layoutPlan.output) || changed {
+		m.updateScrollState()
 	}
-	// Finalize geometry once, then apply navigation that depends on it.
-	// View only paints; it never changes session-visible scroll state.
-	defer func() {
-		previousOutput := m.layoutPlan.output
-		changed := m.applyLayout()
-		if m.applySearchPosition(previousOutput != m.layoutPlan.output) || changed {
-			m.updateScrollState()
-		}
-	}()
+
+	if _, closing := msg.(frameMsg); !closing {
+		m.stale = true
+	}
+	return m, tea.Batch(cmd, m.advanceFrame())
+}
+
+// advanceFrame composes a stale screen unless a frame is open, and returns
+// the command that closes the frame it opened.
+func (m *Model) advanceFrame() tea.Cmd {
+	if m.frameInterval <= 0 || m.frameOpen || !m.stale {
+		return nil
+	}
+	m.compose()
+	m.frameOpen = true
+	return tea.Tick(m.frameInterval, func(time.Time) tea.Msg { return frameMsg{} })
+}
+
+func (m *Model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	// System
 	case tea.WindowSizeMsg:
 		return m.handleWindowSize(msg)
-	case tickMsg:
-		return m.handleTick(msg)
+	case frameMsg:
+		return m.handleFrame()
 	case tea.KeyPressMsg:
 		m.inputCtl.HandleKey(msg)
 		return m, nil
@@ -194,16 +211,16 @@ func (m *Model) handleWindowSize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleTick closes the current batch window: flushes any lines that
-// arrived inside it and re-arms the window only while output is still
-// flowing. A tick that finds nothing pending (output went quiet, or an
-// echo already flushed eagerly) ends the chain - back to zero wakeups.
-func (m *Model) handleTick(msg tickMsg) (tea.Model, tea.Cmd) {
-	if !m.output.tick(msg.generation) {
-		return m, nil
+// handleFrame closes the current frame. Update then composes and re-arms only
+// if the screen went stale inside it; otherwise the chain ends - back to zero
+// wakeups.
+func (m *Model) handleFrame() (tea.Model, tea.Cmd) {
+	m.frameOpen = false
+	if m.scrollReportDue {
+		m.scrollReportDue = false
+		m.updateScrollState()
 	}
-	m.updateScrollState()
-	return m, doTick(msg.generation)
+	return m, nil
 }
 
 func (m *Model) handleConfigUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -244,13 +261,14 @@ func (m *Model) syncBars(content map[string]ui.BarContent) {
 func (m *Model) handleDisplayOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case ui.PrintLineMsg:
-		if generation, schedule := m.output.printServer(string(msg)); schedule {
-			m.updateScrollState()
-			return m, doTick(generation)
+		m.output.Write(string(msg))
+		if m.frameOpen {
+			m.scrollReportDue = true
+			return m, nil
 		}
-		return m, nil
+		m.updateScrollState()
 	case ui.EchoLineMsg:
-		m.output.echo(string(msg))
+		m.output.Write(string(msg))
 		m.updateScrollState()
 	case ui.SetPromptMsg:
 		m.output.setPrompt(string(msg))

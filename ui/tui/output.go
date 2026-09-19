@@ -13,18 +13,15 @@ import (
 const defaultOutputWrapWidth = 80
 
 // outputController is Rune's pre-created output pane plus the capabilities
-// specific to a MUD transcript: physical-row history, batching, live prompts,
-// search anchors, and a retained append-time wrapping width.
+// specific to a MUD transcript: physical-row history, live prompts, search
+// anchors, and a retained append-time wrapping width.
 type outputController struct {
 	buffer   *widget.ScrollbackBuffer
 	viewport *widget.Viewport
 
-	wrapWidth       int
-	hasPlacement    bool
-	promptText      string
-	pendingRows     []string
-	flushScheduled  bool
-	batchGeneration uint64
+	wrapWidth    int
+	hasPlacement bool
+	promptText   string
 }
 
 func newOutputController(styles style.Styles) *outputController {
@@ -39,14 +36,10 @@ func newOutputController(styles style.Styles) *outputController {
 func (o *outputController) Name() string { return ui.OutputPaneName }
 
 func (o *outputController) Write(text string) {
-	o.flushPending()
-	o.appendMessage(text)
+	o.appendRows(splitRows(text, o.wrapWidth)...)
 }
 
 func (o *outputController) Clear() {
-	o.pendingRows = nil
-	o.flushScheduled = false
-	o.batchGeneration++
 	o.buffer.Clear()
 	o.viewport.Clear()
 }
@@ -103,53 +96,6 @@ func (o *outputController) appendRows(rows ...string) {
 	o.viewport.OnNewRows(len(rows))
 }
 
-func (o *outputController) appendMessage(text string) {
-	o.appendRows(splitRows(text, o.wrapWidth)...)
-}
-
-// printServer starts or joins the short output batching window. Its return
-// value tells Model whether it must schedule the first tick in a chain.
-func (o *outputController) printServer(text string) (generation uint64, scheduleTick bool) {
-	rows := splitRows(text, o.wrapWidth)
-	if o.flushScheduled {
-		o.pendingRows = append(o.pendingRows, rows...)
-		return o.batchGeneration, false
-	}
-	o.appendRows(rows...)
-	o.flushScheduled = true
-	o.batchGeneration++
-	return o.batchGeneration, true
-}
-
-// tick flushes one current-generation batch and reports whether output is
-// still flowing. A clear invalidates already-scheduled ticks, preventing an
-// old timer from closing a new batch window.
-func (o *outputController) tick(generation uint64) bool {
-	if generation != o.batchGeneration || !o.flushScheduled {
-		return false
-	}
-	o.flushScheduled = false
-	if len(o.pendingRows) == 0 {
-		return false
-	}
-	o.flushPending()
-	o.flushScheduled = true
-	return true
-}
-
-func (o *outputController) flushPending() {
-	if len(o.pendingRows) == 0 {
-		return
-	}
-	o.appendRows(o.pendingRows...)
-	o.pendingRows = nil
-}
-
-func (o *outputController) echo(text string) {
-	o.flushPending()
-	o.appendMessage(text)
-}
-
 func (o *outputController) setPrompt(text string) {
 	text = util.ExpandTabs(text)
 	if text != o.promptText {
@@ -159,9 +105,8 @@ func (o *outputController) setPrompt(text string) {
 }
 
 func (o *outputController) commitPrompt(text string) {
-	o.flushPending()
 	if text := util.ExpandTabs(text); text != "" {
-		o.appendMessage(text)
+		o.Write(text)
 	}
 	o.viewport.SetPrompt("")
 	o.promptText = ""

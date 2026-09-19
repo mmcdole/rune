@@ -109,6 +109,7 @@ func (b *BubbleTeaUI) CommitPrompt(text string) {
 // Run starts the TUI and blocks until exit.
 func (b *BubbleTeaUI) Run() (err error) {
 	model := NewModel(b.events)
+	model.frameInterval = defaultFrameInterval
 	b.program = tea.NewProgram(model, tea.WithOutput(b.output))
 
 	defer func() {

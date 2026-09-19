@@ -34,12 +34,22 @@ func (m *Model) View() tea.View {
 		return view
 	}
 
-	if !m.contentValid {
-		m.renderedContent = m.renderPlan(m.layoutPlan)
-		m.contentValid = true
+	if m.frameInterval <= 0 {
+		m.compose()
 	}
 	view.Content = m.renderedContent
 	return view
+}
+
+// compose paints the current plan. The frame clock decides when.
+func (m *Model) compose() {
+	m.stale = false
+	m.compositions++
+	if m.width <= 0 || m.height <= 0 {
+		m.renderedContent = ""
+		return
+	}
+	m.renderedContent = m.renderPlan(m.layoutPlan)
 }
 
 func (m *Model) renderPlan(plan layoutPlan) string {
