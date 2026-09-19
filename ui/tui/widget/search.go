@@ -6,6 +6,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
+
 	"github.com/mmcdole/rune/text"
 	"github.com/mmcdole/rune/ui/tui/style"
 	"github.com/mmcdole/rune/ui/tui/util"
@@ -20,8 +21,8 @@ const searchPageSize = 250
 // searchMaxVisible is the maximum number of match rows shown at once.
 const searchMaxVisible = 5
 
-// SearchScope fixes the temporal frame for one search session. OriginSeq is
-// the viewport position from which a new query starts; ResumeSeq optionally
+// SearchScope anchors one search session. OriginSeq is
+// the output window position from which a new query starts; ResumeSeq optionally
 // identifies the previously committed result when reopening a preserved
 // query.
 type SearchScope struct {
@@ -33,9 +34,9 @@ type SearchScope struct {
 
 // Search is the scrollback-search navigator: a query line plus a small
 // chronological window of matching rows. It owns query, match paging, and
-// selection state; Model owns the resulting viewport position.
+// selection state; Model owns the resulting output window position.
 type Search struct {
-	buf        *ScrollbackBuffer
+	scrollback *Scrollback
 	styles     style.Styles
 	query      string
 	pristine   bool // reopened with a preserved query: first typed rune replaces it
@@ -51,9 +52,9 @@ type Search struct {
 	notice     string
 }
 
-// NewSearch creates a search overlay over the given buffer.
-func NewSearch(buf *ScrollbackBuffer, styles style.Styles) *Search {
-	return &Search{buf: buf, styles: styles}
+// NewSearch creates a search overlay over the retained scrollback.
+func NewSearch(scrollback *Scrollback, styles style.Styles) *Search {
+	return &Search{scrollback: scrollback, styles: styles}
 }
 
 // Open (re)opens the overlay over a frozen scrollback snapshot. An empty
@@ -64,8 +65,8 @@ func (s *Search) Open(query string, scope SearchScope) {
 	if query != "" {
 		s.query = query
 	}
-	if s.buf.Count() > 0 {
-		s.frozenTail = s.buf.Seq(s.buf.Count() - 1)
+	if s.scrollback.Count() > 0 {
+		s.frozenTail = s.scrollback.Seq(s.scrollback.Count() - 1)
 		s.frozenSet = true
 	} else {
 		s.frozenSet = false
@@ -154,8 +155,8 @@ func (s *Search) rescan(anchor uint64, anchorSet bool) {
 	}
 
 	match := substringMatcher(s.query)
-	older, olderMore := scanOlder(s.buf, match, anchor, searchPageSize)
-	newer, newerMore := scanNewer(s.buf, match, anchor, s.frozenTail, searchPageSize)
+	older, olderMore := scanOlder(s.scrollback, match, anchor, searchPageSize)
+	newer, newerMore := scanNewer(s.scrollback, match, anchor, s.frozenTail, searchPageSize)
 	s.matches = append(older, newer...)
 	s.olderMore = olderMore
 	s.newerMore = newerMore
@@ -191,7 +192,7 @@ func (s *Search) SelectOlder() {
 		s.notice = "Oldest match"
 		return
 	}
-	page, more := scanOlder(s.buf, substringMatcher(s.query), s.matches[0].Seq-1, searchPageSize)
+	page, more := scanOlder(s.scrollback, substringMatcher(s.query), s.matches[0].Seq-1, searchPageSize)
 	if len(page) == 0 {
 		s.olderMore = false
 		s.notice = "Oldest match"
@@ -219,7 +220,7 @@ func (s *Search) SelectNewer() {
 		s.notice = "Newest match"
 		return
 	}
-	page, more := scanNewer(s.buf, substringMatcher(s.query), s.matches[len(s.matches)-1].Seq, s.frozenTail, searchPageSize)
+	page, more := scanNewer(s.scrollback, substringMatcher(s.query), s.matches[len(s.matches)-1].Seq, s.frozenTail, searchPageSize)
 	if len(page) == 0 {
 		s.newerMore = false
 		s.notice = "Newest match"
@@ -265,7 +266,7 @@ func (s *Search) resultLines(width, limit int) []string {
 	}
 	if len(s.matches) == 0 {
 		empty := "  " + "No matches"
-		return []string{clipRow(s.styles.Muted.Render(empty), width)}
+		return []string{util.ClipRow(s.styles.Muted.Render(empty), width)}
 	}
 	visible := min(limit, len(s.matches))
 	start := s.scrollOff
@@ -306,13 +307,13 @@ func (s *Search) queryLine(width int) string {
 	queryWidth := max(0, width-len(label)-1)
 	query = ansi.TruncateLeft(query, max(0, ansi.StringWidth(query)-queryWidth), "")
 	left := s.styles.Muted.Render(label) + query + "█"
-	leftWidth := len(label) + util.VisibleLen(query) + 1
+	leftWidth := len(label) + ansi.StringWidth(query) + 1
 
 	pad := width - leftWidth - len(count)
 	if pad < 1 {
 		pad = 1
 	}
-	return clipRow(left+strings.Repeat(" ", pad)+s.styles.Muted.Render(count), width)
+	return util.ClipRow(left+strings.Repeat(" ", pad)+s.styles.Muted.Render(count), width)
 }
 
 func (s *Search) footerLine(width int, cancel string) string {
@@ -323,7 +324,7 @@ func (s *Search) footerLine(width int, cancel string) string {
 	if s.notice != "" {
 		help = s.notice + "  ·  " + help
 	}
-	return clipRow(s.styles.Muted.Render(help), width)
+	return util.ClipRow(s.styles.Muted.Render(help), width)
 }
 
 // renderMatch renders one match row, highlighting every occurrence.
@@ -363,5 +364,5 @@ func (s *Search) renderMatch(m SearchMatch, width int, selected bool) string {
 	} else {
 		prefixStyled = s.styles.OverlayNormal.Render(prefix)
 	}
-	return clipRow(prefixStyled+b.String(), max(1, width))
+	return util.ClipRow(prefixStyled+b.String(), max(1, width))
 }

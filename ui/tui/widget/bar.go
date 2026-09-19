@@ -4,6 +4,8 @@ import (
 	"image"
 	"strings"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/mmcdole/rune/ui"
 	"github.com/mmcdole/rune/ui/tui/util"
 )
@@ -23,8 +25,12 @@ func NewBar() *Bar {
 }
 
 // SetContent updates the bar's content.
-func (b *Bar) SetContent(content ui.BarContent) {
+func (b *Bar) SetContent(content ui.BarContent) bool {
+	if b.content == content {
+		return false
+	}
 	b.content = content
+	return true
 }
 
 // View implements Widget.
@@ -33,9 +39,9 @@ func (b *Bar) View() string {
 	center := b.content.Center
 	right := b.content.Right
 
-	leftLen := util.VisibleLen(left)
-	centerLen := util.VisibleLen(center)
-	rightLen := util.VisibleLen(right)
+	leftLen := ansi.StringWidth(left)
+	centerLen := ansi.StringWidth(center)
+	rightLen := ansi.StringWidth(right)
 
 	if centerLen > 0 {
 		// Three-part layout
@@ -47,7 +53,7 @@ func (b *Bar) View() string {
 		if rightPad < 1 {
 			rightPad = 1
 		}
-		return clipRow(left+strings.Repeat(" ", leftPad)+center+strings.Repeat(" ", rightPad)+right, b.width)
+		return util.ClipRow(left+strings.Repeat(" ", leftPad)+center+strings.Repeat(" ", rightPad)+right, b.width)
 	}
 
 	// Two-part layout
@@ -55,7 +61,7 @@ func (b *Bar) View() string {
 	if pad < 1 {
 		pad = 1
 	}
-	return clipRow(left+strings.Repeat(" ", pad)+right, b.width)
+	return util.ClipRow(left+strings.Repeat(" ", pad)+right, b.width)
 }
 
 // SetSize implements Widget.
@@ -65,9 +71,9 @@ func (b *Bar) SetSize(width, height int) {
 }
 
 func (b *Bar) MeasureHeight(width, limit int) int {
-	if util.VisibleLen(b.content.Left) > 0 ||
-		util.VisibleLen(b.content.Center) > 0 ||
-		util.VisibleLen(b.content.Right) > 0 {
+	if ansi.StringWidth(b.content.Left) > 0 ||
+		ansi.StringWidth(b.content.Center) > 0 ||
+		ansi.StringWidth(b.content.Right) > 0 {
 		return min(1, limit)
 	}
 	return 0 // Hidden if no content

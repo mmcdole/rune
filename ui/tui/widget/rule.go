@@ -8,7 +8,7 @@ import (
 )
 
 // Rule describes a joinable line in cell coordinates. From is inclusive and To
-// is exclusive. Widgets describe their decoration; the compositor owns joins.
+// is exclusive. Widgets describe their decoration; the renderer owns joins.
 type Rule struct {
 	Vertical     bool
 	At, From, To int

@@ -7,13 +7,14 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+
 	"github.com/mmcdole/rune/ui"
 	"github.com/mmcdole/rune/ui/tui/widget"
 )
 
 func addPane(t *testing.T, m *Model, name string, lines ...string) {
 	t.Helper()
-	pane := m.panes.Create(name)
+	pane := m.pane(name)
 	for _, line := range lines {
 		pane.Write(line)
 	}
@@ -31,7 +32,7 @@ func setLayout(m *Model, root ui.LayoutNode) {
 	m.applyLayout()
 }
 
-func findLeaf(t *testing.T, plan layoutPlan, kind string, name string) *layoutNode {
+func findLeaf(t *testing.T, plan layoutPlan, kind string, name string) *resolvedNode {
 	t.Helper()
 	for _, leaf := range plan.leaves {
 		if (leaf.node.Type == ui.LayoutTypePane) != (kind == ui.LayoutTypePane) {
@@ -103,7 +104,7 @@ func TestArbitraryTypeIsNotARegistryLookup(t *testing.T) {
 	}
 }
 
-func TestOutputPaneAndSameNamedBarRemainSeparateResources(t *testing.T) {
+func TestOutputPaneAndSameNamedBarRemainSeparateWidgets(t *testing.T) {
 	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 8)), 20, 5)
 	m.syncBars(map[string]ui.BarContent{ui.OutputPaneName: {Left: "bar output"}})
 	setLayout(m, ui.LayoutNode{
@@ -210,9 +211,9 @@ func TestOnlyAutoTracksRequestIntrinsicMeasurement(t *testing.T) {
 			if !ok {
 				t.Fatal("measuring widget did not resolve")
 			}
-			root := &layoutNode{
+			root := &resolvedNode{
 				node:     ui.LayoutNode{Type: ui.LayoutTypeColumn},
-				children: []*layoutNode{child},
+				children: []*resolvedNode{child},
 			}
 			m.allocateChildren(root, 12, axisVertical, 20)
 			if measured.preferredCalls != test.calls {
@@ -238,9 +239,9 @@ func TestAutoRowMeasuresChildrenAtAllocatedWidths(t *testing.T) {
 	if !ok {
 		t.Fatal("input widget did not resolve")
 	}
-	row := &layoutNode{
+	row := &resolvedNode{
 		node:     ui.LayoutNode{Type: ui.LayoutTypeRow},
-		children: []*layoutNode{wrappedResolved, inputResolved},
+		children: []*resolvedNode{wrappedResolved, inputResolved},
 		hasInput: true,
 	}
 	if got := m.preferred(row, axisVertical, 20); got != 3 {
@@ -271,9 +272,9 @@ func TestAutoColumnSumsNestedPreferredHeights(t *testing.T) {
 	if !ok {
 		t.Fatal("input widget did not resolve")
 	}
-	column := &layoutNode{
+	column := &resolvedNode{
 		node:     ui.LayoutNode{Type: ui.LayoutTypeColumn},
-		children: []*layoutNode{twoResolved, inputResolved},
+		children: []*resolvedNode{twoResolved, inputResolved},
 		hasInput: true,
 	}
 	if got := m.preferred(column, axisVertical, 30); got != 5 {
@@ -294,13 +295,13 @@ func TestOutputPaneWrapsAtItsResolvedWidth(t *testing.T) {
 
 	next, _ := m.Update(ui.EchoLineMsg("abcdefghijklmn"))
 	m = next.(*Model)
-	if got := m.output.buffer.Count(); got != 2 {
+	if got := m.output.Scrollback().Count(); got != 2 {
 		t.Fatalf("scrollback row count = %d, want 2", got)
 	}
-	if got := m.output.buffer.At(0); got != "abcdefghijkl" {
+	if got := m.output.Scrollback().At(0); got != "abcdefghijkl" {
 		t.Fatalf("first physical row = %q, want twelve cells", got)
 	}
-	if got := m.output.buffer.At(1); got != "mn" {
+	if got := m.output.Scrollback().At(1); got != "mn" {
 		t.Fatalf("second physical row = %q, want remainder", got)
 	}
 }
@@ -318,7 +319,7 @@ func TestResizeReallocatesTreeWithoutReflowingExistingOutputRows(t *testing.T) {
 
 	next, _ := m.Update(ui.EchoLineMsg(strings.Repeat("a", 35)))
 	m = next.(*Model)
-	if got := m.output.buffer.Count(); got != 2 {
+	if got := m.output.Scrollback().Count(); got != 2 {
 		t.Fatalf("rows appended at thirty-cell output width = %d, want 2", got)
 	}
 
@@ -326,12 +327,12 @@ func TestResizeReallocatesTreeWithoutReflowingExistingOutputRows(t *testing.T) {
 	if got := m.layoutPlan.output.Dx(); got != 60 {
 		t.Fatalf("resized output width = %d, want 60", got)
 	}
-	if got := m.output.buffer.Count(); got != 2 {
+	if got := m.output.Scrollback().Count(); got != 2 {
 		t.Fatalf("resize reflowed existing rows: count = %d, want 2", got)
 	}
 	next, _ = m.Update(ui.EchoLineMsg(strings.Repeat("b", 50)))
 	m = next.(*Model)
-	if got := m.output.buffer.Count(); got != 3 {
+	if got := m.output.Scrollback().Count(); got != 3 {
 		t.Fatalf("new fifty-cell line at resized width added count = %d, want 3", got)
 	}
 }
@@ -700,8 +701,8 @@ func TestSearchUsesTheSameResolvedOutputRectangleAsView(t *testing.T) {
 	if got := plan.output.Dy(); got != 10 {
 		t.Fatalf("search output height = %d, want 10", got)
 	}
-	if got := len(strings.Split(m.output.viewport.View(), "\n")); got != plan.output.Dy() {
-		t.Fatalf("viewport height = %d, want resolved output height %d", got, plan.output.Dy())
+	if got := len(strings.Split(m.output.View(), "\n")); got != plan.output.Dy() {
+		t.Fatalf("output window height = %d, want resolved output height %d", got, plan.output.Dy())
 	}
 	assertExactBlock(t, m.View().Content, 40, 16)
 }
@@ -963,7 +964,7 @@ func TestSeparatorInsideRowKeepsWidgetRendering(t *testing.T) {
 }
 
 // TestBarNameDoesNotReplaceBuiltinWidget verifies that bar and built-in names
-// belong to independent resource namespaces.
+// belong to independent namespaces.
 func TestBarNameDoesNotReplaceBuiltinWidget(t *testing.T) {
 	m := newTestModel(t)
 	inputWidget := m.input

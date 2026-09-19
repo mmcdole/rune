@@ -15,20 +15,20 @@ type inputMode int
 
 const (
 	modeNormal       inputMode = iota // Standard text input
-	modeCompose                       // Lossless structured-text input
+	modeEditor                        // Lossless structured-text input
 	modePickerModal                   // Modal picker traps all keys
 	modePickerInline                  // Inline picker filters based on input
 	modeSearch                        // Scrollback-search overlay traps all keys
 )
 
-// searchEffects is the viewport half of scrollback search, implemented
-// by Model. The controller owns the mode state machine; the viewport
+// searchEffects is the output window half of scrollback search, implemented
+// by Model. The controller owns the mode state machine; the output window
 // snapshot, centering, and highlight stay with the widget owner.
 type searchEffects interface {
-	OpenSearch() widget.SearchScope              // snapshot viewport and choose the search origin
+	OpenSearch() widget.SearchScope              // snapshot output window and choose the search origin
 	PreviewSearch(m widget.SearchMatch, ok bool) // center+highlight the match, or restore when none
 	CommitSearch()                               // keep the accepted match and its highlight
-	CancelSearch()                               // restore the viewport and prior highlight
+	CancelSearch()                               // restore the output window and prior highlight
 }
 
 // inputController owns input transitions and Session effects:
@@ -43,13 +43,13 @@ type inputController struct {
 	// Picker callbacks belong to the Session contract, not the widget.
 	pickerCB      string // Lua callback ID to settle on close
 	pickerDismiss bool   // close inline picker once input contains a space
-	historyRecall bool   // unmodified composed entry restored from history
+	historyRecall bool   // unmodified draft restored from history
 	keepOnSubmit  bool   // keep_input: keep the sent command selected
 
 	notify func(ui.UIEvent)                // state and actions sent to the session
 	submit func(ui.InputSubmittedMsg) bool // atomically transfer submission and following draft
 	scroll func(tea.KeyPressMsg) bool      // Go scroll-key fallback; true if handled
-	search searchEffects                   // viewport side of scrollback search
+	search searchEffects                   // output window side of scrollback search
 }
 
 func newInputController(
@@ -77,8 +77,8 @@ func (c *inputController) mode() inputMode {
 		return modePickerInline
 	case c.input.PickerActive():
 		return modePickerModal
-	case c.input.IsComposing():
-		return modeCompose
+	case c.input.EditorActive():
+		return modeEditor
 	default:
 		return modeNormal
 	}
@@ -89,14 +89,14 @@ func (c *inputController) mode() inputMode {
 // Cancel resolves in every context; modal overlays capture other actions.
 // The UI handles editing and asks Session to submit or open the editor.
 // Callback bindings go to Session and Lua. Normal input protects text-bearing keys
-// while a draft is being typed. The composer owns ordinary editing mechanics.
+// while a draft is being typed. The editor owns ordinary editing mechanics.
 // Unbound scroll keys retain a Go fallback for degraded-core operation.
 func (c *inputController) HandleKey(msg tea.KeyPressMsg) {
 	msg = normalizeNumpadText(msg)
 	action := c.editorAction(msg)
 	cancel := action == "input.cancel"
-	if c.mode() == modeCompose && !cancel {
-		c.input.ContinueCompose()
+	if c.mode() == modeEditor && !cancel {
+		c.input.ContinueEditing()
 	}
 	// Ctrl+C remains an overlay interrupt; the configured cancel action works
 	// in every context, including modal pickers and scrollback search.
@@ -107,9 +107,9 @@ func (c *inputController) HandleKey(msg tea.KeyPressMsg) {
 			c.closePicker(false, "")
 		case modeSearch:
 			c.closeSearch(false)
-		case modeCompose:
+		case modeEditor:
 			if c.input.ConfirmDiscard() {
-				c.cancelCompose()
+				c.cancelEditor()
 			}
 		default:
 			oldText, oldCursor := c.input.Value(), c.input.Position()
@@ -141,8 +141,8 @@ func (c *inputController) HandleKey(msg tea.KeyPressMsg) {
 	}
 
 	switch c.mode() {
-	case modeCompose:
-		c.handleComposeKey(msg, action)
+	case modeEditor:
+		c.handleEditorKey(msg, action)
 	case modePickerModal:
 		c.handleModalKey(msg)
 	case modePickerInline:
@@ -169,7 +169,7 @@ func (c *inputController) SetText(text string) {
 	c.input.CursorEnd()
 	c.notify(ui.DraftAppliedMsg{Text: c.input.Value(), Cursor: c.input.Position()})
 
-	if c.input.IsComposing() {
+	if c.input.EditorActive() {
 		if wasPicker {
 			c.closePicker(false, "")
 		}
@@ -181,7 +181,7 @@ func (c *inputController) SetText(text string) {
 }
 
 // SetSubmission applies and acknowledges a Session-owned history recall.
-// Unlike SetText, an explicit command entry exits sticky compose mode, while
+// Unlike SetText, an explicit command entry exits sticky editor mode, while
 // verbatim is forced even for one safe, non-empty physical line.
 func (c *inputController) SetSubmission(submission input.Submission) {
 	if c.mode() == modeSearch {
@@ -193,7 +193,7 @@ func (c *inputController) SetSubmission(submission input.Submission) {
 	c.input.SetSubmissionMode(submission.Mode)
 
 	if submission.Mode == input.ModeVerbatim {
-		c.input.BeginCompose(submission.Text, utf8.RuneCountInString(submission.Text))
+		c.input.OpenEditor(submission.Text, utf8.RuneCountInString(submission.Text))
 	} else {
 		c.input.SetValue(submission.Text)
 		c.input.CursorEnd()
@@ -207,7 +207,7 @@ func (c *inputController) SetSubmission(submission input.Submission) {
 
 // tryNormalBind applies normal mode's typing-safety rule. Text-bearing
 // keys dispatch only when the draft is empty or selected; non-text keys can
-// remain useful as movement binds while a command is being composed.
+// remain useful as movement binds while a command is being edited.
 func (c *inputController) tryNormalBind(msg tea.KeyPressMsg) bool {
 	key := keyToString(msg)
 	if key == "" || !c.input.Bindings().Has(key) {
@@ -221,9 +221,9 @@ func (c *inputController) tryNormalBind(msg tea.KeyPressMsg) bool {
 }
 
 func (c *inputController) handleNormalKey(msg tea.KeyPressMsg, action string) {
-	// Newline opens the composer when the draft is still single-line.
+	// Newline opens the editor when the draft is still single-line.
 	if action == "input.newline" {
-		c.insertComposerText("\n")
+		c.insertEditorText("\n")
 		return
 	}
 	if action == "input.submit" {
@@ -251,9 +251,9 @@ func (c *inputController) handleNormalKey(msg tea.KeyPressMsg, action string) {
 	c.forwardToInput(msg)
 }
 
-func (c *inputController) handleComposeKey(msg tea.KeyPressMsg, action string) {
+func (c *inputController) handleEditorKey(msg tea.KeyPressMsg, action string) {
 	if action == "input.newline" {
-		c.insertComposerText("\n")
+		c.insertEditorText("\n")
 		return
 	}
 	if action == "input.submit" {
@@ -261,7 +261,7 @@ func (c *inputController) handleComposeKey(msg tea.KeyPressMsg, action string) {
 		return
 	}
 
-	// Compose owns editing mechanics. Give NumLock-off keypad keys their
+	// Editor owns editing mechanics. Give NumLock-off keypad keys their
 	// semantic navigation meaning first, but retain the physical name so an
 	// unconsumed modified chord can still be delegated to Lua.
 	physicalKey := ""
@@ -280,7 +280,7 @@ func (c *inputController) handleComposeKey(msg tea.KeyPressMsg, action string) {
 		case matchesKey(msg, tea.KeyDown, 0):
 			key, delta = "down", 1
 		}
-		if key != "" && !c.input.CanMoveComposerVertically(delta) && c.input.Bindings().Has(key) {
+		if key != "" && !c.input.CanMoveEditorVertically(delta) && c.input.Bindings().Has(key) {
 			c.notify(ui.ExecuteBindMsg(key))
 			return
 		}
@@ -288,7 +288,7 @@ func (c *inputController) handleComposeKey(msg tea.KeyPressMsg, action string) {
 
 	oldValue := c.input.Value()
 	oldCursor := c.input.Position()
-	if c.input.UpdateComposer(msg) {
+	if c.input.UpdateEditor(msg) {
 		if c.reportInputUpdate(oldValue, oldCursor) {
 			c.historyRecall = false
 		}
@@ -301,7 +301,7 @@ func (c *inputController) handleComposeKey(msg tea.KeyPressMsg, action string) {
 		return
 	}
 
-	// Non-editing chords remain scriptable in compose mode. In
+	// Non-editing chords remain scriptable in editor mode. In
 	// particular, Ctrl+E keeps using the existing external-editor bind.
 	if keyStr := keyToString(msg); keyStr != "" && c.input.Bindings().Has(keyStr) {
 		c.notify(ui.ExecuteBindMsg(keyStr))
@@ -332,7 +332,7 @@ func (c *inputController) handlePaste(text string) {
 	c.input.InsertPaste(text)
 	c.reportInputUpdate(oldValue, oldCursor)
 
-	if c.input.IsComposing() {
+	if c.input.EditorActive() {
 		if wasInline {
 			// InputChangedMsg is deliberately emitted before the callback so
 			// Lua observes the newly pasted draft when cancellation runs.
@@ -345,7 +345,7 @@ func (c *inputController) handlePaste(text string) {
 	}
 }
 
-func (c *inputController) insertComposerText(text string) {
+func (c *inputController) insertEditorText(text string) {
 	c.historyRecall = false
 	oldValue := c.input.Value()
 	oldCursor := c.input.Position()
@@ -353,7 +353,7 @@ func (c *inputController) insertComposerText(text string) {
 	c.reportInputUpdate(oldValue, oldCursor)
 }
 
-func (c *inputController) cancelCompose() {
+func (c *inputController) cancelEditor() {
 	c.historyRecall = false
 	c.input.Reset()
 	c.notify(ui.InputChangedMsg{Text: "", Cursor: 0})
@@ -363,7 +363,7 @@ func (c *inputController) cancelCompose() {
 // Printable actions obey the same typing protection as callbacks.
 func (c *inputController) editorAction(msg tea.KeyPressMsg) string {
 	msg.Mod &= keyModifiers
-	if msg.Text != "" && (c.mode() == modeCompose ||
+	if msg.Text != "" && (c.mode() == modeEditor ||
 		(c.mode() == modeNormal && c.input.Value() != "" && !c.input.Selected())) {
 		return ""
 	}

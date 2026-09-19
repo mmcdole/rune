@@ -41,6 +41,8 @@ across runs, including latency percentiles, allocations, and emitted bytes. It
 does not claim statistical significance or enforce a machine-dependent time
 threshold. Raw `bench.txt` files are also usable with `benchstat` if installed.
 Missing workloads make a comparison fail instead of silently disappearing.
+The reader recognizes the former `RenderCompose` name as `RenderScreen`; only
+the name changed, so older baseline files remain comparable.
 Check `metadata.json` before comparing different machines, toolchains, settings,
 or benchmark definitions. Changing a fixture requires a new baseline.
 
@@ -52,19 +54,19 @@ or benchmark definitions. Changing a fixture requires a new baseline.
 | `OutputLatency/single` | One line, waiting for its terminal write before sending the next | Continuous small updates |
 | `OutputLatency/burst100`, `burst1000` | Enqueue a burst and wait for its last line's terminal write | Backlog drain and newest-output latency |
 | `OutputLatency/draft100_burst100` | Same 100-line burst while a multiline draft is open | Unrelated editor work delaying MUD output |
-| `RenderUpdate` | One line inside an open paint-throttle window | Per-message work, with 0/100/1,000 draft lines |
+| `RenderUpdate` | One line inside an open render-throttle window | Per-message work, with 0/100/1,000 draft lines |
 | `RenderFlood` | 100 lines, ten prompt updates, one explicit frame boundary | Fixed-work throughput, independent of timer scheduling |
-| `RenderCompose` | Paint an unchanged two-pane scene at 80×24 or 270×66 | Full composition cost with warm widget caches |
+| `RenderScreen` | Render an unchanged two-pane scene at 80×24 or 270×66 | Full rendering cost with warm widget caches |
 | `RenderLayout` | Resolve geometry for a populated scene | Geometry and border-planning allocations |
-| `RenderPipeline` | Update, compose, decode, diff, and encode a changing frame | Renderer CPU cost and `terminal-B/op`, without timer delays |
+| `RenderPipeline` | Update, render, decode, diff, and encode a changing frame | Renderer CPU cost and `terminal-B/op`, without timer delays |
 | `RenderUnchanged`, `RenderResize` | Repeated unchanged prompt, or alternating terminal sizes | No-op overhead and resizing |
 | `RenderSearch` | Search 100,000 rows for a common or missing term | UI-thread stalls, with plain and colored rows |
 | `RenderPane` | Render 24/66/200 visible chat rows | Wrapping and row-copy scaling |
 
 The latency harness uses production `BubbleTeaUI.Print` and its FIFO, the real
-Model, the 16 ms composition throttle, and the real Bubble Tea renderer and its
+Model, the 16 ms rendering throttle, and the real Bubble Tea renderer and its
 default frame clock. A test-only wrapper adds a sequence marker to the window
-title **only when that output has been composed**. The terminal writer observes
+title **only when that output has been rendered**. The terminal writer observes
 the marker in the same flush as the screen. This avoids falsely acknowledging
 a call to `View` or expecting whole line strings in terminal diff output.
 Bursts alternate their content so the renderer cannot treat successive complete
@@ -72,7 +74,7 @@ bursts as unchanged screens.
 
 The probe adds a small title/observer overhead. It measures UI enqueue to final
 writer delivery, **not TCP receipt, Lua trigger execution, terminal emulator
-painting, or pixels on a physical display**. It runs with a live output viewport.
+display time, or pixels on a physical display**. It runs with a live output window.
 It is a closed-loop burst workload, not a prediction of maximum sustainable
 network throughput. During a burst, intermediate frames can appear before the
 reported final-line latency. Memory goes to a discard/counting observer, not an
@@ -103,7 +105,7 @@ go test -race ./ui/tui -run '^$' -bench '^BenchmarkOutputLatency$' -benchtime=1x
 
 ## Preserve what users see
 
-The normal UI tests cover wrapping, frame junctions, resizing, search anchors,
+The normal UI tests cover wrapping, border junctions, resizing, search anchors,
 prompt commits, ring eviction, and input behavior. `TestRenderSnapshots` adds
 five deterministic scenes using the same fixture as the benchmarks: normal,
 multiline editor, picker, search, and scrolled output receiving new text. They
@@ -132,7 +134,7 @@ checks for key negotiation or display artifacts follow `docs/testing.md`.
    Avoid building a terminal-sized border grid on every message.
 3. Measure frame scheduling against the latency workloads. Rune and Bubble Tea
    have separate frame clocks; removing Rune's throttle without replacing its
-   work coalescing would restore per-message full composition.
+   work coalescing would restore per-message full rendering.
 4. Reduce repeated ANSI/cell conversion and whole-screen clearing. Verify both
    CPU and emitted bytes, plus the rendered-cell snapshots.
 5. Bound search work and avoid rewrapping unchanged sidebar content where those
@@ -140,4 +142,4 @@ checks for key negotiation or display artifacts follow `docs/testing.md`.
 
 Prefer removing work and ownership layers before introducing another cache or
 renderer. A change should identify which dependency invalidates geometry, text,
-or paint, and should have a benchmark that would reveal its regression.
+or rendering, and should have a benchmark that would reveal its regression.

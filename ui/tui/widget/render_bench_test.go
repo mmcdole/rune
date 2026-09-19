@@ -11,7 +11,7 @@ func BenchmarkRenderSearch(b *testing.B) {
 	for _, colored := range []bool{false, true} {
 		for _, query := range []string{"room", "not-present"} {
 			b.Run(fmt.Sprintf("colored=%t/query=%s", colored, query), func(b *testing.B) {
-				buffer := NewScrollbackBuffer(100000)
+				buffer := NewScrollback(100000)
 				line := "You see an ordinary room with exits north and south."
 				if colored {
 					line = "\x1b[32m" + line + "\x1b[0m"

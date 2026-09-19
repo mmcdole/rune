@@ -62,6 +62,8 @@ def measurements(path):
         if not fields or not fields[0].startswith("Benchmark") or len(fields) < 4:
             continue
         name = re.sub(r"-\d+$", "", fields[0])
+        # Same workload, renamed when rendering terminology was consolidated.
+        name = name.replace("BenchmarkRenderCompose/", "BenchmarkRenderScreen/")
         for value, unit in zip(fields[2::2], fields[3::2]):
             if unit in ("ns/op", "B/op", "allocs/op", "p50-ns", "p95-ns", "p99-ns", "terminal-B/op"):
                 results.setdefault((package, name, unit), []).append(float(value))

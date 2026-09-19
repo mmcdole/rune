@@ -5,10 +5,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
+
 	runetext "github.com/mmcdole/rune/text"
 	"github.com/mmcdole/rune/ui"
 	"github.com/mmcdole/rune/ui/tui/style"
-	"github.com/mmcdole/rune/ui/tui/util"
 )
 
 func newTestPicker(maxVisible int, texts ...string) *Picker {
@@ -21,7 +22,7 @@ func newTestPicker(maxVisible int, texts ...string) *Picker {
 	return p
 }
 
-// Render through Input, the production owner of picker composition and sizing.
+// Render through Input, the production owner of picker rendering and sizing.
 func pickerInput(p *Picker, width, height int) *Input {
 	in := newTestInput(width)
 	in.picker = p
@@ -154,7 +155,7 @@ func TestPickerRendersUntrustedTextAsOneSafeRow(t *testing.T) {
 		t.Fatalf("rendered rows = %d, measured height = %d: %q", rows, want, plain)
 	}
 	for n, row := range strings.Split(view, "\n") {
-		if width := util.VisibleLen(row); width > 32 {
+		if width := ansi.StringWidth(row); width > 32 {
 			t.Fatalf("row %d width = %d, exceeds input width 32: %q", n, width, row)
 		}
 	}

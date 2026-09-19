@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/colorprofile"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
+
 	"github.com/mmcdole/rune/ui"
 )
 
@@ -32,22 +33,22 @@ func renderFixture(width, height int, sidebar bool) *Model {
 		line := fmt.Sprintf("\x1b[32mRoom %03d\x1b[0m: a \x1b[1;31mdragon\x1b[0m watches the northern gate.", n)
 		m.output.Write(line)
 		if sidebar {
-			m.panes.Write("chat", line)
+			m.pane("chat").Write(line)
 		}
 	}
-	m.output.setPrompt("HP:100 >")
+	m.output.SetPrompt("HP:100 >")
 	m.applyLayout()
-	m.compose()
+	m.render()
 	return m
 }
 
-func BenchmarkRenderCompose(b *testing.B) {
+func BenchmarkRenderScreen(b *testing.B) {
 	for _, size := range [][2]int{{80, 24}, {270, 66}} {
 		b.Run(fmt.Sprintf("%dx%d", size[0], size[1]), func(b *testing.B) {
 			m := renderFixture(size[0], size[1], true)
 			b.ReportAllocs()
 			for b.Loop() {
-				m.compose()
+				m.render()
 			}
 		})
 	}
@@ -66,7 +67,7 @@ func BenchmarkRenderLayout(b *testing.B) {
 }
 
 // One incoming line inside an already-open throttle window. This exposes
-// per-message work that the paint throttle does not eliminate.
+// per-message work that the render throttle does not eliminate.
 func BenchmarkRenderUpdate(b *testing.B) {
 	for _, lines := range []int{0, 100, 1000} {
 		b.Run(fmt.Sprintf("draft_lines=%d", lines), func(b *testing.B) {
@@ -75,7 +76,7 @@ func BenchmarkRenderUpdate(b *testing.B) {
 				m.input.SetValue(strings.Repeat("say This is a representative line of pasted MUD commands.\n", lines))
 			}
 			m.applyLayout()
-			m.composeInterval, m.throttled = defaultComposeInterval, true
+			m.renderInterval, m.throttled = defaultRenderInterval, true
 			b.ReportAllocs()
 			for b.Loop() {
 				m.Update(ui.PrintLineMsg("a line of MUD output"))
@@ -86,10 +87,10 @@ func BenchmarkRenderUpdate(b *testing.B) {
 }
 
 // Each operation is exactly 100 appends, ten prompt updates, and one frame
-// boundary. Unlike a lines/second test, faster machines do not paint more often.
+// boundary. Unlike a lines/second test, faster machines do not render more often.
 func BenchmarkRenderFlood(b *testing.B) {
 	m := renderFixture(270, 66, true)
-	m.composeInterval, m.throttled = defaultComposeInterval, true
+	m.renderInterval, m.throttled = defaultRenderInterval, true
 	n := 0
 	b.ReportAllocs()
 	for b.Loop() {
@@ -102,7 +103,7 @@ func BenchmarkRenderFlood(b *testing.B) {
 				m.View()
 			}
 		}
-		m.Update(composeTick{})
+		m.Update(renderTick{})
 		m.View()
 	}
 	b.ReportMetric(100, "lines/op")
@@ -155,16 +156,15 @@ func BenchmarkRenderPipeline(b *testing.B) {
 	}
 }
 
-// These messages should not change the screen, but currently still schedule
-// composition. Keeping them measured guards the future no-op fast path.
+// These messages do not change the screen. Measure the cost of ignoring them.
 func BenchmarkRenderUnchanged(b *testing.B) {
 	m := renderFixture(270, 66, true)
-	m.composeInterval = defaultComposeInterval
+	m.renderInterval = defaultRenderInterval
 	b.ReportAllocs()
 	for b.Loop() {
 		m.Update(ui.SetPromptMsg("HP:100 >"))
 		m.View()
-		m.Update(composeTick{})
+		m.Update(renderTick{})
 		m.View()
 	}
 }

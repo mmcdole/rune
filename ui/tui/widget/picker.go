@@ -142,7 +142,7 @@ func (p *Picker) Selected() (ui.PickerItem, bool) {
 	return p.filtered[p.selected], true
 }
 
-// resultHeight excludes the query and decoration owned by the input surface.
+// resultHeight excludes the query and decoration owned by the input widget.
 func (p *Picker) resultHeight() int {
 	return max(1, min(len(p.filtered), p.config.MaxVisible))
 }
@@ -153,7 +153,7 @@ func (p *Picker) resultRows(width, height int) []string {
 	}
 	rows := make([]string, height)
 	if len(p.filtered) == 0 {
-		rows[0] = clipRow(p.styles.Muted.Render("  "+text.VisualizeTerminalControls(p.config.EmptyText, false)), width)
+		rows[0] = util.ClipRow(p.styles.Muted.Render("  "+text.VisualizeTerminalControls(p.config.EmptyText, false)), width)
 		return rows
 	}
 	visible := min(height, len(p.filtered))
@@ -250,5 +250,5 @@ func (p *Picker) renderItem(item ui.PickerItem, width int, selected bool, matche
 	if width < 1 {
 		width = 1
 	}
-	return clipRow(prefixStyled+result.String(), width)
+	return util.ClipRow(prefixStyled+result.String(), width)
 }

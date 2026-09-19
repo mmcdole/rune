@@ -9,7 +9,7 @@ import (
 	"github.com/mmcdole/rune/ui"
 )
 
-func TestBarAlignsUsingCompositorCellWidths(t *testing.T) {
+func TestBarAlignsUsingRendererCellWidths(t *testing.T) {
 	bar := NewBar()
 	bar.SetContent(ui.BarContent{Left: "❤️", Right: "x"})
 	bar.SetSize(5, 1)

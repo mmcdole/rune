@@ -10,8 +10,8 @@ import (
 	"github.com/mmcdole/rune/ui/tui/util"
 )
 
-func newTestBuffer(lines ...string) *ScrollbackBuffer {
-	buf := NewScrollbackBuffer(1000)
+func newTestBuffer(lines ...string) *Scrollback {
+	buf := NewScrollback(1000)
 	for _, l := range lines {
 		buf.Append(l)
 	}
@@ -103,7 +103,7 @@ func TestScanBackwardNonASCIIQuery(t *testing.T) {
 }
 
 func TestScanOlderPagesNearestMatches(t *testing.T) {
-	buf := NewScrollbackBuffer(1000)
+	buf := NewScrollback(1000)
 	for i := 0; i < 300; i++ {
 		buf.Append(fmt.Sprintf("thief %d", i))
 	}
@@ -120,7 +120,7 @@ func TestScanOlderPagesNearestMatches(t *testing.T) {
 	}
 
 	// Exactly one page, all scanned: no older matches remain.
-	buf2 := NewScrollbackBuffer(1000)
+	buf2 := NewScrollback(1000)
 	for i := 0; i < searchPageSize; i++ {
 		buf2.Append("thief")
 	}
@@ -198,7 +198,7 @@ func TestSearchSelectionUsesChronologicalOlderNewerWithoutWrapping(t *testing.T)
 }
 
 func TestSearchStartsAtScrolledOriginRatherThanNewestPage(t *testing.T) {
-	buf := NewScrollbackBuffer(1000)
+	buf := NewScrollback(1000)
 	for i := 0; i < 10; i++ {
 		text := "quiet"
 		if i == 5 {
@@ -215,12 +215,12 @@ func TestSearchStartsAtScrolledOriginRatherThanNewestPage(t *testing.T) {
 	s.Open("thief", SearchScope{OriginSeq: origin, OriginSet: true})
 	m, ok := s.Selected()
 	if !ok || m.Stripped != "nearby thief" {
-		t.Fatalf("selected %+v, want closest older match at the viewport origin", m)
+		t.Fatalf("selected %+v, want closest older match at the output window origin", m)
 	}
 }
 
 func TestSearchLoadsAnotherOlderPageWithoutWrapping(t *testing.T) {
-	buf := NewScrollbackBuffer(1000)
+	buf := NewScrollback(1000)
 	for i := 0; i < 300; i++ {
 		buf.Append(fmt.Sprintf("thief %d", i))
 	}
@@ -326,7 +326,7 @@ func TestConstrainedSearchAlwaysRendersSelectedMatch(t *testing.T) {
 }
 
 func TestSearchViewPartialCount(t *testing.T) {
-	buf := NewScrollbackBuffer(1000)
+	buf := NewScrollback(1000)
 	for i := 0; i < 300; i++ {
 		buf.Append("thief")
 	}
@@ -367,7 +367,7 @@ func TestSearchInputMeasuredHeightCapsAtFiveResults(t *testing.T) {
 }
 
 func TestSearchSeqStableAcrossEviction(t *testing.T) {
-	buf := NewScrollbackBuffer(5)
+	buf := NewScrollback(5)
 	buf.Append("the thief")
 	for i := 0; i < 4; i++ {
 		buf.Append("filler")

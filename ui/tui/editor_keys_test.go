@@ -1,11 +1,13 @@
 package tui
 
 import (
-	tea "charm.land/bubbletea/v2"
-	"github.com/mmcdole/rune/input"
-	"github.com/mmcdole/rune/ui"
 	"strings"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/mmcdole/rune/input"
+	"github.com/mmcdole/rune/ui"
 )
 
 func TestDefaultNewlineBindingsInBothEditors(t *testing.T) {
@@ -142,7 +144,7 @@ func TestNamedActionRespectsTypingAndPhysicalKeypad(t *testing.T) {
 }
 
 func TestReboundCancelAcrossInputContexts(t *testing.T) {
-	for _, context := range []string{"normal", "composer", "inline", "modal", "search"} {
+	for _, context := range []string{"normal", "editor", "inline", "modal", "search"} {
 		t.Run(context, func(t *testing.T) {
 			h := newControllerHarness()
 			bindings := input.DefaultBindings()
@@ -151,7 +153,7 @@ func TestReboundCancelAcrossInputContexts(t *testing.T) {
 			h.ctl.input.SetBindings(bindings)
 			h.ctl.SetText("draft")
 			switch context {
-			case "composer":
+			case "editor":
 				h.ctl.SetText("first\nsecond")
 			case "inline", "modal":
 				h.ctl.ShowPicker(ui.ShowPickerMsg{Items: pickerTestItems, CallbackID: "test", Inline: context == "inline"})
@@ -164,16 +166,16 @@ func TestReboundCancelAcrossInputContexts(t *testing.T) {
 				t.Fatal("unbound Escape still cancels")
 			}
 			h.ctl.HandleKey(ctrlPress('g'))
-			if context == "composer" {
+			if context == "editor" {
 				if h.ctl.input.Value() != draft {
-					t.Fatal("first cancel discarded composer")
+					t.Fatal("first cancel discarded editor")
 				}
 				h.ctl.HandleKey(ctrlPress('g'))
 			}
 			if h.ctl.mode() != modeNormal {
 				t.Fatal("cancel did not close context")
 			}
-			if context == "normal" || context == "composer" {
+			if context == "normal" || context == "editor" {
 				if h.ctl.input.Value() != "" {
 					t.Fatal("cancel did not clear draft")
 				}
@@ -237,7 +239,7 @@ func TestEditorAndCancelHintsFollowActions(t *testing.T) {
 }
 
 func TestReboundEditorUsesDraftAndRespectsOverlays(t *testing.T) {
-	for _, context := range []string{"normal", "composer", "inline", "modal", "search"} {
+	for _, context := range []string{"normal", "editor", "inline", "modal", "search"} {
 		t.Run(context, func(t *testing.T) {
 			h := newControllerHarness()
 			bindings := input.DefaultBindings()
@@ -246,7 +248,7 @@ func TestReboundEditorUsesDraftAndRespectsOverlays(t *testing.T) {
 			h.ctl.input.SetBindings(bindings)
 			h.ctl.SetText("draft")
 			switch context {
-			case "composer":
+			case "editor":
 				h.ctl.SetText("first\nsecond")
 			case "inline", "modal":
 				h.ctl.ShowPicker(ui.ShowPickerMsg{Items: pickerTestItems, CallbackID: "test", Inline: context == "inline"})
@@ -261,7 +263,7 @@ func TestReboundEditorUsesDraftAndRespectsOverlays(t *testing.T) {
 				if editor, ok := event.(ui.OpenEditorMsg); ok {
 					count++
 					if editor.Text != h.ctl.input.Value() {
-						t.Fatal("editor got stale draft")
+						t.Fatal("editor got dirty draft")
 					}
 				}
 			}

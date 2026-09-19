@@ -5,20 +5,21 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
 	"github.com/mmcdole/rune/input"
 	runetext "github.com/mmcdole/rune/text"
 	"github.com/mmcdole/rune/ui"
 )
 
-func TestPasteMessageRoutesAtomicallyToComposer(t *testing.T) {
+func TestPasteMessageRoutesAtomicallyToEditor(t *testing.T) {
 	events := make(chan ui.UIEvent, 4)
 	m := NewModel(events)
 
 	next, _ := m.Update(tea.PasteMsg{Content: "say hello\nsay goodbye"})
 	m = next.(*Model)
 
-	if m.inputCtl.mode() != modeCompose {
-		t.Fatalf("paste mode = %v, want compose", m.inputCtl.mode())
+	if m.inputCtl.mode() != modeEditor {
+		t.Fatalf("paste mode = %v, want editor", m.inputCtl.mode())
 	}
 	if got := m.input.Value(); got != "say hello\nsay goodbye" {
 		t.Fatalf("pasted input = %q", got)
@@ -86,7 +87,7 @@ func TestKeptSubmissionCarriesPostSubmitDraftInOneAcceptedEvent(t *testing.T) {
 	if got := m.input.Value(); got != "north" || !m.input.Selected() {
 		t.Fatalf("local input = %q selected=%v, want kept selection", got, m.input.Selected())
 	}
-	if got := m.output.buffer.Count(); got != 0 {
+	if got := m.output.Scrollback().Count(); got != 0 {
 		t.Fatalf("warning rows = %d, want none", got)
 	}
 	select {
@@ -108,10 +109,10 @@ func TestFullUIEventQueueRejectsSubmissionWithoutLosingDraft(t *testing.T) {
 	if got := m.inputCtl.input.Value(); got != "look" {
 		t.Fatalf("rejected submission changed draft to %q", got)
 	}
-	if got := m.output.buffer.Count(); got != 1 {
+	if got := m.output.Scrollback().Count(); got != 1 {
 		t.Fatalf("warning rows = %d, want exactly one", got)
 	}
-	if warning := runetext.StripANSI(m.output.buffer.At(0)); !strings.Contains(warning, "Input not sent - engine lagging") {
+	if warning := runetext.StripANSI(m.output.Scrollback().At(0)); !strings.Contains(warning, "Input not sent - engine lagging") {
 		t.Fatalf("warning = %q", warning)
 	}
 	if _, ok := (<-events).(ui.InputChangedMsg); !ok {
@@ -127,10 +128,10 @@ func TestFullUIEventQueueReportsDroppedOrdinaryEvent(t *testing.T) {
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = next.(*Model)
 
-	if got := m.output.buffer.Count(); got != 1 {
+	if got := m.output.Scrollback().Count(); got != 1 {
 		t.Fatalf("warning rows = %d, want exactly one", got)
 	}
-	if warning := runetext.StripANSI(m.output.buffer.At(0)); !strings.Contains(warning, "UI event dropped - engine lagging") {
+	if warning := runetext.StripANSI(m.output.Scrollback().At(0)); !strings.Contains(warning, "UI event dropped - engine lagging") {
 		t.Fatalf("warning = %q", warning)
 	}
 }
@@ -140,8 +141,8 @@ func TestSetInputSubmissionMessageForcesVerbatimMode(t *testing.T) {
 	next, _ := m.Update(ui.SetInputSubmissionMsg(input.Verbatim("one line;still data")))
 	m = next.(*Model)
 
-	if m.inputCtl.mode() != modeCompose || !m.input.IsComposing() {
-		t.Fatal("explicit verbatim message did not enter composer")
+	if m.inputCtl.mode() != modeEditor || !m.input.EditorActive() {
+		t.Fatal("explicit verbatim message did not enter editor")
 	}
 	if got := m.input.Value(); got != "one line;still data" {
 		t.Fatalf("input = %q", got)

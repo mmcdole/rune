@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+
 	"github.com/mmcdole/rune/ui"
 )
 
@@ -143,7 +144,7 @@ func TestInputResultsWithoutLeftNeighborHaveNoLeftWall(t *testing.T) {
 }
 
 func TestContainedInputModesPreserveLabelsAndCursor(t *testing.T) {
-	for _, mode := range []string{"normal", "composer", "picker", "search"} {
+	for _, mode := range []string{"normal", "editor", "picker", "search"} {
 		for _, size := range []image.Point{image.Pt(100, 30), image.Pt(20, 8), image.Pt(3, 3), image.Pt(1, 1)} {
 			t.Run(fmt.Sprintf("%s/%dx%d", mode, size.X, size.Y), func(t *testing.T) {
 				m := resizeModel(t, NewModel(make(chan ui.UIEvent, 100)), size.X, size.Y)
@@ -151,7 +152,7 @@ func TestContainedInputModesPreserveLabelsAndCursor(t *testing.T) {
 				switch mode {
 				case "normal":
 					m.Update(ui.SetInputMsg("north"))
-				case "composer":
+				case "editor":
 					m.Update(ui.SetInputMsg("first\nsecond"))
 				case "picker":
 					m.Update(ui.ShowPickerMsg{Title: "Aliases", Items: []ui.PickerItem{{Text: "north"}, {Text: "south"}}})
@@ -173,7 +174,7 @@ func TestContainedInputModesPreserveLabelsAndCursor(t *testing.T) {
 					switch mode {
 					case "normal":
 						labels = []string{"north"}
-					case "composer":
+					case "editor":
 						labels = []string{"VERBATIM", "Enter send", "first", "second"}
 					case "picker":
 						labels = []string{"Aliases:", "north", "south", "> "}
@@ -190,19 +191,19 @@ func TestContainedInputModesPreserveLabelsAndCursor(t *testing.T) {
 }
 
 type countedPane struct {
-	paneResource
+	pane
 	applications int
 }
 
 func (p *countedPane) SetSize(width, height int) {
 	p.applications++
-	p.paneResource.SetSize(width, height)
+	p.pane.SetSize(width, height)
 }
 
 func TestUpdateAppliesGeometryOnce(t *testing.T) {
 	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 100)), 80, 30)
-	probe := &countedPane{paneResource: m.panes.Create("probe")}
-	m.panes.byName["probe"] = probe
+	probe := &countedPane{pane: m.pane("probe")}
+	m.panes["probe"] = probe
 	setLayout(m, ui.LayoutNode{Type: ui.LayoutTypeColumn, Children: []ui.LayoutNode{
 		{Type: ui.LayoutTypePane, Name: "probe", Size: ui.Cells(3)},
 		{Type: ui.LayoutTypePane, Name: ui.OutputPaneName},
@@ -210,7 +211,7 @@ func TestUpdateAppliesGeometryOnce(t *testing.T) {
 	}})
 	for _, msg := range []tea.Msg{
 		tea.WindowSizeMsg{Width: 90, Height: 30},
-		ui.UpdateBarsMsg{},
+		ui.UpdateBarsMsg{"status": {Left: "changed status"}},
 		ui.ShowSearchMsg{Query: "test"},
 		tea.KeyPressMsg{Code: tea.KeyEsc},
 		ui.SetInputMsg("first\nsecond"),
@@ -280,18 +281,18 @@ func TestStaggeredBandsAndInputJoinDividers(t *testing.T) {
 	}
 }
 
-func TestResolveAndViewDoNotResizeSurfaces(t *testing.T) {
+func TestResolveAndViewDoNotResizeWidgets(t *testing.T) {
 	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 100)), 80, 24)
 	m.Update(ui.SetInputMsg(strings.Repeat("a\nb\n", 12)))
 	before := m.layoutPlan
-	mode, count := m.output.viewport.Mode(), m.output.viewport.NewLineCount()
+	mode, count := m.output.Mode(), m.output.NewLineCount()
 	for range 3 {
 		m.resolveLayout()
 		m.View()
 	}
 	if before.leaves[0] != m.layoutPlan.leaves[0] || before.output != m.layoutPlan.output ||
-		mode != m.output.viewport.Mode() || count != m.output.viewport.NewLineCount() {
-		t.Fatal("measurement or painting changed applied geometry/navigation")
+		mode != m.output.Mode() || count != m.output.NewLineCount() {
+		t.Fatal("measurement or rendering changed applied geometry/navigation")
 	}
 }
 
@@ -334,7 +335,7 @@ func TestTitleCannotCoverStaggeredJunction(t *testing.T) {
 }
 
 func TestOutputTitleDefaultsToEmpty(t *testing.T) {
-	custom, empty := "Transcript", ""
+	custom, empty := "Custom output", ""
 	for _, border := range []ui.PaneBorder{ui.PaneBorderFull, ui.PaneBorderHorizontal} {
 		for _, tc := range []struct {
 			name  string
@@ -391,7 +392,7 @@ func BenchmarkLayoutFrame(b *testing.B) {
 	m.layout = ui.LayoutTree{Root: staggeredLayout()}
 	m.applyLayout()
 	for _, name := range []string{"map", "chat", "targets", "stats", "group", ui.OutputPaneName} {
-		m.panes.Write(name, strings.Repeat("sample text\n", 30))
+		m.pane(name).Write(strings.Repeat("sample text\n", 30))
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -401,13 +402,13 @@ func BenchmarkLayoutFrame(b *testing.B) {
 	}
 }
 
-func TestSearchToComposerUsesFinalGeometry(t *testing.T) {
+func TestSearchToEditorUsesFinalGeometry(t *testing.T) {
 	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 100)), 80, 30)
 	m.Update(ui.ShowSearchMsg{Query: "missing"})
 	m.Update(ui.SetInputMsg("one\ntwo\nthree\nfour\nfive"))
 	leaf := findLeaf(t, m.layoutPlan, "", ui.LayoutTypeInput)
 	if got, want := leaf.outer.Dy(), m.input.MeasureHeight(leaf.content.Dx(), ui.MaxLayoutCells); got != want {
-		t.Fatalf("search -> composer allocated height %d, preferred %d", got, want)
+		t.Fatalf("search -> editor allocated height %d, preferred %d", got, want)
 	}
 }
 
@@ -452,13 +453,13 @@ func TestHorizontalPressureKeepsInputReachable(t *testing.T) {
 func TestNestedInputSurvivesConstrainedGeometryInEveryMode(t *testing.T) {
 	for _, width := range []int{1, 2, 3, 40, 100} {
 		for _, height := range []int{1, 2, 3, 8, 30} {
-			for _, mode := range []string{"normal", "composer", "search"} {
+			for _, mode := range []string{"normal", "editor", "search"} {
 				m := resizeModel(t, NewModel(make(chan ui.UIEvent, 100)), width, height)
 				setLayout(m, staggeredLayout())
 				switch mode {
 				case "normal":
 					m.Update(ui.SetInputMsg("edit"))
-				case "composer":
+				case "editor":
 					m.Update(ui.SetInputMsg("one\ntwo\nthree\nfour\nfive"))
 				case "search":
 					m.Update(ui.ShowSearchMsg{Query: "query"})

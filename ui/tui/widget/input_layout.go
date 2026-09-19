@@ -2,13 +2,13 @@ package widget
 
 import (
 	"image"
-	"strings"
 
 	"github.com/charmbracelet/x/ansi"
+
 	"github.com/mmcdole/rune/input"
 )
 
-// inputLayout describes the picker and command field separately. Both painting
+// inputLayout describes the picker and command field separately. Both rendering
 // and shared-boundary planning use these same positions, including labels.
 type inputLayout struct {
 	height         int
@@ -46,7 +46,7 @@ func (i *Input) layout(width, height int) inputLayout {
 	}
 	top, bottom := p.pickerHeight, height
 	fieldHeight := bottom - top
-	if i.composer != nil && !i.SearchActive() && (!i.PickerActive() || i.PickerInline()) {
+	if i.editor != nil && !i.SearchActive() && (!i.PickerActive() || i.PickerInline()) {
 		if fieldHeight >= 2 {
 			p.header = top
 			p.rules = append(p.rules, Rule{At: top, To: width})
@@ -71,15 +71,15 @@ func (i *Input) layout(width, height int) inputLayout {
 	return p
 }
 
-// Rules supplies compositor-owned decoration around View's content. Label
-// styling is deferred until painting; layout itself computes only geometry.
+// Rules supplies renderer-owned decoration around View's content. Label
+// styling is deferred until rendering; layout itself computes only geometry.
 func (i *Input) Rules(width, height int) []Rule {
 	if width <= 0 || height <= 0 {
 		return nil
 	}
 	plan := i.layout(width, height)
-	if i.composer != nil && !i.SearchActive() && (!i.PickerActive() || i.PickerInline()) {
-		header, toggle, footer := i.composeLabels(strings.Count(i.Value(), "\n")+1, width-4)
+	if i.editor != nil && !i.SearchActive() && (!i.PickerActive() || i.PickerInline()) {
+		header, toggle, footer := i.editorLabels(i.editor.layout(width).lineCount, width-4)
 		for n := range plan.rules {
 			rule := &plan.rules[n]
 			if rule.Vertical {

@@ -10,10 +10,11 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/colorprofile"
+
 	"github.com/mmcdole/rune/ui"
 )
 
-// Stamp the SAME View as the composed screen. A terminal title marker is
+// Stamp the SAME View as the rendered screen. A terminal title marker is
 // emitted in the same writer flush as that screen, even when terminal diffing
 // emits only a suffix of a changed line. Counting calls to View or searching
 // for raw output text would incorrectly acknowledge frames not yet written.
@@ -29,7 +30,7 @@ func (m *outputProbe) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lines++
 	}
 	_, cmd := m.Model.Update(msg)
-	if !m.stale && !m.throttled {
+	if !m.dirty && !m.throttled {
 		select {
 		case m.idle <- outputFrame{lines: m.lines, at: time.Now()}:
 		default:
@@ -40,7 +41,7 @@ func (m *outputProbe) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *outputProbe) View() tea.View {
 	view := m.Model.View()
-	if !m.stale {
+	if !m.dirty {
 		m.visible = m.lines
 	}
 	view.WindowTitle = fmt.Sprintf("rune-render-%d", m.visible)
@@ -96,8 +97,8 @@ func startOutputProbe(b *testing.B, draftLines int) (*BubbleTeaUI, <-chan output
 		m.input.SetValue(strings.Repeat("say This is a representative pasted command.\n", draftLines))
 	}
 	m.applyLayout()
-	m.compose()
-	m.composeInterval = defaultComposeInterval
+	m.render()
+	m.renderInterval = defaultRenderInterval
 	observer := &outputObserver{frames: make(chan outputFrame, 4096)}
 	idle := make(chan outputFrame, 4096)
 	program := tea.NewProgram(&outputProbe{Model: m, idle: idle},
@@ -161,7 +162,7 @@ func awaitOutput(b *testing.B, frames <-chan outputFrame, done <-chan error, lin
 // Wall-clock latency from immediately before the first UI.Print in a burst
 // until the terminal write containing its final line. Includes the real FIFO,
 // Model, both production frame timers, Bubble Tea diffing, and encoding. The
-// consumer is an in-memory writer: network/Lua work and emulator paint are not
+// consumer is an in-memory writer: network/Lua work and emulator display time are not
 // measured. Samples wait for visibility, so there is no unbounded producer.
 func BenchmarkOutputLatency(b *testing.B) {
 	for _, tc := range []struct {
@@ -213,7 +214,7 @@ func BenchmarkOutputLatency(b *testing.B) {
 	}
 }
 
-func TestOutputProbeWaitsForComposition(t *testing.T) {
+func TestOutputProbeWaitsForRender(t *testing.T) {
 	m := &outputProbe{Model: newThrottledModel(t)}
 	m.Update(ui.PrintLineMsg("visible"))
 	if got := m.View().WindowTitle; got != "rune-render-1" {
@@ -221,9 +222,9 @@ func TestOutputProbeWaitsForComposition(t *testing.T) {
 	}
 	m.Update(ui.PrintLineMsg("waiting for next frame"))
 	if got := m.View().WindowTitle; got != "rune-render-1" {
-		t.Fatalf("acknowledged an unpainted line: %s", got)
+		t.Fatalf("acknowledged an unrendered line: %s", got)
 	}
-	m.Update(composeTick{})
+	m.Update(renderTick{})
 	if got := m.View().WindowTitle; got != "rune-render-2" {
 		t.Fatal(got)
 	}

@@ -4,6 +4,7 @@ import (
 	"image"
 
 	"github.com/mattn/go-runewidth"
+
 	"github.com/mmcdole/rune/ui/tui/style"
 )
 

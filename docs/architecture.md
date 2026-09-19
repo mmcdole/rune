@@ -75,7 +75,7 @@ The `Session` struct runs the main application event loop.
 | `ui.Events()` | One ordered stream of `ui.UIEvent`: draft changes, `InputSubmittedMsg`, binds, picker results, and view state | `handleUIEvent` |
 | `net.Inbound()` | One owned `network.EventBatch` or disconnect, tagged with its connection ID (`network.Inbound`) | `handleInbound` |
 | `timerEvents` | Due Lua timers | `engine.OnTimer` |
-| `barTicker` | 250ms bar repaint tick | `pushBarUpdates` |
+| `barTicker` | 250ms bar update tick | `pushBarUpdates` |
 | `internalEvents` | Typed results and deferred work owned by Session (`connectFinished`, `httpFinished`, `reloadRequested`) | `handleInternalEvent` |
 
 Session-owned background work publishes inert data through `internalEvents`; it
@@ -91,8 +91,8 @@ read the `select`.
 The UI layer (built with Bubble Tea) owns terminal interaction mechanics, not
 application policy.
 
-- **Interaction mechanics:** It owns editing, compose mode, picker and search
-  modes, viewport navigation, wrapping, and compose throttling.
+- **Interaction mechanics:** It owns editing, editor mode, picker and search
+  modes, output scrolling, wrapping, and render throttling.
 - **Application policy:** Lua decides which binds, bars, layouts, triggers, and
   commands exist. The UI never calls Lua directly.
 - **Push Architecture:** It renders based entirely on state snapshots pushed to it by the Session.
@@ -131,7 +131,7 @@ Lua core declares the normal layout; Go provides a minimal output/input recovery
 tree. The Lua parser checks table types and the exactly-one-input invariant.
 `ui.NormalizeLayoutTree` validates structure and copies the declaration with
 axis-aware size defaults. `ui.LayoutTree` is the shared, immutable snapshot:
-containers divide space, leaves select surfaces, and `hidden` is local
+containers divide space, leaves select widgets, and `hidden` is local
 placement state. Pane names and region IDs address the same copy-on-write
 visibility operation.
 
@@ -139,26 +139,40 @@ Session serializes Lua work. Presentation changes mark it dirty, and each event
 handler publishes its final snapshots on return. Layout, bars, and binds remain
 separate messages; the TUI never calls Lua during measurement or rendering.
 
-The TUI prunes inactive nodes, measures surfaces without resizing them, and uses
-`ui.AllocateAxis` to assign rectangles. Each update applies geometry once,
-then settles geometry-dependent search navigation. Composing that plan is the
-expensive step, so one throttle in `Model` bounds it: the first change after
-an idle period composes immediately and starts a 16ms window, changes inside the
-window apply to state at once and are composed together when it ends, and an
-idle client schedules no timer. View returns the composed screen without
-changing navigation. Output scroll state is derived, so nothing posts it while
-handling a message: the same step compares it with the last value Session
-accepted and reports a difference together with the screen that shows it.
-Input's minimum is protected on both axes when constraints cannot fit.
+The TUI prunes inactive nodes, measures widgets without resizing them, and uses
+`ui.AllocateAxis` to assign rectangles. It retains that layout until geometry
+can change: terminal size, layout declarations, input edits, changed bars, or
+text in an auto-sized pane/container. Ordinary output appends reuse it. A single
+conservative flag records whether any active pane has content-dependent sizing;
+there is no dependency graph. Geometry changes are applied before subsequent
+messages wrap output or move the search selection.
 
-Pane frames, dividers, separators, and joinable input rules feed one frame grid.
-The compositor clips content to its rectangle and resolves junction glyphs.
-Titles use current scroll state and cannot overwrite junctions.
+Rendering builds the screen from that layout. `Model` renders the first change
+after idle immediately, then coalesces changes inside a 16ms window. Its timer
+stops when nothing changes. Bubble Tea has a separate terminal flush clock.
+`View` returns the last rendered screen. Scroll state is reported with the screen
+that shows it, retrying if Session's queue is full. Identical prompt and bar
+snapshots do not schedule a render. Input's minimum remains protected on both
+axes when constraints cannot fit.
 
-All leaves share a surface contract: minimum size, bounded height measurement,
-size application, and rendering. Named panes also expose buffer operations.
-The reserved `output` pane implements that interface directly, but retains
-append-time transcript wrapping; ordinary panes re-wrap logical lines.
+Pane borders, dividers, separators, and joinable input rules feed one border
+grid. A layout's first render resolves junctions into positioned cells; later
+renders reuse those cells with current labels. Widget content is clipped to its rectangle.
+Each widget draw clears that rectangle; a full canvas clear is needed only
+on the first render after layout changes. Titles cannot overwrite junctions.
+
+All leaves implement `widget.Widget`: minimum size, bounded height measurement,
+size application, and `View`. Named panes also expose text and scroll operations.
+The model owns their map and creates missing panes on first write or placement.
+The reserved `output` entry is the same `widget.Output` used for main output,
+not a controller wrapping another widget. Output owns its prompt, scrolling,
+wrapping, and `Scrollback`, the bounded ring of retained terminal rows. Search
+reads that ring using eviction-stable sequence numbers. Output wraps on arrival;
+ordinary panes retain logical lines and re-wrap when their width changes.
+
+The multiline `editor` keeps its wrapped rows and insertion positions until
+text, width, or cursor changes. Input measurement, navigation, and rendering
+reuse that result. Incoming output does not rebuild an unchanged draft.
 
 Bar callbacks run on Session's 250ms ticker with the terminal width. The TUI
 aligns/clips their snapshots to the assigned slot. No layout-to-Lua width
@@ -180,14 +194,14 @@ Bar registrations survive layout replacement but are rebuilt on reload.
 
 Input owns result placement, editor placement, height measurement, and
 separator rules. Picker and Search supply result rows and query state.
-The compositor joins Input's separators to surrounding layout dividers.
+The renderer joins Input's separators to surrounding layout dividers.
 
 - **Modal mode:** History and alias pickers show results above their filter
   field. The command draft is hidden and preserved while the picker is open.
 - **Inline mode:** Slash-command suggestions appear above the active command
   field and filter from its text.
-- **Search:** Find shows matching transcript rows and navigation help above
-  its query field. The selected match controls the output viewport position.
+- **Search:** Find shows matching scrollback rows and navigation help above
+  its query field. The selected match controls the output window position.
 
 **Flow:**
 
@@ -341,7 +355,7 @@ carry the Lua generation that created their callback; a result from before
 - `version/`: Version number, single-sourced for `/version` and TTYPE/MNES
 - `ui/`: UI interface and messages
   - `tui/`: Bubble Tea implementation
-  - `tui/widget/`: Reusable widgets (Input, Picker, Viewport, Pane, Bar)
+  - `tui/widget/`: Reusable widgets (Input, Output, Pane, Picker, Search, Bar)
 
 ### Drafts, submissions, and lines
 
@@ -397,12 +411,12 @@ rune-based editor. Observers can edit the draft again; nested callbacks execute
 synchronously under the enclosing watchdog. The `input_changed` event name and
 public `rune.input` APIs remain unchanged.
 
-The lossless composer is an editing surface, not an interpretation mode.
+The lossless editor preserves draft structure independently of its submission mode.
 Structured text initially selects Verbatim; an explicit mode choice persists
 for the draft. `rune.bind` registers callbacks and named editor actions in one
 registry. The controller resolves the editor action once per key from the same
 binding snapshot used for callback membership and hints. Modal overlays capture
-keys; the composer retains its editing mechanics. Missing core bindings use Go
+keys; the editor retains its editing mechanics. Missing core bindings use Go
 recovery defaults; a successful empty snapshot means no bindings.
 
 The UI validates Command text before queueing so rejected submissions retain

@@ -12,36 +12,36 @@ import (
 	"github.com/mmcdole/rune/ui/tui/util"
 )
 
-type composerGlyph struct {
+type editorGlyph struct {
 	text  string
 	width int
 }
 
-type composerPoint struct {
+type editorPoint struct {
 	offset int
 	col    int
 }
 
-type composerRow struct {
+type editorRow struct {
 	line         int
 	continuation bool
-	glyphs       []composerGlyph
-	points       []composerPoint
+	glyphs       []editorGlyph
+	points       []editorPoint
 }
 
-type composerLayout struct {
-	rows       []composerRow
+type editorLayout struct {
+	rows       []editorRow
 	cursorRow  int
 	cursorCol  int
 	lineCount  int
 	gutterSize int
 }
 
-// buildComposerLayout derives safe terminal rows from the canonical buffer.
+// buildEditorLayout derives safe terminal rows from the canonical buffer.
 // Source tabs remain one rune but expand to cells at classic 8-column stops.
 // Every source insertion offset is retained on exactly one visual row so
 // vertical movement and cursor rendering never need to reverse-map strings.
-func buildComposerLayout(content []rune, cursor, width int) composerLayout {
+func buildEditorLayout(content []rune, cursor, width int) editorLayout {
 	lineCount := 1
 	for _, r := range content {
 		if r == '\n' {
@@ -49,13 +49,13 @@ func buildComposerLayout(content []rune, cursor, width int) composerLayout {
 		}
 	}
 
-	gutter := composerGutterSize(lineCount, width)
+	gutter := editorGutterSize(lineCount, width)
 	contentWidth := width - gutter
 	if contentWidth < 1 {
 		contentWidth = 1
 	}
 
-	layout := composerLayout{
+	layout := editorLayout{
 		lineCount:  lineCount,
 		gutterSize: gutter,
 		cursorRow:  -1,
@@ -69,26 +69,26 @@ func buildComposerLayout(content []rune, cursor, width int) composerLayout {
 			lineEnd++
 		}
 
-		layout.rows = append(layout.rows, composerRow{line: line})
+		layout.rows = append(layout.rows, editorRow{line: line})
 		rowIndex := len(layout.rows) - 1
 		col := 0
 		logicalCol := 0
 
 		newContinuation := func() {
-			layout.rows = append(layout.rows, composerRow{line: line, continuation: true})
+			layout.rows = append(layout.rows, editorRow{line: line, continuation: true})
 			rowIndex = len(layout.rows) - 1
 			col = 0
 		}
 		addPoint := func(offset int) {
-			layout.rows[rowIndex].points = append(layout.rows[rowIndex].points, composerPoint{offset: offset, col: col})
+			layout.rows[rowIndex].points = append(layout.rows[rowIndex].points, editorPoint{offset: offset, col: col})
 			if offset == cursor {
 				layout.cursorRow = rowIndex
 				layout.cursorCol = col
 			}
 		}
-		appendGlyph := func(g composerGlyph) {
+		appendGlyph := func(g editorGlyph) {
 			if g.width > contentWidth {
-				g = composerGlyph{text: "�", width: 1}
+				g = editorGlyph{text: "�", width: 1}
 			}
 			if col > 0 && col+g.width > contentWidth {
 				newContinuation()
@@ -116,7 +116,7 @@ func buildComposerLayout(content []rune, cursor, width int) composerLayout {
 					if col >= contentWidth {
 						newContinuation()
 					}
-					appendGlyph(composerGlyph{text: " ", width: 1})
+					appendGlyph(editorGlyph{text: " ", width: 1})
 				}
 				offset++
 				remaining = remaining[1:]
@@ -126,7 +126,7 @@ func buildComposerLayout(content []rune, cursor, width int) composerLayout {
 			cluster, _ := ansi.FirstGraphemeCluster(remaining, ansi.GraphemeWidth)
 			remaining = remaining[len(cluster):]
 			display := text.VisualizeTerminalControls(cluster, false)
-			glyph := composerGlyph{text: display, width: util.VisibleLen(display)}
+			glyph := editorGlyph{text: display, width: ansi.StringWidth(display)}
 			// A wide glyph that does not fit belongs wholly to the next
 			// visual row; its source cursor point must move with it.
 			if col > 0 && col+glyph.width > contentWidth {
@@ -160,7 +160,7 @@ func buildComposerLayout(content []rune, cursor, width int) composerLayout {
 	return layout
 }
 
-func composerGutterSize(lineCount, width int) int {
+func editorGutterSize(lineCount, width int) int {
 	digits := lenInt(lineCount)
 	size := digits + 3 // number + space + marker + space
 	if width-size < 1 {
@@ -181,9 +181,9 @@ func lenInt(n int) int {
 	return digits
 }
 
-func (i *Input) composerTopRow(layout composerLayout, bodyHeight int) int {
+func (i *Input) editorTopRow(layout editorLayout, bodyHeight int) int {
 	maxTop := max(0, len(layout.rows)-bodyHeight)
-	top := clampInt(i.composer.topRow, 0, maxTop)
+	top := clampInt(i.editor.topRow, 0, maxTop)
 	if layout.cursorRow < top {
 		top = layout.cursorRow
 	} else if layout.cursorRow >= top+bodyHeight {
@@ -192,9 +192,9 @@ func (i *Input) composerTopRow(layout composerLayout, bodyHeight int) int {
 	return clampInt(top, 0, maxTop)
 }
 
-func (i *Input) composerRows(bodyHeight int) []string {
-	layout := buildComposerLayout(i.composer.text, i.composer.cursor, i.width)
-	top := i.composerTopRow(layout, bodyHeight)
+func (i *Input) editorRows(bodyHeight int) []string {
+	layout := i.editor.layout(i.width)
+	top := i.editorTopRow(layout, bodyHeight)
 
 	rows := make([]string, 0, bodyHeight)
 
@@ -204,15 +204,15 @@ func (i *Input) composerRows(bodyHeight int) []string {
 			rows = append(rows, strings.Repeat(" ", max(0, i.width)))
 			continue
 		}
-		rows = append(rows, i.renderComposerRow(layout, rowIndex))
+		rows = append(rows, i.renderEditorRow(layout, rowIndex))
 	}
 
 	return rows
 }
 
-// composeLabels fits complete labels in the available cells. Mode switching
+// editorLabels fits complete labels in the available cells. Mode switching
 // takes precedence over line count; submit and newline precede secondary actions.
-func (i *Input) composeLabels(lines, width int) (header, toggle, footer string) {
+func (i *Input) editorLabels(lines, width int) (header, toggle, footer string) {
 	mode, destination, submit := "COMMAND", "verbatim", i.actionHint("submit", "run")
 	if i.SubmissionMode() == input.ModeVerbatim {
 		mode, destination, submit = "VERBATIM", "command", i.actionHint("submit", "send")
@@ -229,9 +229,9 @@ func (i *Input) composeLabels(lines, width int) (header, toggle, footer string) 
 	}
 	if ansi.StringWidth(header)+3+ansi.StringWidth(toggle) > width {
 		toggle = ""
-		header = fitComposerHints(width, title)
+		header = fitEditorHints(width, title)
 		if header == "" {
-			header = fitComposerHints(width, mode)
+			header = fitEditorHints(width, mode)
 		}
 	}
 	hints := []string{submit, i.actionHint("newline", "newline")}
@@ -240,19 +240,19 @@ func (i *Input) composeLabels(lines, width int) (header, toggle, footer string) 
 		hints = append(hints, cancel+"×2 discard")
 	}
 	hints = append(hints, i.actionHint("open_editor", "editor"))
-	footer = fitComposerHints(width, hints...)
+	footer = fitEditorHints(width, hints...)
 	if i.discardPending && cancel != "" {
-		footer = fitComposerHints(width, cancel+" again to discard")
+		footer = fitEditorHints(width, cancel+" again to discard")
 		if footer == "" {
-			footer = fitComposerHints(width, cancel+" to discard")
+			footer = fitEditorHints(width, cancel+" to discard")
 		}
 	}
 
 	return header, toggle, footer
 }
 
-// fitComposerHints keeps hints in priority order without cutting a key or label.
-func fitComposerHints(width int, hints ...string) string {
+// fitEditorHints keeps hints in priority order without cutting a key or label.
+func fitEditorHints(width int, hints ...string) string {
 	var fitted string
 	for _, hint := range hints {
 		if hint == "" {
@@ -270,7 +270,7 @@ func fitComposerHints(width int, hints ...string) string {
 	return fitted
 }
 
-func (i *Input) renderComposerRow(layout composerLayout, rowIndex int) string {
+func (i *Input) renderEditorRow(layout editorLayout, rowIndex int) string {
 	row := layout.rows[rowIndex]
 	var b strings.Builder
 
@@ -301,10 +301,10 @@ func (i *Input) renderComposerRow(layout composerLayout, rowIndex int) string {
 	}
 
 	view := b.String()
-	if padding := i.width - util.VisibleLen(view); padding > 0 {
+	if padding := i.width - ansi.StringWidth(view); padding > 0 {
 		view += strings.Repeat(" ", padding)
 	}
-	return clipRow(view, i.width)
+	return util.ClipRow(view, i.width)
 }
 
 func (i *Input) actionHint(action, label string) string {

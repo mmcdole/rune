@@ -3,32 +3,40 @@ package tui
 import (
 	"image"
 
+	uv "github.com/charmbracelet/ultraviolet"
+
 	"github.com/mmcdole/rune/ui"
 	"github.com/mmcdole/rune/ui/tui/widget"
 )
 
-// frameGrid records line connectivity independently from content rendering.
-// Titles are painted after the grid, so a shared lower pane header naturally
+// borderGrid records line connectivity independently from content rendering.
+// Titles are rendered after the grid, so a shared lower pane header naturally
 // owns a horizontal pane boundary.
-type frameGrid struct {
+type borderGrid struct {
 	width, height int
 	horizontal    []bool
 	vertical      []bool
+	cells         []borderCell
 }
 
-func newFrameGrid(width, height int) frameGrid {
-	return frameGrid{
+type borderCell struct {
+	x, y int
+	cell *uv.Cell
+}
+
+func newBorderGrid(width, height int) borderGrid {
+	return borderGrid{
 		width: width, height: height,
 		horizontal: make([]bool, max(0, width*height)),
 		vertical:   make([]bool, max(0, width*height)),
 	}
 }
 
-func (f frameGrid) inside(x, y int) bool {
+func (f borderGrid) inside(x, y int) bool {
 	return x >= 0 && y >= 0 && x < f.width && y < f.height
 }
 
-func (f frameGrid) markRule(rule widget.Rule) {
+func (f borderGrid) markRule(rule widget.Rule) {
 	if rule.Vertical {
 		f.markVertical(rule.At, rule.From, rule.To)
 	} else {
@@ -36,11 +44,11 @@ func (f frameGrid) markRule(rule widget.Rule) {
 	}
 }
 
-func (f frameGrid) at(cells []bool, x, y int) bool {
+func (f borderGrid) at(cells []bool, x, y int) bool {
 	return f.inside(x, y) && cells[y*f.width+x]
 }
 
-func (f frameGrid) markHorizontal(y, left, right int) {
+func (f borderGrid) markHorizontal(y, left, right int) {
 	if y < 0 || y >= f.height {
 		return
 	}
@@ -50,7 +58,7 @@ func (f frameGrid) markHorizontal(y, left, right int) {
 	}
 }
 
-func (f frameGrid) markVertical(x, top, bottom int) {
+func (f borderGrid) markVertical(x, top, bottom int) {
 	if x < 0 || x >= f.width {
 		return
 	}
@@ -63,7 +71,7 @@ func (f frameGrid) markVertical(x, top, bottom int) {
 // glyph selects the box-drawing character for one cell from the lines that
 // meet there. Every marked cell looks at all four neighbors, so a rule that
 // ends against a border produces a tee on the border side as well as its own.
-func (f frameGrid) glyph(x, y int) string {
+func (f borderGrid) glyph(x, y int) string {
 	ownVertical := f.at(f.vertical, x, y)
 	ownHorizontal := f.at(f.horizontal, x, y)
 	if !ownVertical && !ownHorizontal {
@@ -89,7 +97,7 @@ func (f frameGrid) glyph(x, y int) string {
 // axis, such as a pane corner beside the end of a separator, only connects
 // when the current cell runs along that axis itself; otherwise the rule stops
 // short instead of sprouting a tee into the corner.
-func (f frameGrid) connects(x, y int, along, across []bool, ownAlong bool) bool {
+func (f borderGrid) connects(x, y int, along, across []bool, ownAlong bool) bool {
 	return f.at(along, x, y) && (ownAlong || !f.at(across, x, y))
 }
 
@@ -125,46 +133,46 @@ func junctionGlyph(up, down, left, right bool) string {
 	return ""
 }
 
-func framedPane(leaf *layoutNode) bool {
-	return leaf.node.Type == ui.LayoutTypePane && leaf.frames != 0
+func borderedPane(leaf *resolvedNode) bool {
+	return leaf.node.Type == ui.LayoutTypePane && leaf.edges != 0
 }
 
 // joinableSeparator reports a default-character separator placed by a column. It
-// draws through the frame grid so it joins dividers and pane borders. A custom
+// draws through the border grid so it joins dividers and pane borders. A custom
 // character, or a separator placed by a row, keeps the widget rendering.
-func joinableSeparator(leaf *layoutNode) bool {
+func joinableSeparator(leaf *resolvedNode) bool {
 	return leaf.node.Type == ui.LayoutTypeSeparator &&
 		leaf.node.SeparatorChar == "" && leaf.parentAxis == axisVertical
 }
 
-func insetFrame(rect image.Rectangle, frames frameEdges) image.Rectangle {
-	if frames&frameLeft != 0 && rect.Min.X < rect.Max.X {
+func insetBorders(rect image.Rectangle, frames borderEdges) image.Rectangle {
+	if frames&borderLeft != 0 && rect.Min.X < rect.Max.X {
 		rect.Min.X++
 	}
-	if frames&frameRight != 0 && rect.Min.X < rect.Max.X {
+	if frames&borderRight != 0 && rect.Min.X < rect.Max.X {
 		rect.Max.X--
 	}
-	if frames&frameTop != 0 && rect.Min.Y < rect.Max.Y {
+	if frames&borderTop != 0 && rect.Min.Y < rect.Max.Y {
 		rect.Min.Y++
 	}
-	if frames&frameBottom != 0 && rect.Min.Y < rect.Max.Y {
+	if frames&borderBottom != 0 && rect.Min.Y < rect.Max.Y {
 		rect.Max.Y--
 	}
 	return rect
 }
 
-// planFrames gives every piece of chrome one owner. Each framed pane marks
+// planBorders gives every piece of chrome one owner. Each framed pane marks
 // its configured edges and insets its content rectangle; each container with
 // dividers marks the rules between its active children; each default
 // separator marks its row and gives up its content rectangle. Shared
-// coordinates merge naturally in frameGrid, including T and cross junctions.
-func (m *Model) planFrames(plan *layoutPlan) {
+// coordinates merge naturally in borderGrid, including T and cross junctions.
+func (m *Model) planBorders(plan *layoutPlan) {
 	for _, rule := range plan.rules {
-		plan.frame.markRule(rule)
+		plan.borders.markRule(rule)
 	}
 	for i := range plan.leaves {
 		leaf := plan.leaves[i]
-		if decorated, ok := leaf.surface.(interface{ Rules(int, int) []widget.Rule }); ok {
+		if decorated, ok := leaf.widget.(interface{ Rules(int, int) []widget.Rule }); ok {
 			for _, rule := range decorated.Rules(leaf.content.Dx(), leaf.content.Dy()) {
 				rule = rule.Translate(leaf.content.Min)
 				// Extend edge-aligned rules to the boundaries reserved by the
@@ -183,30 +191,49 @@ func (m *Model) planFrames(plan *layoutPlan) {
 						rule.To = leaf.outer.Max.X
 					}
 				}
-				plan.frame.markRule(rule)
+				plan.borders.markRule(rule)
 				plan.rules = append(plan.rules, rule)
 			}
 		}
 		if joinableSeparator(leaf) {
-			plan.frame.markHorizontal(leaf.outer.Min.Y, leaf.outer.Min.X, leaf.outer.Max.X)
+			plan.borders.markHorizontal(leaf.outer.Min.Y, leaf.outer.Min.X, leaf.outer.Max.X)
 			leaf.content = image.Rectangle{}
 			continue
 		}
-		if !framedPane(leaf) {
+		if !borderedPane(leaf) {
 			continue
 		}
 		outer := leaf.outer
-		if leaf.frames&frameTop != 0 {
-			plan.frame.markHorizontal(outer.Min.Y, outer.Min.X, outer.Max.X)
+		if leaf.edges&borderTop != 0 {
+			plan.borders.markHorizontal(outer.Min.Y, outer.Min.X, outer.Max.X)
 		}
-		if leaf.frames&frameBottom != 0 {
-			plan.frame.markHorizontal(outer.Max.Y-1, outer.Min.X, outer.Max.X)
+		if leaf.edges&borderBottom != 0 {
+			plan.borders.markHorizontal(outer.Max.Y-1, outer.Min.X, outer.Max.X)
 		}
-		if leaf.frames&frameLeft != 0 {
-			plan.frame.markVertical(outer.Min.X, outer.Min.Y, outer.Max.Y)
+		if leaf.edges&borderLeft != 0 {
+			plan.borders.markVertical(outer.Min.X, outer.Min.Y, outer.Max.Y)
 		}
-		if leaf.frames&frameRight != 0 {
-			plan.frame.markVertical(outer.Max.X-1, outer.Min.Y, outer.Max.Y)
+		if leaf.edges&borderRight != 0 {
+			plan.borders.markVertical(outer.Max.X-1, outer.Min.Y, outer.Max.Y)
 		}
+	}
+}
+
+// resolveBorderCells prepares a layout's borders on its first render. Geometry
+// updates before that render can replace the layout without preparing unused cells.
+func (m *Model) resolveBorderCells(grid *borderGrid) {
+	grid.cells = []borderCell{} // non-nil also records an empty, prepared grid
+	for index := range grid.horizontal {
+		if !grid.horizontal[index] && !grid.vertical[index] {
+			continue
+		}
+		x, y := index%grid.width, index/grid.width
+		glyph := grid.glyph(x, y)
+		cell := m.borderCells[glyph]
+		if cell == nil {
+			cell = styledCell(m.styles.PaneBorder.Render(glyph))
+			m.borderCells[glyph] = cell
+		}
+		grid.cells = append(grid.cells, borderCell{x: x, y: y, cell: cell})
 	}
 }

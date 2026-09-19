@@ -6,11 +6,11 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/mmcdole/rune/input"
 	"github.com/mmcdole/rune/ui"
 	"github.com/mmcdole/rune/ui/tui/style"
-	"github.com/mmcdole/rune/ui/tui/util"
 )
 
 // Compile-time check that Input implements Widget
@@ -29,7 +29,7 @@ const (
 type Input struct {
 	keys      input.Bindings
 	textinput textinput.Model
-	composer  *composer
+	editor    *editor
 	picker    *Picker
 	search    *Search
 	styles    style.Styles
@@ -44,8 +44,8 @@ type Input struct {
 	height         int
 }
 
-// NewInput creates the input surface. Search supplies transcript matches and
-// navigation state; Input owns composition, measurement, and decoration.
+// NewInput creates the input widget. Search supplies scrollback matches and
+// navigation state; Input owns rendering, measurement, and decoration.
 func NewInput(styles style.Styles, search *Search) *Input {
 	if search == nil {
 		panic("widget.NewInput requires a search widget")
@@ -81,8 +81,8 @@ func NewInput(styles style.Styles, search *Search) *Input {
 // UpdateTextInput forwards messages to the underlying textinput.
 func (i *Input) UpdateTextInput(msg tea.Msg) tea.Cmd {
 	if key, ok := msg.(tea.KeyPressMsg); ok {
-		if i.composer != nil {
-			i.UpdateComposer(key)
+		if i.editor != nil {
+			i.UpdateEditor(key)
 			return nil
 		}
 		if i.selected {
@@ -161,11 +161,11 @@ func (i *Input) View() string {
 		}
 		return strings.Join(rows, "\n")
 	}
-	if i.composer != nil {
-		copy(rows[plan.body.Min.Y:plan.body.Max.Y], i.composerRows(plan.body.Dy()))
+	if i.editor != nil {
+		copy(rows[plan.body.Min.Y:plan.body.Max.Y], i.editorRows(plan.body.Dy()))
 	} else if !plan.body.Empty() {
 		// Keep the ordinary one-line input in its compact three-row layout.
-		// Mode labels are painted on the surrounding rules.
+		// Mode labels are rendered on the surrounding rules.
 		inputView := i.textinput.View()
 		if i.selected {
 			// Bubbles renders TextStyle across its width padding. Render the
@@ -175,13 +175,13 @@ func (i *Input) View() string {
 			selectedInput.SetWidth(0)
 			selectedInput.Blur() // the selection replaces the visual caret
 			inputView = selectedInput.View()
-			if padding := i.width - util.VisibleLen(inputView); padding > 0 {
+			if padding := i.width - ansi.StringWidth(inputView); padding > 0 {
 				inputView += strings.Repeat(" ", padding)
 			}
 		}
 		rows[plan.body.Min.Y] = inputView
 	}
-	// Decorations are painted once by the compositor, after all content.
+	// Decorations are rendered once by the renderer, after all content.
 	return strings.Join(rows, "\n")
 }
 
@@ -194,9 +194,9 @@ func (i *Input) SetSize(width, height int) {
 		i.textinput.Prompt = ""
 	}
 	i.textinput.SetWidth(max(0, width-len(i.textinput.Prompt)))
-	if i.composer != nil && !i.SearchActive() {
-		layout := buildComposerLayout(i.composer.text, i.composer.cursor, width)
-		i.composer.topRow = i.composerTopRow(layout, i.layout(width, height).body.Dy())
+	if i.editor != nil && !i.SearchActive() {
+		layout := i.editor.layout(width)
+		i.editor.topRow = i.editorTopRow(layout, i.layout(width, height).body.Dy())
 	}
 }
 
@@ -215,9 +215,9 @@ func (i *Input) MeasureHeight(width, limit int) int {
 	}
 
 	h := 3 // normal: top border + input + bottom border
-	if i.composer != nil {
-		layout := buildComposerLayout(i.composer.text, i.composer.cursor, width)
-		bodyRows := clampInt(len(layout.rows), 1, maxComposerBodyRows)
+	if i.editor != nil {
+		layout := i.editor.layout(width)
+		bodyRows := clampInt(len(layout.rows), 1, maxEditorBodyRows)
 		h = bodyRows + 2 // status header + content + key footer
 	}
 	if i.PickerActive() {
@@ -228,8 +228,8 @@ func (i *Input) MeasureHeight(width, limit int) int {
 
 // Value returns the current input text.
 func (i *Input) Value() string {
-	if i.composer != nil {
-		return i.composer.Value()
+	if i.editor != nil {
+		return i.editor.Value()
 	}
 	return i.textinput.Value()
 }
@@ -241,15 +241,15 @@ func (i *Input) SetValue(s string) {
 		return
 	}
 	i.Deselect()
-	if i.composer != nil {
-		// Preserve the editing surface and interpretation when an edit
+	if i.editor != nil {
+		// Preserve the editor and interpretation when an edit
 		// replaces the draft with one non-empty physical line.
-		i.composer.Set(s, len([]rune(input.NormalizeDraftText(s))))
+		i.editor.Set(s, len([]rune(input.NormalizeDraftText(s))))
 		i.discardPending = false
 		return
 	}
-	if RequiresComposer(s) {
-		i.BeginCompose(s, len([]rune(input.NormalizeDraftText(s))))
+	if input.RequiresStructuredEditor(s) {
+		i.OpenEditor(s, len([]rune(input.NormalizeDraftText(s))))
 		return
 	}
 	i.textinput.SetValue(s)
@@ -257,8 +257,8 @@ func (i *Input) SetValue(s string) {
 
 // CursorEnd moves the cursor to the end.
 func (i *Input) CursorEnd() {
-	if i.composer != nil {
-		i.composer.CursorEnd()
+	if i.editor != nil {
+		i.editor.CursorEnd()
 		return
 	}
 	i.textinput.CursorEnd()
@@ -266,8 +266,8 @@ func (i *Input) CursorEnd() {
 
 // Position returns the cursor position.
 func (i *Input) Position() int {
-	if i.composer != nil {
-		return i.composer.Position()
+	if i.editor != nil {
+		return i.editor.Position()
 	}
 	return i.textinput.Position()
 }
@@ -275,8 +275,8 @@ func (i *Input) Position() int {
 // SetCursor sets the cursor position.
 func (i *Input) SetCursor(pos int) {
 	i.Deselect()
-	if i.composer != nil {
-		i.composer.SetCursor(pos)
+	if i.editor != nil {
+		i.editor.SetCursor(pos)
 		return
 	}
 	i.textinput.SetCursor(pos)
@@ -286,7 +286,7 @@ func (i *Input) SetCursor(pos int) {
 func (i *Input) Reset() {
 	i.submissionMode = input.ModeCommand
 	i.modeExplicit = false
-	i.composer = nil
+	i.editor = nil
 	i.Deselect()
 	i.discardPending = false
 	i.textinput.SetValue("")
@@ -297,14 +297,14 @@ func (i *Input) Reset() {
 func (i *Input) SubmissionMode() input.SubmissionMode { return i.submissionMode }
 
 // SetSubmissionMode makes an explicit choice without changing text, cursor,
-// selection, or the editing surface. Structured pastes respect this choice.
+// selection, or the editor. Structured pastes respect this choice.
 func (i *Input) SetSubmissionMode(mode input.SubmissionMode) {
 	i.submissionMode = mode
 	i.modeExplicit = true
 	i.discardPending = false
 }
 
-// ToggleSubmissionMode opens the composer when necessary so an explicit mode
+// ToggleSubmissionMode opens the editor when necessary so an explicit mode
 // change is always visible, preserving text, cursor, and selection.
 func (i *Input) ToggleSubmissionMode() {
 	mode := input.ModeVerbatim
@@ -312,24 +312,24 @@ func (i *Input) ToggleSubmissionMode() {
 		mode = input.ModeCommand
 	}
 	i.SetSubmissionMode(mode)
-	if i.composer == nil {
-		i.composer = newComposer(i.textinput.Value(), i.textinput.Position())
+	if i.editor == nil {
+		i.editor = newEditor(i.textinput.Value(), i.textinput.Position())
 	}
 }
 
-// IsComposing reports whether the lossless structured-text editor is active.
-func (i *Input) IsComposing() bool {
-	return i.composer != nil
+// EditorActive reports whether the lossless structured-text editor is active.
+func (i *Input) EditorActive() bool {
+	return i.editor != nil
 }
 
-// BeginCompose replaces the active input with a canonical structured draft.
+// OpenEditor replaces the active input with a canonical structured draft.
 // It does not submit and it never routes the text through bubbles/textinput.
-func (i *Input) BeginCompose(text string, cursor int) {
+func (i *Input) OpenEditor(text string, cursor int) {
 	if !i.modeExplicit {
 		i.submissionMode = input.ModeVerbatim
 	}
 	i.Deselect()
-	i.composer = newComposer(text, cursor)
+	i.editor = newEditor(text, cursor)
 	i.discardPending = false
 }
 
@@ -345,15 +345,15 @@ func (i *Input) InsertPaste(text string) tea.Cmd {
 	}
 	i.discardPending = false
 	text = input.NormalizeDraftText(text)
-	if i.composer != nil {
-		i.composer.Insert(text)
+	if i.editor != nil {
+		i.editor.Insert(text)
 		return nil
 	}
-	if RequiresComposer(text) {
+	if input.RequiresStructuredEditor(text) {
 		value := i.textinput.Value()
 		cursor := i.textinput.Position()
-		i.BeginCompose(value, cursor)
-		i.composer.Insert(text)
+		i.OpenEditor(value, cursor)
+		i.editor.Insert(text)
 		return nil
 	}
 
@@ -363,23 +363,23 @@ func (i *Input) InsertPaste(text string) tea.Cmd {
 	return cmd
 }
 
-// UpdateComposer applies local editing/navigation keys. The return value is
+// UpdateEditor applies local editing/navigation keys. The return value is
 // false for keys owned by the controller (notably plain Enter, Escape,
-// Ctrl+C, and Ctrl+E). Compose mode remains sticky until submit/cancel so an
+// Ctrl+C, and Ctrl+E). Editor mode remains sticky until submit/cancel so an
 // edit can never silently change the draft's interpretation.
-func (i *Input) UpdateComposer(msg tea.KeyPressMsg) bool {
-	if i.composer == nil {
+func (i *Input) UpdateEditor(msg tea.KeyPressMsg) bool {
+	if i.editor == nil {
 		return false
 	}
 	if i.selected {
 		i.resolveSelection(msg)
-		if i.composer == nil {
+		if i.editor == nil {
 			// Typing or deleting over the selection starts a fresh draft.
 			i.UpdateTextInput(msg)
 			return true
 		}
 	}
-	handled := i.composer.Update(msg, i.width)
+	handled := i.editor.Update(msg, i.width)
 	if handled {
 		i.discardPending = false
 	}
@@ -387,7 +387,7 @@ func (i *Input) UpdateComposer(msg tea.KeyPressMsg) bool {
 }
 
 // ConfirmDiscard arms the first cancel action and confirms on the second.
-// Large composed drafts should never disappear from one accidental keypress.
+// Large drafts should never disappear from one accidental keypress.
 func (i *Input) ConfirmDiscard() bool {
 	if i.discardPending {
 		return true
@@ -396,19 +396,19 @@ func (i *Input) ConfirmDiscard() bool {
 	return false
 }
 
-// ContinueCompose dismisses a pending discard confirmation.
-func (i *Input) ContinueCompose() {
+// ContinueEditing dismisses a pending discard confirmation.
+func (i *Input) ContinueEditing() {
 	i.discardPending = false
 }
 
-// CanMoveComposerVertically reports whether a one-row vertical move would
+// CanMoveEditorVertically reports whether a one-row vertical move would
 // remain inside the current visual document. Controllers use the boundary to
 // hand unmodified recalled entries back to Lua history navigation.
-func (i *Input) CanMoveComposerVertically(delta int) bool {
-	if i.composer == nil || delta == 0 {
+func (i *Input) CanMoveEditorVertically(delta int) bool {
+	if i.editor == nil || delta == 0 {
 		return false
 	}
-	layout := buildComposerLayout(i.composer.text, i.composer.cursor, i.width)
+	layout := i.editor.layout(i.width)
 	if delta < 0 {
 		return layout.cursorRow > 0
 	}

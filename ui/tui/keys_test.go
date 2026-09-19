@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
 	"github.com/mmcdole/rune/ui/tui/widget"
 )
 
@@ -187,8 +188,8 @@ func TestHomeEndEditInputWhileCtrlVariantsScroll(t *testing.T) {
 
 	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyHome})
 	m = next.(*Model)
-	if m.output.viewport.Mode() != widget.ModeLive {
-		t.Fatal("Home scrolled the viewport instead of reaching the input")
+	if m.output.Mode() != widget.ModeLive {
+		t.Fatal("Home scrolled the output window instead of reaching the input")
 	}
 	if pos := m.inputCtl.input.Position(); pos != 0 {
 		t.Fatalf("Home left cursor at %d, want 0", pos)
@@ -196,8 +197,8 @@ func TestHomeEndEditInputWhileCtrlVariantsScroll(t *testing.T) {
 
 	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnd})
 	m = next.(*Model)
-	if m.output.viewport.Mode() != widget.ModeLive {
-		t.Fatal("End scrolled the viewport instead of reaching the input")
+	if m.output.Mode() != widget.ModeLive {
+		t.Fatal("End scrolled the output window instead of reaching the input")
 	}
 	if pos := m.inputCtl.input.Position(); pos != len(typed) {
 		t.Fatalf("End left cursor at %d, want %d", pos, len(typed))
@@ -205,14 +206,14 @@ func TestHomeEndEditInputWhileCtrlVariantsScroll(t *testing.T) {
 
 	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyHome, Mod: tea.ModCtrl})
 	m = next.(*Model)
-	if m.output.viewport.Mode() == widget.ModeLive {
-		t.Fatal("Ctrl+Home did not scroll the viewport to the top")
+	if m.output.Mode() == widget.ModeLive {
+		t.Fatal("Ctrl+Home did not scroll the output window to the top")
 	}
 
 	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnd, Mod: tea.ModCtrl})
 	m = next.(*Model)
-	if m.output.viewport.Mode() != widget.ModeLive {
-		t.Fatal("Ctrl+End did not return the viewport to live")
+	if m.output.Mode() != widget.ModeLive {
+		t.Fatal("Ctrl+End did not return the output window to live")
 	}
 	if got := m.inputCtl.input.Value(); got != typed {
 		t.Fatalf("input draft = %q, want %q", got, typed)

@@ -11,7 +11,7 @@ import (
 // is active is a plain no-op. An open picker settles first: overlays
 // are mutually exclusive and the newcomer wins.
 func (c *inputController) ShowSearch(opts ui.ShowSearchMsg) {
-	if c.input.IsComposing() {
+	if c.input.EditorActive() {
 		return
 	}
 	if c.mode() == modePickerModal || c.mode() == modePickerInline {
@@ -75,7 +75,7 @@ func (c *inputController) selectNewerSearch() bool {
 	return true
 }
 
-// previewSearch centers the viewport on the current selection (live
+// previewSearch centers the output window on the current selection (live
 // preview); with no match it restores the pre-search position so a
 // query edit that empties the result set snaps back.
 func (c *inputController) previewSearch() {
@@ -84,7 +84,7 @@ func (c *inputController) previewSearch() {
 }
 
 // closeSearch is the single exit path from search mode: resets the
-// mode, hides the overlay, and settles the viewport exactly once -
+// mode, hides the overlay, and settles the output window exactly once -
 // committed (stay at the match) or cancelled (restore the snapshot).
 func (c *inputController) closeSearch(accepted bool) {
 	c.input.HideSearch()

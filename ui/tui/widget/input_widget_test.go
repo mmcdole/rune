@@ -14,7 +14,7 @@ import (
 
 func newTestInput(width int) *Input {
 	styles := style.DefaultStyles()
-	in := NewInput(styles, NewSearch(NewScrollbackBuffer(100), styles))
+	in := NewInput(styles, NewSearch(NewScrollback(100), styles))
 	in.SetSize(width, 0)
 	return in
 }
@@ -42,7 +42,7 @@ func TestModalPickerShowsResultsAboveItsOnlyEditor(t *testing.T) {
 		t.Fatalf("picker/field boundaries disagree with assigned geometry:\n%s", strings.Join(rows, "\n"))
 	}
 	if strings.Contains(in.View(), "─") {
-		t.Fatal("content painted compositor-owned rules")
+		t.Fatal("content rendered renderer-owned rules")
 	}
 	if strings.Contains(in.View(), "unfinished command") || strings.Count(in.View(), "█") != 1 {
 		t.Fatal("modal picker exposed the inactive command editor")
@@ -63,24 +63,24 @@ func inputLabels(in *Input) string {
 	return strings.Join(labels, "\n")
 }
 
-func TestComposerMeasurementAndViewDoNotChangeNavigation(t *testing.T) {
+func TestEditorMeasurementAndViewDoNotChangeNavigation(t *testing.T) {
 	in := newTestInput(40)
 	in.SetValue(strings.Repeat("a\nb\n", 12))
 	in.SetSize(40, 7)
-	before := in.composer.topRow
+	before := in.editor.topRow
 	in.MeasureHeight(5, 24)
 	in.Rules(5, 24)
 	in.View()
-	if in.composer.topRow != before || in.width != 40 || in.height != 7 {
+	if in.editor.topRow != before || in.width != 40 || in.height != 7 {
 		t.Fatal("measurement or rendering changed applied geometry")
 	}
-	in.composer.SetCursor(0)
+	in.editor.SetCursor(0)
 	in.View()
-	if in.composer.topRow != before {
+	if in.editor.topRow != before {
 		t.Fatal("View applied a navigation change")
 	}
 	in.SetSize(40, 7)
-	if in.composer.topRow != 0 {
+	if in.editor.topRow != 0 {
 		t.Fatal("SetSize did not bring the cursor into view")
 	}
 }
@@ -303,14 +303,14 @@ func TestConstrainedSearchKeepsActiveQueryVisible(t *testing.T) {
 	}
 }
 
-func TestConstrainedComposerKeepsEditableBodyVisible(t *testing.T) {
+func TestConstrainedEditorKeepsEditableBodyVisible(t *testing.T) {
 	in := newTestInput(24)
-	in.BeginCompose("say north\nsay south", 4)
+	in.OpenEditor("say north\nsay south", 4)
 	in.SetSize(24, 1)
 
 	rows := strings.Split(text.StripANSI(in.View()), "\n")
 	if len(rows) != 1 || !strings.Contains(rows[0], "say north") {
-		t.Fatalf("one-row composer hid editable body: %q", rows)
+		t.Fatalf("one-row editor hid editable body: %q", rows)
 	}
 }
 

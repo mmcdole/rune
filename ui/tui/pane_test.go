@@ -10,10 +10,10 @@ import (
 	"github.com/mmcdole/rune/ui/tui/widget"
 )
 
-func TestOutputPaneImplementsPaneResourceLifecycle(t *testing.T) {
+func TestOutputPaneImplementsPaneLifecycle(t *testing.T) {
 	m := newBareModel(t)
 
-	output, ok := m.panes.Lookup(ui.OutputPaneName)
+	output, ok := m.panes[ui.OutputPaneName]
 	if !ok {
 		t.Fatal("output pane was not pre-created")
 	}
@@ -23,9 +23,9 @@ func TestOutputPaneImplementsPaneResourceLifecycle(t *testing.T) {
 
 	next, _ := m.Update(ui.PaneCreateMsg{Name: ui.OutputPaneName})
 	m = next.(*Model)
-	recreated, _ := m.panes.Lookup(ui.OutputPaneName)
+	recreated := m.panes[ui.OutputPaneName]
 	if recreated != output {
-		t.Fatal("creating output replaced the reserved pane resource")
+		t.Fatal("creating output replaced the reserved pane")
 	}
 
 	next, _ = m.Update(ui.PaneWriteMsg{Name: ui.OutputPaneName, Text: "visible"})
@@ -62,34 +62,34 @@ func TestOutputPaneImplementsPaneResourceLifecycle(t *testing.T) {
 	m = next.(*Model)
 	next, _ = m.Update(ui.PaneScrollToTopMsg{Name: ui.OutputPaneName})
 	m = next.(*Model)
-	if m.output.viewport.Mode() != widget.ModeScrolled {
+	if m.output.Mode() != widget.ModeScrolled {
 		t.Fatal("output pane did not honor pane scroll-to-top")
 	}
 	next, _ = m.Update(ui.PaneScrollToBottomMsg{Name: ui.OutputPaneName})
 	m = next.(*Model)
-	if m.output.viewport.Mode() != widget.ModeLive {
+	if m.output.Mode() != widget.ModeLive {
 		t.Fatal("output pane did not honor pane scroll-to-bottom")
 	}
 }
 
 func TestOutputBeforeFirstWindowSizeUsesBoundedStartupWidth(t *testing.T) {
 	m := NewModel(make(chan ui.UIEvent, 16))
-	line := strings.Repeat("x", defaultOutputWrapWidth+7)
+	line := strings.Repeat("x", 80+7)
 
 	next, _ := m.Update(ui.PrintLineMsg(line))
 	m = next.(*Model)
-	if got := m.output.buffer.Count(); got != 2 {
+	if got := m.output.Scrollback().Count(); got != 2 {
 		t.Fatalf("pre-size output rows = %d, want 2 at startup width", got)
 	}
-	if got := m.output.buffer.At(0); got != strings.Repeat("x", defaultOutputWrapWidth) {
-		t.Fatalf("pre-size first row width = %d, want %d", len(got), defaultOutputWrapWidth)
+	if got := m.output.Scrollback().At(0); got != strings.Repeat("x", 80) {
+		t.Fatalf("pre-size first row width = %d, want %d", len(got), 80)
 	}
-	if got := m.output.buffer.At(1); got != strings.Repeat("x", 7) {
+	if got := m.output.Scrollback().At(1); got != strings.Repeat("x", 7) {
 		t.Fatalf("pre-size remainder = %q, want seven cells", got)
 	}
 
 	m = resizeModel(t, m, 120, 20)
-	if got := m.output.buffer.Count(); got != 2 {
+	if got := m.output.Scrollback().Count(); got != 2 {
 		t.Fatalf("first terminal size reflowed startup rows: got %d", got)
 	}
 }
@@ -110,7 +110,7 @@ func TestOutputPaneBuffersWhileHiddenOrUnplacedAtRetainedWidth(t *testing.T) {
 	if got := m.layoutPlan.output.Dx(); got != 12 {
 		t.Fatalf("placed output width = %d, want 12", got)
 	}
-	if got := m.output.wrapWidth; got != 12 {
+	if got := m.output.Width(); got != 12 {
 		t.Fatalf("append width after placement = %d, want 12", got)
 	}
 
@@ -121,7 +121,7 @@ func TestOutputPaneBuffersWhileHiddenOrUnplacedAtRetainedWidth(t *testing.T) {
 	m = next.(*Model)
 	next, _ = m.Update(ui.PaneWriteMsg{Name: ui.OutputPaneName, Text: strings.Repeat("a", 14)})
 	m = next.(*Model)
-	if got := m.output.wrapWidth; got != 12 {
+	if got := m.output.Width(); got != 12 {
 		t.Fatalf("hidden output changed retained width to %d", got)
 	}
 	wantScrollback(t, m, strings.Repeat("a", 12), "aa")
@@ -138,7 +138,7 @@ func TestOutputPaneBuffersWhileHiddenOrUnplacedAtRetainedWidth(t *testing.T) {
 	}
 	next, _ = m.Update(ui.PaneWriteMsg{Name: ui.OutputPaneName, Text: strings.Repeat("b", 14)})
 	m = next.(*Model)
-	if got := m.output.wrapWidth; got != 12 {
+	if got := m.output.Width(); got != 12 {
 		t.Fatalf("unplaced output changed retained width to %d", got)
 	}
 	wantScrollback(t, m, strings.Repeat("a", 12), "aa", strings.Repeat("b", 12), "bb")
@@ -147,8 +147,8 @@ func TestOutputPaneBuffersWhileHiddenOrUnplacedAtRetainedWidth(t *testing.T) {
 		Type: ui.LayoutTypePane, Name: ui.OutputPaneName, Border: ui.PaneBorderNone,
 	}}))
 	m = next.(*Model)
-	if got := m.output.wrapWidth; got != 20 {
-		t.Fatalf("new output placement retained stale width %d, want 20", got)
+	if got := m.output.Width(); got != 20 {
+		t.Fatalf("new output placement retained dirty width %d, want 20", got)
 	}
 	next, _ = m.Update(ui.PaneWriteMsg{Name: ui.OutputPaneName, Text: strings.Repeat("c", 18)})
 	m = next.(*Model)
@@ -156,7 +156,7 @@ func TestOutputPaneBuffersWhileHiddenOrUnplacedAtRetainedWidth(t *testing.T) {
 		strings.Repeat("a", 12), "aa", strings.Repeat("b", 12), "bb", strings.Repeat("c", 18))
 }
 
-func TestClearOutputPaneResetsTranscriptSearchAndViewportButPreservesPrompt(t *testing.T) {
+func TestClearOutputPaneResetsSearchAndScrollingButPreservesPrompt(t *testing.T) {
 	m := newBareModel(t)
 
 	next, _ := m.Update(ui.SetPromptMsg("HP> "))
@@ -170,7 +170,7 @@ func TestClearOutputPaneResetsTranscriptSearchAndViewportButPreservesPrompt(t *t
 	m = next.(*Model)
 	next, _ = m.Update(ui.PaneScrollToTopMsg{Name: ui.OutputPaneName})
 	m = next.(*Model)
-	if m.output.viewport.Mode() != widget.ModeScrolled {
+	if m.output.Mode() != widget.ModeScrolled {
 		t.Fatal("test setup did not scroll output")
 	}
 	next, _ = m.Update(ui.ShowSearchMsg{Query: "thief"})
@@ -181,22 +181,22 @@ func TestClearOutputPaneResetsTranscriptSearchAndViewportButPreservesPrompt(t *t
 
 	next, _ = m.Update(ui.PaneClearMsg{Name: ui.OutputPaneName})
 	m = next.(*Model)
-	if got := m.output.buffer.Count(); got != 0 {
-		t.Fatalf("clear left %d transcript rows", got)
+	if got := m.output.Scrollback().Count(); got != 0 {
+		t.Fatalf("clear left %d scrollback rows", got)
 	}
 	if m.input.SearchActive() || m.searchView.focus != nil || m.searchView.priorFocus != nil {
 		t.Fatalf("clear retained search state: active=%v state=%+v", m.input.SearchActive(), m.searchView)
 	}
-	if mode := m.output.viewport.Mode(); mode != widget.ModeLive {
-		t.Fatalf("clear left viewport mode %v, want live", mode)
+	if mode := m.output.Mode(); mode != widget.ModeLive {
+		t.Fatalf("clear left output window mode %v, want live", mode)
 	}
-	if got := m.output.viewport.NewLineCount(); got != 0 {
+	if got := m.output.NewLineCount(); got != 0 {
 		t.Fatalf("clear left new-line count %d", got)
 	}
-	if got := m.output.promptText; got != "HP> " {
+	if got := m.output.Prompt(); got != "HP> " {
 		t.Fatalf("clear changed prompt to %q", got)
 	}
-	if got := runetext.StripANSI(m.output.viewport.View()); !strings.Contains(got, "HP> ") {
+	if got := runetext.StripANSI(m.output.View()); !strings.Contains(got, "HP> ") {
 		t.Fatalf("preserved prompt is absent from output view: %q", got)
 	}
 }
@@ -214,7 +214,7 @@ func TestOrdinaryPaneLifecycle(t *testing.T) {
 
 	next, _ = m.Update(ui.PaneCreateMsg{Name: "chat"})
 	m = next.(*Model)
-	chat, ok := m.panes.Lookup("chat")
+	chat, ok := m.panes["chat"]
 	if !ok {
 		t.Fatal("ordinary pane was not created")
 	}
@@ -235,7 +235,7 @@ func TestOrdinaryPaneLifecycle(t *testing.T) {
 		t.Fatalf("hidden ordinary pane did not buffer writes: %q", got)
 	}
 	for _, leaf := range m.layoutPlan.leaves {
-		if leaf.node.Type == ui.LayoutTypePane && leaf.surface == chat {
+		if leaf.node.Type == ui.LayoutTypePane && leaf.widget == chat {
 			t.Fatal("hidden pane placement still resolved")
 		}
 	}
@@ -263,7 +263,7 @@ func TestOrdinaryPaneLifecycle(t *testing.T) {
 }
 
 // TestReplaceOutputPaneIsOneClearAndWrite: a replace behaves like clear
-// (search dropped, viewport live, prompt kept) and
+// (search dropped, output window live, prompt kept) and
 // then holds only the new rows, all within one Update.
 func TestReplaceOutputPaneIsOneClearAndWrite(t *testing.T) {
 	m := newBareModel(t)
@@ -281,24 +281,24 @@ func TestReplaceOutputPaneIsOneClearAndWrite(t *testing.T) {
 	m = next.(*Model)
 	next, _ = m.Update(ui.ShowSearchMsg{Query: "thief"})
 	m = next.(*Model)
-	if !m.input.SearchActive() || m.output.viewport.Mode() != widget.ModeScrolled {
+	if !m.input.SearchActive() || m.output.Mode() != widget.ModeScrolled {
 		t.Fatal("test setup did not scroll and search output")
 	}
 	next, _ = m.Update(ui.PaneReplaceMsg{Name: ui.OutputPaneName, Text: "first\nsecond"})
 	m = next.(*Model)
-	if got := m.output.buffer.Count(); got != 2 {
-		t.Fatalf("replace left %d transcript rows, want the two new rows", got)
+	if got := m.output.Scrollback().Count(); got != 2 {
+		t.Fatalf("replace left %d scrollback rows, want the two new rows", got)
 	}
-	if got := m.output.buffer.At(0) + "|" + m.output.buffer.At(1); got != "first|second" {
+	if got := m.output.Scrollback().At(0) + "|" + m.output.Scrollback().At(1); got != "first|second" {
 		t.Fatalf("replace rows = %q", got)
 	}
 	if m.input.SearchActive() || m.searchView.focus != nil {
 		t.Fatal("replace retained search state")
 	}
-	if mode := m.output.viewport.Mode(); mode != widget.ModeLive {
-		t.Fatalf("replace left viewport mode %v, want live", mode)
+	if mode := m.output.Mode(); mode != widget.ModeLive {
+		t.Fatalf("replace left output window mode %v, want live", mode)
 	}
-	if got := m.output.promptText; got != "HP> " {
+	if got := m.output.Prompt(); got != "HP> " {
 		t.Fatalf("replace dropped the live prompt: %q", got)
 	}
 }
@@ -310,7 +310,7 @@ func TestReplaceOrdinaryPaneCreatesAndSnapsToLive(t *testing.T) {
 	m := newBareModel(t)
 	next, _ := m.Update(ui.PaneReplaceMsg{Name: "status", Text: "HP 10"})
 	m = next.(*Model)
-	status, ok := m.panes.Lookup("status")
+	status, ok := m.panes["status"]
 	if !ok {
 		t.Fatal("replace did not create the pane")
 	}

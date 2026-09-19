@@ -6,12 +6,13 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
 	runetext "github.com/mmcdole/rune/text"
 	"github.com/mmcdole/rune/ui"
 	"github.com/mmcdole/rune/ui/tui/widget"
 )
 
-func TestGrowingOutputViewportPublishesLiveState(t *testing.T) {
+func TestGrowingOutputOutputWindowPublishesLiveState(t *testing.T) {
 	events := make(chan ui.UIEvent, 128)
 	m := resizeModel(t, NewModel(events), 30, 6)
 	setLayout(m, ui.LayoutNode{
@@ -27,7 +28,7 @@ func TestGrowingOutputViewportPublishesLiveState(t *testing.T) {
 	}
 	next, _ := m.Update(ui.PaneScrollToTopMsg{Name: ui.OutputPaneName})
 	m = next.(*Model)
-	if m.output.viewport.Mode() != widget.ModeScrolled {
+	if m.output.Mode() != widget.ModeScrolled {
 		t.Fatal("test setup did not scroll the constrained output pane")
 	}
 	if view := runetext.StripANSI(m.View().Content); strings.Contains(view, "output · scroll") {
@@ -39,12 +40,12 @@ func TestGrowingOutputViewportPublishesLiveState(t *testing.T) {
 
 	next, _ = m.Update(tea.WindowSizeMsg{Width: 30, Height: 20})
 	m = next.(*Model)
-	if m.output.viewport.Mode() != widget.ModeLive || m.output.viewport.NewLineCount() != 0 {
+	if m.output.Mode() != widget.ModeLive || m.output.NewLineCount() != 0 {
 		t.Fatalf("expanded output remained scrolled: mode=%v new=%d",
-			m.output.viewport.Mode(), m.output.viewport.NewLineCount())
+			m.output.Mode(), m.output.NewLineCount())
 	}
 	if view := runetext.StripANSI(m.View().Content); strings.Contains(view, "output · scroll") {
-		t.Fatalf("expanded output retained stale scroll title: %q", view)
+		t.Fatalf("expanded output retained dirty scroll title: %q", view)
 	}
 
 	foundLive := false
@@ -80,7 +81,7 @@ func TestClosingTallSearchPublishesGeometryInducedLiveState(t *testing.T) {
 	}
 	next, _ = m.Update(ui.PaneScrollToTopMsg{Name: ui.OutputPaneName})
 	m = next.(*Model)
-	if m.output.viewport.Mode() != widget.ModeScrolled {
+	if m.output.Mode() != widget.ModeScrolled {
 		t.Fatal("test setup did not scroll the search-constrained output")
 	}
 	for len(events) > 0 {
@@ -92,12 +93,12 @@ func TestClosingTallSearchPublishesGeometryInducedLiveState(t *testing.T) {
 	if m.input.SearchActive() {
 		t.Fatal("Escape did not close search")
 	}
-	if m.output.viewport.Mode() != widget.ModeLive || m.output.viewport.NewLineCount() != 0 {
+	if m.output.Mode() != widget.ModeLive || m.output.NewLineCount() != 0 {
 		t.Fatalf("post-search output = mode %v new %d, want live zero state",
-			m.output.viewport.Mode(), m.output.viewport.NewLineCount())
+			m.output.Mode(), m.output.NewLineCount())
 	}
 	if view := runetext.StripANSI(m.View().Content); strings.Contains(view, "output · scroll") {
-		t.Fatalf("post-search output retained stale title: %q", view)
+		t.Fatalf("post-search output retained dirty title: %q", view)
 	}
 
 	foundLive := false
@@ -112,7 +113,7 @@ func TestClosingTallSearchPublishesGeometryInducedLiveState(t *testing.T) {
 }
 
 // Search changes the input widget's intrinsic height as its result list
-// grows and collapses. The viewport must be sized for that final geometry
+// grows and collapses. The output window must be sized for that final geometry
 // before centering, or the selected source row can land just outside the
 // visible window even though it is selected in the overlay.
 func TestSearchFocusUsesFinalLayoutGeometry(t *testing.T) {
@@ -145,19 +146,19 @@ func TestSearchFocusUsesFinalLayoutGeometry(t *testing.T) {
 	m = next.(*Model)
 	m.View()
 
-	assertViewportRowCentered(t, m.output.viewport.View(), "SELECTED thief")
+	assertOutputWindowRowCentered(t, m.output.View(), "SELECTED thief")
 
-	// Enter removes the overlay and expands the viewport. The accepted row
+	// Enter removes the overlay and expands the output window. The accepted row
 	// must be centered again using that post-close height.
 	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = next.(*Model)
 	m.View()
-	assertViewportRowCentered(t, m.output.viewport.View(), "SELECTED thief")
+	assertOutputWindowRowCentered(t, m.output.View(), "SELECTED thief")
 	if m.searchView.focus == nil {
 		t.Fatal("accepted search should retain its active-result marker")
 	}
 	committedSeq := m.searchView.focus.Seq
-	assertViewportRowHighlighted(t, m.output.viewport.View(), "SELECTED thief")
+	assertOutputWindowRowHighlighted(t, m.output.View(), "SELECTED thief")
 
 	// A replacement search may preview another row, but cancelling it restores
 	// the previously committed focus from the grouped search lifecycle state.
@@ -173,9 +174,9 @@ func TestSearchFocusUsesFinalLayoutGeometry(t *testing.T) {
 	if m.searchView.focus == nil || m.searchView.focus.Seq != committedSeq {
 		t.Fatal("cancelled replacement search did not restore committed focus")
 	}
-	assertViewportRowHighlighted(t, m.output.viewport.View(), "SELECTED thief")
+	assertOutputWindowRowHighlighted(t, m.output.View(), "SELECTED thief")
 
-	// Deliberate viewport navigation retires the accepted marker.
+	// Deliberate output window navigation retires the accepted marker.
 	next, _ = m.Update(ui.UpdateConfigMsg{Mouse: true})
 	m = next.(*Model)
 	next, _ = m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
@@ -208,7 +209,7 @@ func TestSearchReportsInteractionStateSeparatelyFromScrollState(t *testing.T) {
 	}
 }
 
-func TestManualViewportEntryPointsClearCommittedSearchFocus(t *testing.T) {
+func TestManualOutputWindowEntryPointsClearCommittedSearchFocus(t *testing.T) {
 	tests := []struct {
 		name  string
 		msg   tea.Msg
@@ -236,14 +237,14 @@ func TestManualViewportEntryPointsClearCommittedSearchFocus(t *testing.T) {
 				next, _ := m.Update(ui.UpdateConfigMsg{Mouse: true})
 				m = next.(*Model)
 			}
-			focus := widget.SearchMatch{Seq: m.output.buffer.Seq(50)}
+			focus := widget.SearchMatch{Seq: m.output.Scrollback().Seq(50)}
 			m.searchView.focus = &focus
-			m.output.viewport.SetHighlight(focus.Seq, focus.Ranges)
+			m.output.SetHighlight(focus.Seq, focus.Ranges)
 
 			next, _ := m.Update(tt.msg)
 			m = next.(*Model)
 			if m.searchView.focus != nil {
-				t.Fatal("manual viewport navigation retained committed search focus")
+				t.Fatal("manual output window navigation retained committed search focus")
 			}
 		})
 	}
@@ -281,7 +282,7 @@ func TestMouseWheelNavigatesActiveSearchMatches(t *testing.T) {
 	}
 }
 
-func assertViewportRowCentered(t *testing.T, view, want string) {
+func assertOutputWindowRowCentered(t *testing.T, view, want string) {
 	t.Helper()
 	rows := strings.Split(view, "\n")
 	for i, row := range rows {
@@ -290,15 +291,15 @@ func assertViewportRowCentered(t *testing.T, view, want string) {
 		}
 		center := (len(rows) - 1) / 2
 		if i < center-1 || i > center+1 {
-			t.Fatalf("row %q rendered at viewport row %d of %d, want it centered near %d\n%s",
+			t.Fatalf("row %q rendered at output window row %d of %d, want it centered near %d\n%s",
 				want, i, len(rows), center, runetext.StripANSI(view))
 		}
 		return
 	}
-	t.Fatalf("row %q is outside the viewport:\n%s", want, runetext.StripANSI(view))
+	t.Fatalf("row %q is outside the output window:\n%s", want, runetext.StripANSI(view))
 }
 
-func assertViewportRowHighlighted(t *testing.T, view, want string) {
+func assertOutputWindowRowHighlighted(t *testing.T, view, want string) {
 	t.Helper()
 	for _, row := range strings.Split(view, "\n") {
 		if runetext.StripANSI(row) != want {
@@ -309,5 +310,5 @@ func assertViewportRowHighlighted(t *testing.T, view, want string) {
 		}
 		return
 	}
-	t.Fatalf("row %q is outside the viewport:\n%s", want, runetext.StripANSI(view))
+	t.Fatalf("row %q is outside the output window:\n%s", want, runetext.StripANSI(view))
 }

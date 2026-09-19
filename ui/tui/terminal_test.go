@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
 	"github.com/mmcdole/rune/ui"
 	"github.com/mmcdole/rune/ui/tui/widget"
 )
@@ -73,26 +74,26 @@ func TestKeyboardEnhancementsFollowNumpadConfig(t *testing.T) {
 	}
 }
 
-// TestMouseWheelScrollsViewport verifies wheel events scroll the output
-// viewport - the reason the terminal mouse is captured at all.
-func TestMouseWheelScrollsViewport(t *testing.T) {
+// TestMouseWheelScrollsOutputWindow verifies wheel events scroll the output
+// output window - the reason the terminal mouse is captured at all.
+func TestMouseWheelScrollsOutputWindow(t *testing.T) {
 	m := newTestModel(t)
 	next, _ := m.Update(ui.UpdateConfigMsg{Mouse: true})
 	m = next.(*Model)
 
-	if m.output.viewport.Mode() != widget.ModeLive {
-		t.Fatal("expected viewport to start at bottom")
+	if m.output.Mode() != widget.ModeLive {
+		t.Fatal("expected output window to start at bottom")
 	}
-	liveBottom := m.output.viewport.SaveScroll().BottomSeq
+	liveBottom := m.output.SaveScroll().BottomSeq
 
 	wheelUp := tea.MouseWheelMsg{Button: tea.MouseWheelUp}
 	next, _ = m.Update(wheelUp)
 	m = next.(*Model)
 
-	if m.output.viewport.Mode() == widget.ModeLive {
-		t.Fatal("wheel up did not scroll the viewport")
+	if m.output.Mode() == widget.ModeLive {
+		t.Fatal("wheel up did not scroll the output window")
 	}
-	if got := liveBottom - m.output.viewport.SaveScroll().BottomSeq; got != wheelScrollLines {
+	if got := liveBottom - m.output.SaveScroll().BottomSeq; got != wheelScrollLines {
 		t.Fatalf("wheel up scrolled %d lines, want %d", got, wheelScrollLines)
 	}
 
@@ -101,13 +102,13 @@ func TestMouseWheelScrollsViewport(t *testing.T) {
 	next, _ = m.Update(wheelDown)
 	m = next.(*Model)
 
-	if m.output.viewport.Mode() != widget.ModeLive {
+	if m.output.Mode() != widget.ModeLive {
 		t.Fatal("wheel down did not scroll back to bottom")
 	}
 }
 
 // TestMouseNonWheelEventsIgnored verifies clicks and motion do not
-// disturb the viewport.
+// disturb the output window.
 func TestMouseNonWheelEventsIgnored(t *testing.T) {
 	m := newTestModel(t)
 	next, _ := m.Update(ui.UpdateConfigMsg{Mouse: true})
@@ -117,7 +118,7 @@ func TestMouseNonWheelEventsIgnored(t *testing.T) {
 	next, _ = m.Update(click)
 	m = next.(*Model)
 
-	if m.output.viewport.Mode() != widget.ModeLive {
-		t.Fatal("non-wheel mouse event moved the viewport")
+	if m.output.Mode() != widget.ModeLive {
+		t.Fatal("non-wheel mouse event moved the output window")
 	}
 }

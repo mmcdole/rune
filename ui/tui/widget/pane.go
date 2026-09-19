@@ -81,25 +81,23 @@ func (p *Pane) ContentRows(width, height int) []string {
 		end = 0
 	}
 
-	var rows []string
-	for i := end - 1; i >= 0 && len(rows) < height; i-- {
-		rows = append(util.WrapLine(p.lines[i], width), rows...)
+	rows := make([]string, height)
+	start := height
+	for i := end - 1; i >= 0 && start > 0; i-- {
+		wrapped := util.WrapLine(p.lines[i], width)
+		n := min(start, len(wrapped))
+		start -= n
+		copy(rows[start:], wrapped[len(wrapped)-n:])
+	}
+	if start > 0 {
+		// Deep scrolls extend forward to fill the window; sparse panes pad below.
+		used := copy(rows, rows[start:])
+		clear(rows[used:])
+		for i := end; i < len(p.lines) && used < height; i++ {
+			used += copy(rows[used:], util.WrapLine(p.lines[i], width))
+		}
 	}
 
-	if len(rows) >= height {
-		rows = rows[len(rows)-height:]
-	} else {
-		for i := end; i < len(p.lines) && len(rows) < height; i++ {
-			rows = append(rows, util.WrapLine(p.lines[i], width)...)
-		}
-		if len(rows) > height {
-			rows = rows[:height]
-		}
-	}
-
-	for len(rows) < height {
-		rows = append(rows, "")
-	}
 	return rows
 }
 

@@ -20,7 +20,7 @@ func TestOrderedPromptCommitThenLocalSubmissionOutput(t *testing.T) {
 	m = next.(*Model)
 
 	wantScrollback(t, m, "HP>", "> /help", "local help")
-	if got := m.output.promptText; got != "" {
+	if got := m.output.Prompt(); got != "" {
 		t.Fatalf("prompt overlay = %q after commit, want empty", got)
 	}
 }
@@ -34,7 +34,7 @@ func TestPromptClearClearsOverlay(t *testing.T) {
 	m = next.(*Model)
 
 	wantScrollback(t, m)
-	if got := m.output.promptText; got != "Username:" {
+	if got := m.output.Prompt(); got != "Username:" {
 		t.Fatalf("prompt overlay = %q, want %q", got, "Username:")
 	}
 
@@ -42,8 +42,8 @@ func TestPromptClearClearsOverlay(t *testing.T) {
 	m = next.(*Model)
 
 	wantScrollback(t, m)
-	if m.output.promptText != "" {
-		t.Fatalf("prompt overlay = %q after clear, want empty", m.output.promptText)
+	if m.output.Prompt() != "" {
+		t.Fatalf("prompt overlay = %q after clear, want empty", m.output.Prompt())
 	}
 }
 
@@ -102,7 +102,7 @@ func TestEchoExpandsPreservedTabsBeforeScrollback(t *testing.T) {
 	next, _ := m.Update(ui.EchoLineMsg("> a\tb"))
 	m = next.(*Model)
 
-	got := m.output.buffer.At(0)
+	got := m.output.Scrollback().At(0)
 	if strings.ContainsRune(got, '\t') {
 		t.Fatalf("raw tab reached scrollback: %q", got)
 	}
@@ -112,17 +112,17 @@ func TestEchoExpandsPreservedTabsBeforeScrollback(t *testing.T) {
 }
 
 // Regression #16: raw tabs must never reach the renderer. Bubbletea
-// repaints only changed rows; a row starting with \t makes the terminal
+// rerenders only changed rows; a row starting with \t makes the terminal
 // skip cells without erasing them, resurrecting the previous frame
-// (ghost columns). True paint verification is the manual tmux route -
+// (ghost columns). True render verification is the manual tmux route -
 // this pins the model-layer guarantee that scrollback rows are tab-free.
 func TestPrintedTabsAreExpanded(t *testing.T) {
 	m := newTestModel(t)
 	next, _ := m.Update(ui.PrintLineMsg("\tDead-file cleanup"))
 	m = next.(*Model)
 	found := false
-	for i := 0; i < m.output.buffer.Count(); i++ {
-		row := m.output.buffer.At(i)
+	for i := 0; i < m.output.Scrollback().Count(); i++ {
+		row := m.output.Scrollback().At(i)
 		if row == "        Dead-file cleanup" {
 			found = true
 		}
@@ -135,7 +135,7 @@ func TestPrintedTabsAreExpanded(t *testing.T) {
 	}
 	next, _ = m.Update(ui.SetPromptMsg("HP\t> "))
 	m = next.(*Model)
-	if got := m.output.promptText; got != "HP      > " {
+	if got := m.output.Prompt(); got != "HP      > " {
 		t.Errorf("prompt = %q, want tab expanded", got)
 	}
 }

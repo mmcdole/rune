@@ -7,14 +7,15 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
+
 	"github.com/mmcdole/rune/input"
 )
 
-func TestComposerLabelsPrioritizeEssentialActions(t *testing.T) {
+func TestEditorLabelsPrioritizeEssentialActions(t *testing.T) {
 	for _, mode := range []input.SubmissionMode{input.ModeCommand, input.ModeVerbatim} {
 		t.Run(mode.String(), func(t *testing.T) {
 			in := newTestInput(100)
-			in.BeginCompose("first\nsecond", 0)
+			in.OpenEditor("first\nsecond", 0)
 			in.SetSubmissionMode(mode)
 			for _, width := range []int{32, 40, 60, 80, 100} {
 				t.Run(fmt.Sprint(width), func(t *testing.T) {
@@ -48,9 +49,9 @@ func TestComposerLabelsPrioritizeEssentialActions(t *testing.T) {
 	}
 }
 
-func TestComposerLabelsStayCompleteAndInsideTheirRules(t *testing.T) {
+func TestEditorLabelsStayCompleteAndInsideTheirRules(t *testing.T) {
 	in := newTestInput(100)
-	in.BeginCompose("first\nsecond", 0)
+	in.OpenEditor("first\nsecond", 0)
 	complete := map[string]bool{
 		"COMMAND": true, "VERBATIM": true, "COMMAND · 2 lines": true, "VERBATIM · 2 lines": true,
 		"Alt+V command": true, "Alt+V verbatim": true,
