@@ -113,7 +113,7 @@ func (m *Model) Init() tea.Cmd {
 // to compose. View only returns the composed screen; it never changes
 // session-visible scroll state.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	_, cmd := m.dispatch(msg)
+	m.dispatch(msg)
 
 	previousOutput := m.layoutPlan.output
 	m.applyLayout()
@@ -122,7 +122,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if _, closing := msg.(frameMsg); !closing {
 		m.stale = true
 	}
-	return m, tea.Batch(cmd, m.advanceFrame())
+	return m, m.advanceFrame()
 }
 
 // advanceFrame composes a stale screen unless a frame is open, and returns
@@ -146,98 +146,27 @@ func (m *Model) advanceFrame() tea.Cmd {
 	return tea.Tick(m.frameInterval, func(time.Time) tea.Msg { return frameMsg{} })
 }
 
-func (m *Model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
+// dispatch applies one message to state. Nothing here composes, reports
+// scroll state, or schedules work: Update does that once, afterwards.
+func (m *Model) dispatch(msg tea.Msg) {
 	switch msg := msg.(type) {
 	// System
 	case tea.WindowSizeMsg:
-		return m.handleWindowSize(msg)
+		m.width, m.height = msg.Width, msg.Height
+		m.initialized = true
+		m.notifySession(ui.WindowSizeChangedMsg{Width: msg.Width, Height: msg.Height})
 	case frameMsg:
-		return m.handleFrame()
+		// Update composes and re-arms only if the screen went stale inside
+		// the frame; otherwise the chain ends - back to zero wakeups.
+		m.frameOpen = false
 	case tea.KeyPressMsg:
 		m.inputCtl.HandleKey(msg)
-		return m, nil
 	case tea.PasteMsg:
 		m.inputCtl.HandlePaste(msg.Content)
-		return m, nil
 	case tea.MouseWheelMsg:
-		return m.handleMouse(msg)
+		m.handleMouseWheel(msg)
 
 	// Session config updates
-	case ui.UpdateBindsMsg, ui.UpdateBarsMsg, ui.UpdateLayoutMsg, ui.UpdateConfigMsg:
-		return m.handleConfigUpdate(msg)
-
-	// Scrollback appends and the prompt overlay
-	case ui.PrintLineMsg, ui.EchoLineMsg, ui.SetPromptMsg, ui.CommitPromptMsg:
-		return m.handleDisplayOutput(msg)
-
-	// Pane operations
-	case ui.PaneCreateMsg, ui.PaneWriteMsg, ui.PaneReplaceMsg, ui.PaneClearMsg:
-		return m.handlePaneMsg(msg)
-
-	// Input control
-	case ui.ShowPickerMsg:
-		m.inputCtl.ShowPicker(msg)
-		return m, nil
-	case ui.ShowSearchMsg:
-		m.inputCtl.ShowSearch(msg)
-		return m, nil
-	case ui.SetInputMsg:
-		m.inputCtl.SetText(string(msg))
-		return m, nil
-	case ui.SetInputSubmissionMsg:
-		m.inputCtl.SetSubmission(input.Submission(msg))
-		return m, nil
-
-	// Input primitives (from Lua)
-	case ui.InputSetCursorMsg:
-		m.input.SetCursor(int(msg))
-		m.notifySession(ui.DraftAppliedMsg{Text: m.input.Value(), Cursor: m.input.Position()})
-		return m, nil
-
-	// Clipboard (from Lua). OSC 52 asks the terminal emulator to set
-	// the system clipboard; it renders nothing, so it bypasses the
-	// renderer and goes to the terminal on stderr.
-	case ui.SetClipboardMsg:
-		osc52.New(string(msg)).WriteTo(os.Stderr) //nolint:errcheck // best-effort: no way to report terminal-side failure
-		return m, nil
-
-	// Pane scrolling (from Lua). Every named surface follows the same pane
-	// contract.
-	case ui.PaneScrollUpMsg:
-		m.scrollPane(msg.Name, func(pane paneResource) { pane.ScrollUp(msg.Lines) })
-		return m, nil
-	case ui.PaneScrollDownMsg:
-		m.scrollPane(msg.Name, func(pane paneResource) { pane.ScrollDown(msg.Lines) })
-		return m, nil
-	case ui.PaneScrollToTopMsg:
-		m.scrollPane(msg.Name, func(pane paneResource) { pane.ScrollToTop() })
-		return m, nil
-	case ui.PaneScrollToBottomMsg:
-		m.scrollPane(msg.Name, func(pane paneResource) { pane.ScrollToBottom() })
-		return m, nil
-	}
-
-	return m, nil
-}
-
-func (m *Model) handleWindowSize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
-	m.width = msg.Width
-	m.height = msg.Height
-	m.initialized = true
-	m.notifySession(ui.WindowSizeChangedMsg{Width: msg.Width, Height: msg.Height})
-	return m, nil
-}
-
-// handleFrame closes the current frame. Update then composes and re-arms only
-// if the screen went stale inside it; otherwise the chain ends - back to zero
-// wakeups.
-func (m *Model) handleFrame() (tea.Model, tea.Cmd) {
-	m.frameOpen = false
-	return m, nil
-}
-
-func (m *Model) handleConfigUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
 	case ui.UpdateBindsMsg:
 		m.input.SetBindings(input.Bindings(msg))
 	case ui.UpdateBarsMsg:
@@ -248,8 +177,63 @@ func (m *Model) handleConfigUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.inputCtl.SetKeepOnSubmit(msg.KeepInput)
 		m.mouseEnabled = msg.Mouse
 		m.numpadMode = msg.Numpad
+
+	// Scrollback appends and the prompt overlay. Server lines and local
+	// echoes differ only in where Session sends them from.
+	case ui.PrintLineMsg:
+		m.output.Write(string(msg))
+	case ui.EchoLineMsg:
+		m.output.Write(string(msg))
+	case ui.SetPromptMsg:
+		m.output.setPrompt(string(msg))
+	case ui.CommitPromptMsg:
+		m.output.commitPrompt(string(msg))
+
+	// Pane buffer content. Placement and visibility are layout-tree state
+	// and arrive as UpdateLayoutMsg instead.
+	case ui.PaneCreateMsg:
+		m.panes.Create(msg.Name)
+	case ui.PaneWriteMsg:
+		m.panes.Write(msg.Name, msg.Text)
+	case ui.PaneReplaceMsg:
+		m.dropOutputSearch(msg.Name)
+		m.panes.Replace(msg.Name, msg.Text)
+	case ui.PaneClearMsg:
+		m.dropOutputSearch(msg.Name)
+		m.panes.Clear(msg.Name)
+
+	// Input control
+	case ui.ShowPickerMsg:
+		m.inputCtl.ShowPicker(msg)
+	case ui.ShowSearchMsg:
+		m.inputCtl.ShowSearch(msg)
+	case ui.SetInputMsg:
+		m.inputCtl.SetText(string(msg))
+	case ui.SetInputSubmissionMsg:
+		m.inputCtl.SetSubmission(input.Submission(msg))
+
+	// Input primitives (from Lua)
+	case ui.InputSetCursorMsg:
+		m.input.SetCursor(int(msg))
+		m.notifySession(ui.DraftAppliedMsg{Text: m.input.Value(), Cursor: m.input.Position()})
+
+	// Clipboard (from Lua). OSC 52 asks the terminal emulator to set
+	// the system clipboard; it renders nothing, so it bypasses the
+	// renderer and goes to the terminal on stderr.
+	case ui.SetClipboardMsg:
+		osc52.New(string(msg)).WriteTo(os.Stderr) //nolint:errcheck // best-effort: no way to report terminal-side failure
+
+	// Pane scrolling (from Lua). Every named surface follows the same pane
+	// contract.
+	case ui.PaneScrollUpMsg:
+		m.scrollPane(msg.Name, func(pane paneResource) { pane.ScrollUp(msg.Lines) })
+	case ui.PaneScrollDownMsg:
+		m.scrollPane(msg.Name, func(pane paneResource) { pane.ScrollDown(msg.Lines) })
+	case ui.PaneScrollToTopMsg:
+		m.scrollPane(msg.Name, func(pane paneResource) { pane.ScrollToTop() })
+	case ui.PaneScrollToBottomMsg:
+		m.scrollPane(msg.Name, func(pane paneResource) { pane.ScrollToBottom() })
 	}
-	return m, nil
 }
 
 // syncBars reconciles the bar registry with the latest successful Lua snapshot.
@@ -271,38 +255,6 @@ func (m *Model) syncBars(content map[string]ui.BarContent) {
 	}
 }
 
-func (m *Model) handleDisplayOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case ui.PrintLineMsg:
-		m.output.Write(string(msg))
-	case ui.EchoLineMsg:
-		m.output.Write(string(msg))
-	case ui.SetPromptMsg:
-		m.output.setPrompt(string(msg))
-	case ui.CommitPromptMsg:
-		m.output.commitPrompt(string(msg))
-	}
-	return m, nil
-}
-
-// handlePaneMsg applies buffer content operations. Placement and visibility
-// are layout-tree state and arrive as UpdateLayoutMsg instead.
-func (m *Model) handlePaneMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case ui.PaneCreateMsg:
-		m.panes.Create(msg.Name)
-	case ui.PaneWriteMsg:
-		m.panes.Write(msg.Name, msg.Text)
-	case ui.PaneReplaceMsg:
-		m.dropOutputSearch(msg.Name)
-		m.panes.Replace(msg.Name, msg.Text)
-	case ui.PaneClearMsg:
-		m.dropOutputSearch(msg.Name)
-		m.panes.Clear(msg.Name)
-	}
-	return m, nil
-}
-
 // dropOutputSearch abandons an active transcript search before the output
 // buffer it anchors to is emptied.
 func (m *Model) dropOutputSearch(name string) {
@@ -315,16 +267,14 @@ func (m *Model) dropOutputSearch(name string) {
 	m.searchView = searchViewState{}
 }
 
-// scrollPane applies one navigation operation to an existing pane. Output's
-// extra search effect remains private to the controller.
+// scrollPane applies one navigation operation to an existing pane.
 func (m *Model) scrollPane(name string, scroll func(paneResource)) {
 	pane, ok := m.panes.Lookup(name)
 	if !ok {
 		return
 	}
 	if pane == m.output {
-		m.navigateOutputPane(func() { scroll(pane) })
-		return
+		m.clearCommittedSearchFocus()
 	}
 	scroll(pane)
 }
@@ -333,26 +283,21 @@ func (m *Model) scrollPane(name string, scroll func(paneResource)) {
 // viewport. Matches the common terminal-emulator default.
 const wheelScrollLines = 3
 
-// handleMouse scrolls the output viewport on wheel events when the terminal
-// reports them; everything else is ignored.
-func (m *Model) handleMouse(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
+// handleMouseWheel moves the search selection while search is open and
+// scrolls the output viewport otherwise.
+func (m *Model) handleMouseWheel(msg tea.MouseWheelMsg) {
 	switch msg.Button {
 	case tea.MouseWheelUp:
-		if m.inputCtl.selectOlderSearch() {
-			return m, nil
-		}
-		m.navigateOutputPane(func() {
+		if !m.inputCtl.selectOlderSearch() {
+			m.clearCommittedSearchFocus()
 			m.output.viewport.ScrollUp(wheelScrollLines)
-		})
-	case tea.MouseWheelDown:
-		if m.inputCtl.selectNewerSearch() {
-			return m, nil
 		}
-		m.navigateOutputPane(func() {
+	case tea.MouseWheelDown:
+		if !m.inputCtl.selectNewerSearch() {
+			m.clearCommittedSearchFocus()
 			m.output.viewport.ScrollDown(wheelScrollLines)
-		})
+		}
 	}
-	return m, nil
 }
 
 // submit offers a submission and its following draft to the session as one
@@ -416,28 +361,23 @@ func (m *Model) reportScrollState() bool {
 	return true
 }
 
-// navigateOutputPane is the single path for deliberate user/script
-// navigation of the output surface. Search previews position the
-// viewport directly so their committed marker remains intact.
-func (m *Model) navigateOutputPane(move func()) {
-	m.clearCommittedSearchFocus()
-	move()
-}
-
 // handleScrollKey handles viewport scrolling keys.
 // Returns true if the key was handled.
 func (m *Model) handleScrollKey(msg tea.KeyPressMsg) bool {
+	var move func()
 	switch {
 	case matchesKey(msg, tea.KeyPgUp, 0):
-		m.navigateOutputPane(m.output.viewport.PageUp)
+		move = m.output.viewport.PageUp
 	case matchesKey(msg, tea.KeyPgDown, 0):
-		m.navigateOutputPane(m.output.viewport.PageDown)
+		move = m.output.viewport.PageDown
 	case matchesKey(msg, tea.KeyHome, tea.ModCtrl):
-		m.navigateOutputPane(m.output.viewport.GotoTop)
+		move = m.output.viewport.GotoTop
 	case matchesKey(msg, tea.KeyEnd, tea.ModCtrl):
-		m.navigateOutputPane(m.output.viewport.GotoBottom)
+		move = m.output.viewport.GotoBottom
 	default:
 		return false
 	}
+	m.clearCommittedSearchFocus()
+	move()
 	return true
 }

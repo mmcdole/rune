@@ -72,7 +72,7 @@ func (m *Model) resolveLayout() layoutPlan {
 func (m *Model) applyOutputGeometry(plan layoutPlan) {
 	width, height := plan.output.Dx(), plan.output.Dy()
 	if width > 0 && height > 0 {
-		m.output.setGeometry(width, height)
+		m.output.SetSize(width, height)
 	} else {
 		m.output.setFallbackGeometry(m.width, m.height)
 	}

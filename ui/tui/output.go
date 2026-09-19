@@ -36,7 +36,11 @@ func newOutputController(styles style.Styles) *outputController {
 func (o *outputController) Name() string { return ui.OutputPaneName }
 
 func (o *outputController) Write(text string) {
-	o.appendRows(splitRows(text, o.wrapWidth)...)
+	rows := splitRows(text, o.wrapWidth)
+	for _, row := range rows {
+		o.buffer.Append(row)
+	}
+	o.viewport.OnNewRows(len(rows))
 }
 
 func (o *outputController) Clear() {
@@ -58,7 +62,13 @@ func (o *outputController) View() string {
 	return o.viewport.View()
 }
 
-func (o *outputController) SetSize(width, height int) { o.setGeometry(width, height) }
+func (o *outputController) SetSize(width, height int) {
+	if width > 0 {
+		o.wrapWidth = width
+	}
+	o.hasPlacement = true
+	o.viewport.SetSize(max(1, width), max(1, height))
+}
 
 func (o *outputController) MinimumSize() image.Point { return image.Pt(0, 1) }
 
@@ -70,14 +80,6 @@ func (o *outputController) MeasureHeight(width, limit int) int {
 	return min(rows, limit)
 }
 
-func (o *outputController) setGeometry(width, height int) {
-	if width > 0 {
-		o.wrapWidth = width
-	}
-	o.hasPlacement = true
-	o.viewport.SetSize(max(1, width), max(1, height))
-}
-
 // setFallbackGeometry gives an output pane that has never been placed a
 // useful append/search width. Once it has had real placement geometry, hiding
 // or omitting it preserves that geometry so incoming history does not reflow.
@@ -87,13 +89,6 @@ func (o *outputController) setFallbackGeometry(width, height int) {
 	}
 	o.wrapWidth = width
 	o.viewport.SetSize(width, max(1, height))
-}
-
-func (o *outputController) appendRows(rows ...string) {
-	for _, row := range rows {
-		o.buffer.Append(row)
-	}
-	o.viewport.OnNewRows(len(rows))
 }
 
 func (o *outputController) setPrompt(text string) {

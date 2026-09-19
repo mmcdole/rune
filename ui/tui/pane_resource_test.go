@@ -43,7 +43,7 @@ func TestOutputRetainsLastPlacementGeometryWhileHidden(t *testing.T) {
 		t.Fatalf("unplaced fallback width = %d, want latest terminal width 100", output.wrapWidth)
 	}
 
-	output.setGeometry(24, 6)
+	output.SetSize(24, 6)
 	output.setFallbackGeometry(120, 40)
 	if output.wrapWidth != 24 {
 		t.Fatalf("hidden output width = %d, want retained placement width 24", output.wrapWidth)
