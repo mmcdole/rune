@@ -54,6 +54,9 @@ or benchmark definitions. Changing a fixture requires a new baseline.
 | `OutputLatency/single` | One line, waiting for its terminal write before sending the next | Continuous small updates |
 | `OutputLatency/burst100`, `burst1000` | Enqueue a burst and wait for its last line's terminal write | Backlog drain and newest-output latency |
 | `OutputLatency/draft100_burst100` | Same 100-line burst while a multiline draft is open | Unrelated draft editing work delaying MUD output |
+| `OutputLatency/auto_side_draft1000_burst100`, `beside_pane_draft1000_burst100` | 100-line burst with a 1,000-line draft and an auto-sized pane or adjacent pane | Verify layout savings reach the terminal writer |
+| `RenderAutoLayoutOutput` | One incoming line in the default layout, with an auto-sized chat pane, or with input beside a pane in an auto-sized row | Per-message layout costs with 0/1,000 draft lines; rendering is deferred |
+| `RenderDraftCursor` | Left then Right in a 1,000-line draft, processing both updates and consuming their Session events | Draft navigation and layout work; rendering is deferred |
 | `RenderUpdate` | One line inside an open render-throttle window | Per-message work, with 0/100/1,000 draft lines |
 | `RenderFlood` | 100 lines, ten prompt updates, one explicit frame boundary | Fixed-work throughput, independent of timer scheduling |
 | `RenderScreen` | Render an unchanged two-pane scene at 80×24 or 270×66 | Full rendering cost with warm widget caches |
