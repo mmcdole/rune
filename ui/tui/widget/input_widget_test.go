@@ -19,7 +19,7 @@ func newTestInput(width int) *Input {
 	return in
 }
 
-func TestModalPickerShowsResultsAboveItsOnlyEditor(t *testing.T) {
+func TestModalPickerShowsResultsAboveItsOnlyDraftEditor(t *testing.T) {
 	in := newTestInput(40)
 	in.SetValue("unfinished command")
 	in.ShowPicker(ui.ShowPickerMsg{Title: "Aliases", Items: []ui.PickerItem{{Text: "north"}, {Text: "south"}}})
@@ -63,24 +63,24 @@ func inputLabels(in *Input) string {
 	return strings.Join(labels, "\n")
 }
 
-func TestEditorMeasurementAndViewDoNotChangeNavigation(t *testing.T) {
+func TestDraftEditorMeasurementAndViewDoNotChangeNavigation(t *testing.T) {
 	in := newTestInput(40)
 	in.SetValue(strings.Repeat("a\nb\n", 12))
 	in.SetSize(40, 7)
-	before := in.editor.topRow
+	before := in.draftEditor.topRow
 	in.MeasureHeight(5, 24)
 	in.Rules(5, 24)
 	in.View()
-	if in.editor.topRow != before || in.width != 40 || in.height != 7 {
+	if in.draftEditor.topRow != before || in.width != 40 || in.height != 7 {
 		t.Fatal("measurement or rendering changed applied geometry")
 	}
-	in.editor.SetCursor(0)
+	in.draftEditor.SetCursor(0)
 	in.View()
-	if in.editor.topRow != before {
+	if in.draftEditor.topRow != before {
 		t.Fatal("View applied a navigation change")
 	}
 	in.SetSize(40, 7)
-	if in.editor.topRow != 0 {
+	if in.draftEditor.topRow != 0 {
 		t.Fatal("SetSize did not bring the cursor into view")
 	}
 }
@@ -303,9 +303,9 @@ func TestConstrainedSearchKeepsActiveQueryVisible(t *testing.T) {
 	}
 }
 
-func TestConstrainedEditorKeepsEditableBodyVisible(t *testing.T) {
+func TestConstrainedDraftEditorKeepsEditableBodyVisible(t *testing.T) {
 	in := newTestInput(24)
-	in.OpenEditor("say north\nsay south", 4)
+	in.OpenDraftEditor("say north\nsay south", 4)
 	in.SetSize(24, 1)
 
 	rows := strings.Split(text.StripANSI(in.View()), "\n")

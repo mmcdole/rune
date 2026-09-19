@@ -7,22 +7,22 @@ import (
 	"testing"
 )
 
-func TestEditorLayoutTracksEditsAfterMeasurement(t *testing.T) {
+func TestDraftEditorLayoutTracksEditsAfterMeasurement(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		edit func(*editor)
+		edit func(*draftEditor)
 		want string
 	}{
-		{"replace_same_length", func(c *editor) { c.Set("XYZ\n123", 3) }, "XYZ\n123"},
-		{"insert", func(c *editor) { c.Insert("!") }, "abc!\ndef"},
-		{"backspace", (*editor).Backspace, "ab\ndef"},
-		{"delete", (*editor).Delete, "abcdef"},
-		{"delete_word", (*editor).DeleteWordBack, "\ndef"},
-		{"delete_start", (*editor).DeleteToLineStart, "\ndef"},
-		{"delete_end", (*editor).DeleteToLineEnd, "abcdef"},
+		{"replace_same_length", func(c *draftEditor) { c.Set("XYZ\n123", 3) }, "XYZ\n123"},
+		{"insert", func(c *draftEditor) { c.Insert("!") }, "abc!\ndef"},
+		{"backspace", (*draftEditor).Backspace, "ab\ndef"},
+		{"delete", (*draftEditor).Delete, "abcdef"},
+		{"delete_word", (*draftEditor).DeleteWordBack, "\ndef"},
+		{"delete_start", (*draftEditor).DeleteToLineStart, "\ndef"},
+		{"delete_end", (*draftEditor).DeleteToLineEnd, "abcdef"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			c := newEditor("abc\ndef", 3)
+			c := newDraftEditor("abc\ndef", 3)
 			c.layout(80) // measurement before the edit must not freeze its pixels
 			tc.edit(c)
 			var rows []string
@@ -40,9 +40,9 @@ func TestEditorLayoutTracksEditsAfterMeasurement(t *testing.T) {
 	}
 }
 
-func TestEditorKeepsRowsDuringNavigationAndMeasurement(t *testing.T) {
+func TestDraftEditorKeepsRowsDuringNavigationAndMeasurement(t *testing.T) {
 	for _, value := range []string{"a\tb界é\n", strings.Repeat("long draft\n", 1000), strings.Repeat("wrap ", 1000)} {
-		c := newEditor(value, 0)
+		c := newDraftEditor(value, 0)
 		rows := c.layout(20).rows
 		for _, width := range []int{1, 10, 80, 270} {
 			c.measureRows(width)
@@ -67,7 +67,7 @@ func TestEditorKeepsRowsDuringNavigationAndMeasurement(t *testing.T) {
 	}
 }
 
-func TestEditorMeasurementMatchesFullLayout(t *testing.T) {
+func TestDraftEditorMeasurementMatchesFullLayout(t *testing.T) {
 	values := []string{"", "abcdef", "a\tb界é\n", strings.Repeat("\t", 20), strings.Repeat("long line 界 é ", 100), strings.Repeat("x\n", 10)}
 	random := rand.New(rand.NewSource(42))
 	alphabet := []rune("ab界\t\ń👩‍💻")
@@ -80,10 +80,10 @@ func TestEditorMeasurementMatchesFullLayout(t *testing.T) {
 	}
 	for n, value := range values {
 		t.Run(fmt.Sprint(n), func(t *testing.T) {
-			c := newEditor(value, 0)
+			c := newDraftEditor(value, 0)
 			for width := 1; width <= 80; width++ {
 				got := c.measureRows(width)
-				want := min(len(c.layout(width).rows), maxEditorBodyRows)
+				want := min(len(c.layout(width).rows), maxDraftBodyRows)
 				if got != want {
 					t.Fatalf("width %d, %q: measured %d, want %d", width, value, got, want)
 				}

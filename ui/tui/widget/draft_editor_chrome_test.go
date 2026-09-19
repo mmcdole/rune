@@ -11,11 +11,11 @@ import (
 	"github.com/mmcdole/rune/input"
 )
 
-func TestEditorLabelsPrioritizeEssentialActions(t *testing.T) {
+func TestDraftEditorLabelsPrioritizeEssentialActions(t *testing.T) {
 	for _, mode := range []input.SubmissionMode{input.ModeCommand, input.ModeVerbatim} {
 		t.Run(mode.String(), func(t *testing.T) {
 			in := newTestInput(100)
-			in.OpenEditor("first\nsecond", 0)
+			in.OpenDraftEditor("first\nsecond", 0)
 			in.SetSubmissionMode(mode)
 			for _, width := range []int{32, 40, 60, 80, 100} {
 				t.Run(fmt.Sprint(width), func(t *testing.T) {
@@ -49,9 +49,9 @@ func TestEditorLabelsPrioritizeEssentialActions(t *testing.T) {
 	}
 }
 
-func TestEditorLabelsStayCompleteAndInsideTheirRules(t *testing.T) {
+func TestDraftEditorLabelsStayCompleteAndInsideTheirRules(t *testing.T) {
 	in := newTestInput(100)
-	in.OpenEditor("first\nsecond", 0)
+	in.OpenDraftEditor("first\nsecond", 0)
 	complete := map[string]bool{
 		"COMMAND": true, "VERBATIM": true, "COMMAND · 2 lines": true, "VERBATIM · 2 lines": true,
 		"Alt+V command": true, "Alt+V verbatim": true,

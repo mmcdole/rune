@@ -29,7 +29,7 @@ func (i *Input) layout(width, height int) inputLayout {
 		return p
 	}
 	if i.PickerActive() || i.SearchActive() {
-		// One editor stays at the bottom. Suggestions/results occupy the
+		// One input field stays at the bottom. Suggestions/results occupy the
 		// rows above it; Input owns their shared separators, with no box.
 		fieldHeight := min(3, max(1, height-1))
 		p.pickerHeight = max(0, height-fieldHeight)
@@ -46,7 +46,7 @@ func (i *Input) layout(width, height int) inputLayout {
 	}
 	top, bottom := p.pickerHeight, height
 	fieldHeight := bottom - top
-	if i.editor != nil && !i.SearchActive() && (!i.PickerActive() || i.PickerInline()) {
+	if i.draftEditor != nil && !i.SearchActive() && (!i.PickerActive() || i.PickerInline()) {
 		if fieldHeight >= 2 {
 			p.header = top
 			p.rules = append(p.rules, Rule{At: top, To: width})
@@ -78,8 +78,8 @@ func (i *Input) Rules(width, height int) []Rule {
 		return nil
 	}
 	plan := i.layout(width, height)
-	if i.editor != nil && !i.SearchActive() && (!i.PickerActive() || i.PickerInline()) {
-		header, toggle, footer := i.editorLabels(i.editor.lines(), width-4)
+	if i.draftEditor != nil && !i.SearchActive() && (!i.PickerActive() || i.PickerInline()) {
+		header, toggle, footer := i.draftLabels(i.draftEditor.lines(), width-4)
 		for n := range plan.rules {
 			rule := &plan.rules[n]
 			if rule.Vertical {

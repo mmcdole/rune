@@ -11,7 +11,7 @@ import (
 // is active is a plain no-op. An open picker settles first: overlays
 // are mutually exclusive and the newcomer wins.
 func (c *inputController) ShowSearch(opts ui.ShowSearchMsg) {
-	if c.input.EditorActive() {
+	if c.input.DraftEditorActive() {
 		return
 	}
 	if c.mode() == modePickerModal || c.mode() == modePickerInline {

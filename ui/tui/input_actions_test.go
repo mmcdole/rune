@@ -10,7 +10,7 @@ import (
 	"github.com/mmcdole/rune/ui"
 )
 
-func TestDefaultNewlineBindingsInBothEditors(t *testing.T) {
+func TestDefaultNewlineBindingsInBothInputModes(t *testing.T) {
 	for _, msg := range []tea.KeyPressMsg{
 		{Code: 'j', Mod: tea.ModCtrl}, {Code: tea.KeyEnter, Mod: tea.ModShift},
 		{Code: tea.KeyEnter, Mod: tea.ModCtrl}, {Code: tea.KeyKpEnter, Mod: tea.ModShift},
@@ -25,7 +25,7 @@ func TestDefaultNewlineBindingsInBothEditors(t *testing.T) {
 	}
 }
 
-func TestEditorBindingsChangeRoutingAndHints(t *testing.T) {
+func TestInputBindingsChangeRoutingAndHints(t *testing.T) {
 	m := newBareModel(t)
 	m.input.SetSize(120, 0)
 	keys := input.Bindings{
@@ -144,7 +144,7 @@ func TestNamedActionRespectsTypingAndPhysicalKeypad(t *testing.T) {
 }
 
 func TestReboundCancelAcrossInputContexts(t *testing.T) {
-	for _, context := range []string{"normal", "editor", "inline", "modal", "search"} {
+	for _, context := range []string{"normal", "draft_editor", "inline", "modal", "search"} {
 		t.Run(context, func(t *testing.T) {
 			h := newControllerHarness()
 			bindings := input.DefaultBindings()
@@ -153,7 +153,7 @@ func TestReboundCancelAcrossInputContexts(t *testing.T) {
 			h.ctl.input.SetBindings(bindings)
 			h.ctl.SetText("draft")
 			switch context {
-			case "editor":
+			case "draft_editor":
 				h.ctl.SetText("first\nsecond")
 			case "inline", "modal":
 				h.ctl.ShowPicker(ui.ShowPickerMsg{Items: pickerTestItems, CallbackID: "test", Inline: context == "inline"})
@@ -166,7 +166,7 @@ func TestReboundCancelAcrossInputContexts(t *testing.T) {
 				t.Fatal("unbound Escape still cancels")
 			}
 			h.ctl.HandleKey(ctrlPress('g'))
-			if context == "editor" {
+			if context == "draft_editor" {
 				if h.ctl.input.Value() != draft {
 					t.Fatal("first cancel discarded editor")
 				}
@@ -175,7 +175,7 @@ func TestReboundCancelAcrossInputContexts(t *testing.T) {
 			if h.ctl.mode() != modeNormal {
 				t.Fatal("cancel did not close context")
 			}
-			if context == "normal" || context == "editor" {
+			if context == "normal" || context == "draft_editor" {
 				if h.ctl.input.Value() != "" {
 					t.Fatal("cancel did not clear draft")
 				}
@@ -239,7 +239,7 @@ func TestEditorAndCancelHintsFollowActions(t *testing.T) {
 }
 
 func TestReboundEditorUsesDraftAndRespectsOverlays(t *testing.T) {
-	for _, context := range []string{"normal", "editor", "inline", "modal", "search"} {
+	for _, context := range []string{"normal", "draft_editor", "inline", "modal", "search"} {
 		t.Run(context, func(t *testing.T) {
 			h := newControllerHarness()
 			bindings := input.DefaultBindings()
@@ -248,7 +248,7 @@ func TestReboundEditorUsesDraftAndRespectsOverlays(t *testing.T) {
 			h.ctl.input.SetBindings(bindings)
 			h.ctl.SetText("draft")
 			switch context {
-			case "editor":
+			case "draft_editor":
 				h.ctl.SetText("first\nsecond")
 			case "inline", "modal":
 				h.ctl.ShowPicker(ui.ShowPickerMsg{Items: pickerTestItems, CallbackID: "test", Inline: context == "inline"})

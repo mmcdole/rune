@@ -94,8 +94,8 @@ rune.bind("numpad3", function() rune.send("down") end)
 | Key | Normal input | Composer |
 |---|---|---|
 | `enter` | Submit the command | Submit using the displayed mode |
-| `alt+v` | Open the composer in Verbatim mode | Toggle Command/Verbatim |
-| `ctrl+j`, `shift+enter`, `ctrl+enter` | Start a composer newline | Insert a newline |
+| `alt+v` | Open the draft editor in Verbatim mode | Toggle Command/Verbatim |
+| `ctrl+j`, `shift+enter`, `ctrl+enter` | Start a draft editor newline | Insert a newline |
 | `ctrl+e` | Edit the draft in `$EDITOR` | Edit the draft in `$EDITOR` |
 | `esc` | Clear the draft | Confirm, then discard on the second press |
 
@@ -145,7 +145,7 @@ modified keypad Enter.
 | Context | Rune handles locally | Lua binds |
 |---|---|---|
 | Normal input | Configured input actions; paste is atomic | Non-printable binds run. A printable bind runs only when the input is empty or fully selected; otherwise the character is typed |
-| Inline picker | Configured cancel or `ctrl+c` closes; `up`/`down` navigate; `tab` accepts; `enter` accepts; configured submit accepts and submits; newline starts the composer; editor closes the picker and edits the draft; unbound text filters | Any other bound key runs, including printable keys |
+| Inline picker | Configured cancel or `ctrl+c` closes; `up`/`down` navigate; `tab` accepts; `enter` accepts; configured submit accepts and submits; newline starts the draft editor; editor closes the picker and edits the draft; unbound text filters | Any other bound key runs, including printable keys |
 | Modal picker | Configured cancel closes; all other keys stay in the picker | None |
 | Scrollback search | Configured cancel closes; all other keys stay in search | None |
 | Composer | Text entry, editing and navigation, literal `tab`, submit, newline, external editor, and two-step configured cancel | Unused chords can run |
@@ -156,9 +156,9 @@ kept command also counts as empty because the next typed character would
 replace it.
 
 Bracketed paste never runs a bind. Normal input, an inline picker, and the
-composer insert it all at once, so a bind can't fire partway through it;
+draft editor insert it all at once, so a bind can't fire partway through it;
 structured paste opens the
-[composer](/interface/input/#multiline-verbatim-composer).
+[draft editor](/interface/input/#multiline-draft-editor).
 Verbatim is the initial interpretation unless you explicitly chose a mode for
 this draft. Modal pickers and scrollback search append paste to their query.
 
@@ -222,7 +222,7 @@ in your `init.lua` replaces its default action.
 
 Bare `home` and `end` are deliberately unbound, so they move the input cursor
 to the start or end of the line. In normal input, binding either key replaces
-that movement with your callback; the composer continues to own both keys.
+that movement with your callback; the draft editor continues to own both keys.
 
 `pgup`, `pgdown`, `ctrl+home`, and `ctrl+end` also have a built-in fallback, so
 output remains scrollable if the Lua defaults are absent. Removing their binds

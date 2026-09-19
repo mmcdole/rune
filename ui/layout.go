@@ -325,7 +325,7 @@ var ErrLayoutTooSmall = errors.New("layout extent is smaller than its minimum si
 
 // ValidateLayoutTree validates structural shape and constraints. Widget
 // registration and application-level requirements, such as the mandatory input
-// composer, belong to the loader.
+// input widget, belong to the loader.
 func ValidateLayoutTree(tree LayoutTree) error {
 	state := layoutValidation{
 		ids:       make(map[string]string),
@@ -470,7 +470,7 @@ func validateLeafFields(node LayoutNode, path string) error {
 	return nil
 }
 
-// validateRegionContents keeps the input composer reachable. A region may
+// validateRegionContents keeps the input widget reachable. A region may
 // carry an id while it contains input, so ids stay usable as plain handles,
 // but it cannot be declared hidden while it does. The region API refuses to
 // hide such a region at runtime for the same reason.
@@ -491,8 +491,8 @@ func validateRegionContents(node LayoutNode, path string) (containsInput bool, e
 }
 
 // RegionContainsInput reports whether the identified region holds the input
-// composer at any depth. Such a region exists and may be shown or queried,
-// but hiding it would make the composer unreachable.
+// input widget at any depth. Such a region exists and may be shown or queried,
+// but hiding it would make the input widget unreachable.
 func (t LayoutTree) RegionContainsInput(id string) (containsInput, found bool) {
 	if id == "" {
 		return false, false

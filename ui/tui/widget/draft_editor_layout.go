@@ -13,42 +13,42 @@ import (
 	"github.com/mmcdole/rune/ui/tui/util"
 )
 
-type editorGlyph struct {
+type draftGlyph struct {
 	text  string
 	width int
 }
 
-type editorPoint struct {
+type draftPoint struct {
 	offset int
 	col    int
 }
 
-type editorRow struct {
+type draftRow struct {
 	line         int
 	continuation bool
-	glyphs       []editorGlyph
-	points       []editorPoint
+	glyphs       []draftGlyph
+	points       []draftPoint
 }
 
-type editorLayout struct {
-	rows       []editorRow
+type draftLayout struct {
+	rows       []draftRow
 	cursorRow  int
 	cursorCol  int
 	gutterSize int
 }
 
-// buildEditorLayout derives safe terminal rows from the canonical buffer.
+// buildDraftLayout derives safe terminal rows from the canonical buffer.
 // Source tabs remain one rune but expand to cells at classic 8-column stops.
 // Every source insertion offset is retained on exactly one visual row so
 // vertical movement and cursor rendering never need to reverse-map strings.
-func buildEditorLayout(content []rune, width, lineCount, rowLimit int) editorLayout {
-	gutter := editorGutterSize(lineCount, width)
+func buildDraftLayout(content []rune, width, lineCount, rowLimit int) draftLayout {
+	gutter := draftGutterSize(lineCount, width)
 	contentWidth := width - gutter
 	if contentWidth < 1 {
 		contentWidth = 1
 	}
 
-	layout := editorLayout{
+	layout := draftLayout{
 		gutterSize: gutter,
 	}
 
@@ -60,22 +60,22 @@ func buildEditorLayout(content []rune, width, lineCount, rowLimit int) editorLay
 			lineEnd++
 		}
 
-		layout.rows = append(layout.rows, editorRow{line: line})
+		layout.rows = append(layout.rows, draftRow{line: line})
 		rowIndex := len(layout.rows) - 1
 		col := 0
 		logicalCol := 0
 
 		newContinuation := func() {
-			layout.rows = append(layout.rows, editorRow{line: line, continuation: true})
+			layout.rows = append(layout.rows, draftRow{line: line, continuation: true})
 			rowIndex = len(layout.rows) - 1
 			col = 0
 		}
 		addPoint := func(offset int) {
-			layout.rows[rowIndex].points = append(layout.rows[rowIndex].points, editorPoint{offset: offset, col: col})
+			layout.rows[rowIndex].points = append(layout.rows[rowIndex].points, draftPoint{offset: offset, col: col})
 		}
-		appendGlyph := func(g editorGlyph) {
+		appendGlyph := func(g draftGlyph) {
 			if g.width > contentWidth {
-				g = editorGlyph{text: "�", width: 1}
+				g = draftGlyph{text: "�", width: 1}
 			}
 			if col > 0 && col+g.width > contentWidth {
 				newContinuation()
@@ -106,7 +106,7 @@ func buildEditorLayout(content []rune, width, lineCount, rowLimit int) editorLay
 					if col >= contentWidth {
 						newContinuation()
 					}
-					appendGlyph(editorGlyph{text: " ", width: 1})
+					appendGlyph(draftGlyph{text: " ", width: 1})
 				}
 				offset++
 				remaining = remaining[1:]
@@ -116,7 +116,7 @@ func buildEditorLayout(content []rune, width, lineCount, rowLimit int) editorLay
 			cluster, _ := ansi.FirstGraphemeCluster(remaining, ansi.GraphemeWidth)
 			remaining = remaining[len(cluster):]
 			display := text.VisualizeTerminalControls(cluster, false)
-			glyph := editorGlyph{text: display, width: ansi.StringWidth(display)}
+			glyph := draftGlyph{text: display, width: ansi.StringWidth(display)}
 			// A wide glyph that does not fit belongs wholly to the next
 			// visual row; its source cursor point must move with it.
 			if col > 0 && col+glyph.width > contentWidth {
@@ -148,7 +148,7 @@ func buildEditorLayout(content []rune, width, lineCount, rowLimit int) editorLay
 
 // Source offsets are ordered within each row. Tab expansion can leave rows
 // without insertion points; skip those when locating the cursor.
-func (l editorLayout) withCursor(cursor int) editorLayout {
+func (l draftLayout) withCursor(cursor int) draftLayout {
 	for rowIndex, row := range l.rows {
 		if len(row.points) == 0 || row.points[len(row.points)-1].offset < cursor {
 			continue
@@ -163,7 +163,7 @@ func (l editorLayout) withCursor(cursor int) editorLayout {
 	return l
 }
 
-func editorGutterSize(lineCount, width int) int {
+func draftGutterSize(lineCount, width int) int {
 	digits := lenInt(lineCount)
 	size := digits + 3 // number + space + marker + space
 	if width-size < 1 {
@@ -184,9 +184,9 @@ func lenInt(n int) int {
 	return digits
 }
 
-func (i *Input) editorTopRow(layout editorLayout, bodyHeight int) int {
+func (i *Input) draftTopRow(layout draftLayout, bodyHeight int) int {
 	maxTop := max(0, len(layout.rows)-bodyHeight)
-	top := clampInt(i.editor.topRow, 0, maxTop)
+	top := clampInt(i.draftEditor.topRow, 0, maxTop)
 	if layout.cursorRow < top {
 		top = layout.cursorRow
 	} else if layout.cursorRow >= top+bodyHeight {
@@ -195,9 +195,9 @@ func (i *Input) editorTopRow(layout editorLayout, bodyHeight int) int {
 	return clampInt(top, 0, maxTop)
 }
 
-func (i *Input) editorRows(bodyHeight int) []string {
-	layout := i.editor.layout(i.width)
-	top := i.editorTopRow(layout, bodyHeight)
+func (i *Input) draftRows(bodyHeight int) []string {
+	layout := i.draftEditor.layout(i.width)
+	top := i.draftTopRow(layout, bodyHeight)
 
 	rows := make([]string, 0, bodyHeight)
 
@@ -207,15 +207,15 @@ func (i *Input) editorRows(bodyHeight int) []string {
 			rows = append(rows, strings.Repeat(" ", max(0, i.width)))
 			continue
 		}
-		rows = append(rows, i.renderEditorRow(layout, rowIndex))
+		rows = append(rows, i.renderDraftRow(layout, rowIndex))
 	}
 
 	return rows
 }
 
-// editorLabels fits complete labels in the available cells. Mode switching
+// draftLabels fits complete labels in the available cells. Mode switching
 // takes precedence over line count; submit and newline precede secondary actions.
-func (i *Input) editorLabels(lines, width int) (header, toggle, footer string) {
+func (i *Input) draftLabels(lines, width int) (header, toggle, footer string) {
 	mode, destination, submit := "COMMAND", "verbatim", i.actionHint("submit", "run")
 	if i.SubmissionMode() == input.ModeVerbatim {
 		mode, destination, submit = "VERBATIM", "command", i.actionHint("submit", "send")
@@ -232,9 +232,9 @@ func (i *Input) editorLabels(lines, width int) (header, toggle, footer string) {
 	}
 	if ansi.StringWidth(header)+3+ansi.StringWidth(toggle) > width {
 		toggle = ""
-		header = fitEditorHints(width, title)
+		header = fitDraftHints(width, title)
 		if header == "" {
-			header = fitEditorHints(width, mode)
+			header = fitDraftHints(width, mode)
 		}
 	}
 	hints := []string{submit, i.actionHint("newline", "newline")}
@@ -243,19 +243,19 @@ func (i *Input) editorLabels(lines, width int) (header, toggle, footer string) {
 		hints = append(hints, cancel+"×2 discard")
 	}
 	hints = append(hints, i.actionHint("open_editor", "editor"))
-	footer = fitEditorHints(width, hints...)
+	footer = fitDraftHints(width, hints...)
 	if i.discardPending && cancel != "" {
-		footer = fitEditorHints(width, cancel+" again to discard")
+		footer = fitDraftHints(width, cancel+" again to discard")
 		if footer == "" {
-			footer = fitEditorHints(width, cancel+" to discard")
+			footer = fitDraftHints(width, cancel+" to discard")
 		}
 	}
 
 	return header, toggle, footer
 }
 
-// fitEditorHints keeps hints in priority order without cutting a key or label.
-func fitEditorHints(width int, hints ...string) string {
+// fitDraftHints keeps hints in priority order without cutting a key or label.
+func fitDraftHints(width int, hints ...string) string {
 	var fitted string
 	for _, hint := range hints {
 		if hint == "" {
@@ -273,7 +273,7 @@ func fitEditorHints(width int, hints ...string) string {
 	return fitted
 }
 
-func (i *Input) renderEditorRow(layout editorLayout, rowIndex int) string {
+func (i *Input) renderDraftRow(layout draftLayout, rowIndex int) string {
 	row := layout.rows[rowIndex]
 	var b strings.Builder
 

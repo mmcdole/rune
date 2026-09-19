@@ -27,12 +27,12 @@ const (
 
 // Input handles the input area including text entry, picker overlay, and borders.
 type Input struct {
-	keys      input.Bindings
-	textinput textinput.Model
-	editor    *editor
-	picker    *Picker
-	search    *Search
-	styles    style.Styles
+	keys        input.Bindings
+	textinput   textinput.Model
+	draftEditor *draftEditor
+	picker      *Picker
+	search      *Search
+	styles      style.Styles
 
 	// State
 	submissionMode input.SubmissionMode
@@ -81,8 +81,8 @@ func NewInput(styles style.Styles, search *Search) *Input {
 // UpdateTextInput forwards messages to the underlying textinput.
 func (i *Input) UpdateTextInput(msg tea.Msg) tea.Cmd {
 	if key, ok := msg.(tea.KeyPressMsg); ok {
-		if i.editor != nil {
-			i.UpdateEditor(key)
+		if i.draftEditor != nil {
+			i.UpdateDraftEditor(key)
 			return nil
 		}
 		if i.selected {
@@ -161,8 +161,8 @@ func (i *Input) View() string {
 		}
 		return strings.Join(rows, "\n")
 	}
-	if i.editor != nil {
-		copy(rows[plan.body.Min.Y:plan.body.Max.Y], i.editorRows(plan.body.Dy()))
+	if i.draftEditor != nil {
+		copy(rows[plan.body.Min.Y:plan.body.Max.Y], i.draftRows(plan.body.Dy()))
 	} else if !plan.body.Empty() {
 		// Keep the ordinary one-line input in its compact three-row layout.
 		// Mode labels are rendered on the surrounding rules.
@@ -194,9 +194,9 @@ func (i *Input) SetSize(width, height int) {
 		i.textinput.Prompt = ""
 	}
 	i.textinput.SetWidth(max(0, width-len(i.textinput.Prompt)))
-	if i.editor != nil && !i.SearchActive() {
-		layout := i.editor.layout(width)
-		i.editor.topRow = i.editorTopRow(layout, i.layout(width, height).body.Dy())
+	if i.draftEditor != nil && !i.SearchActive() {
+		layout := i.draftEditor.layout(width)
+		i.draftEditor.topRow = i.draftTopRow(layout, i.layout(width, height).body.Dy())
 	}
 }
 
@@ -204,7 +204,7 @@ func (i *Input) MinimumSize() image.Point {
 	return image.Pt(3, 3)
 }
 
-// MeasureHeight does not resize the editor or its children.
+// MeasureHeight does not resize the draft editor or its children.
 func (i *Input) MeasureHeight(width, limit int) int {
 	if i.SearchActive() {
 		// Matching rows, one help row, one query row, and three separators.
@@ -215,8 +215,8 @@ func (i *Input) MeasureHeight(width, limit int) int {
 	}
 
 	h := 3 // normal: top border + input + bottom border
-	if i.editor != nil {
-		bodyRows := i.editor.measureRows(width)
+	if i.draftEditor != nil {
+		bodyRows := i.draftEditor.measureRows(width)
 		h = bodyRows + 2 // status header + content + key footer
 	}
 	if i.PickerActive() {
@@ -227,8 +227,8 @@ func (i *Input) MeasureHeight(width, limit int) int {
 
 // Value returns the current input text.
 func (i *Input) Value() string {
-	if i.editor != nil {
-		return i.editor.Value()
+	if i.draftEditor != nil {
+		return i.draftEditor.Value()
 	}
 	return i.textinput.Value()
 }
@@ -240,15 +240,15 @@ func (i *Input) SetValue(s string) {
 		return
 	}
 	i.Deselect()
-	if i.editor != nil {
-		// Preserve the editor and interpretation when an edit
+	if i.draftEditor != nil {
+		// Preserve the draft editor and interpretation when an edit
 		// replaces the draft with one non-empty physical line.
-		i.editor.Set(s, len([]rune(input.NormalizeDraftText(s))))
+		i.draftEditor.Set(s, len([]rune(input.NormalizeDraftText(s))))
 		i.discardPending = false
 		return
 	}
 	if input.RequiresStructuredEditor(s) {
-		i.OpenEditor(s, len([]rune(input.NormalizeDraftText(s))))
+		i.OpenDraftEditor(s, len([]rune(input.NormalizeDraftText(s))))
 		return
 	}
 	i.textinput.SetValue(s)
@@ -256,8 +256,8 @@ func (i *Input) SetValue(s string) {
 
 // CursorEnd moves the cursor to the end.
 func (i *Input) CursorEnd() {
-	if i.editor != nil {
-		i.editor.CursorEnd()
+	if i.draftEditor != nil {
+		i.draftEditor.CursorEnd()
 		return
 	}
 	i.textinput.CursorEnd()
@@ -265,8 +265,8 @@ func (i *Input) CursorEnd() {
 
 // Position returns the cursor position.
 func (i *Input) Position() int {
-	if i.editor != nil {
-		return i.editor.Position()
+	if i.draftEditor != nil {
+		return i.draftEditor.Position()
 	}
 	return i.textinput.Position()
 }
@@ -274,8 +274,8 @@ func (i *Input) Position() int {
 // SetCursor sets the cursor position.
 func (i *Input) SetCursor(pos int) {
 	i.Deselect()
-	if i.editor != nil {
-		i.editor.SetCursor(pos)
+	if i.draftEditor != nil {
+		i.draftEditor.SetCursor(pos)
 		return
 	}
 	i.textinput.SetCursor(pos)
@@ -285,7 +285,7 @@ func (i *Input) SetCursor(pos int) {
 func (i *Input) Reset() {
 	i.submissionMode = input.ModeCommand
 	i.modeExplicit = false
-	i.editor = nil
+	i.draftEditor = nil
 	i.Deselect()
 	i.discardPending = false
 	i.textinput.SetValue("")
@@ -296,14 +296,14 @@ func (i *Input) Reset() {
 func (i *Input) SubmissionMode() input.SubmissionMode { return i.submissionMode }
 
 // SetSubmissionMode makes an explicit choice without changing text, cursor,
-// selection, or the editor. Structured pastes respect this choice.
+// selection, or the draft editor. Structured pastes respect this choice.
 func (i *Input) SetSubmissionMode(mode input.SubmissionMode) {
 	i.submissionMode = mode
 	i.modeExplicit = true
 	i.discardPending = false
 }
 
-// ToggleSubmissionMode opens the editor when necessary so an explicit mode
+// ToggleSubmissionMode opens the draft editor when necessary so an explicit mode
 // change is always visible, preserving text, cursor, and selection.
 func (i *Input) ToggleSubmissionMode() {
 	mode := input.ModeVerbatim
@@ -311,24 +311,24 @@ func (i *Input) ToggleSubmissionMode() {
 		mode = input.ModeCommand
 	}
 	i.SetSubmissionMode(mode)
-	if i.editor == nil {
-		i.editor = newEditor(i.textinput.Value(), i.textinput.Position())
+	if i.draftEditor == nil {
+		i.draftEditor = newDraftEditor(i.textinput.Value(), i.textinput.Position())
 	}
 }
 
-// EditorActive reports whether the lossless structured-text editor is active.
-func (i *Input) EditorActive() bool {
-	return i.editor != nil
+// DraftEditorActive reports whether the lossless draft editor is active.
+func (i *Input) DraftEditorActive() bool {
+	return i.draftEditor != nil
 }
 
-// OpenEditor replaces the active input with a canonical structured draft.
+// OpenDraftEditor replaces the active input with a canonical structured draft.
 // It does not submit and it never routes the text through bubbles/textinput.
-func (i *Input) OpenEditor(text string, cursor int) {
+func (i *Input) OpenDraftEditor(text string, cursor int) {
 	if !i.modeExplicit {
 		i.submissionMode = input.ModeVerbatim
 	}
 	i.Deselect()
-	i.editor = newEditor(text, cursor)
+	i.draftEditor = newDraftEditor(text, cursor)
 	i.discardPending = false
 }
 
@@ -344,15 +344,15 @@ func (i *Input) InsertPaste(text string) tea.Cmd {
 	}
 	i.discardPending = false
 	text = input.NormalizeDraftText(text)
-	if i.editor != nil {
-		i.editor.Insert(text)
+	if i.draftEditor != nil {
+		i.draftEditor.Insert(text)
 		return nil
 	}
 	if input.RequiresStructuredEditor(text) {
 		value := i.textinput.Value()
 		cursor := i.textinput.Position()
-		i.OpenEditor(value, cursor)
-		i.editor.Insert(text)
+		i.OpenDraftEditor(value, cursor)
+		i.draftEditor.Insert(text)
 		return nil
 	}
 
@@ -362,23 +362,23 @@ func (i *Input) InsertPaste(text string) tea.Cmd {
 	return cmd
 }
 
-// UpdateEditor applies local editing/navigation keys. The return value is
+// UpdateDraftEditor applies local editing/navigation keys. The return value is
 // false for keys owned by the controller (notably plain Enter, Escape,
-// Ctrl+C, and Ctrl+E). Editor mode remains sticky until submit/cancel so an
+// Ctrl+C, and Ctrl+E). Draft editor mode remains sticky until submit/cancel so an
 // edit can never silently change the draft's interpretation.
-func (i *Input) UpdateEditor(msg tea.KeyPressMsg) bool {
-	if i.editor == nil {
+func (i *Input) UpdateDraftEditor(msg tea.KeyPressMsg) bool {
+	if i.draftEditor == nil {
 		return false
 	}
 	if i.selected {
 		i.resolveSelection(msg)
-		if i.editor == nil {
+		if i.draftEditor == nil {
 			// Typing or deleting over the selection starts a fresh draft.
 			i.UpdateTextInput(msg)
 			return true
 		}
 	}
-	handled := i.editor.Update(msg, i.width)
+	handled := i.draftEditor.Update(msg, i.width)
 	if handled {
 		i.discardPending = false
 	}
@@ -400,14 +400,14 @@ func (i *Input) ContinueEditing() {
 	i.discardPending = false
 }
 
-// CanMoveEditorVertically reports whether a one-row vertical move would
+// CanMoveDraftEditorVertically reports whether a one-row vertical move would
 // remain inside the current visual document. Controllers use the boundary to
 // hand unmodified recalled entries back to Lua history navigation.
-func (i *Input) CanMoveEditorVertically(delta int) bool {
-	if i.editor == nil || delta == 0 {
+func (i *Input) CanMoveDraftEditorVertically(delta int) bool {
+	if i.draftEditor == nil || delta == 0 {
 		return false
 	}
-	layout := i.editor.layout(i.width)
+	layout := i.draftEditor.layout(i.width)
 	if delta < 0 {
 		return layout.cursorRow > 0
 	}

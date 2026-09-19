@@ -8,40 +8,40 @@ import (
 	"github.com/mmcdole/rune/input"
 )
 
-// maxEditorBodyRows keeps a pasted document useful without allowing the
+// maxDraftBodyRows keeps a pasted document useful without allowing the
 // input area to take over the terminal. The surrounding Input adds a header
 // and footer to these content rows.
-const maxEditorBodyRows = 8
+const maxDraftBodyRows = 8
 
-// editor is the lossless editing model used for verbatim drafts, including
+// draftEditor is the lossless editing model used for verbatim drafts, including
 // physical structure that bubbles/textinput cannot represent (LF or TAB).
 // Cursor positions are rune offsets, matching the existing Rune input API.
-type editor struct {
+type draftEditor struct {
 	text    []rune
 	cursor  int
 	goalCol int // retained display column during vertical movement; -1 = unset
 	topRow  int // first visual row shown by the input window
 
-	cached      editorLayout
+	cached      draftLayout
 	layoutWidth int
 	lineCount   int
 }
 
-func newEditor(text string, cursor int) *editor {
-	c := &editor{goalCol: -1}
+func newDraftEditor(text string, cursor int) *draftEditor {
+	c := &draftEditor{goalCol: -1}
 	c.Set(text, cursor)
 	return c
 }
 
-func (c *editor) Value() string {
+func (c *draftEditor) Value() string {
 	return string(c.text)
 }
 
-func (c *editor) Position() int {
+func (c *draftEditor) Position() int {
 	return c.cursor
 }
 
-func (c *editor) Set(text string, cursor int) {
+func (c *draftEditor) Set(text string, cursor int) {
 	c.text = []rune(input.NormalizeDraftText(text))
 	c.invalidate()
 	c.SetCursor(cursor)
@@ -49,16 +49,16 @@ func (c *editor) Set(text string, cursor int) {
 	c.topRow = 0
 }
 
-func (c *editor) SetCursor(cursor int) {
+func (c *draftEditor) SetCursor(cursor int) {
 	c.cursor = clampInt(cursor, 0, len(c.text))
 	c.goalCol = -1
 }
 
-func (c *editor) CursorEnd() {
+func (c *draftEditor) CursorEnd() {
 	c.SetCursor(len(c.text))
 }
 
-func (c *editor) Insert(text string) {
+func (c *draftEditor) Insert(text string) {
 	runes := []rune(input.NormalizeDraftText(text))
 	if len(runes) == 0 {
 		return
@@ -72,7 +72,7 @@ func (c *editor) Insert(text string) {
 	c.goalCol = -1
 }
 
-func (c *editor) Backspace() {
+func (c *draftEditor) Backspace() {
 	if c.cursor == 0 {
 		return
 	}
@@ -82,7 +82,7 @@ func (c *editor) Backspace() {
 	c.goalCol = -1
 }
 
-func (c *editor) Delete() {
+func (c *draftEditor) Delete() {
 	if c.cursor >= len(c.text) {
 		return
 	}
@@ -91,45 +91,45 @@ func (c *editor) Delete() {
 	c.goalCol = -1
 }
 
-func (c *editor) Left() {
+func (c *draftEditor) Left() {
 	if c.cursor > 0 {
 		c.cursor--
 	}
 	c.goalCol = -1
 }
 
-func (c *editor) Right() {
+func (c *draftEditor) Right() {
 	if c.cursor < len(c.text) {
 		c.cursor++
 	}
 	c.goalCol = -1
 }
 
-func (c *editor) LineStart() {
+func (c *draftEditor) LineStart() {
 	for c.cursor > 0 && c.text[c.cursor-1] != '\n' {
 		c.cursor--
 	}
 	c.goalCol = -1
 }
 
-func (c *editor) LineEnd() {
+func (c *draftEditor) LineEnd() {
 	for c.cursor < len(c.text) && c.text[c.cursor] != '\n' {
 		c.cursor++
 	}
 	c.goalCol = -1
 }
 
-func (c *editor) DocStart() {
+func (c *draftEditor) DocStart() {
 	c.cursor = 0
 	c.goalCol = -1
 }
 
-func (c *editor) DocEnd() {
+func (c *draftEditor) DocEnd() {
 	c.cursor = len(c.text)
 	c.goalCol = -1
 }
 
-func (c *editor) WordLeft() {
+func (c *draftEditor) WordLeft() {
 	for c.cursor > 0 && unicode.IsSpace(c.text[c.cursor-1]) {
 		c.cursor--
 	}
@@ -139,7 +139,7 @@ func (c *editor) WordLeft() {
 	c.goalCol = -1
 }
 
-func (c *editor) WordRight() {
+func (c *draftEditor) WordRight() {
 	for c.cursor < len(c.text) && !unicode.IsSpace(c.text[c.cursor]) {
 		c.cursor++
 	}
@@ -149,7 +149,7 @@ func (c *editor) WordRight() {
 	c.goalCol = -1
 }
 
-func (c *editor) DeleteWordBack() {
+func (c *draftEditor) DeleteWordBack() {
 	end := c.cursor
 	c.WordLeft()
 	if c.cursor == end {
@@ -160,7 +160,7 @@ func (c *editor) DeleteWordBack() {
 	c.goalCol = -1
 }
 
-func (c *editor) DeleteToLineStart() {
+func (c *draftEditor) DeleteToLineStart() {
 	end := c.cursor
 	c.LineStart()
 	if c.cursor == end {
@@ -171,13 +171,13 @@ func (c *editor) DeleteToLineStart() {
 	c.goalCol = -1
 }
 
-func (c *editor) DeleteToLineEnd() {
+func (c *draftEditor) DeleteToLineEnd() {
 	start := c.cursor
 	c.LineEnd()
 	end := c.cursor
 	c.cursor = start
 	if start == end {
-		// Match terminal editor behavior: at EOL, Ctrl+K joins the next
+		// Match terminal editing behavior: at EOL, Ctrl+K joins the next
 		// physical line instead of becoming a no-op.
 		if end < len(c.text) && c.text[end] == '\n' {
 			end++
@@ -190,10 +190,10 @@ func (c *editor) DeleteToLineEnd() {
 	c.goalCol = -1
 }
 
-// Update applies keys that have local editing meaning in editor mode. The
-// controller handles configured editor actions first. Escape, Ctrl+C, and
+// Update applies keys that have local editing meaning in draft editor mode. The
+// controller handles configured input actions first. Escape, Ctrl+C, and
 // Ctrl+E remain available for cancellation and Lua bindings.
-func (c *editor) Update(msg tea.KeyPressMsg, widgetWidth int) bool {
+func (c *draftEditor) Update(msg tea.KeyPressMsg, widgetWidth int) bool {
 	if msg.Text != "" {
 		c.Insert(msg.Text)
 		return true
@@ -259,10 +259,10 @@ func (c *editor) Update(msg tea.KeyPressMsg, widgetWidth int) bool {
 		c.DeleteToLineEnd()
 		return true
 	case matchesKey(msg, tea.KeyPgUp, 0):
-		c.moveVertical(-maxEditorBodyRows, widgetWidth)
+		c.moveVertical(-maxDraftBodyRows, widgetWidth)
 		return true
 	case matchesKey(msg, tea.KeyPgDown, 0):
-		c.moveVertical(maxEditorBodyRows, widgetWidth)
+		c.moveVertical(maxDraftBodyRows, widgetWidth)
 		return true
 	}
 
@@ -281,7 +281,7 @@ func matchesEnterKey(msg tea.KeyPressMsg, modifiers tea.KeyMod) bool {
 		msg.Mod&keyModifiers == modifiers
 }
 
-func (c *editor) moveVertical(delta, widgetWidth int) {
+func (c *draftEditor) moveVertical(delta, widgetWidth int) {
 	layout := c.layout(widgetWidth)
 	if len(layout.rows) == 0 {
 		return
@@ -326,20 +326,20 @@ func absInt(value int) int {
 
 // layout shares the same shaped draft across measurement, rendering, and
 // navigation. Text edits invalidate it; an unchanged draft needs no reshaping.
-func (c *editor) layout(width int) editorLayout {
+func (c *draftEditor) layout(width int) draftLayout {
 	if c.cached.rows == nil || c.layoutWidth != width {
-		c.cached = buildEditorLayout(c.text, width, c.lines(), 0)
+		c.cached = buildDraftLayout(c.text, width, c.lines(), 0)
 		c.layoutWidth = width
 	}
 	return c.cached.withCursor(c.cursor)
 }
 
-func (c *editor) invalidate() {
+func (c *draftEditor) invalidate() {
 	c.cached.rows = nil
 	c.lineCount = 0
 }
 
-func (c *editor) lines() int {
+func (c *draftEditor) lines() int {
 	if c.lineCount == 0 {
 		c.lineCount = 1
 		for _, r := range c.text {
@@ -353,12 +353,12 @@ func (c *editor) lines() int {
 
 // Measurement must not evict the layout at the actual editing width. Most
 // large drafts already reach the height cap without examining their wrapping.
-func (c *editor) measureRows(width int) int {
-	if c.lines() >= maxEditorBodyRows {
-		return maxEditorBodyRows
+func (c *draftEditor) measureRows(width int) int {
+	if c.lines() >= maxDraftBodyRows {
+		return maxDraftBodyRows
 	}
 	if c.cached.rows != nil && c.layoutWidth == width {
-		return min(len(c.cached.rows), maxEditorBodyRows)
+		return min(len(c.cached.rows), maxDraftBodyRows)
 	}
-	return min(len(buildEditorLayout(c.text, width, c.lines(), maxEditorBodyRows).rows), maxEditorBodyRows)
+	return min(len(buildDraftLayout(c.text, width, c.lines(), maxDraftBodyRows).rows), maxDraftBodyRows)
 }

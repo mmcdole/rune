@@ -123,7 +123,7 @@ relaxed to keep input reachable on both axes; explicit maxima still apply.
 
 ### Leaf types
 
-- `input`: command input, composer, picker, and search. Required exactly once.
+- `input`: command input, draft editor, picker, and search. Required exactly once.
 - `pane`: a named, scrollable buffer. Requires `name`.
 - `bar`: a named Lua bar renderer. Requires `name`.
 - `separator`: a one-line rule with optional `char`.

@@ -19,13 +19,13 @@ var updateRenderSnapshots = flag.Bool("update-render", false, "rewrite reviewed 
 // Equivalent ANSI encodings pass; changed glyphs, colors, cursor styles, and
 // geometry do not. Each quoted line is one terminal row, including its padding.
 func TestRenderSnapshots(t *testing.T) {
-	for _, scene := range []string{"normal", "editor", "picker", "search", "scrolled"} {
+	for _, scene := range []string{"normal", "draft_editor", "picker", "search", "scrolled"} {
 		t.Run(scene, func(t *testing.T) {
 			m := renderFixture(80, 24, true)
 			m.Update(ui.PrintLineMsg("\x1b[35mUnicode:\x1b[0m 界 e\u0301 👩‍💻 1️⃣\tend"))
 			m.Update(ui.SetInputMsg("look north"))
 			switch scene {
-			case "editor":
+			case "draft_editor":
 				m.Update(ui.SetInputMsg("say hello\n\t界 e\u0301 👩‍💻\nlook"))
 			case "picker":
 				m.Update(ui.ShowPickerMsg{Title: "History", Items: []ui.PickerItem{{Text: "look north"}, {Text: "say hello"}}})

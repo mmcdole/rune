@@ -66,7 +66,7 @@ Aliases are not normalized: use `esc`, `pgup`, and `pgdown`, not `escape`,
 The Keybindings guide describes
 [where binds run](/scripting/keybindings/#where-binds-run) and the
 [default keymap](/scripting/keybindings/#defaults). It distinguishes normal
-input, inline and modal pickers, scrollback search, and the composer.
+input, inline and modal pickers, scrollback search, and the draft editor.
 
 ## Managing
 

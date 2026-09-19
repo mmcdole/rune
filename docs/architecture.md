@@ -91,7 +91,7 @@ read the `select`.
 The UI layer (built with Bubble Tea) owns terminal interaction mechanics, not
 application policy.
 
-- **Interaction mechanics:** It owns editing, editor mode, picker and search
+- **Interaction mechanics:** It owns editing, draft editor mode, picker and search
   modes, output scrolling, wrapping, and render throttling.
 - **Application policy:** Lua decides which binds, bars, layouts, triggers, and
   commands exist. The UI never calls Lua directly.
@@ -107,7 +107,7 @@ and the editable draft that should follow it. Once Session accepts the event,
 the UI applies that same post-submit state locally; Session mirrors it and
 finishes the partial prompt, then calls `input_changed` when the draft text
 changed, before processing the submitted lines. If the queue is full,
-the UI leaves a submission in the editor and shows a warning. Other rejected
+the UI leaves a submission in the draft editor and shows a warning. Other rejected
 events are dropped with a warning. This keeps the UI responsive without
 silently losing typed input.
 
@@ -142,10 +142,9 @@ separate messages; the TUI never calls Lua during measurement or rendering.
 The TUI prunes inactive nodes, measures widgets without resizing them, and uses
 `ui.AllocateAxis` to assign rectangles. It retains that layout until geometry
 can change: terminal size, layout declarations, input edits, changed bars, or
-text in an auto-sized pane/container. Ordinary output appends reuse it. A single
-conservative flag records whether any active pane has content-dependent sizing;
-there is no dependency graph. Geometry changes are applied before subsequent
-messages wrap output or move the search selection.
+text in a pane whose size, or ancestor size, is auto. The layout records those
+pane names; writes to other panes reuse the geometry. Geometry changes are applied
+before subsequent messages wrap output or move the search selection.
 
 Rendering builds the screen from that layout. `Model` renders the first change
 after idle immediately, then coalesces changes inside a 16ms window. Its timer
@@ -170,9 +169,10 @@ wrapping, and `Scrollback`, the bounded ring of retained terminal rows. Search
 reads that ring using eviction-stable sequence numbers. Output wraps on arrival;
 ordinary panes retain logical lines and re-wrap when their width changes.
 
-The multiline `editor` keeps its wrapped rows and insertion positions until
-text, width, or cursor changes. Input measurement, navigation, and rendering
-reuse that result. Incoming output does not rebuild an unchanged draft.
+The `draftEditor` keeps one layout of wrapped rows and insertion positions until
+text or width changes. Cursor movement locates an existing insertion point;
+height measurement stops at eight rows and preserves the editing layout.
+Incoming output does not rebuild an unchanged draft.
 
 Bar callbacks run on Session's 250ms ticker with the terminal width. The TUI
 aligns/clips their snapshots to the assigned slot. No layout-to-Lua width
@@ -187,12 +187,12 @@ Bar registrations survive layout replacement but are rebuilt on reload.
 - **Registration:** Lua registers a bind: `rune.bind("ctrl+r", fn)`.
 - **Sync:** Session pushes an `input.Bindings` snapshot to the UI (`UpdateBindsMsg`).
 - **Detection:** When a key is pressed, the UI checks this map.
-  - **If Bound:** Within the current context, the UI executes named editor actions locally or sends callbacks as an `ExecuteBindMsg` to Session. Disabled bindings are consumed.
+  - **If Bound:** Within the current context, the UI executes named input actions locally or sends callbacks as an `ExecuteBindMsg` to Session. Disabled bindings are consumed.
   - **If Unbound:** The UI handles it normally (for example, typing text).
 
 ### 3.3 The Generic Picker
 
-Input owns result placement, editor placement, height measurement, and
+Input owns result placement, input placement, height measurement, and
 separator rules. Picker and Search supply result rows and query state.
 The renderer joins Input's separators to surrounding layout dividers.
 
@@ -407,16 +407,16 @@ Draft callbacks and state acknowledgments have separate purposes:
   atomically, so it needs no separate UI change event.
 
 Script draft edits normalize CRLF and CR to LF using the same rule as the
-rune-based editor. Observers can edit the draft again; nested callbacks execute
+rune-based draft editor. Observers can edit the draft again; nested callbacks execute
 synchronously under the enclosing watchdog. The `input_changed` event name and
 public `rune.input` APIs remain unchanged.
 
-The lossless editor preserves draft structure independently of its submission mode.
+The draft editor preserves draft structure independently of its submission mode.
 Structured text initially selects Verbatim; an explicit mode choice persists
-for the draft. `rune.bind` registers callbacks and named editor actions in one
-registry. The controller resolves the editor action once per key from the same
+for the draft. `rune.bind` registers callbacks and named input actions in one
+registry. The controller resolves the input action once per key from the same
 binding snapshot used for callback membership and hints. Modal overlays capture
-keys; the editor retains its editing mechanics. Missing core bindings use Go
+keys; the draft editor retains its editing mechanics. Missing core bindings use Go
 recovery defaults; a successful empty snapshot means no bindings.
 
 The UI validates Command text before queueing so rejected submissions retain

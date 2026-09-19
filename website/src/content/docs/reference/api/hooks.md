@@ -134,7 +134,7 @@ script additions are immediately visible to both history reads and later history
 expansion. An empty final history string is not saved.
 An accepted `""` replacement still reaches echo and dispatch.
 
-See the [input hook compatibility note](/interface/input/#multiline-verbatim-composer)
+See the [input hook compatibility note](/interface/input/#multiline-draft-editor)
 for the changes from whole-draft Verbatim hooks and earlier history timing.
 
 All input handlers run in priority order, with lower numbers first. If none

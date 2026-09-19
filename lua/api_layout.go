@@ -429,7 +429,7 @@ func countInputNodes(root ui.LayoutNode) (input int) {
 }
 
 // refuseHidingInput returns nil, err to the caller when hiding the region
-// would remove the input composer from the layout. Unknown regions are left
+// would remove the input widget from the layout. Unknown regions are left
 // to the caller's own not-found handling.
 func (e *Engine) refuseHidingInput(c *script.Call, operation, id string) bool {
 	containsInput, found := e.layout.RegionContainsInput(id)

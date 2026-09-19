@@ -14,7 +14,7 @@ func (c *inputController) ShowPicker(opts ui.ShowPickerMsg) {
 	// Completion/history pickers are single-line concepts. If a script
 	// asks for one while a structured draft is active, settle its callback
 	// immediately instead of layering conflicting input modes.
-	if c.input.EditorActive() {
+	if c.input.DraftEditorActive() {
 		c.notify(ui.PickerSelectMsg{CallbackID: opts.CallbackID, Accepted: false})
 		return
 	}

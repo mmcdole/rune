@@ -18,7 +18,7 @@ func TestPasteMessageRoutesAtomicallyToEditor(t *testing.T) {
 	next, _ := m.Update(tea.PasteMsg{Content: "say hello\nsay goodbye"})
 	m = next.(*Model)
 
-	if m.inputCtl.mode() != modeEditor {
+	if m.inputCtl.mode() != modeDraftEditor {
 		t.Fatalf("paste mode = %v, want editor", m.inputCtl.mode())
 	}
 	if got := m.input.Value(); got != "say hello\nsay goodbye" {
@@ -141,7 +141,7 @@ func TestSetInputSubmissionMessageForcesVerbatimMode(t *testing.T) {
 	next, _ := m.Update(ui.SetInputSubmissionMsg(input.Verbatim("one line;still data")))
 	m = next.(*Model)
 
-	if m.inputCtl.mode() != modeEditor || !m.input.EditorActive() {
+	if m.inputCtl.mode() != modeDraftEditor || !m.input.DraftEditorActive() {
 		t.Fatal("explicit verbatim message did not enter editor")
 	}
 	if got := m.input.Value(); got != "one line;still data" {

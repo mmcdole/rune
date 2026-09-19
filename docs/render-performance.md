@@ -53,7 +53,7 @@ or benchmark definitions. Changing a fixture requires a new baseline.
 | `OutputLatency/idle` | One line after the model's pending frame work has settled | First-output delay; settling is excluded from timing |
 | `OutputLatency/single` | One line, waiting for its terminal write before sending the next | Continuous small updates |
 | `OutputLatency/burst100`, `burst1000` | Enqueue a burst and wait for its last line's terminal write | Backlog drain and newest-output latency |
-| `OutputLatency/draft100_burst100` | Same 100-line burst while a multiline draft is open | Unrelated editor work delaying MUD output |
+| `OutputLatency/draft100_burst100` | Same 100-line burst while a multiline draft is open | Unrelated draft editing work delaying MUD output |
 | `RenderUpdate` | One line inside an open render-throttle window | Per-message work, with 0/100/1,000 draft lines |
 | `RenderFlood` | 100 lines, ten prompt updates, one explicit frame boundary | Fixed-work throughput, independent of timer scheduling |
 | `RenderScreen` | Render an unchanged two-pane scene at 80×24 or 270×66 | Full rendering cost with warm widget caches |
@@ -108,7 +108,7 @@ go test -race ./ui/tui -run '^$' -bench '^BenchmarkOutputLatency$' -benchtime=1x
 The normal UI tests cover wrapping, border junctions, resizing, search anchors,
 prompt commits, ring eviction, and input behavior. `TestRenderSnapshots` adds
 five deterministic scenes using the same fixture as the benchmarks: normal,
-multiline editor, picker, search, and scrolled output receiving new text. They
+draft editor, picker, search, and scrolled output receiving new text. They
 include colors, wide characters, combining marks, emoji, and tabs. Snapshots
 normalize ANSI through terminal cells before comparison, so equivalent escape
 encodings can pass. Quoted rows preserve styles and padding in reviewable files.
@@ -127,7 +127,7 @@ checks for key negotiation or display artifacts follow `docs/testing.md`.
 
 ## Optimization order
 
-1. Eliminate geometry and multiline-editor work from ordinary output updates
+1. Eliminate geometry and draft editor work from ordinary output updates
    when their sizes cannot change. Preserve append-time wrapping and apply any
    pending resize before appending the next line.
 2. Reuse resolved geometry and border cells until geometry actually changes.

@@ -343,7 +343,7 @@ func fallbackAllocation(
 	}
 
 	// Retry without gaps or ordinary minima, preserving the original sizing
-	// rules and hard maxima. Keep the editor reachable on either axis.
+	// rules and hard maxima. Keep the input reachable on either axis.
 	relaxed := append([]ui.AxisTrack(nil), tracks...)
 	for i := range relaxed {
 		relaxed[i].Min = 0
@@ -403,7 +403,7 @@ func fallbackAllocation(
 }
 
 // Under pressure, preserve content rather than the chrome included in normal
-// minima. In particular the editor can fall back to one editable row.
+// minima. In particular the input can fall back to one editable row.
 func interactionMinimum(node *resolvedNode, axis splitAxis) int {
 	if node.widget != nil {
 		minimum := node.widget.MinimumSize()

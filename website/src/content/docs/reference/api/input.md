@@ -5,7 +5,7 @@ description: Full signatures for reading and editing the input buffer, plus subm
 
 Read and modify the input buffer from scripts — pickers, binds, and
 completion are all built on these. For the interactive side (default
-keys, the multiline composer, history navigation, and tab completion), see
+keys, the multiline draft editor, history navigation, and tab completion), see
 [Input & History](/interface/input/).
 
 ## Quick reference
@@ -38,11 +38,11 @@ snaps an offset inside a multibyte sequence to the preceding UTF-8 code point
 boundary.
 
 Setting text containing a newline, tab, or terminal control byte activates the
-visible composer and initially selects Verbatim. An explicit mode choice made
+visible draft editor and initially selects Verbatim. An explicit mode choice made
 with `Alt+V` or restored from history persists through text changes. Replacing
 the draft with one non-empty plain line preserves its mode; setting it to `""`
 clears the draft and resets to Command. See
-[Multiline verbatim composer](/interface/input/#multiline-verbatim-composer)
+[Multiline draft editor](/interface/input/#multiline-draft-editor)
 for its submission semantics and limits.
 
 ## Input bindings
@@ -62,7 +62,7 @@ rune.bind({"ctrl+j", "shift+enter", "ctrl+enter"}, "input.newline")
 | Internal action | Behavior | Default keys |
 |---|---|---|
 | `input.submit` | Submit the draft using its current Command/Verbatim mode | Enter |
-| `input.newline` | Insert a newline, opening the composer if necessary | Ctrl+J, Shift+Enter, Ctrl+Enter |
+| `input.newline` | Insert a newline, opening the draft editor if necessary | Ctrl+J, Shift+Enter, Ctrl+Enter |
 | `input.toggle_mode` | Switch Command/Verbatim interpretation | Alt+V |
 | `input.open_editor` | Edit the current draft in `$EDITOR`; apply a successful result without submitting | Ctrl+E |
 | `input.cancel` | Cancel according to the current input context, as below | Esc |
@@ -70,7 +70,7 @@ rune.bind({"ctrl+j", "shift+enter", "ctrl+enter"}, "input.newline")
 | Cancel context | Behavior |
 |---|---|
 | Normal input | Clear the draft |
-| Multiline composer | First press requests confirmation; a second cancel press discards the draft |
+| Multiline draft editor | First press requests confirmation; a second cancel press discards the draft |
 | Inline or modal picker | Close without accepting; preserve the draft |
 | Scrollback search | Cancel search and restore the previous view |
 
@@ -127,7 +127,7 @@ file. It returns `"", false` when the editor could not run or exited with an
 error.
 
 The default `ctrl+e` bind is a thin wrapper. A multiline result enters the
-composer, respecting an explicit mode choice and preserving newlines:
+draft editor, respecting an explicit mode choice and preserving newlines:
 
 ```lua
 rune.bind("ctrl+e", function()
@@ -151,7 +151,7 @@ and invalid lines are omitted. An empty final history string is not added.
 Input hooks, echo hooks, and command handlers do not see the current submission
 in history while it is running. Explicit `add` calls remain visible immediately.
 Arrow navigation and `ctrl+r` restore the block and its stored mode, so even a
-one-line Verbatim entry returns to the composer. Consecutive entries are
+one-line Verbatim entry returns to the draft editor. Consecutive entries are
 deduplicated only when both their text and mode match.
 
 `get()` returns the text-only view and does not expose the stored mode.

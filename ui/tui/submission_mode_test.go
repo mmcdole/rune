@@ -21,7 +21,7 @@ func TestDraftModeTogglePreservesEditingState(t *testing.T) {
 			eventCount := len(h.events)
 			for range 2 {
 				h.ctl.HandleKey(tea.KeyPressMsg{Code: 'v', Mod: tea.ModAlt})
-				if !h.ctl.input.EditorActive() {
+				if !h.ctl.input.DraftEditorActive() {
 					t.Fatal("explicit mode switch must open and retain the editor")
 				}
 				if h.ctl.input.Value() != draft || h.ctl.input.Position() != 3 || !h.ctl.input.Selected() {
@@ -179,7 +179,7 @@ func TestEscapeConfirmationDoesNotConsumeSubmit(t *testing.T) {
 	if len(h.submitted) != 1 || h.submitted[0] != input.Verbatim("first\nsecond") {
 		t.Fatalf("Enter after Escape = %+v", h.submitted)
 	}
-	if h.ctl.input.EditorActive() || h.ctl.input.Value() != "" {
+	if h.ctl.input.DraftEditorActive() || h.ctl.input.Value() != "" {
 		t.Fatal("accepted submission retained editor")
 	}
 }
