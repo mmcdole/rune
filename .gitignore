@@ -6,6 +6,7 @@ layout-test
 
 # Generated files
 allcode.txt
+__pycache__/
 
 # Local files
 .DS_Store

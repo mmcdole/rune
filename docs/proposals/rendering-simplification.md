@@ -230,37 +230,28 @@ python3 tools/render-perf.py compare \
 ```
 
 The complete comparison is `perf-results/render-followup-comparison.txt`.
-The earlier `before-render-followup` directory predates the two new latency
-workloads and cursor-event consumption; it is not the comparison baseline.
-The archived review probe is stored as `.go.txt`, so Go does not mistake it
-for a standalone test package during `make test`.
-
-Follow-up validation passed the full default race/shuffle suite, final UI
-race tests, all seven live latency probes under the race detector, and
-`GOTOOLCHAIN=go1.26.5 make check`. The website builds with the renamed sections
-and updated internal links. Regression tests cover per-pane layout decisions,
-uncovered-cell clearing after border preparation, cursor reuse at tab and
-Unicode insertion points, text-edit invalidation, and bounded measurement
-against full shaping over fixed-seed inputs and widths 1–80. Isolated tmux
-checks passed output, structured paste, cursor movement, resize, and discard;
-evidence is in `perf-results/terminal-followup`. Golden scene bytes are unchanged.
-`make test-jit` still cannot link the missing `libluajit-5.1.a`.
 
 ## Validation
 
 - Full default-backend race/shuffle suite (`make test`) passed; UI race tests
-  also passed after the final deferred-border change.
+  also passed after the final draft-layout change.
 - `make check` passed with `GOTOOLCHAIN=go1.26.5`, the repository's declared Go
   version. The host Go 1.27 export format is newer than pinned staticcheck supports.
-- The live Bubble Tea latency workloads passed a separate `-race -benchtime=1x`
-  smoke run; those instrumented timings are excluded from the tables.
+- All seven live Bubble Tea latency workloads passed a separate
+  `-race -benchtime=1x` smoke run; those instrumented timings are excluded
+  from the tables.
 - All five rendered-cell snapshots match unchanged. The multiline scene's file
   was renamed from `composer.golden` to `editor.golden` in the first pass, then
   to `draft_editor.golden` in the follow-up, without changing its bytes.
-- New regressions cover unchanged-draft appends, nested auto-sized panes, no-op
-  updates, removed-pane cleanup, one-row prompts, and editor cache invalidation.
-- Isolated tmux smoke checks passed output, command dispatch, and terminal resize
-  without a MUD connection or changes to the user's config.
+- Regression tests cover per-pane layout decisions, nested auto-sized panes,
+  no-op updates, uncovered-cell clearing after border preparation, one-row
+  prompts, cursor reuse at tab and Unicode insertion points, text-edit
+  invalidation, and bounded measurement against full shaping over fixed-seed
+  inputs and widths 1–80.
+- Isolated tmux checks passed output, command dispatch, structured paste,
+  cursor movement, resize, and discard without a MUD connection or changes
+  to the user's config. Captures are in `perf-results/terminal-followup`.
+- The website builds with the renamed sections and updated internal links.
 - LuaJIT's full suite could not link: this host lacks `libluajit-5.1.a`. Tagged
   vet passed; the LuaJIT runtime suite remains unverified here.
 
