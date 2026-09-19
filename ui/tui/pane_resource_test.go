@@ -37,14 +37,14 @@ func TestPaneRegistryAppliesLifecycleToReservedOutput(t *testing.T) {
 
 func TestOutputRetainsLastPlacementGeometryWhileHidden(t *testing.T) {
 	output := newOutputController(style.DefaultStyles())
-	output.setFallbackGeometry(80, 24)
-	output.setFallbackGeometry(100, 30)
+	output.setFallbackSize(80, 24)
+	output.setFallbackSize(100, 30)
 	if output.wrapWidth != 100 {
 		t.Fatalf("unplaced fallback width = %d, want latest terminal width 100", output.wrapWidth)
 	}
 
 	output.SetSize(24, 6)
-	output.setFallbackGeometry(120, 40)
+	output.setFallbackSize(120, 40)
 	if output.wrapWidth != 24 {
 		t.Fatalf("hidden output width = %d, want retained placement width 24", output.wrapWidth)
 	}

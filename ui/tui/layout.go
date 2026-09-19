@@ -69,15 +69,6 @@ func (m *Model) resolveLayout() layoutPlan {
 	return plan
 }
 
-func (m *Model) applyOutputGeometry(plan layoutPlan) {
-	width, height := plan.output.Dx(), plan.output.Dy()
-	if width > 0 && height > 0 {
-		m.output.SetSize(width, height)
-	} else {
-		m.output.setFallbackGeometry(m.width, m.height)
-	}
-}
-
 // applyLayout resolves current state and applies all leaf rectangles once at
 // the end of Update, before geometry-dependent navigation and painting.
 func (m *Model) applyLayout() {
@@ -85,7 +76,11 @@ func (m *Model) applyLayout() {
 		return
 	}
 	plan := m.resolveLayout()
-	m.applyOutputGeometry(plan)
+	if width, height := plan.output.Dx(), plan.output.Dy(); width > 0 && height > 0 {
+		m.output.SetSize(width, height)
+	} else {
+		m.output.setFallbackSize(m.width, m.height)
+	}
 	for _, leaf := range plan.leaves {
 		if !leaf.content.Empty() && leaf.surface != m.output {
 			leaf.surface.SetSize(leaf.content.Dx(), leaf.content.Dy())

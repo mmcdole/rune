@@ -15,17 +15,17 @@ import (
 	"github.com/mmcdole/rune/ui/tui/widget"
 )
 
-// defaultFrameInterval bounds screen composition to about 60 frames a second.
-const defaultFrameInterval = 16 * time.Millisecond
+// defaultComposeInterval bounds screen composition to about 60 a second.
+const defaultComposeInterval = 16 * time.Millisecond
 
-// frameMsg closes the current frame. Bubble Tea calls View after every
+// composeTick ends a throttle window. Bubble Tea calls View after every
 // message, and composing the screen is the one expensive step, so Model
-// composes at most once per frame: the first change after an idle period
-// composes immediately and opens a frame; changes arriving inside it apply
-// to state at once and are composed together when the frame closes. Frames
+// composes at most once per interval: the first change after an idle period
+// composes immediately and starts a window; changes arriving inside it apply
+// to state at once and are composed together when the tick ends it. Ticks
 // are scheduled on demand only - an idle client has no standing timer and
-// zero wakeups - and at most one frameMsg is ever outstanding.
-type frameMsg struct{}
+// zero wakeups - and at most one composeTick is ever outstanding.
+type composeTick struct{}
 
 // Model is the main Bubble Tea model for the TUI. It routes messages
 // between the session and the widgets; input-mode policy lives in the
@@ -50,19 +50,19 @@ type Model struct {
 	layout     ui.LayoutTree
 	layoutPlan layoutPlan
 
-	// Frame clock. Every message but frameMsg marks the screen stale; see
-	// frameMsg for when a stale screen is composed. A zero frameInterval
-	// composes on every View instead.
-	frameInterval   time.Duration
-	frameOpen       bool
+	// Compose throttle. Every message but composeTick marks the screen stale;
+	// see composeTick for when a stale screen is composed. A zero
+	// composeInterval composes on every View instead.
+	composeInterval time.Duration
+	throttled       bool
 	stale           bool
-	renderedContent string
+	screen          string
 	compositions    int
 
-	// Compositor state reused across frames: the cell grid and the styled
+	// Compositor state reused between compositions: the cell grid and the styled
 	// border cell for each junction glyph.
-	canvas     uv.ScreenBuffer
-	frameCells map[string]*uv.Cell
+	canvas      uv.ScreenBuffer
+	borderCells map[string]*uv.Cell
 
 	// Last scroll state the Session queue accepted; see reportScrollState.
 	reportedScroll ui.ScrollStateChangedMsg
@@ -85,14 +85,14 @@ func NewModel(events chan<- ui.UIEvent) *Model {
 	panes := newPaneRegistry(output)
 
 	m := &Model{
-		output:     output,
-		input:      input,
-		panes:      panes,
-		events:     events,
-		bars:       make(map[string]*widget.Bar),
-		frameCells: make(map[string]*uv.Cell),
-		styles:     styles,
-		layout:     ui.DefaultLayoutTree(),
+		output:      output,
+		input:       input,
+		panes:       panes,
+		events:      events,
+		bars:        make(map[string]*widget.Bar),
+		borderCells: make(map[string]*uv.Cell),
+		styles:      styles,
+		layout:      ui.DefaultLayoutTree(),
 		// Session starts from the same value, so an untouched viewport
 		// reports nothing.
 		reportedScroll: ui.ScrollStateChangedMsg{Mode: "live"},
@@ -102,15 +102,15 @@ func NewModel(events chan<- ui.UIEvent) *Model {
 	return m
 }
 
-// Init implements tea.Model. No standing tick: frames are scheduled on
+// Init implements tea.Model. No standing tick: composeTicks are scheduled on
 // demand when something changes.
 func (m *Model) Init() tea.Cmd {
 	return nil
 }
 
 // Update implements tea.Model: apply the message, finalize geometry once and
-// the navigation that depends on it, then let the frame clock decide whether
-// to compose. View only returns the composed screen; it never changes
+// the navigation that depends on it, then refresh the screen if the throttle
+// allows. View only returns the composed screen; it never changes
 // session-visible scroll state.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.dispatch(msg)
@@ -119,31 +119,31 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.applyLayout()
 	m.applySearchPosition(previousOutput != m.layoutPlan.output)
 
-	if _, closing := msg.(frameMsg); !closing {
+	if _, closing := msg.(composeTick); !closing {
 		m.stale = true
 	}
-	return m, m.advanceFrame()
+	return m, m.refresh()
 }
 
-// advanceFrame composes a stale screen unless a frame is open, and returns
-// the command that closes the frame it opened. Scroll state is reported with
-// the screen it describes, so rune.state matches what the user sees and a
-// flood costs Session one report per frame. Unthrottled, View composes and
+// refresh composes a stale screen unless throttled, then throttles until the
+// composeTick it returns. Scroll state is reported with the screen it
+// describes, so rune.state matches what the user sees and a flood costs
+// Session one report per interval. With a zero interval, View composes and
 // every update reports.
-func (m *Model) advanceFrame() tea.Cmd {
-	if m.frameInterval <= 0 {
+func (m *Model) refresh() tea.Cmd {
+	if m.composeInterval <= 0 {
 		m.reportScrollState()
 		return nil
 	}
-	if m.frameOpen || !m.stale {
+	if m.throttled || !m.stale {
 		return nil
 	}
 	m.compose()
 	if !m.reportScrollState() {
-		m.stale = true // retry when this frame closes
+		m.stale = true // retry on the tick
 	}
-	m.frameOpen = true
-	return tea.Tick(m.frameInterval, func(time.Time) tea.Msg { return frameMsg{} })
+	m.throttled = true
+	return tea.Tick(m.composeInterval, func(time.Time) tea.Msg { return composeTick{} })
 }
 
 // dispatch applies one message to state. Nothing here composes, reports
@@ -155,10 +155,10 @@ func (m *Model) dispatch(msg tea.Msg) {
 		m.width, m.height = msg.Width, msg.Height
 		m.initialized = true
 		m.notifySession(ui.WindowSizeChangedMsg{Width: msg.Width, Height: msg.Height})
-	case frameMsg:
-		// Update composes and re-arms only if the screen went stale inside
-		// the frame; otherwise the chain ends - back to zero wakeups.
-		m.frameOpen = false
+	case composeTick:
+		// Update composes and re-arms only if the screen went stale while
+		// throttled; otherwise the chain ends - back to zero wakeups.
+		m.throttled = false
 	case tea.KeyPressMsg:
 		m.inputCtl.HandleKey(msg)
 	case tea.PasteMsg:

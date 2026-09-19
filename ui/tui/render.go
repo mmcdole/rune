@@ -31,10 +31,10 @@ func (m *Model) View() tea.View {
 		return view
 	}
 
-	if m.frameInterval <= 0 {
+	if m.composeInterval <= 0 {
 		m.compose()
 	}
-	view.Content = m.renderedContent
+	view.Content = m.screen
 	return view
 }
 
@@ -46,9 +46,9 @@ func newCanvas(width, height int) uv.ScreenBuffer {
 	return canvas
 }
 
-// frameCanvas returns a blank canvas of the terminal size, reusing the last
-// frame's cells: allocating them anew dominated composition.
-func (m *Model) frameCanvas() uv.ScreenBuffer {
+// blankCanvas returns a blank canvas of the terminal size, reusing the last
+// composition's cells: allocating them anew dominated the cost.
+func (m *Model) blankCanvas() uv.ScreenBuffer {
 	if m.canvas.RenderBuffer == nil || m.canvas.Width() != m.width || m.canvas.Height() != m.height {
 		m.canvas = newCanvas(m.width, m.height)
 	} else {
@@ -57,18 +57,18 @@ func (m *Model) frameCanvas() uv.ScreenBuffer {
 	return m.canvas
 }
 
-// compose paints the current layout plan into renderedContent: leaf content,
+// compose paints the current layout plan into screen: leaf content,
 // then the frame grid's junction glyphs, then the labels that sit on it. The
-// frame clock decides when.
+// throttle in refresh decides when.
 func (m *Model) compose() {
 	m.stale = false
 	m.compositions++
 	if m.width <= 0 || m.height <= 0 {
-		m.renderedContent = ""
+		m.screen = ""
 		return
 	}
 	plan := m.layoutPlan
-	canvas := m.frameCanvas()
+	canvas := m.blankCanvas()
 	for _, leaf := range plan.leaves {
 		if !leaf.content.Empty() {
 			drawStyled(canvas, leaf.surface.View(), leaf.content)
@@ -83,19 +83,19 @@ func (m *Model) compose() {
 		}
 		x, y := i%frame.width, i/frame.width
 		glyph := frame.glyph(x, y)
-		cell := m.frameCells[glyph]
+		cell := m.borderCells[glyph]
 		if cell == nil {
 			cell = styledCell(m.styles.PaneBorder.Render(glyph))
-			m.frameCells[glyph] = cell
+			m.borderCells[glyph] = cell
 		}
 		canvas.SetCell(x, y, cell)
 	}
-	m.drawFrameLabels(canvas, plan)
-	m.renderedContent = canvas.Render()
+	m.drawLabels(canvas, plan)
+	m.screen = canvas.Render()
 }
 
-// drawFrameLabels paints pane titles and rule labels over the frame grid.
-func (m *Model) drawFrameLabels(canvas uv.ScreenBuffer, plan layoutPlan) {
+// drawLabels paints pane titles and rule labels over the frame grid.
+func (m *Model) drawLabels(canvas uv.ScreenBuffer, plan layoutPlan) {
 	for _, leaf := range plan.leaves {
 		if leaf.node.Type != ui.LayoutTypePane || leaf.frames&frameTop == 0 {
 			continue
@@ -115,11 +115,11 @@ func (m *Model) drawFrameLabels(canvas uv.ScreenBuffer, plan layoutPlan) {
 			right--
 		}
 		title = " " + runetext.VisualizeTerminalControls(title, false) + " "
-		drawFrameLabel(canvas, plan.frame, m.styles.PaneHeader.Render(title), left, right, leaf.outer.Min.Y)
+		drawLabel(canvas, plan.frame, m.styles.PaneHeader.Render(title), left, right, leaf.outer.Min.Y)
 	}
 	for _, rule := range plan.rules {
 		for _, label := range rule.Labels {
-			drawFrameLabel(canvas, plan.frame, label.Style.Render(label.Text), label.At, rule.To, rule.At)
+			drawLabel(canvas, plan.frame, label.Style.Render(label.Text), label.At, rule.To, rule.At)
 		}
 	}
 }
@@ -139,7 +139,7 @@ func styledCell(rendered string) *uv.Cell {
 }
 
 // Labels cover only their text cells, never the remaining rule or a junction.
-func drawFrameLabel(canvas uv.ScreenBuffer, frame frameGrid, label string, left, right, y int) {
+func drawLabel(canvas uv.ScreenBuffer, frame frameGrid, label string, left, right, y int) {
 	for x := left; x < right; x++ {
 		if frame.at(frame.vertical, x, y) || frame.at(frame.vertical, x, y-1) || frame.at(frame.vertical, x, y+1) {
 			right = x

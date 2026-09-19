@@ -80,10 +80,10 @@ func (o *outputController) MeasureHeight(width, limit int) int {
 	return min(rows, limit)
 }
 
-// setFallbackGeometry gives an output pane that has never been placed a
+// setFallbackSize gives an output pane that has never been placed a
 // useful append/search width. Once it has had real placement geometry, hiding
 // or omitting it preserves that geometry so incoming history does not reflow.
-func (o *outputController) setFallbackGeometry(width, height int) {
+func (o *outputController) setFallbackSize(width, height int) {
 	if o.hasPlacement || width <= 0 {
 		return
 	}
