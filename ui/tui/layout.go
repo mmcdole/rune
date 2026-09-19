@@ -103,6 +103,7 @@ func (m *Model) applyLayout() {
 		}
 	}
 	m.layoutPlan = plan
+	m.needsClear = true
 }
 
 // paneBorders maps the canonical pane border mode to rendered edges.

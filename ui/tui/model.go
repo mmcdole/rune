@@ -61,6 +61,7 @@ type Model struct {
 	// Renderer state reused between renders: the cell grid and the styled
 	// border cell for each junction glyph.
 	canvas      uv.ScreenBuffer
+	needsClear  bool // layout changed; erase uncovered cells on the next render
 	borderCells map[string]*uv.Cell
 
 	// Last scroll state the Session queue accepted; see reportScrollState.

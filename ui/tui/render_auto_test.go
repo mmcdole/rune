@@ -63,6 +63,8 @@ func TestLayoutChangeErasesUncoveredCells(t *testing.T) {
 	}
 	m.layout.Root.Children = []ui.LayoutNode{output, input}
 	m.applyLayout()
+	// Preparing borders must not consume the pending canvas clear.
+	m.resolveBorderCells(&m.layoutPlan.borders)
 	if strings.Contains(m.View().Content, "GAP-MARKER") {
 		t.Fatal("removed pane remains in uncovered cells")
 	}

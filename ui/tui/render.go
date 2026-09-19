@@ -57,11 +57,12 @@ func (m *Model) render() {
 	}
 	if m.canvas.RenderBuffer == nil || m.canvas.Width() != m.width || m.canvas.Height() != m.height {
 		m.canvas = newCanvas(m.width, m.height)
-	} else if m.layoutPlan.borders.cells == nil {
+	} else if m.needsClear {
 		// A new layout may leave gaps where widgets used to be. Clear once
 		// when rendering it, even if several layout updates preceded this render.
 		m.canvas.Clear()
 	}
+	m.needsClear = false
 	if m.layoutPlan.borders.cells == nil {
 		m.resolveBorderCells(&m.layoutPlan.borders)
 	}
