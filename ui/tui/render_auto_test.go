@@ -74,11 +74,16 @@ func BenchmarkRenderDraftCursor(b *testing.B) {
 	for _, kind := range []string{"default", "auto_side", "input_beside_pane"} {
 		b.Run(kind, func(b *testing.B) {
 			m := autoLayoutFixture(kind, 1000)
+			events := make(chan ui.UIEvent, 16)
+			m.events = events
 			b.ReportAllocs()
 			for b.Loop() {
 				m.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
 				m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
 				m.View()
+				for len(events) > 0 {
+					<-events
+				}
 			}
 		})
 	}

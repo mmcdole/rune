@@ -88,10 +88,14 @@ func (w *outputObserver) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func startOutputProbe(b *testing.B, draftLines int) (*BubbleTeaUI, <-chan outputFrame, <-chan outputFrame, <-chan error) {
+func startOutputProbe(b *testing.B, draftLines int, layout string) (*BubbleTeaUI, <-chan outputFrame, <-chan outputFrame, <-chan error) {
 	b.Helper()
 	adapter := NewBubbleTeaUI()
 	m := renderFixture(270, 66, true)
+	if layout != "" {
+		m = autoLayoutFixture(layout, 0)
+		m.throttled = false
+	}
 	m.events = adapter.events
 	if draftLines > 0 {
 		m.input.SetValue(strings.Repeat("say This is a representative pasted command.\n", draftLines))
@@ -169,15 +173,18 @@ func BenchmarkOutputLatency(b *testing.B) {
 		name         string
 		burst, draft int
 		idle         bool
+		layout       string
 	}{
-		{"idle", 1, 0, true},
-		{"single", 1, 0, false},
-		{"burst100", 100, 0, false},
-		{"burst1000", 1000, 0, false},
-		{"draft100_burst100", 100, 100, false},
+		{"idle", 1, 0, true, ""},
+		{"single", 1, 0, false, ""},
+		{"burst100", 100, 0, false, ""},
+		{"burst1000", 1000, 0, false, ""},
+		{"draft100_burst100", 100, 100, false, ""},
+		{"auto_side_draft1000_burst100", 100, 1000, false, "auto_side"},
+		{"beside_pane_draft1000_burst100", 100, 1000, false, "input_beside_pane"},
 	} {
 		b.Run(tc.name, func(b *testing.B) {
-			adapter, frames, idle, done := startOutputProbe(b, tc.draft)
+			adapter, frames, idle, done := startOutputProbe(b, tc.draft, tc.layout)
 			awaitOutput(b, frames, done, 0)
 			var batches [2][]string
 			for variant := range batches {
