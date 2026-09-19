@@ -69,34 +69,24 @@ func (m *Model) resolveLayout() layoutPlan {
 	return plan
 }
 
-func (m *Model) applyOutputGeometry(plan layoutPlan) (scrollStateChanged bool) {
-	beforeMode := m.output.viewport.Mode()
-	beforeLines := m.output.viewport.NewLineCount()
-	width, height := plan.output.Dx(), plan.output.Dy()
-	if width > 0 && height > 0 {
-		m.output.setGeometry(width, height)
-	} else {
-		m.output.setFallbackGeometry(m.width, m.height)
-	}
-	return beforeMode != m.output.viewport.Mode() ||
-		beforeLines != m.output.viewport.NewLineCount()
-}
-
 // applyLayout resolves current state and applies all leaf rectangles once at
 // the end of Update, before geometry-dependent navigation and painting.
-func (m *Model) applyLayout() bool {
+func (m *Model) applyLayout() {
 	if !m.initialized {
-		return false
+		return
 	}
 	plan := m.resolveLayout()
-	changed := m.applyOutputGeometry(plan)
+	if width, height := plan.output.Dx(), plan.output.Dy(); width > 0 && height > 0 {
+		m.output.SetSize(width, height)
+	} else {
+		m.output.setFallbackSize(m.width, m.height)
+	}
 	for _, leaf := range plan.leaves {
 		if !leaf.content.Empty() && leaf.surface != m.output {
 			leaf.surface.SetSize(leaf.content.Dx(), leaf.content.Dy())
 		}
 	}
 	m.layoutPlan = plan
-	return changed
 }
 
 // paneFrames maps the canonical pane border mode to rendered edges.

@@ -92,7 +92,7 @@ The UI layer (built with Bubble Tea) owns terminal interaction mechanics, not
 application policy.
 
 - **Interaction mechanics:** It owns editing, compose mode, picker and search
-  modes, viewport navigation, wrapping, and render batching.
+  modes, viewport navigation, wrapping, and compose throttling.
 - **Application policy:** Lua decides which binds, bars, layouts, triggers, and
   commands exist. The UI never calls Lua directly.
 - **Push Architecture:** It renders based entirely on state snapshots pushed to it by the Session.
@@ -141,8 +141,14 @@ separate messages; the TUI never calls Lua during measurement or rendering.
 
 The TUI prunes inactive nodes, measures surfaces without resizing them, and uses
 `ui.AllocateAxis` to assign rectangles. Each update applies geometry once,
-then settles geometry-dependent search navigation. View paints the final plan
-without changing navigation.
+then settles geometry-dependent search navigation. Composing that plan is the
+expensive step, so one throttle in `Model` bounds it: the first change after
+an idle period composes immediately and starts a 16ms window, changes inside the
+window apply to state at once and are composed together when it ends, and an
+idle client schedules no timer. View returns the composed screen without
+changing navigation. Output scroll state is derived, so nothing posts it while
+handling a message: the same step compares it with the last value Session
+accepted and reports a difference together with the screen that shows it.
 Input's minimum is protected on both axes when constraints cannot fit.
 
 Pane frames, dividers, separators, and joinable input rules feed one frame grid.

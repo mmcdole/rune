@@ -263,7 +263,7 @@ func TestOrdinaryPaneLifecycle(t *testing.T) {
 }
 
 // TestReplaceOutputPaneIsOneClearAndWrite: a replace behaves like clear
-// (search dropped, viewport live, prompt kept, stale batch tick ignored) and
+// (search dropped, viewport live, prompt kept) and
 // then holds only the new rows, all within one Update.
 func TestReplaceOutputPaneIsOneClearAndWrite(t *testing.T) {
 	m := newBareModel(t)
@@ -284,11 +284,6 @@ func TestReplaceOutputPaneIsOneClearAndWrite(t *testing.T) {
 	if !m.input.SearchActive() || m.output.viewport.Mode() != widget.ModeScrolled {
 		t.Fatal("test setup did not scroll and search output")
 	}
-	generation, scheduled := m.output.printServer("batched")
-	if !scheduled {
-		t.Fatal("test setup did not open a batch window")
-	}
-
 	next, _ = m.Update(ui.PaneReplaceMsg{Name: ui.OutputPaneName, Text: "first\nsecond"})
 	m = next.(*Model)
 	if got := m.output.buffer.Count(); got != 2 {
@@ -305,11 +300,6 @@ func TestReplaceOutputPaneIsOneClearAndWrite(t *testing.T) {
 	}
 	if got := m.output.promptText; got != "HP> " {
 		t.Fatalf("replace dropped the live prompt: %q", got)
-	}
-	next, _ = m.Update(tickMsg{generation: generation})
-	m = next.(*Model)
-	if got := m.output.buffer.Count(); got != 2 {
-		t.Fatalf("stale batch tick changed the transcript after replace: %d rows", got)
 	}
 }
 

@@ -254,7 +254,7 @@ func TestMouseWheelNavigatesActiveSearchMatches(t *testing.T) {
 	next, _ := m.Update(ui.UpdateConfigMsg{Mouse: true})
 	m = next.(*Model)
 	for _, line := range []string{"thief oldest", "quiet", "thief middle", "quiet", "thief newest"} {
-		m.appendMessage(line)
+		m.output.Write(line)
 	}
 
 	m.inputCtl.ShowSearch(ui.ShowSearchMsg{Query: "thief"})

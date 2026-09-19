@@ -19,8 +19,6 @@ func newTestModel(t *testing.T) *Model {
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = next.(*Model)
 
-	// EchoLineMsg appends to the scrollback immediately and never
-	// opens a batch window, so no tick bookkeeping is needed here.
 	for i := 0; i < 100; i++ {
 		next, _ = m.Update(ui.EchoLineMsg(fmt.Sprintf("line %d", i)))
 		m = next.(*Model)
