@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -87,5 +88,41 @@ func TestLayoutChangeErasesRemovedPane(t *testing.T) {
 	m.Update(ui.UpdateLayoutMsg(ui.DefaultLayoutTree()))
 	if strings.Contains(m.View().Content, "REMOVED-PANE") {
 		t.Fatal("removed pane left pixels on the reused canvas")
+	}
+}
+
+func TestOnlyAutoPaneContentRequestsLayout(t *testing.T) {
+	for _, nested := range []bool{false, true} {
+		for _, tc := range []struct {
+			name string
+			msg  tea.Msg
+			want bool
+		}{
+			{"output", ui.PrintLineMsg("server text"), false},
+			{"echo", ui.EchoLineMsg("local echo"), false},
+			{"prompt", ui.SetPromptMsg("HP>"), false},
+			{"commit", ui.CommitPromptMsg("HP>"), false},
+			{"auto", ui.PaneWriteMsg{Name: "chat", Text: "one\ntwo\nthree"}, true},
+			{"hidden", ui.PaneWriteMsg{Name: "hidden", Text: "one\ntwo"}, false},
+		} {
+			t.Run(fmt.Sprintf("%s/nested=%t", tc.name, nested), func(t *testing.T) {
+				m := resizeModel(t, NewModel(make(chan ui.UIEvent, 100)), 80, 24)
+				probe := &countedPane{pane: m.pane("chat")}
+				m.panes["chat"] = probe
+				auto := ui.LayoutNode{Type: ui.LayoutTypePane, Name: "chat", Size: ui.AutoSize()}
+				if nested {
+					auto.Size = ui.Fraction(1)
+					auto = ui.LayoutNode{Type: ui.LayoutTypeColumn, Size: ui.AutoSize(), Children: []ui.LayoutNode{auto}}
+				}
+				setLayout(m, ui.LayoutNode{Type: ui.LayoutTypeColumn, Children: []ui.LayoutNode{
+					auto, {Type: ui.LayoutTypePane, Name: ui.OutputPaneName}, {Type: ui.LayoutTypeInput, Size: ui.AutoSize()},
+				}})
+				probe.applications = 0
+				m.Update(tc.msg)
+				if got := probe.applications > 0; got != tc.want {
+					t.Fatalf("layout applied = %t, want %t", got, tc.want)
+				}
+			})
+		}
 	}
 }

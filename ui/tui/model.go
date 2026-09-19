@@ -185,16 +185,16 @@ func (m *Model) dispatch(msg tea.Msg) (render, layout bool) {
 	// echoes differ only in where Session sends them from.
 	case ui.PrintLineMsg:
 		m.output.Write(string(msg))
-		return true, m.layoutPlan.contentSized
+		return true, m.layoutPlan.autoPanes[ui.OutputPaneName]
 	case ui.EchoLineMsg:
 		m.output.Write(string(msg))
-		return true, m.layoutPlan.contentSized
+		return true, m.layoutPlan.autoPanes[ui.OutputPaneName]
 	case ui.SetPromptMsg:
 		changed := m.output.SetPrompt(string(msg))
-		return changed, changed && m.layoutPlan.contentSized
+		return changed, changed && m.layoutPlan.autoPanes[ui.OutputPaneName]
 	case ui.CommitPromptMsg:
 		changed := m.output.CommitPrompt(string(msg))
-		return changed, changed && m.layoutPlan.contentSized
+		return changed, changed && m.layoutPlan.autoPanes[ui.OutputPaneName]
 
 	// Pane buffer content. Placement and visibility are layout-tree state
 	// and arrive as UpdateLayoutMsg instead.
@@ -203,7 +203,7 @@ func (m *Model) dispatch(msg tea.Msg) (render, layout bool) {
 		return false, false
 	case ui.PaneWriteMsg:
 		m.pane(msg.Name).Write(msg.Text)
-		return true, m.layoutPlan.contentSized
+		return true, m.layoutPlan.autoPanes[msg.Name]
 	case ui.PaneReplaceMsg:
 		m.dropOutputSearch(msg.Name)
 		p := m.pane(msg.Name)

@@ -21,9 +21,8 @@ type layoutPlan struct {
 	rules   []widget.Rule
 	borders borderGrid
 	output  image.Rectangle
-	// Only auto-sized panes (or their auto-sized ancestors) depend on text.
-	// A single conservative flag avoids a per-widget invalidation graph.
-	contentSized bool
+	// Text changes only affect geometry for these panes or their auto ancestors.
+	autoPanes map[string]bool
 }
 
 // resolvedNode is an active tree node. Leaves carry a widget and its geometry;
@@ -61,7 +60,7 @@ func (m *Model) resolveLayout() layoutPlan {
 	}
 	assignSharedEdges(root, 0)
 	m.placeNode(root, image.Rect(0, 0, m.width, m.height), axisVertical, 0, &plan)
-	plan.contentSized = contentSized(root, false)
+	plan.collectAutoPanes(root, false)
 	plan.borders = newBorderGrid(m.width, m.height)
 	m.planBorders(&plan)
 	for _, leaf := range plan.leaves {
@@ -73,17 +72,17 @@ func (m *Model) resolveLayout() layoutPlan {
 	return plan
 }
 
-func contentSized(node *resolvedNode, auto bool) bool {
+func (p *layoutPlan) collectAutoPanes(node *resolvedNode, auto bool) {
 	auto = auto || node.node.Size.Kind == ui.LayoutSizeAuto
-	if node.node.Type == ui.LayoutTypePane {
-		return auto
+	if auto && node.node.Type == ui.LayoutTypePane {
+		if p.autoPanes == nil {
+			p.autoPanes = make(map[string]bool)
+		}
+		p.autoPanes[node.node.Name] = true
 	}
 	for _, child := range node.children {
-		if contentSized(child, auto) {
-			return true
-		}
+		p.collectAutoPanes(child, auto)
 	}
-	return false
 }
 
 // applyLayout resolves current state and applies all leaf rectangles once at
