@@ -1,169 +1,174 @@
-# Rendering review: speed through less work
+# Rendering simplification and measurements
 
-Reviewed production code at `0307cda`. The accompanying changes add measurement
-and correctness tooling; they do not change runtime rendering. The priority is
-how quickly new MUD output reaches the terminal, alongside fewer concepts and
-clearer ownership.
+Branch: `simplify-rendering`. Production baseline: `0307cda` (latest `main`
+when work began). Harness-only baseline commit: `8eaa1a6`. The priority is new
+MUD text reaching the terminal promptly, with fewer owners and fewer terms.
 
-## Findings, in priority order
+## What the branch changes
 
-### 1. Incoming output repeatedly lays out an unrelated multiline draft
+The old incoming-line path rebuilt the entire layout, repeatedly wrapped any
+open multiline draft, allocated terminal-sized border grids, and then checked
+whether screen rendering was due. A 100-line draft made a 100-line incoming
+burst take about 1.31 seconds to reach the terminal writer. Throttling the final
+render did not throttle that per-message work.
 
-[`Model.Update`](../../ui/tui/model.go) unconditionally calls `applyLayout`.
-Input resolution and preferred-height calculation call `MeasureHeight`, which
-builds the entire composer layout. `Input.SetSize` builds it again even when
-dimensions did not change. Frame-edge discovery also repeatedly calls `Rules`,
-which constructs labels and copies/counts the draft text. Painting builds the
-composer layout again.
+The new path is:
 
-This is the clearest user-visible bottleneck. The new real-renderer benchmark
-measures about **1.3 seconds** to display the end of a 100-line incoming burst
-with a 100-line draft open, versus about **45 ms** without that draft. An isolated
-throttled output update with a 1,000-line draft costs about **89 ms and 25 MB**.
-These are local measurements, not universal thresholds; short slow-case runs
-do not establish p99 latency.
+```text
+incoming line → Output.Write → mark screen dirty
+                              ↓ when rendering is due
+                render retained layout → Bubble Tea → terminal writer
+```
 
-**Change:** ordinary appends should not remeasure an unchanged editor. Compute
-draft wrapping from text revision and width; use its existing insertion points
-to locate the cursor. Keep cursor visibility adjustment separate from geometry
-measurement. A size-equality early return in `SetSize` alone is insufficient:
-editing or moving the cursor still needs to keep the caret visible.
+`Model.dispatch` reports whether pixels and geometry may change. Ordinary
+appends reuse layout; auto-sized panes and containers still trigger measurement.
+Resize/layout messages apply geometry immediately, preserving ordering and
+append-time wrapping. The editor reuses its wrapped rows until text, cursor,
+or width changes. A layout's first render resolves border junctions into
+positioned cells; later renders reuse them. Widgets clear their own rectangles;
+a full canvas clear happens on the first render after layout changes. Identical bars/prompts schedule no work.
+Side-pane rows are filled into one bounded slice instead of repeatedly prepended.
 
-### 2. Paint is throttled; geometry and border allocation are not
+## Vocabulary and ownership
 
-[`resolveLayout`](../../ui/tui/layout.go) rebuilds the active tree and creates
-two screen-sized Boolean grids after every message, including ordinary output,
-unchanged prompt updates, ignored input, and closing throttle ticks.
-[`newFrameGrid`](../../ui/tui/frames.go) accounts for **about 89% of allocated
-bytes** in the original output-flood allocation profile. At 270×66, a simple
-output update allocates about **39 KB before painting**. Appending a short line
-to the transcript alone was approximately **0.1 microseconds**, so the ring
-buffer is not the place to start.
-
-**Change:** retain the resolved layout until a dependency that can alter
-geometry changes. Distinguish geometry changes from paint changes. Ordinary
-output in a fixed/fractional pane generally changes paint only; an auto-sized
-pane, bar appearing/disappearing, input wrapping, visibility, or terminal resize
-can change geometry. Preserve message ordering: a resize or layout change must
-take effect before subsequent output uses its append-time wrapping width.
-
-Reuse the border geometry with that layout. Resolve junction glyphs once into
-a compact list of positioned cells. This removes both screen-sized allocations
-per message and the whole-grid scan plus neighbor lookup on every paint. Keep
-dynamic labels separate; a changing draft count or pane scroll title must not
-require rebuilding border connectivity.
-
-### 3. Two frame clocks contribute to visible latency
-
-Rune limits composition with a 16 ms on-demand `composeTick`. The pinned Bubble
-Tea renderer flushes on its own default 60 Hz clock. A line can wait for a Rune
-composition and then for a terminal flush. The local harness sees single-line
-delivery around **20–25 ms per operation**, and continuous 100-line bursts around
-**45 ms**. Composing the 270×66 two-pane scene alone costs about **2.5 ms**.
-
-**Change:** evaluate one owner of frame scheduling after fixing per-message
-work. Preserve burst coalescing and immediate state updates. Simply deleting
-Rune's throttle would make full composition run after every Bubble Tea message.
-The latency benchmark uses the real clocks specifically to catch that tradeoff.
-It measures writer delivery, not the terminal emulator's physical paint time.
-
-### 4. The screen crosses the ANSI/cell boundary twice
-
-[`compose`](../../ui/tui/render.go) takes widget ANSI strings, parses them into
-Ultraviolet cells, then serializes the entire canvas back into ANSI. Bubble Tea
-parses that ANSI into another cell grid before diffing and emitting terminal
-output. The pinned `StyledString.Draw` clears its rectangle first; Rune also
-clears the whole canvas. Unchanged widget text is still parsed on each paint.
-
-**Change:** choose one terminal representation at the composition boundary.
-Initially, reuse parsed visible rows or unchanged widget regions and avoid
-redundant clearing. A direct cell handoff would remove an entire conversion,
-but Bubble Tea's current `View.Content` boundary is string-based: this needs an
-upstream/API decision, not an assumption that Rune can switch a method call.
-Keep terminal diffing, Unicode handling, editor suspension, and terminal modes
-working. A separate custom terminal engine is not justified by this review.
-
-### 5. Search and side panes can stall the same UI loop
-
-[`Search.rescan`](../../ui/tui/widget/search.go) caps the number of *matches*,
-not the number of rows examined. A missing query can synchronously scan all
-100,000 rows and strip ANSI again on every edit. The initial probe measured
-about **62 ms and 6.4 MB** for a miss over colored history. During that work,
-new MUD output waits.
-
-**Change:** reuse searchable plain text for immutable rows if the memory
-tradeoff is worthwhile, then bound scanning work per UI turn. Incremental scans
-can stay on the owning goroutine and cancel by query revision; introducing
-shared mutable buffers and worker synchronization is unnecessary initially.
-Cached stripping alone will not bound a scan of rare or missing matches.
-
-[`Pane.ContentRows`](../../ui/tui/widget/pane.go) repeatedly prepends wrapped
-rows to an expanding slice, causing quadratic copying in the visible row count.
-It rewraps unchanged text on each paint. Fill a preallocated window from the
-bottom, with wrap results reused by width when justified. This is secondary to
-the output/update bottlenecks but matters with large side panes.
-
-## Names and ownership
-
-| Current | Recommendation | Reason |
+| Before | Now | What earned its place |
 |---|---|---|
-| `outputController` | `transcript` | It owns scrollback, prompt, wrapping width, and viewport; it does not control input |
-| `paneResource` | `pane` | “Resource” adds no useful distinction in this private interface |
-| `paneRegistry` | Keep one small owner, optionally `paneStore` | Lazy creation and preserving output identity are real invariants; avoid scattering raw map access |
-| `surface` in layout nodes | `widget` | It is already a `widget.Widget`; remove the extra vocabulary |
-| Private `layoutNode` | `resolvedNode` | Distinguishes allocated/active state from declarative `ui.LayoutNode` |
-| `layoutPlan` | Keep | One geometry result shared by interaction and painting is valuable |
-| `frameGrid`, `frameEdges` | `borderGrid`, `borderEdges` | “Frame” also means a screen update; these describe borders |
-| `frames.go` | `borders.go` | Own connectivity, junctions, and positioned border cells together |
-| `compose`, `composeTick`, `stale` | `paint`, `paintTick`, `dirty` | Separates screen painting from the multiline input composer |
-| `layout_size.go` | `layout_measure.go` | Its responsibility is measurement/allocation; retain this separation from placement |
-| `util.VisibleLen` | Use `ansi.StringWidth` directly | The wrapper adds neither behavior nor clarity, and “length” obscures display columns |
-| `ScrollbackBuffer` | `Scrollback` | The buffer suffix contributes little; keep its bounded ring and stable sequence numbers |
+| `outputController` → `Viewport` → `ScrollbackBuffer` | `Output` → `Scrollback` | One widget owns wrapping, prompt, scrolling, and the visible window; one ring stores retained rows |
+| `transcript`, `history`, `buffer` as names for output storage | `scrollback` | The retained rows, not another rendering layer; command history remains a separate feature |
+| `compose`, `paint`, compositor | `render` | One name for building the screen, including `renderTick`, `renderInterval`, and `render.go` |
+| multiline `composer`, `modeCompose` | `editor`, `modeEditor` | Text editing has its own name and files |
+| `paneResource`, `paneRegistry`/`paneStore` | `pane`, model's `panes` map | Removed the registry type and its forwarding methods; one lookup/create helper preserves output identity |
+| layout `surface` | `widget` | It already implements `widget.Widget` |
+| private `layoutNode` | `resolvedNode` | Distinguishes measured/placed nodes from the declarative `ui.LayoutNode` |
+| `frameGrid`, `frameEdges`, `frames.go` | `borderGrid`, `borderEdges`, `borders.go` | Borders are not screen frames |
+| `layout_size.go` | `layout_measure.go` | Measurement/allocation is distinct from placement |
+| `util.VisibleLen` | `ansi.StringWidth` | Removed a forwarding name that obscured terminal columns |
+| `widget/text.go` | `util.ClipRow` beside ANSI helpers | Removed a one-helper file |
+| stored scroll mode plus offset | mode derived from offset | One source of truth for live versus scrolled output |
 
-Do not rename everything before the performance changes. Use these names while
-changing the corresponding ownership or code, keeping each review focused.
+Output and side panes remain distinct because their behavior differs: output
+retains physical rows as they arrived, while side panes reflow logical lines.
+Combining them would introduce policy flags and change scrolling units. Layout
+and rendering also remain distinct because content changes much more often than
+rectangles. The small Widget interface and input controller retain real duties:
+measurement/placement, and submission/picker/search event ordering respectively.
 
-**Keep the real distinctions:** declarative layout versus resolved geometry;
-buffer contents versus placement; output's append-time physical rows versus
-side panes' resize-reflowed logical lines; scrollback versus its visible window.
-Collapsing those behaviors into a universal pane would likely add flags and
-branches. A shared scroll-position helper could be worthwhile, but preserving
-the different line units is essential.
+The production TUI goes from 32 files / 6,335 lines to 30 files / 6,217 lines
+(118 fewer lines, excluding tests, benchmarks, and docs). Most changed lines
+are consistent renames; the ownership and update-path changes are the point.
 
-The `Widget` measurement/size/view contract and `inputController` also earn
-their place: the controller centralizes submission and picker-callback
-invariants, and its mode is derived rather than a second mutable state machine.
-Search's viewport snapshot/restore ownership is useful. Do not merge picker
-filtering and transcript search merely because they both display result rows.
+## Measurements
 
-**Collapse repeated mechanisms:** `surfaceFrames` discovers border edges by
-asking a widget to regenerate full rules and labels, and `planFrames` asks
-again. Compute the widget's geometry once and reuse it for measurement,
-placement, and border drawing. Default separators can become border rules;
-custom-character separators still need their drawing behavior. Removing the
-`Separator` widget should follow unifying those paths, not discard that feature.
+Baseline `8eaa1a6` versus implementation `2776f35`, measured sequentially on the
+same AMD Ryzen 7 4800U machine, Linux/amd64, Go `1.27.1-X:nodwarf5`, default
+16-way scheduler. Five uninstrumented runs per workload, `-benchtime=1s`.
+Tables report the median of each run's mean `ns/op`; ranges show the smallest
+and largest run means, not confidence intervals. These runs do not establish
+p99 latency: the old large-draft case has one burst per run (five total),
+versus 24–26 bursts per run after the change.
 
-**Keep small, useful files:** `render.go`, border connectivity, layout placement,
-and measurement have separate responsibilities. Combining their roughly 1,100
-lines would not remove concepts. `widget/text.go` is a better merge candidate:
-its single clipping helper can live with related ANSI utilities if that leaves
-one clear owner. Tiny forwarding methods are lower priority than avoiding
-per-message reconstruction of the entire scene.
+| Incoming output to terminal writer | Before mean (run range) | After mean (run range) | Change |
+|---|---:|---:|---:|
+| One line after idle | 20.47 ms (20.34–21.74) | 19.69 ms (18.12–20.53) | -3.8% |
+| Continuous single lines | 24.50 ms (24.07–24.94) | 22.65 ms (22.45–22.97) | -7.6% |
+| 100-line burst | 43.33 ms (42.62–46.75) | 37.05 ms (35.32–40.52) | -14.5% |
+| 1,000-line burst | 109.52 ms (104.47–117.58) | 39.81 ms (36.87–41.82) | -63.7% |
+| 100-line burst with 100-line draft | 1312.58 ms (1261.30–1343.09) | 46.55 ms (43.40–49.92) | -96.5% |
 
-**Skip unchanged work:** successful bar snapshots are pushed every 250 ms even
-when unchanged, and every such message marks the whole screen stale. Compare
-content before requesting paint; distinguish bar visibility changes from text
-changes. Likewise, scrolled output can retain its cached visible rows when new
-appends have not evicted that window. These are explicit invalidation rules,
-not reasons to add a general-purpose dependency framework. The compositor's
-on-demand tick does not make the whole application free of idle wakeups.
+The large-draft burst is **28.2× faster** in this measurement; the 1,000-line
+burst is **2.75× faster**. Idle single-line delay remains around 20ms.
 
-## Acceptance for the next changes
+| Supporting workload | Before | After |
+|---|---:|---:|
+| Short-line update, empty draft | 17.60 µs | 50.1 ns |
+| Short-line update, 100-line draft | 9.12 ms | 50.1 ns |
+| Short-line update, 1,000-line draft | 90.10 ms | 49.4 ns |
+| 100 lines + 10 prompts + one render | 10.28 ms | 2.19 ms |
+| Render warm 80×24 screen | 426.86 µs | 454.81 µs |
+| Render warm 270×66 screen | 2.49 ms | 2.23 ms |
+| Rebuild two-pane layout | 21.16 µs | 21.29 µs |
+| Prompt update through decode/diff/encode | 5.52 ms | 5.01 ms |
+| Scroll update through decode/diff/encode | 5.60 ms | 5.14 ms |
+| Unchanged prompt + closing tick | 3.12 ms | 50.6 ns |
+| Alternating terminal sizes | 1.46 ms | 1.45 ms |
+| Render 200 side-pane rows | 203.79 µs | 19.41 µs |
+| Missing query in 100,000 plain rows | 7.67 ms | 8.76 ms |
+| Missing query in 100,000 colored rows | 69.83 ms | 69.86 ms |
 
-Use [the rendering harness](../render-performance.md) before and after each
-step. The primary results are incoming-output latency and burst drain time;
-the supporting results explain allocations and CPU. UI race tests and cell
-snapshots must pass. A useful first milestone is that an unrelated draft's
-length no longer determines the cost of an incoming output message. The next
-is that ordinary output performs no geometry or border-grid reconstruction.
-Measure scheduling and representation changes only after those wins are clear.
+**Allocated bytes, not retained memory:** the fixed 100-line flood falls from
+4.758 MB to 0.197 MB per operation (**95.9% less**).
+Short-line updates allocate **zero bytes and zero objects** for all three draft
+sizes; the old 1,000-line draft allocated 24.9 MB per incoming line. The
+200-row side pane falls from 355 KB to 16 KB.
+
+**Tradeoffs and unchanged costs:** layout rebuild time/allocations are effectively
+unchanged. Resize time is also similar, but allocations rise from 454 KB to
+467 KB (3%) for the cached positioned borders. The small-screen render median
+is 6.5% slower with overlapping run ranges (before 424–474 µs, after 403–493 µs);
+this is not evidence of a uniform render-speed gain. Plain search misses were
+14.3% slower in the full run despite no search-algorithm change. An alternating
+three-run control reproduced it: 7.67 ms before versus 8.68 ms after (+13.1%),
+with unchanged allocations. Its cause is not isolated; this is a known regression
+on this branch, not dismissed as timing noise. Raw control runs and revision/order
+metadata are in `perf-results/search-control`.
+
+A separate output-flood profile now spends about **54% of sampled CPU beneath
+`ultraviolet.renderLine`** and **84% of allocated bytes beneath
+`ultraviolet.(*Buffer).Render`**. String serialization is the next major CPU/
+allocation target. These are cumulative profile shares, not timing samples; the
+profile does not include Bubble Tea’s terminal flush or its waiting time.
+
+See [the harness](../render-performance.md) for workload definitions and
+measurement boundaries. Reproduce the comparison from the repository root:
+
+```sh
+# With the harness-only baseline (8eaa1a6) checked out:
+python3 tools/render-perf.py record perf-results/before-simplification
+# With the implementation (2776f35) checked out:
+python3 tools/render-perf.py record perf-results/final-simplification
+python3 tools/render-perf.py compare \
+  perf-results/before-simplification perf-results/final-simplification
+```
+
+Local ignored artifacts include each directory's `bench.txt`, `metadata.json`,
+and `changes.patch`; profiles are saved separately in
+`perf-results/final-flood-profile`. The old `RenderCompose` workload has been
+renamed `RenderScreen`; the comparison tool recognizes that name change.
+
+## Validation
+
+- Full default-backend race/shuffle suite (`make test`) passed; UI race tests
+  also passed after the final deferred-border change.
+- `make check` passed with `GOTOOLCHAIN=go1.26.5`, the repository's declared Go
+  version. The host Go 1.27 export format is newer than pinned staticcheck supports.
+- The live Bubble Tea latency workloads passed a separate `-race -benchtime=1x`
+  smoke run; those instrumented timings are excluded from the tables.
+- All five rendered-cell snapshots match unchanged. The multiline scene's file
+  was renamed from `composer.golden` to `editor.golden` without changing its bytes.
+- New regressions cover unchanged-draft appends, nested auto-sized panes, no-op
+  updates, removed-pane cleanup, one-row prompts, and editor cache invalidation.
+- Isolated tmux smoke checks passed output, command dispatch, and terminal resize
+  without a MUD connection or changes to the user's config.
+- LuaJIT's full suite could not link: this host lacks `libluajit-5.1.a`. Tagged
+  vet passed; the LuaJIT runtime suite remains unverified here.
+
+## Remaining bottlenecks
+
+- **Two clocks:** Rune coalesces renders at 16ms and Bubble Tea flushes at 60Hz.
+  This branch preserves both. Removing one safely is a separate experiment;
+  deleting Rune's throttle alone restores expensive per-message rendering.
+- **Two ANSI/cell conversions:** widget strings become Rune cells and strings,
+  then Bubble Tea decodes those strings again. Full-screen rendering is still
+  several milliseconds at 270×66. A direct cell handoff needs an API decision;
+  this branch does not introduce a custom terminal engine.
+- **Search:** a missing query still scans up to 100,000 rows synchronously and
+  strips colored text again. That can stall incoming output. Bounded search
+  work and/or cached plain text need their own measured change.
+- **Side-pane wrapping and changed drafts:** side panes still rewrap visible
+  lines each render. Editing or moving the cursor in a large draft still shapes
+  the whole draft; incoming output no longer does. These costs remain measurable.
+
+The harness measures UI enqueue through the real FIFO and Bubble Tea terminal
+writer, including both clocks. It excludes network receipt, Lua triggers, and
+the terminal emulator's physical display time. This is evidence about Rune's
+UI latency, not a claim about complete network-to-pixel latency.
