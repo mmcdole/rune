@@ -146,7 +146,9 @@ expensive step, so one frame clock in `Model` bounds it: the first change after
 an idle period paints immediately and opens a 16ms frame, changes inside the
 frame apply to state at once and are painted together when it closes, and an
 idle client schedules no timer. View returns the painted screen without
-changing navigation.
+changing navigation. Output scroll state is derived, so nothing posts it while
+handling a message: the frame clock compares it with the last value Session
+accepted and reports a difference together with the screen that shows it.
 Input's minimum is protected on both axes when constraints cannot fit.
 
 Pane frames, dividers, separators, and joinable input rules feed one frame grid.

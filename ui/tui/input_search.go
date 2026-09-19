@@ -86,9 +86,6 @@ func (c *inputController) previewSearch() {
 // closeSearch is the single exit path from search mode: resets the
 // mode, hides the overlay, and settles the viewport exactly once -
 // committed (stay at the match) or cancelled (restore the snapshot).
-// The final ScrollStateChangedMsg emitted by the effects is search's
-// analog of the picker's settle message: it keeps the session's
-// rune.state scroll view fresh.
 func (c *inputController) closeSearch(accepted bool) {
 	c.input.HideSearch()
 	if accepted {

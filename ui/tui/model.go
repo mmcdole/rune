@@ -58,9 +58,8 @@ type Model struct {
 	renderedContent string
 	compositions    int
 
-	// A server line inside an open frame reports scroll state when the frame
-	// closes, so a flood reports once per frame rather than once per line.
-	scrollReportDue bool
+	// Last scroll state the Session queue accepted; see reportScrollState.
+	reportedScroll ui.ScrollStateChangedMsg
 
 	// State
 	width        int
@@ -87,6 +86,9 @@ func NewModel(events chan<- ui.UIEvent) *Model {
 		bars:   make(map[string]*widget.Bar),
 		styles: styles,
 		layout: ui.DefaultLayoutTree(),
+		// Session starts from the same value, so an untouched viewport
+		// reports nothing.
+		reportedScroll: ui.ScrollStateChangedMsg{Mode: "live"},
 	}
 	m.inputCtl = newInputController(input, m.notifySession, m.submit, m.handleScrollKey, m)
 
@@ -107,10 +109,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	_, cmd := m.dispatch(msg)
 
 	previousOutput := m.layoutPlan.output
-	changed := m.applyLayout()
-	if m.applySearchPosition(previousOutput != m.layoutPlan.output) || changed {
-		m.updateScrollState()
-	}
+	m.applyLayout()
+	m.applySearchPosition(previousOutput != m.layoutPlan.output)
 
 	if _, closing := msg.(frameMsg); !closing {
 		m.stale = true
@@ -119,12 +119,22 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // advanceFrame composes a stale screen unless a frame is open, and returns
-// the command that closes the frame it opened.
+// the command that closes the frame it opened. Scroll state is reported with
+// the screen it describes, so rune.state matches what the user sees and a
+// flood costs Session one report per frame. Unthrottled, View composes and
+// every update reports.
 func (m *Model) advanceFrame() tea.Cmd {
-	if m.frameInterval <= 0 || m.frameOpen || !m.stale {
+	if m.frameInterval <= 0 {
+		m.reportScrollState()
+		return nil
+	}
+	if m.frameOpen || !m.stale {
 		return nil
 	}
 	m.compose()
+	if !m.reportScrollState() {
+		m.stale = true // retry when this frame closes
+	}
 	m.frameOpen = true
 	return tea.Tick(m.frameInterval, func(time.Time) tea.Msg { return frameMsg{} })
 }
@@ -185,7 +195,7 @@ func (m *Model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	// Pane scrolling (from Lua). Every named surface follows the same pane
-	// contract. Output additionally reports its scroll state to Session.
+	// contract.
 	case ui.PaneScrollUpMsg:
 		m.scrollPane(msg.Name, func(pane paneResource) { pane.ScrollUp(msg.Lines) })
 		return m, nil
@@ -216,10 +226,6 @@ func (m *Model) handleWindowSize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 // wakeups.
 func (m *Model) handleFrame() (tea.Model, tea.Cmd) {
 	m.frameOpen = false
-	if m.scrollReportDue {
-		m.scrollReportDue = false
-		m.updateScrollState()
-	}
 	return m, nil
 }
 
@@ -262,19 +268,12 @@ func (m *Model) handleDisplayOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case ui.PrintLineMsg:
 		m.output.Write(string(msg))
-		if m.frameOpen {
-			m.scrollReportDue = true
-			return m, nil
-		}
-		m.updateScrollState()
 	case ui.EchoLineMsg:
 		m.output.Write(string(msg))
-		m.updateScrollState()
 	case ui.SetPromptMsg:
 		m.output.setPrompt(string(msg))
 	case ui.CommitPromptMsg:
 		m.output.commitPrompt(string(msg))
-		m.updateScrollState()
 	}
 	return m, nil
 }
@@ -282,25 +281,17 @@ func (m *Model) handleDisplayOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
 // handlePaneMsg applies buffer content operations. Placement and visibility
 // are layout-tree state and arrive as UpdateLayoutMsg instead.
 func (m *Model) handlePaneMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
-	contentChanged := false
-	var affected paneResource
 	switch msg := msg.(type) {
 	case ui.PaneCreateMsg:
-		affected = m.panes.Create(msg.Name)
+		m.panes.Create(msg.Name)
 	case ui.PaneWriteMsg:
-		affected = m.panes.Write(msg.Name, msg.Text)
-		contentChanged = true
+		m.panes.Write(msg.Name, msg.Text)
 	case ui.PaneReplaceMsg:
 		m.dropOutputSearch(msg.Name)
-		affected = m.panes.Replace(msg.Name, msg.Text)
-		contentChanged = true
+		m.panes.Replace(msg.Name, msg.Text)
 	case ui.PaneClearMsg:
 		m.dropOutputSearch(msg.Name)
-		affected, _ = m.panes.Clear(msg.Name)
-		contentChanged = true
-	}
-	if affected == m.output && contentChanged {
-		m.updateScrollState()
+		m.panes.Clear(msg.Name)
 	}
 	return m, nil
 }
@@ -318,7 +309,7 @@ func (m *Model) dropOutputSearch(name string) {
 }
 
 // scrollPane applies one navigation operation to an existing pane. Output's
-// extra search and session-state effects remain private to the controller.
+// extra search effect remains private to the controller.
 func (m *Model) scrollPane(name string, scroll func(paneResource)) {
 	pane, ok := m.panes.Lookup(name)
 	if !ok {
@@ -357,12 +348,6 @@ func (m *Model) handleMouse(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// appendMessage shapes text into rows and appends them.
-func (m *Model) appendMessage(text string) {
-	m.output.Write(text)
-	m.updateScrollState()
-}
-
 // submit offers a submission and its following draft to the session as one
 // transition. It rejects invalid command text or a busy engine with a
 // visible warning rather than blocking the render loop; false tells the
@@ -373,7 +358,7 @@ func (m *Model) submit(msg ui.InputSubmittedMsg) bool {
 		if key := m.input.Bindings().Hint("toggle_mode"); key != "" {
 			warning += " Use " + key + " for verbatim."
 		}
-		m.appendMessage(text.Red(warning))
+		m.output.Write(text.Red(warning))
 		return false
 	}
 	if m.tryPost(msg) {
@@ -401,21 +386,27 @@ func (m *Model) notifySession(event ui.UIEvent) {
 	m.showWarning("UI event dropped - engine lagging")
 }
 
-// showWarning appends locally without reporting another scroll-state event:
-// this path is reached only when the Session event queue is already full.
 func (m *Model) showWarning(message string) {
 	m.output.Write(text.Red("[WARNING] " + message))
 }
 
-func (m *Model) updateScrollState() {
-	mode := m.output.viewport.Mode()
-	newLines := m.output.viewport.NewLineCount()
-
-	modeStr := "live"
-	if mode != widget.ModeLive {
-		modeStr = "scrolled"
+// reportScrollState posts the output viewport's scroll state when it differs
+// from the last value Session accepted. It is derived state with one reporter:
+// nothing else posts it. A full queue is not a dropped event - the value is
+// simply still unreported - so it reports false and the caller retries.
+func (m *Model) reportScrollState() bool {
+	state := ui.ScrollStateChangedMsg{Mode: "live", NewLines: m.output.viewport.NewLineCount()}
+	if m.output.viewport.Mode() != widget.ModeLive {
+		state.Mode = "scrolled"
 	}
-	m.notifySession(ui.ScrollStateChangedMsg{Mode: modeStr, NewLines: newLines})
+	if state == m.reportedScroll {
+		return true
+	}
+	if !m.tryPost(state) {
+		return false
+	}
+	m.reportedScroll = state
+	return true
 }
 
 // navigateOutputPane is the single path for deliberate user/script
@@ -424,7 +415,6 @@ func (m *Model) updateScrollState() {
 func (m *Model) navigateOutputPane(move func()) {
 	m.clearCommittedSearchFocus()
 	move()
-	m.updateScrollState()
 }
 
 // handleScrollKey handles viewport scrolling keys.

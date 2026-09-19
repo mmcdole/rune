@@ -120,41 +120,78 @@ func TestFrameNeverShowsStaleGeometry(t *testing.T) {
 	}
 }
 
-// TestServerLineFloodReportsScrollStateOncePerFrame pins the Session-facing
-// rate: each report costs a Lua bar render, so lines inside a frame share one.
-func TestServerLineFloodReportsScrollStateOncePerFrame(t *testing.T) {
+// drainScrollReports empties the event queue and returns its scroll reports.
+func drainScrollReports(events chan ui.UIEvent) (reports []ui.ScrollStateChangedMsg) {
+	for {
+		select {
+		case event := <-events:
+			if report, ok := event.(ui.ScrollStateChangedMsg); ok {
+				reports = append(reports, report)
+			}
+		default:
+			return reports
+		}
+	}
+}
+
+// TestScrollStateReportsOnlyChangesOncePerFrame pins the Session-facing
+// contract: each report costs a Lua bar render, so an unchanged value posts
+// nothing and a value changing on every line posts once per frame.
+func TestScrollStateReportsOnlyChangesOncePerFrame(t *testing.T) {
 	events := make(chan ui.UIEvent, 4096)
 	m := NewModel(events)
 	m.frameInterval = defaultFrameInterval
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	m.Update(frameMsg{})
-	scrollReports := func() (n int) {
-		for {
-			select {
-			case event := <-events:
-				if _, ok := event.(ui.ScrollStateChangedMsg); ok {
-					n++
-				}
-			default:
-				return n
-			}
-		}
+	for range 100 {
+		m.Update(ui.PrintLineMsg("history"))
 	}
-	scrollReports()
+	m.Update(frameMsg{})
+	m.Update(frameMsg{})
+	if got := drainScrollReports(events); len(got) != 0 {
+		t.Fatalf("live output posted unchanged scroll state: %v", got)
+	}
 
-	m.Update(ui.PrintLineMsg("first"))
-	if got := scrollReports(); got != 1 {
-		t.Fatalf("first line posted %d scroll reports, want 1", got)
+	m.Update(ui.PaneScrollUpMsg{Name: ui.OutputPaneName, Lines: 5})
+	if got := drainScrollReports(events); len(got) != 1 || got[0].Mode != "scrolled" {
+		t.Fatalf("scrolling from idle reported %v, want one scrolled report", got)
 	}
 	for range 50 {
 		m.Update(ui.PrintLineMsg("flood"))
 	}
-	if got := scrollReports(); got != 0 {
-		t.Fatalf("lines inside a frame posted %d scroll reports, want 0", got)
+	if got := drainScrollReports(events); len(got) != 0 {
+		t.Fatalf("lines inside a frame posted %d scroll reports, want 0", len(got))
 	}
 	m.Update(frameMsg{})
-	if got := scrollReports(); got != 1 {
-		t.Fatalf("frame close posted %d scroll reports, want 1", got)
+	if got := drainScrollReports(events); len(got) != 1 || got[0].NewLines != 50 {
+		t.Fatalf("frame close reported %v, want one report of 50 new lines", got)
+	}
+}
+
+// TestScrollStateRetriesAfterFullQueue verifies a report the Session queue
+// rejected is not lost: the frame chain stays alive until it is accepted.
+func TestScrollStateRetriesAfterFullQueue(t *testing.T) {
+	events := make(chan ui.UIEvent, 1)
+	m := NewModel(events)
+	m.frameInterval = defaultFrameInterval
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24}) // fills the queue
+	for range 100 {
+		m.Update(ui.PrintLineMsg("history"))
+	}
+	m.Update(frameMsg{})
+	m.Update(frameMsg{})
+
+	m.Update(ui.PaneScrollUpMsg{Name: ui.OutputPaneName, Lines: 5})
+	if _, cmd := m.Update(frameMsg{}); cmd == nil {
+		t.Fatal("frame chain ended with scroll state still unreported")
+	}
+	<-events
+	m.Update(frameMsg{})
+	if got := drainScrollReports(events); len(got) != 1 || got[0].Mode != "scrolled" {
+		t.Fatalf("retry reported %v, want one scrolled report", got)
+	}
+	m.Update(frameMsg{})
+	if _, cmd := m.Update(frameMsg{}); cmd != nil {
+		t.Fatal("frame chain kept running after the report was accepted")
 	}
 }
 

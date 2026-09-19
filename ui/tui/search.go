@@ -18,9 +18,8 @@ type searchViewState struct {
 
 // Model implements searchEffects: the viewport half of scrollback
 // search. The controller drives the mode; these methods move the
-// viewport. Every position change reports the resulting scroll state
-// so the session's rune.state view cannot go stale - the settle
-// message of a search is its final ScrollStateChangedMsg.
+// viewport. They never report scroll state themselves: the frame clock
+// reports whatever position the update settles on.
 
 // OpenSearch snapshots the viewport and committed highlight for cancel, then
 // returns the temporal origin the Search widget should scan around.
@@ -43,21 +42,17 @@ func (m *Model) OpenSearch() widget.SearchScope {
 
 // applySearchPosition runs after layout, keeping active previews centered and
 // settling a close against the final viewport rather than an intermediate one.
-func (m *Model) applySearchPosition(geometryChanged bool) bool {
+func (m *Model) applySearchPosition(geometryChanged bool) {
 	state := &m.searchView
 	if !state.positionPending && !(m.input.SearchActive() && geometryChanged) {
-		return false
+		return
 	}
-	beforeMode := m.output.viewport.Mode()
-	beforeLines := m.output.viewport.NewLineCount()
 	if state.restore != nil {
 		m.output.viewport.RestoreScroll(*state.restore)
 	} else if state.focus != nil {
 		m.output.viewport.CenterOn(state.focus.Seq)
 	}
-	pending := state.positionPending
 	state.positionPending, state.restore = false, nil
-	return pending || beforeMode != m.output.viewport.Mode() || beforeLines != m.output.viewport.NewLineCount()
 }
 
 // PreviewSearch centers and highlights the selected match; with no

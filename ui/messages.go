@@ -109,7 +109,8 @@ type WindowSizeChangedMsg struct {
 func (WindowSizeChangedMsg) uiEvent() {}
 
 // ScrollStateChangedMsg notifies Session of scroll state changes.
-// Session uses this to update rune.state.scroll_mode/scroll_lines.
+// Session uses this to update rune.state.scroll_mode/scroll_lines. It is
+// state, not an event: the UI posts it only when the value changed.
 type ScrollStateChangedMsg struct {
 	Mode     string // "live" or "scrolled"
 	NewLines int    // Lines behind live (when scrolled)
