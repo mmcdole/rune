@@ -31,6 +31,10 @@ measurements, not correctness gates. Real-terminal verification uses the
 manual tmux route in `.agents/skills/verify/SKILL.md`; E2E mocks the terminal
 and does not prove actual terminal rendering or key encoding.
 
+`make bench-render` checks rendering workloads and UI correctness. For saved
+before/after measurements, real renderer output latency, profiles, and visual
+snapshots, see [Rendering performance](render-performance.md).
+
 ## Test layers
 
 Work down this list and stop at the first layer where the failure you
