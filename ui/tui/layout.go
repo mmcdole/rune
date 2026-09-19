@@ -85,6 +85,7 @@ func (m *Model) applyOutputGeometry(plan layoutPlan) (scrollStateChanged bool) {
 // applyLayout resolves current state and applies all leaf rectangles once at
 // the end of Update, before geometry-dependent navigation and painting.
 func (m *Model) applyLayout() bool {
+	m.contentValid = false
 	if !m.initialized {
 		return false
 	}

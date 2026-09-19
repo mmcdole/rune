@@ -53,6 +53,11 @@ type Model struct {
 	layout     ui.LayoutTree
 	layoutPlan layoutPlan
 
+	// Content is cached between model updates. Buffered output changes no
+	// visible state; all other updates conservatively invalidate the cache.
+	renderedContent string
+	contentValid    bool
+
 	// State
 	width        int
 	height       int
@@ -92,6 +97,13 @@ func (m *Model) Init() tea.Cmd {
 
 // Update implements tea.Model.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if line, ok := msg.(ui.PrintLineMsg); ok && m.output.flushScheduled {
+		// Only pendingRows changes. Leave layout and the composed screen alone
+		// until the batch is flushed, even though Bubble Tea calls View after
+		// every message. Do not mark an as-yet unrendered screen valid here.
+		m.output.printServer(string(line))
+		return m, nil
+	}
 	// Finalize geometry once, then apply navigation that depends on it.
 	// View only paints; it never changes session-visible scroll state.
 	defer func() {

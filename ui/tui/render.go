@@ -34,7 +34,11 @@ func (m *Model) View() tea.View {
 		return view
 	}
 
-	view.Content = m.renderPlan(m.layoutPlan)
+	if !m.contentValid {
+		m.renderedContent = m.renderPlan(m.layoutPlan)
+		m.contentValid = true
+	}
+	view.Content = m.renderedContent
 	return view
 }
 
