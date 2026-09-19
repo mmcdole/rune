@@ -109,7 +109,7 @@ func (m *Model) Init() tea.Cmd {
 }
 
 // Update implements tea.Model: apply the message, finalize geometry once and
-// the navigation that depends on it, then refresh the screen if the throttle
+// the navigation that depends on it, then compose the screen if the throttle
 // allows. View only returns the composed screen; it never changes
 // session-visible scroll state.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -122,15 +122,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if _, closing := msg.(composeTick); !closing {
 		m.stale = true
 	}
-	return m, m.refresh()
+	return m, m.composeThrottled()
 }
 
-// refresh composes a stale screen unless throttled, then throttles until the
-// composeTick it returns. Scroll state is reported with the screen it
-// describes, so rune.state matches what the user sees and a flood costs
+// composeThrottled composes a stale screen unless throttled, then throttles
+// until the composeTick it returns. Scroll state is reported with the screen
+// it describes, so rune.state matches what the user sees and a flood costs
 // Session one report per interval. With a zero interval, View composes and
 // every update reports.
-func (m *Model) refresh() tea.Cmd {
+func (m *Model) composeThrottled() tea.Cmd {
 	if m.composeInterval <= 0 {
 		m.reportScrollState()
 		return nil

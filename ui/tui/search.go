@@ -18,7 +18,7 @@ type searchViewState struct {
 
 // Model implements searchEffects: the viewport half of scrollback
 // search. The controller drives the mode; these methods move the
-// viewport. They never report scroll state themselves: the frame clock
+// viewport. They never report scroll state themselves: composeThrottled
 // reports whatever position the update settles on.
 
 // OpenSearch snapshots the viewport and committed highlight for cancel, then

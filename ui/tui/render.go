@@ -59,7 +59,7 @@ func (m *Model) blankCanvas() uv.ScreenBuffer {
 
 // compose paints the current layout plan into screen: leaf content,
 // then the frame grid's junction glyphs, then the labels that sit on it. The
-// throttle in refresh decides when.
+// composeThrottled decides when.
 func (m *Model) compose() {
 	m.stale = false
 	m.compositions++
