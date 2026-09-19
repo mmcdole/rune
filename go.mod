@@ -9,8 +9,8 @@ require (
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1
 	github.com/charmbracelet/ultraviolet v0.0.0-20260811164956-006e29f97886
 	github.com/charmbracelet/x/ansi v0.11.8
-	github.com/mattn/go-runewidth v0.0.29
-	github.com/mmcdole/lunar v0.1.1
+	github.com/mattn/go-runewidth v0.0.30
+	github.com/mmcdole/lunar v0.1.2
 )
 
 require (
