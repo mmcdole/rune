@@ -2,7 +2,6 @@ package widget
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -146,15 +145,15 @@ func buildDraftLayout(content []rune, width, lineCount, rowLimit int) draftLayou
 	return layout
 }
 
-// Source offsets are ordered within each row. Tab expansion can leave rows
-// without insertion points; skip those when locating the cursor.
+// Each row retains one point per consecutive rune offset. Tab expansion can
+// leave rows without insertion points; skip those when locating the cursor.
 func (l draftLayout) withCursor(cursor int) draftLayout {
 	for rowIndex, row := range l.rows {
-		if len(row.points) == 0 || row.points[len(row.points)-1].offset < cursor {
+		if len(row.points) == 0 {
 			continue
 		}
-		n := sort.Search(len(row.points), func(n int) bool { return row.points[n].offset >= cursor })
-		if n < len(row.points) && row.points[n].offset == cursor {
+		n := cursor - row.points[0].offset
+		if n >= 0 && n < len(row.points) {
 			l.cursorRow, l.cursorCol = rowIndex, row.points[n].col
 			return l
 		}

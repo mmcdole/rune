@@ -25,6 +25,9 @@ func TestDraftEditorLayoutTracksEditsAfterMeasurement(t *testing.T) {
 			c := newDraftEditor("abc\ndef", 3)
 			c.layout(80) // measurement before the edit must not freeze its pixels
 			tc.edit(c)
+			if got, want := c.lines(), strings.Count(tc.want, "\n")+1; got != want {
+				t.Fatalf("line count = %d, want %d", got, want)
+			}
 			var rows []string
 			for _, row := range c.layout(80).rows {
 				var text strings.Builder
@@ -41,12 +44,18 @@ func TestDraftEditorLayoutTracksEditsAfterMeasurement(t *testing.T) {
 }
 
 func TestDraftEditorKeepsRowsDuringNavigationAndMeasurement(t *testing.T) {
-	for _, value := range []string{"a\tb界é\n", strings.Repeat("long draft\n", 1000), strings.Repeat("wrap ", 1000)} {
-		c := newDraftEditor(value, 0)
-		rows := c.layout(20).rows
+	for _, tc := range []struct {
+		value string
+		width int
+	}{
+		{"a\tb界é\n", 1}, {"a\tb界é\n", 20},
+		{strings.Repeat("long draft\n", 1000), 20}, {strings.Repeat("wrap ", 1000), 20},
+	} {
+		c := newDraftEditor(tc.value, 0)
+		rows := c.layout(tc.width).rows
 		for _, width := range []int{1, 10, 80, 270} {
 			c.measureRows(width)
-			if &c.layout(20).rows[0] != &rows[0] {
+			if &c.layout(tc.width).rows[0] != &rows[0] {
 				t.Fatal("measurement evicted the editing layout")
 			}
 		}
@@ -55,7 +64,7 @@ func TestDraftEditorKeepsRowsDuringNavigationAndMeasurement(t *testing.T) {
 		for rowIndex, row := range rows {
 			for _, point := range row.points {
 				c.SetCursor(point.offset)
-				layout := c.layout(20)
+				layout := c.layout(tc.width)
 				if &layout.rows[0] != &rows[0] {
 					t.Fatal("cursor movement reshaped the draft")
 				}
