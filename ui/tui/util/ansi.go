@@ -100,7 +100,7 @@ func ExpandTabs(line string) string {
 
 // ClipRow truncates a styled row to the available terminal cells.
 func ClipRow(s string, width int) string {
-	if width < 1 || ansi.StringWidth(s) <= width {
+	if width < 1 || len(s) <= width || ansi.StringWidth(s) <= width {
 		return s
 	}
 	return ansi.Truncate(s, width, "")
