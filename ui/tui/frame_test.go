@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -242,5 +243,30 @@ func BenchmarkIdleMessage(b *testing.B) {
 		m.Update(ui.PrintLineMsg("a line of MUD output"))
 		m.View()
 		m.Update(frameMsg{})
+	}
+}
+
+// BenchmarkCompose is one full-screen paint at a large terminal size: colored
+// scrollback, a framed side pane with a title, dividers, and a prompt.
+func BenchmarkCompose(b *testing.B) {
+	m := NewModel(make(chan ui.UIEvent, 4096))
+	m.Update(tea.WindowSizeMsg{Width: 270, Height: 66})
+	m.Update(ui.UpdateLayoutMsg{Root: ui.LayoutNode{Type: ui.LayoutTypeColumn, Children: []ui.LayoutNode{
+		{Type: ui.LayoutTypeRow, Dividers: true, Children: []ui.LayoutNode{
+			{Type: ui.LayoutTypePane, Name: ui.OutputPaneName, Border: ui.PaneBorderNone},
+			{Type: ui.LayoutTypePane, Name: "chat", Size: ui.Cells(60)},
+		}},
+		{Type: ui.LayoutTypeInput, Size: ui.AutoSize()},
+	}}})
+	for i := range 200 {
+		line := fmt.Sprintf("\x1b[32mline %d\x1b[0m some \x1b[1;31mcolored\x1b[0m output that is long enough to be realistic", i)
+		m.Update(ui.PrintLineMsg(line))
+		m.Update(ui.PaneWriteMsg{Name: "chat", Text: line})
+	}
+	m.Update(ui.SetPromptMsg("HP:100 >"))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		m.compose()
 	}
 }

@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	osc52 "github.com/aymanbagabas/go-osc52/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 
 	"github.com/mmcdole/rune/input"
 	"github.com/mmcdole/rune/text"
@@ -58,6 +59,11 @@ type Model struct {
 	renderedContent string
 	compositions    int
 
+	// Compositor state reused across frames: the cell grid and the styled
+	// border cell for each junction glyph.
+	canvas     uv.ScreenBuffer
+	frameCells map[string]*uv.Cell
+
 	// Last scroll state the Session queue accepted; see reportScrollState.
 	reportedScroll ui.ScrollStateChangedMsg
 
@@ -79,13 +85,14 @@ func NewModel(events chan<- ui.UIEvent) *Model {
 	panes := newPaneRegistry(output)
 
 	m := &Model{
-		output: output,
-		input:  input,
-		panes:  panes,
-		events: events,
-		bars:   make(map[string]*widget.Bar),
-		styles: styles,
-		layout: ui.DefaultLayoutTree(),
+		output:     output,
+		input:      input,
+		panes:      panes,
+		events:     events,
+		bars:       make(map[string]*widget.Bar),
+		frameCells: make(map[string]*uv.Cell),
+		styles:     styles,
+		layout:     ui.DefaultLayoutTree(),
 		// Session starts from the same value, so an untouched viewport
 		// reports nothing.
 		reportedScroll: ui.ScrollStateChangedMsg{Mode: "live"},

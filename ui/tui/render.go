@@ -2,10 +2,8 @@ package tui
 
 import (
 	"image"
-	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 
@@ -52,8 +50,27 @@ func (m *Model) compose() {
 	m.renderedContent = m.renderPlan(m.layoutPlan)
 }
 
+// newCanvas returns a blank cell grid. A ScreenBuffer renders every cell, so
+// the composed block is exactly its size with no trimming to undo.
+func newCanvas(width, height int) uv.ScreenBuffer {
+	canvas := uv.NewScreenBuffer(width, height)
+	canvas.Method = ansi.GraphemeWidth
+	return canvas
+}
+
+// frameCanvas returns a blank canvas of the terminal size, reusing the last
+// frame's cells: allocating them anew dominated composition.
+func (m *Model) frameCanvas() uv.ScreenBuffer {
+	if m.canvas.RenderBuffer == nil || m.canvas.Width() != m.width || m.canvas.Height() != m.height {
+		m.canvas = newCanvas(m.width, m.height)
+	} else {
+		m.canvas.Clear()
+	}
+	return m.canvas
+}
+
 func (m *Model) renderPlan(plan layoutPlan) string {
-	canvas := lipgloss.NewCanvas(m.width, m.height)
+	canvas := m.frameCanvas()
 	for i := range plan.leaves {
 		leaf := plan.leaves[i]
 		if leaf.content.Empty() {
@@ -62,21 +79,27 @@ func (m *Model) renderPlan(plan layoutPlan) string {
 		drawStyled(canvas, leaf.surface.View(), leaf.content)
 	}
 
-	frameCells := make(map[string]*uv.Cell)
-	for y := 0; y < plan.frame.height; y++ {
-		for x := 0; x < plan.frame.width; x++ {
-			glyph := plan.frame.glyph(x, y)
-			if glyph == "" {
-				continue
-			}
-			cell := frameCells[glyph]
-			if cell == nil {
-				cell = styledCell(m.styles.PaneBorder.Render(glyph))
-				frameCells[glyph] = cell
-			}
-			canvas.SetCell(x, y, cell)
+	// Only marked cells can hold a glyph; most of the grid is content.
+	frame := plan.frame
+	for i := range frame.horizontal {
+		if !frame.horizontal[i] && !frame.vertical[i] {
+			continue
 		}
+		x, y := i%frame.width, i/frame.width
+		glyph := frame.glyph(x, y)
+		cell := m.frameCells[glyph]
+		if cell == nil {
+			cell = styledCell(m.styles.PaneBorder.Render(glyph))
+			m.frameCells[glyph] = cell
+		}
+		canvas.SetCell(x, y, cell)
 	}
+	m.drawFrameLabels(canvas, plan)
+	return canvas.Render()
+}
+
+// drawFrameLabels paints pane titles and rule labels over the frame grid.
+func (m *Model) drawFrameLabels(canvas uv.ScreenBuffer, plan layoutPlan) {
 	for _, leaf := range plan.leaves {
 		if leaf.node.Type != ui.LayoutTypePane || leaf.frames&frameTop == 0 {
 			continue
@@ -103,7 +126,6 @@ func (m *Model) renderPlan(plan layoutPlan) string {
 			drawFrameLabel(canvas, plan.frame, label.Style.Render(label.Text), label.At, rule.To, rule.At)
 		}
 	}
-	return exactCanvasRender(canvas, m.width, m.height)
 }
 
 // frameGrid records line connectivity independently from content rendering.
@@ -310,7 +332,7 @@ func (m *Model) planFrames(plan *layoutPlan) {
 	}
 }
 
-func drawStyled(canvas *lipgloss.Canvas, content string, rect image.Rectangle) {
+func drawStyled(canvas uv.ScreenBuffer, content string, rect image.Rectangle) {
 	rect = rect.Intersect(canvas.Bounds())
 	if rect.Empty() {
 		return
@@ -319,13 +341,13 @@ func drawStyled(canvas *lipgloss.Canvas, content string, rect image.Rectangle) {
 }
 
 func styledCell(rendered string) *uv.Cell {
-	canvas := lipgloss.NewCanvas(1, 1)
+	canvas := newCanvas(1, 1)
 	drawStyled(canvas, rendered, canvas.Bounds())
 	return canvas.CellAt(0, 0)
 }
 
 // Labels cover only their text cells, never the remaining rule or a junction.
-func drawFrameLabel(canvas *lipgloss.Canvas, frame frameGrid, label string, left, right, y int) {
+func drawFrameLabel(canvas uv.ScreenBuffer, frame frameGrid, label string, left, right, y int) {
 	for x := left; x < right; x++ {
 		if frame.at(frame.vertical, x, y) || frame.at(frame.vertical, x, y-1) || frame.at(frame.vertical, x, y+1) {
 			right = x
@@ -337,31 +359,4 @@ func drawFrameLabel(canvas *lipgloss.Canvas, frame frameGrid, label string, left
 	}
 	label = ansi.Truncate(label, right-left, "")
 	drawStyled(canvas, label, image.Rect(left, y, left+ansi.StringWidth(label), y+1))
-}
-
-// exactCanvasRender retains the Canvas cell clipping/compositing semantics
-// while making the returned block exactly width by height. Ultraviolet
-// deliberately trims trailing blanks from each rendered line.
-func exactCanvasRender(canvas *lipgloss.Canvas, width, height int) string {
-	if width <= 0 || height <= 0 {
-		return ""
-	}
-	lines := strings.Split(canvas.Render(), "\n")
-	if len(lines) < height {
-		lines = append(lines, make([]string, height-len(lines))...)
-	} else if len(lines) > height {
-		lines = lines[:height]
-	}
-	for i, line := range lines {
-		visible := ansi.StringWidth(line)
-		if visible > width {
-			line = ansi.Truncate(line, width, "")
-			visible = ansi.StringWidth(line)
-		}
-		if visible < width {
-			line += strings.Repeat(" ", width-visible)
-		}
-		lines[i] = line
-	}
-	return strings.Join(lines, "\n")
 }
