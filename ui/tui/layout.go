@@ -260,7 +260,7 @@ func (m *Model) placeNode(node *resolvedNode, rect image.Rectangle, parentAxis s
 
 	axis := nodeAxis(node.node)
 	allocation := m.allocateChildren(node, axisExtent(rect, axis), axis, crossExtent(rect, axis))
-	childShared := childSharedEdges(node, shared, allocation.gaps, !allocation.constrained)
+	childShared := childSharedEdges(node, shared, allocation.boundaries, !allocation.constrained)
 
 	position := rect.Min.X
 	if axis == axisVertical {
@@ -285,7 +285,7 @@ func (m *Model) placeNode(node *resolvedNode, rect image.Rectangle, parentAxis s
 		m.placeNode(child, childArea, axis, inherited, plan)
 		position += size
 		if i < len(node.children)-1 {
-			gap := allocation.gaps[i]
+			gap := allocation.boundaries[i].gap
 			// The tiny-terminal fallback drops gaps, and with them the cell a
 			// divider draws in, so dividers degrade away with their gap.
 			if node.node.Dividers && !allocation.constrained {
@@ -307,7 +307,7 @@ func (m *Model) placeNode(node *resolvedNode, rect image.Rectangle, parentAxis s
 				plan.rules = append(plan.rules, rule)
 			}
 			position += gap
-			if allocation.overlaps[i] {
+			if allocation.boundaries[i].overlap {
 				position--
 			}
 		}

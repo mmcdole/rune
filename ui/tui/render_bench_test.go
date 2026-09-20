@@ -66,6 +66,34 @@ func BenchmarkRenderLayout(b *testing.B) {
 	}
 }
 
+func BenchmarkRenderNestedLayout(b *testing.B) {
+	for _, size := range [][2]int{{270, 66}, {20, 3}} {
+		b.Run(fmt.Sprintf("%dx%d", size[0], size[1]), func(b *testing.B) {
+			m := renderFixture(size[0], size[1], false)
+			m.layout.Root = staggeredLayout()
+			for _, row := range []*ui.LayoutNode{&m.layout.Root.Children[0], &m.layout.Root.Children[2]} {
+				for i := range row.Children {
+					if row.Children[i].Type == ui.LayoutTypePane {
+						row.Children[i].Border = ui.PaneBorderFull
+					}
+				}
+			}
+			root, ok := m.resolveNode(m.layout.Root, m.width, axisVertical)
+			if !ok {
+				b.Fatal("nested fixture did not resolve")
+			}
+			assignSharedEdges(root, 0)
+			if constrained := m.allocateChildren(root, m.height, axisVertical, m.width).constrained; constrained != (m.height == 3) {
+				b.Fatalf("unexpected fallback: %t", constrained)
+			}
+			b.ReportAllocs()
+			for b.Loop() {
+				m.applyLayout()
+			}
+		})
+	}
+}
+
 // One incoming line inside an already-open throttle window. This exposes
 // per-message work that the render throttle does not eliminate.
 func BenchmarkRenderUpdate(b *testing.B) {

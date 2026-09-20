@@ -25,25 +25,34 @@ func seamBorders(children []*resolvedNode, index int, axis splitAxis) (before, a
 	return children[index].hasBorder(borderBottom), children[index+1].hasBorder(borderTop)
 }
 
-// boundaryGaps returns the space between each pair of active children. With
-// no declared gap, a divider reuses an existing framed seam; otherwise it
-// reserves one cell for a rule.
-func boundaryGaps(node ui.LayoutNode, children []*resolvedNode, axis splitAxis) []int {
-	gaps := make([]int, max(0, len(children)-1))
-	for i := range gaps {
-		gaps[i] = node.Gap
-		before, after := seamBorders(children, i, axis)
-		if node.Dividers && gaps[i] == 0 && !before && !after {
-			gaps[i] = 1
-		}
-	}
-	return gaps
+// boundary records the gap and shared-cell overlap between two children.
+type boundary struct {
+	gap     int
+	overlap bool
 }
 
-func gapCells(gaps []int) int {
+// With no declared gap, a divider needs a cell only when neither child
+// supplies a border at the boundary.
+func childBoundaries(node ui.LayoutNode, children []*resolvedNode, axis splitAxis) []boundary {
+	boundaries := make([]boundary, max(0, len(children)-1))
+	for i := range boundaries {
+		before, after := seamBorders(children, i, axis)
+		gap := node.Gap
+		if node.Dividers && gap == 0 && !before && !after {
+			gap = 1
+		}
+		boundaries[i] = boundary{gap: gap, overlap: gap == 0 && before && after}
+	}
+	return boundaries
+}
+
+func boundarySpace(boundaries []boundary) int {
 	total := 0
-	for _, gap := range gaps {
-		total += gap
+	for _, boundary := range boundaries {
+		total += boundary.gap
+		if boundary.overlap {
+			total--
+		}
 	}
 	return total
 }
@@ -131,7 +140,7 @@ func contentInsets(node *resolvedNode) borderEdges {
 	return node.shared &^ node.edges
 }
 
-func childSharedEdges(node *resolvedNode, inherited borderEdges, gaps []int, seams bool) []borderEdges {
+func childSharedEdges(node *resolvedNode, inherited borderEdges, boundaries []boundary, seams bool) []borderEdges {
 	axis := nodeAxis(node.node)
 	start, end, cross := borderLeft, borderRight, borderTop|borderBottom
 	if axis == axisVertical {
@@ -148,9 +157,9 @@ func childSharedEdges(node *resolvedNode, inherited borderEdges, gaps []int, sea
 		}
 	}
 	if seams {
-		for i, gap := range gaps {
-			before, after := seamBorders(node.children, i, axis)
-			if gap == 0 && (node.node.Dividers || before && after) {
+		for i, boundary := range boundaries {
+			if boundary.overlap || (boundary.gap == 0 && node.node.Dividers) {
+				before, after := seamBorders(node.children, i, axis)
 				if before {
 					shared[i] |= end
 				}
@@ -168,7 +177,7 @@ func assignSharedEdges(node *resolvedNode, inherited borderEdges) {
 	if node.widget != nil {
 		return
 	}
-	shared := childSharedEdges(node, inherited, boundaryGaps(node.node, node.children, nodeAxis(node.node)), true)
+	shared := childSharedEdges(node, inherited, childBoundaries(node.node, node.children, nodeAxis(node.node)), true)
 	for i, child := range node.children {
 		assignSharedEdges(child, shared[i])
 	}
@@ -198,8 +207,7 @@ func (m *Model) preferred(node *resolvedNode, axis splitAxis, cross int) int {
 
 	direction := nodeAxis(node.node)
 	if direction == axis {
-		gaps := boundaryGaps(node.node, node.children, direction)
-		total := gapCells(gaps) - countTrue(seamOverlaps(node.children, gaps, direction))
+		total := boundarySpace(childBoundaries(node.node, node.children, direction))
 		for _, child := range node.children {
 			desired := 0
 			switch child.node.Size.Kind {
@@ -274,8 +282,7 @@ func (m *Model) intrinsicMinimum(node *resolvedNode, axis splitAxis) int {
 
 	direction := nodeAxis(node.node)
 	if direction == axis {
-		gaps := boundaryGaps(node.node, node.children, direction)
-		total := gapCells(gaps) - countTrue(seamOverlaps(node.children, gaps, direction))
+		total := boundarySpace(childBoundaries(node.node, node.children, direction))
 		for _, child := range node.children {
 			total += m.minimum(child, axis)
 		}
@@ -295,33 +302,9 @@ func nodeMaximum(node ui.LayoutNode) int {
 	return *node.MaxSize
 }
 
-// seamOverlaps reports where resolved geometry lets adjacent framed panes share
-// one boundary cell.
-func seamOverlaps(children []*resolvedNode, gaps []int, axis splitAxis) []bool {
-	overlaps := make([]bool, max(0, len(children)-1))
-	for i := range overlaps {
-		if gaps[i] == 0 {
-			before, after := seamBorders(children, i, axis)
-			overlaps[i] = before && after
-		}
-	}
-	return overlaps
-}
-
-func countTrue(values []bool) int {
-	total := 0
-	for _, value := range values {
-		if value {
-			total++
-		}
-	}
-	return total
-}
-
 type childAllocation struct {
 	sizes       []int
-	gaps        []int
-	overlaps    []bool
+	boundaries  []boundary
 	constrained bool
 }
 
@@ -335,8 +318,7 @@ func fallbackAllocation(
 	result := childAllocation{
 		constrained: true,
 		sizes:       make([]int, count),
-		gaps:        make([]int, max(0, count-1)),
-		overlaps:    make([]bool, max(0, count-1)),
+		boundaries:  make([]boundary, max(0, count-1)),
 	}
 	extent = max(0, extent)
 	if extent == 0 || count == 0 {
@@ -429,9 +411,9 @@ func interactionMinimum(node *resolvedNode, axis splitAxis) int {
 }
 
 func (m *Model) allocateChildren(node *resolvedNode, extent int, axis splitAxis, cross int) childAllocation {
-	gaps := boundaryGaps(node.node, node.children, axis)
-	overlaps := seamOverlaps(node.children, gaps, axis)
-	effectiveExtent := max(0, extent) - gapCells(gaps) + countTrue(overlaps)
+	boundaries := childBoundaries(node.node, node.children, axis)
+	space := boundarySpace(boundaries)
+	effectiveExtent := max(0, extent) - space
 	tracks := make([]ui.AxisTrack, len(node.children))
 	for i, child := range node.children {
 		track := ui.AxisTrack{
@@ -449,9 +431,9 @@ func (m *Model) allocateChildren(node *resolvedNode, extent int, axis splitAxis,
 		return fallbackAllocation(node.children, extent, axis, tracks)
 	}
 
-	used := gapCells(gaps) - countTrue(overlaps)
+	used := space
 	for i, size := range sizes {
-		if size < 0 || (i < len(overlaps) && overlaps[i] && (size == 0 || sizes[i+1] == 0)) {
+		if size < 0 || (i < len(boundaries) && boundaries[i].overlap && (size == 0 || sizes[i+1] == 0)) {
 			return fallbackAllocation(node.children, extent, axis, tracks)
 		}
 		used += size
@@ -463,10 +445,10 @@ func (m *Model) allocateChildren(node *resolvedNode, extent int, axis splitAxis,
 				width, height, start, end = size, cross, borderLeft, borderRight
 			}
 			var required borderEdges
-			if i > 0 && overlaps[i-1] {
+			if i > 0 && boundaries[i-1].overlap {
 				required |= start
 			}
-			if i < len(overlaps) && overlaps[i] {
+			if i < len(boundaries) && boundaries[i].overlap {
 				required |= end
 			}
 			if required&^widgetBorders(child.widget, width, height) != 0 {
@@ -477,5 +459,5 @@ func (m *Model) allocateChildren(node *resolvedNode, extent int, axis splitAxis,
 	if used > extent {
 		return fallbackAllocation(node.children, extent, axis, tracks)
 	}
-	return childAllocation{sizes: sizes, gaps: gaps, overlaps: overlaps}
+	return childAllocation{sizes: sizes, boundaries: boundaries}
 }
