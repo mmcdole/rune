@@ -224,7 +224,7 @@ func BenchmarkRenderInputBorders(b *testing.B) {
 			m := autoLayoutFixture("input_beside_pane", 1000)
 			b.ReportAllocs()
 			for b.Loop() {
-				widgetBorders(m.input, width, 10)
+				m.inputBorders(width, 10)
 			}
 		})
 	}

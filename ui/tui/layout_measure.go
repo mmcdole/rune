@@ -409,7 +409,7 @@ func (m *Model) allocateChildren(node *resolvedNode, extent int, axis splitAxis,
 		}
 		used += size
 		child := node.children[i]
-		if child.widget != nil && child.node.Type != ui.LayoutTypePane {
+		if child.widget == m.input {
 			width, height := cross, size
 			start, end := borderTop, borderBottom
 			if axis == axisHorizontal {
@@ -422,7 +422,7 @@ func (m *Model) allocateChildren(node *resolvedNode, extent int, axis splitAxis,
 			if i < len(boundaries) && boundaries[i].overlap {
 				required |= end
 			}
-			if required&^widgetBorders(child.widget, width, height) != 0 {
+			if required&^m.inputBorders(width, height) != 0 {
 				return fallbackAllocation(node.children, extent, axis, tracks)
 			}
 		}

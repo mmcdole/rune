@@ -145,7 +145,7 @@ func (m *Model) resolveNode(node ui.LayoutNode, availableWidth int, parentAxis s
 			}
 		}
 		resolved.widget, resolved.hasInput = m.input, true
-		resolved.edges = widgetBorders(m.input, availableWidth, height)
+		resolved.edges = m.inputBorders(availableWidth, height)
 	case ui.LayoutTypeSeparator:
 		resolved.widget = widget.NewSeparator(node.SeparatorChar, m.styles.PaneBorder)
 	case ui.LayoutTypePane:
@@ -172,9 +172,9 @@ func (m *Model) placeNode(node *resolvedNode, rect image.Rectangle, parentAxis s
 	}
 	if node.widget != nil {
 		edges := node.edges
-		if node.node.Type != ui.LayoutTypePane {
-			// Constrained widgets may drop borders at the allocated size.
-			edges = widgetBorders(node.widget, rect.Dx(), rect.Dy())
+		if node.widget == m.input {
+			// Constrained input may drop borders at the allocated size.
+			edges = m.inputBorders(rect.Dx(), rect.Dy())
 		}
 		node.outer, node.content = rect, insetBorders(rect, contentInsets(node.node.Type, edges, shared))
 		node.parentAxis = parentAxis

@@ -1,6 +1,6 @@
 # Rendering Simplification PRD
 
-Status: Section 3, the scoped Section 4 contraction, the Section 5 frame lifecycle cleanup, the scoped Section 2 dispatch cleanup, the separator construction/styling cleanup, the input allocation contract cleanup, the container-border contraction, and the bar construction/rendering contraction are approved and implemented. Other implementation proposals remain unapproved.
+Status: Section 3, the scoped Section 4 contraction, the Section 5 frame lifecycle cleanup, the scoped Section 2 dispatch cleanup, the separator construction/styling cleanup, the input allocation contract cleanup, the container-border contraction, the bar construction/rendering contraction, and explicit input-rule integration are approved and implemented. Other implementation proposals remain unapproved.
 
 Review baseline: `simplify-rendering`, commit `17b7df0`, September 20, 2026.
 
@@ -506,6 +506,12 @@ Skipping work often requires remembering more state. The goal is less total comp
 Section 3 was selected and implemented first after the workload and cleanup discussion, followed by the scoped Section 4 contraction and the Section 5 frame lifecycle cleanup recorded below. Section 1 is deferred. Review the remaining proposals one at a time; agreement on one section does not approve the others. Keep this document as the single source for decisions and revisions.
 
 ### Suggested implementation order after agreement
+
+Input-rule integration implementation record: approved and implemented. `Input` is the only implementation of `Rules(width, height)`. Removed the anonymous optional-interface assertions from border measurement and planning; the model now uses its input directly, consistently with input-label rendering.
+
+Replaced the generic `widgetBorders` helper with model method `inputBorders(width, height)`, which reads `m.input.Rules` directly. Measurement and allocated-size checks now apply only to input leaves in `resolveNode`, `placeNode`, and `allocateChildren`. `planBorders` fetches input rules directly for the input leaf. Preserved rule-to-edge detection and rule translation/extension behavior. Updated the existing border-measurement benchmark to call the explicit helper. Added no replacement interface, registry, cache, or file.
+
+Contract: input owns its internal line geometry; layout uses it to measure and share boundary cells; the border renderer draws the resulting lines and joins. Pane borders, container dividers, and separator behavior retain their existing owners. Kept `Widget`, `Rule`, `Input.Rules`, and input labels. Validation: `go test -race -shuffle=on ./ui/... ./text/...` and `go vet ./ui/... ./text/...` pass, including existing constrained-input, picker/search/draft, shared-seam, junction, and snapshot coverage. No snapshot changes. The benefit is an explicit path for the one actual rule-producing widget, with no quantitative speedup claim.
 
 Bar construction/rendering implementation record: approved and implemented after independent simplification and idiomatic Go proposal review. Removed the empty `NewBar` constructor; `syncBars` now uses `new(widget.Bar)` and widget tests use `var bar Bar`. Kept the existing widget and its content-change signal.
 

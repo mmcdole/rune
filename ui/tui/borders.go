@@ -154,13 +154,12 @@ func paneBorders(border ui.PaneBorder) borderEdges {
 	return borderAll
 }
 
-func widgetBorders(w widget.Widget, width, height int) borderEdges {
-	decorated, ok := w.(interface{ Rules(int, int) []widget.Rule })
-	if !ok || width <= 0 || height <= 0 {
+func (m *Model) inputBorders(width, height int) borderEdges {
+	if width <= 0 || height <= 0 {
 		return 0
 	}
 	var edges borderEdges
-	for _, rule := range decorated.Rules(width, height) {
+	for _, rule := range m.input.Rules(width, height) {
 		if rule.Vertical && rule.From == 0 && rule.To == height {
 			if rule.At == 0 {
 				edges |= borderLeft
@@ -224,8 +223,8 @@ func insetBorders(rect image.Rectangle, edges borderEdges) image.Rectangle {
 func (m *Model) planBorders(plan *layoutPlan) {
 	for i := range plan.leaves {
 		leaf := plan.leaves[i]
-		if decorated, ok := leaf.widget.(interface{ Rules(int, int) []widget.Rule }); ok {
-			for _, rule := range decorated.Rules(leaf.content.Dx(), leaf.content.Dy()) {
+		if leaf.widget == m.input {
+			for _, rule := range m.input.Rules(leaf.content.Dx(), leaf.content.Dy()) {
 				rule = rule.Translate(leaf.content.Min)
 				// Extend edge-aligned rules to the boundaries reserved by the
 				// surrounding layout so separators meet neighboring dividers.
