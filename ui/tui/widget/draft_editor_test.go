@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/mmcdole/rune/text"
+	"github.com/mmcdole/rune/ui"
 )
 
 func TestDraftEditorNormalizesNewlinesAndPreservesWhitespace(t *testing.T) {
@@ -167,6 +168,7 @@ func TestSetValueAdmitsAndKeepsVerbatimSticky(t *testing.T) {
 func TestDraftEditorRenderExpandsTabsWithoutMutatingDraft(t *testing.T) {
 	in := newTestInput(50)
 	in.OpenDraftEditor("a\tb\n\tindent", len([]rune("a\tb\n\tindent")))
+	in.SetSize(in.width, in.MeasureHeight(in.width, ui.MaxLayoutCells))
 
 	view := in.View()
 	plain := text.StripANSI(view)
@@ -205,6 +207,7 @@ func TestDraftEditorRenderEscapesControlSequences(t *testing.T) {
 func TestDraftEditorDistinguishesHardLinesAndSoftWraps(t *testing.T) {
 	in := newTestInput(16) // 4-cell gutter, 12-cell content
 	in.OpenDraftEditor("abcdefghijklmnop\nnext", 0)
+	in.SetSize(in.width, in.MeasureHeight(in.width, ui.MaxLayoutCells))
 	plain := text.StripANSI(in.View())
 
 	if !strings.Contains(plain, "1 │ abcdefghijkl") {
@@ -270,6 +273,7 @@ func TestDraftEditorWideRunesWrapWithoutOverflow(t *testing.T) {
 
 	in := newTestInput(10)
 	in.OpenDraftEditor("abcd界x", len([]rune("abcd界x")))
+	in.SetSize(in.width, in.MeasureHeight(in.width, ui.MaxLayoutCells))
 	for n, row := range strings.Split(in.View(), "\n") {
 		if width := ansi.StringWidth(row); width > 10 {
 			t.Fatalf("rendered row %d width = %d, exceeds terminal width 10: %q", n, width, row)
@@ -324,6 +328,7 @@ func TestDraftEditorTinyWidthsDoNotPanicOrLeakTabs(t *testing.T) {
 		t.Run(string(rune('0'+width)), func(t *testing.T) {
 			in := newTestInput(width)
 			in.OpenDraftEditor("\t界\ntext", len([]rune("\t界\ntext")))
+			in.SetSize(width, in.MeasureHeight(width, ui.MaxLayoutCells))
 			view := in.View()
 			if strings.Contains(view, "\t") {
 				t.Fatalf("width %d emitted a raw tab", width)

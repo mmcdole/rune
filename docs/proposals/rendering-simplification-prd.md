@@ -1,6 +1,6 @@
 # Rendering Simplification PRD
 
-Status: Section 3, the scoped Section 4 contraction, the Section 5 frame lifecycle cleanup, the scoped Section 2 dispatch cleanup, and the separator construction/styling cleanup are approved and implemented. Other implementation proposals remain unapproved.
+Status: Section 3, the scoped Section 4 contraction, the Section 5 frame lifecycle cleanup, the scoped Section 2 dispatch cleanup, the separator construction/styling cleanup, the input allocation contract cleanup, and the container-border contraction are approved and implemented. Other implementation proposals remain unapproved.
 
 Review baseline: `simplify-rendering`, commit `17b7df0`, September 20, 2026.
 
@@ -506,6 +506,18 @@ Skipping work often requires remembering more state. The goal is less total comp
 Section 3 was selected and implemented first after the workload and cleanup discussion, followed by the scoped Section 4 contraction and the Section 5 frame lifecycle cleanup recorded below. Section 1 is deferred. Review the remaining proposals one at a time; agreement on one section does not approve the others. Keep this document as the single source for decisions and revisions.
 
 ### Suggested implementation order after agreement
+
+Container-border implementation record: approved and implemented. `containerBorders` now chooses start, end, and cross-axis masks according to orientation, then accumulates border edges in one child pass. Removed its local `any` closure, repeated scans, and mirrored row/column branches. The production diff removes 21 net lines without adding a function, type, field, or file.
+
+For rows, the first child supplies the left edge, the last supplies the right, and children contribute top/bottom edges. Columns use the same rule rotated. Empty and nil-child behavior is preserved. The function remains in `layout_measure.go` alongside container boundary sizing.
+
+Validation: a temporary Go comparison extracted the old and new functions and matched all 177,482 combinations of rows/columns with zero through four children, all 16 edge combinations per child, and nil children. The comparison harness was removed afterward. `go test -race -shuffle=on ./ui/... ./text/...`, `go vet ./ui/... ./text/...`, and `git diff --check` pass, including the existing shared-border, divider, constrained-input, and junction tests. No quantitative speedup is claimed.
+
+Input allocation contract implementation record: approved and implemented. Removed the nonpositive-height fallback from `Input.layout`, which previously called `MeasureHeight` implicitly during rendering. Content, rules, and labels now consistently produce nothing when either allocated dimension is nonpositive. Production already applies actual rectangles; direct widget tests now measure and allocate explicitly.
+
+Removed `inputLayout.height`; drawing uses the allocated height directly. `pickerHeight` is now local to geometry calculation instead of a returned field. Empty geometry is handled in `Input.layout`, so `Rules` and `Labels` no longer duplicate dimension guards. `View` returns an empty string for nonpositive dimensions, and `SetSize` skips draft viewport adjustment without a usable rectangle. Existing picker/search fixtures explicitly measure within a supplied limit, and direct render tests apply dimensions after size-changing edits or mode transitions. No new function, cache, interface, or alternate automatic-sizing API was added. The contract is: measurement suggests a height, SetSize assigns it, and rendering respects it.
+
+Validation: `go test -race -shuffle=on ./ui/... ./text/...`, `go vet ./ui/... ./text/...`, and `git diff --check` pass. Expanded the existing allocation matrix across normal input, draft editor, inline picker, modal picker, and search to check empty output/rules/labels for zero or negative dimensions and exact row counts for positive heights. Existing constrained-layout, navigation, and snapshot tests pass without snapshot changes.
 
 Separator construction and styling implementation record: approved and implemented. Removed the single-caller `style.RenderBorder` helper and the unused post-construction `SetChar` mutation. Layout now creates each separator in one call with its character and configured border style. `style/styles.go` holds style definitions without the separator drawing helper.
 

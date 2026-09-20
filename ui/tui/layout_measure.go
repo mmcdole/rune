@@ -59,46 +59,25 @@ func boundarySpace(boundaries []boundary) int {
 
 // A container requests the union of its descendants' cross-axis edges. When
 // that edge is shared, descendants without their own border reserve the same
-// boundary cell rather than rendering content into it.
+// boundary cell rather than rendering content into it. Along the split axis,
+// only the first and last children can supply the outer edges.
 func containerBorders(node ui.LayoutNode, children []*resolvedNode) borderEdges {
-	if len(children) == 0 {
-		return 0
-	}
-	any := func(edge borderEdges) bool {
-		for _, child := range children {
-			if child.hasBorder(edge) {
-				return true
-			}
-		}
-		return false
+	start, end, cross := borderTop, borderBottom, borderLeft|borderRight
+	if node.Type == ui.LayoutTypeRow {
+		start, end, cross = borderLeft, borderRight, borderTop|borderBottom
 	}
 	var edges borderEdges
-	if node.Type == ui.LayoutTypeRow {
-		if children[0].hasBorder(borderLeft) {
-			edges |= borderLeft
+	for i, child := range children {
+		if child == nil {
+			continue
 		}
-		if children[len(children)-1].hasBorder(borderRight) {
-			edges |= borderRight
+		edges |= child.edges & cross
+		if i == 0 {
+			edges |= child.edges & start
 		}
-		if any(borderTop) {
-			edges |= borderTop
+		if i == len(children)-1 {
+			edges |= child.edges & end
 		}
-		if any(borderBottom) {
-			edges |= borderBottom
-		}
-		return edges
-	}
-	if children[0].hasBorder(borderTop) {
-		edges |= borderTop
-	}
-	if children[len(children)-1].hasBorder(borderBottom) {
-		edges |= borderBottom
-	}
-	if any(borderLeft) {
-		edges |= borderLeft
-	}
-	if any(borderRight) {
-		edges |= borderRight
 	}
 	return edges
 }

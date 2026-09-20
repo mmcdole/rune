@@ -136,10 +136,13 @@ func (i *Input) Selected() bool {
 	return i.selected
 }
 
-// View implements Widget.
+// View draws within the allocated size; unallocated input has no content.
 func (i *Input) View() string {
+	if i.width <= 0 || i.height <= 0 {
+		return ""
+	}
 	plan := i.layout(i.width, i.height)
-	rows := make([]string, plan.height)
+	rows := make([]string, i.height)
 	if i.SearchActive() {
 		if !plan.results.Empty() {
 			copy(rows[plan.results.Min.Y:plan.results.Max.Y], i.search.resultLines(plan.results.Dx(), plan.results.Dy()))
@@ -194,7 +197,7 @@ func (i *Input) SetSize(width, height int) {
 		i.textinput.Prompt = ""
 	}
 	i.textinput.SetWidth(max(0, width-len(i.textinput.Prompt)))
-	if i.draftEditor != nil && !i.SearchActive() {
+	if width > 0 && height > 0 && i.draftEditor != nil && !i.SearchActive() {
 		layout := i.draftEditor.layout(width)
 		i.draftEditor.topRow = i.draftTopRow(layout, i.layout(width, height).body.Dy())
 	}

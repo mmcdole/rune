@@ -738,11 +738,11 @@ func TestPasteMsgFiltersModalPickerWithoutChangingDraft(t *testing.T) {
 func TestPasteMsgEditsSearchQueryWithoutChangingDraft(t *testing.T) {
 	h := newControllerHarness()
 	h.buf.Append("a thief passes")
-	h.ctl.input.SetSize(80, 0)
 	h.ctl.ShowSearch(ui.ShowSearchMsg{})
 	previews := len(h.fx.previews)
 
 	h.ctl.HandlePaste("thief")
+	h.ctl.input.SetSize(80, h.ctl.input.MeasureHeight(80, ui.MaxLayoutCells))
 
 	view := runetext.StripANSI(h.ctl.input.View())
 	if !strings.Contains(view, "Search: thief") {
@@ -804,10 +804,10 @@ func TestAltGrTextIsTypedInEveryInputMode(t *testing.T) {
 
 	t.Run("search", func(t *testing.T) {
 		h := newControllerHarness()
-		h.ctl.input.SetSize(80, 0)
 		h.ctl.ShowSearch(ui.ShowSearchMsg{})
 
 		h.ctl.HandleKey(msg)
+		h.ctl.input.SetSize(80, h.ctl.input.MeasureHeight(80, ui.MaxLayoutCells))
 
 		if view := runetext.StripANSI(h.ctl.input.View()); !strings.Contains(view, "Search: @") {
 			t.Fatalf("search after AltGr input does not contain query: %q", view)

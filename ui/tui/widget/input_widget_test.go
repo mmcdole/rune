@@ -16,7 +16,7 @@ import (
 func newTestInput(width int) *Input {
 	styles := style.DefaultStyles()
 	in := NewInput(styles, NewSearch(NewScrollback(100), styles))
-	in.SetSize(width, 0)
+	in.SetSize(width, in.MeasureHeight(width, ui.MaxLayoutCells))
 	return in
 }
 
@@ -39,7 +39,7 @@ func TestModalPickerShowsResultsAboveItsQueryField(t *testing.T) {
 			horizontal[rule.At] = true
 		}
 	}
-	if len(horizontal) != 3 || !horizontal[0] || !horizontal[plan.pickerHeight] || !horizontal[in.height-1] {
+	if len(horizontal) != 3 || !horizontal[0] || !horizontal[plan.results.Max.Y] || !horizontal[in.height-1] {
 		t.Fatalf("picker/field boundaries disagree with assigned geometry:\n%s", strings.Join(rows, "\n"))
 	}
 	if strings.Contains(in.View(), "─") {
@@ -49,6 +49,7 @@ func TestModalPickerShowsResultsAboveItsQueryField(t *testing.T) {
 		t.Fatal("modal picker exposed the inactive command input")
 	}
 	in.HidePicker()
+	in.SetSize(in.width, in.MeasureHeight(in.width, ui.MaxLayoutCells))
 	if in.Value() != "unfinished command" || !strings.Contains(text.StripANSI(in.View()), "unfinished command") {
 		t.Fatal("closing picker did not restore the command draft")
 	}
@@ -62,7 +63,7 @@ func inputLabels(in *Input) string {
 	return strings.Join(labels, "\n")
 }
 
-func TestInputLabelsStayOnAllocatedRules(t *testing.T) {
+func TestInputRenderingHonorsAllocation(t *testing.T) {
 	for _, mode := range []string{"normal", "draft", "inline", "modal", "search"} {
 		t.Run(mode, func(t *testing.T) {
 			in := newTestInput(80)
@@ -76,12 +77,19 @@ func TestInputLabelsStayOnAllocatedRules(t *testing.T) {
 			case "search":
 				in.ShowSearch("世界", SearchScope{})
 			}
-			for _, width := range []int{0, 1, 2, 3, 10, 80} {
-				for _, height := range []int{0, 1, 2, 3, 10} {
+			for _, width := range []int{-1, 0, 1, 2, 3, 10, 80} {
+				for _, height := range []int{-1, 0, 1, 2, 3, 10} {
 					t.Run(fmt.Sprintf("%dx%d", width, height), func(t *testing.T) {
 						in.SetSize(width, height)
 						geometry := in.Rules(width, height)
 						labels := in.Labels()
+						if width <= 0 || height <= 0 {
+							if view := in.View(); view != "" || len(geometry) != 0 || len(labels) != 0 {
+								t.Fatalf("unallocated input drew content=%q, rules=%v, labels=%v", view, geometry, labels)
+							}
+						} else if rows := len(strings.Split(in.View(), "\n")); rows != height {
+							t.Fatalf("rendered %d rows, want allocated height %d", rows, height)
+						}
 						if (mode == "normal" || mode == "modal" || mode == "search" || width <= 0 || height <= 0) && len(labels) != 0 {
 							t.Fatalf("inactive or unallocated draft has labels: %+v", labels)
 						}
@@ -279,6 +287,7 @@ func TestInputPickerOverlayGrowsView(t *testing.T) {
 	}
 
 	in.ShowPicker(ui.ShowPickerMsg{Title: "Worlds", Items: items})
+	in.SetSize(in.width, in.MeasureHeight(in.width, ui.MaxLayoutCells))
 	if in.MeasureHeight(in.width, 1<<14) <= 3 {
 		t.Error("active picker must add to the preferred height")
 	}
@@ -291,6 +300,7 @@ func TestInputPickerOverlayGrowsView(t *testing.T) {
 	}
 
 	in.HidePicker()
+	in.SetSize(in.width, in.MeasureHeight(in.width, ui.MaxLayoutCells))
 	if in.MeasureHeight(in.width, 1<<14) != 3 {
 		t.Errorf("PreferredHeight after hide = %d, want 3", in.MeasureHeight(in.width, 1<<14))
 	}
@@ -381,6 +391,7 @@ func TestInputInlinePickerSeedsFilterFromInput(t *testing.T) {
 
 	in.SetValue("rel")
 	in.ShowPicker(ui.ShowPickerMsg{Items: items, Inline: true})
+	in.SetSize(in.width, in.MeasureHeight(in.width, ui.MaxLayoutCells))
 
 	if got := in.Picker().Query(); got != "rel" {
 		t.Errorf("inline picker query = %q, want %q", got, "rel")
@@ -396,6 +407,7 @@ func TestInputInlinePickerSeedsFilterFromInput(t *testing.T) {
 	// Typing more re-filters from the input value.
 	in.SetValue("re")
 	in.Picker().Filter(in.Value())
+	in.SetSize(in.width, in.MeasureHeight(in.width, ui.MaxLayoutCells))
 	view := text.StripANSI(in.View())
 	if !strings.Contains(view, "reload") {
 		t.Errorf("re-filtered view should keep matches, got %q", view)
@@ -407,9 +419,9 @@ func TestInputSearchReplacesInactiveCommandField(t *testing.T) {
 	styles := style.DefaultStyles()
 	search := NewSearch(buf, styles)
 	in := NewInput(styles, search)
-	in.SetSize(60, 0)
 	in.SetValue("COMMAND-DRAFT")
 	in.ShowSearch("thief", SearchScope{})
+	in.SetSize(60, in.MeasureHeight(60, ui.MaxLayoutCells))
 
 	view := text.StripANSI(in.View())
 	if !strings.Contains(view, "Search:") || !strings.Contains(view, "a thief passes") {
@@ -430,6 +442,7 @@ func TestInputSearchReplacesInactiveCommandField(t *testing.T) {
 	}
 
 	in.HideSearch()
+	in.SetSize(in.width, in.MeasureHeight(in.width, ui.MaxLayoutCells))
 	if view := text.StripANSI(in.View()); !strings.Contains(view, "COMMAND-DRAFT") {
 		t.Fatalf("command draft did not return after search closed:\n%s", view)
 	}
