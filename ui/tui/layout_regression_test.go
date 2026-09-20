@@ -398,6 +398,7 @@ func BenchmarkLayoutFrame(b *testing.B) {
 	b.ResetTimer()
 	for b.Loop() {
 		m.applyLayout()
+		m.render()
 		m.View()
 	}
 }

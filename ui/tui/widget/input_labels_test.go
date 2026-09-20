@@ -2,13 +2,13 @@ package widget
 
 import (
 	"fmt"
-	"image"
 	"strings"
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/mmcdole/rune/input"
+	"github.com/mmcdole/rune/text"
 )
 
 func TestDraftEditorLabelsPrioritizeEssentialActions(t *testing.T) {
@@ -19,7 +19,7 @@ func TestDraftEditorLabelsPrioritizeEssentialActions(t *testing.T) {
 			in.SetSubmissionMode(mode)
 			for _, width := range []int{32, 40, 60, 80, 100} {
 				t.Run(fmt.Sprint(width), func(t *testing.T) {
-					in.SetSize(width, 0)
+					in.SetSize(width, in.MeasureHeight(width, 100))
 					labels := inputLabels(in)
 					if !strings.Contains(labels, "Enter ") || !strings.Contains(labels, "Ctrl+J newline") {
 						t.Fatalf("essential editing hints missing at width %d: %q", width, labels)
@@ -64,28 +64,20 @@ func TestDraftEditorLabelsStayCompleteAndInsideTheirRules(t *testing.T) {
 		for _, confirmation := range []bool{false, true} {
 			in.discardPending = confirmation
 			for width := 1; width <= 120; width++ {
-				for _, rule := range in.LabeledRules(width, in.MeasureHeight(width, 100)) {
-					end := 0
-					for _, label := range rule.Labels {
-						if label.At <= end || label.At+ansi.StringWidth(label.Text) >= width {
-							t.Fatalf("overlapping/outside label at width %d: %+v", width, rule)
-						}
-						end = label.At + ansi.StringWidth(label.Text)
-						value := strings.TrimSpace(label.Text)
-						if complete[value] {
-							continue
-						}
-						for _, hint := range strings.Split(value, " · ") {
-							if !complete[hint] {
-								t.Fatalf("incomplete hint at width %d: %q", width, hint)
-							}
-						}
+				in.SetSize(width, in.MeasureHeight(width, 100))
+				ends := make(map[int]int)
+				for _, label := range in.Labels() {
+					if label.Position.X <= ends[label.Position.Y] || label.Position.X+ansi.StringWidth(label.Text) >= width {
+						t.Fatalf("overlapping/outside label at width %d: %+v", width, label)
 					}
-					// Positioning a copy in the frame must not move the widget's own labels.
-					translated := rule.Translate(image.Pt(7, 3))
-					for n, label := range rule.Labels {
-						if translated.Labels[n].At != label.At+7 {
-							t.Fatal("label translation mutated local coordinates")
+					ends[label.Position.Y] = label.Position.X + ansi.StringWidth(label.Text)
+					value := strings.TrimSpace(text.StripANSI(label.Text))
+					if complete[value] {
+						continue
+					}
+					for _, hint := range strings.Split(value, " · ") {
+						if !complete[hint] {
+							t.Fatalf("incomplete hint at width %d: %q", width, hint)
 						}
 					}
 				}

@@ -15,18 +15,6 @@ import (
 	"github.com/mmcdole/rune/ui/tui/widget"
 )
 
-// defaultRenderInterval bounds screen rendering to about 60 a second.
-const defaultRenderInterval = 16 * time.Millisecond
-
-// renderTick ends a throttle window. Bubble Tea calls View after every
-// message, and rendering the screen is the one expensive step, so Model
-// renders at most once per interval: the first change after an idle period
-// renders immediately and starts a window; changes arriving inside it apply
-// to state at once and are rendered together when the tick ends it. Ticks
-// are scheduled on demand only; at most one renderTick is ever outstanding.
-// Bubble Tea owns the separate terminal flush clock.
-type renderTick struct{}
-
 // Model is the main Bubble Tea model for the TUI. It routes messages
 // between the session and the widgets; input-mode policy lives in the
 // inputController; layout planning and canvas rendering are separate.
@@ -50,8 +38,8 @@ type Model struct {
 	layout     ui.LayoutTree
 	layoutPlan layoutPlan
 
-	// Render throttle. Only visible changes mark the screen dirty. A zero
-	// renderInterval renders on every View, for deterministic tests.
+	// Render throttle. Dirty means undrawn changes. A zero renderInterval
+	// renders immediately during Update and schedules no ticks.
 	renderInterval time.Duration
 	throttled      bool
 	dirty          bool
@@ -122,28 +110,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if render {
 		m.dirty = true
 	}
-	return m, m.renderThrottled()
-}
-
-// renderThrottled renders a dirty screen unless throttled, then throttles
-// until the renderTick it returns. Scroll state is reported with the screen
-// it describes, so rune.state matches what the user sees and a flood costs
-// Session one report per interval. With a zero interval, View renders and
-// every update reports.
-func (m *Model) renderThrottled() tea.Cmd {
-	if m.renderInterval <= 0 {
-		m.reportScrollState()
-		return nil
-	}
-	if m.throttled || !m.dirty {
-		return nil
-	}
-	m.render()
-	if !m.reportScrollState() {
-		m.dirty = true // retry on the tick
-	}
-	m.throttled = true
-	return tea.Tick(m.renderInterval, func(time.Time) tea.Msg { return renderTick{} })
+	return m, m.renderIfDue()
 }
 
 // dispatch applies one message to state. Nothing here renders, reports
@@ -158,8 +125,8 @@ func (m *Model) dispatch(msg tea.Msg) (render, layout bool) {
 		m.initialized = true
 		m.notifySession(ui.WindowSizeChangedMsg{Width: msg.Width, Height: msg.Height})
 	case renderTick:
-		// Update renders and re-arms only if the screen went dirty while
-		// throttled; otherwise the chain ends - back to zero wakeups.
+		// Allow pending pixels and scroll reports through. The scheduler
+		// ends the tick chain when neither needs more work.
 		m.throttled = false
 		return false, false
 	case tea.KeyPressMsg:

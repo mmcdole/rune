@@ -2,6 +2,7 @@ package tui
 
 import (
 	"image"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -11,7 +12,37 @@ import (
 	"github.com/mmcdole/rune/ui"
 )
 
-// View implements tea.Model.
+// defaultRenderInterval bounds screen rendering to about 60 a second.
+const defaultRenderInterval = 16 * time.Millisecond
+
+// renderTick ends a throttle window. The first change after idle renders
+// immediately; changes inside the window are drawn together at its end.
+// At most one tick is outstanding, including retries of rejected scroll
+// reports. Bubble Tea owns the separate terminal flush clock.
+type renderTick struct{}
+
+// renderIfDue draws pending changes and reports the resulting scroll state.
+// Reporting stays behind the throttle so it cannot run ahead of the screen.
+// A rejected report keeps the timer alive without requiring another redraw.
+// With a zero interval, a failed report waits for the next Update instead.
+func (m *Model) renderIfDue() tea.Cmd {
+	if m.throttled {
+		return nil
+	}
+	rendered := m.dirty
+	if rendered {
+		m.render()
+		m.dirty = false
+	}
+	reported := m.reportScrollState()
+	if m.renderInterval <= 0 || (!rendered && reported) {
+		return nil
+	}
+	m.throttled = true
+	return tea.Tick(m.renderInterval, func(time.Time) tea.Msg { return renderTick{} })
+}
+
+// View implements tea.Model, returning the prepared screen and terminal options.
 func (m *Model) View() tea.View {
 	view := tea.View{AltScreen: true}
 	if m.mouseEnabled {
@@ -31,9 +62,6 @@ func (m *Model) View() tea.View {
 		return view
 	}
 
-	if m.renderInterval <= 0 {
-		m.render()
-	}
 	view.Content = m.screen
 	return view
 }
@@ -47,9 +75,8 @@ func newCanvas(width, height int) uv.ScreenBuffer {
 }
 
 // render draws leaf content, resolved borders, and their labels.
-// renderThrottled decides when.
+// renderIfDue decides when and owns the dirty flag.
 func (m *Model) render() {
-	m.dirty = false
 	m.renders++
 	if m.width <= 0 || m.height <= 0 {
 		m.screen = ""
@@ -81,7 +108,8 @@ func (m *Model) render() {
 	m.screen = canvas.Render()
 }
 
-// drawLabels renders pane titles and rule labels over the borders.
+// drawLabels fetches current pane titles and input labels after borders have
+// been restored. Label-only changes do not need a new layout plan.
 func (m *Model) drawLabels(canvas uv.ScreenBuffer, plan layoutPlan) {
 	for _, leaf := range plan.leaves {
 		if leaf.node.Type != ui.LayoutTypePane || leaf.edges&borderTop == 0 {
@@ -104,9 +132,13 @@ func (m *Model) drawLabels(canvas uv.ScreenBuffer, plan layoutPlan) {
 		title = " " + runetext.VisualizeTerminalControls(title, false) + " "
 		drawLabel(canvas, plan.borders, m.styles.PaneHeader.Render(title), left, right, leaf.outer.Min.Y)
 	}
-	for _, rule := range plan.rules {
-		for _, label := range rule.Labels {
-			drawLabel(canvas, plan.borders, label.Style.Render(label.Text), label.At, rule.To, rule.At)
+	for _, leaf := range plan.leaves {
+		if leaf.widget != m.input || leaf.content.Empty() {
+			continue
+		}
+		for _, label := range m.input.Labels() {
+			position := label.Position.Add(leaf.content.Min)
+			drawLabel(canvas, plan.borders, label.Text, position.X, leaf.outer.Max.X, position.Y)
 		}
 	}
 }

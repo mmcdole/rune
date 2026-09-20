@@ -1000,10 +1000,9 @@ func TestDraftEditorEscapeRequiresConfirmation(t *testing.T) {
 		t.Fatalf("first Escape discarded draft: value=%q draft editor active=%v", got, h.ctl.input.DraftEditorActive())
 	}
 	var labels string
-	for _, rule := range h.ctl.input.LabeledRules(80, h.ctl.input.MeasureHeight(80, 100)) {
-		for _, label := range rule.Labels {
-			labels += label.Text
-		}
+	h.ctl.input.SetSize(80, h.ctl.input.MeasureHeight(80, 100))
+	for _, label := range h.ctl.input.Labels() {
+		labels += label.Text
 	}
 	if !strings.Contains(labels, "Esc again to discard") {
 		t.Fatalf("discard confirmation is not visible: %q", labels)

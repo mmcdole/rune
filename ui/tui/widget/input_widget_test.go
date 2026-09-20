@@ -2,7 +2,6 @@ package widget
 
 import (
 	"fmt"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -57,15 +56,13 @@ func TestModalPickerShowsResultsAboveItsQueryField(t *testing.T) {
 
 func inputLabels(in *Input) string {
 	var labels []string
-	for _, rule := range in.LabeledRules(in.width, in.MeasureHeight(in.width, 1<<14)) {
-		for _, label := range rule.Labels {
-			labels = append(labels, label.Text)
-		}
+	for _, label := range in.Labels() {
+		labels = append(labels, text.StripANSI(label.Text))
 	}
 	return strings.Join(labels, "\n")
 }
 
-func TestInputRulesPreserveGeometryWithoutLabels(t *testing.T) {
+func TestInputLabelsStayOnAllocatedRules(t *testing.T) {
 	for _, mode := range []string{"normal", "draft", "inline", "modal", "search"} {
 		t.Run(mode, func(t *testing.T) {
 			in := newTestInput(80)
@@ -82,17 +79,22 @@ func TestInputRulesPreserveGeometryWithoutLabels(t *testing.T) {
 			for _, width := range []int{0, 1, 2, 3, 10, 80} {
 				for _, height := range []int{0, 1, 2, 3, 10} {
 					t.Run(fmt.Sprintf("%dx%d", width, height), func(t *testing.T) {
+						in.SetSize(width, height)
 						geometry := in.Rules(width, height)
-						labeled := in.LabeledRules(width, height)
-						for n := range labeled {
-							labeled[n].Labels = nil
+						labels := in.Labels()
+						if (mode == "normal" || mode == "modal" || mode == "search" || width <= 0 || height <= 0) && len(labels) != 0 {
+							t.Fatalf("inactive or unallocated draft has labels: %+v", labels)
 						}
-						if !reflect.DeepEqual(geometry, labeled) {
-							t.Fatalf("label formatting changed geometry: %+v vs %+v", geometry, labeled)
-						}
-						for _, rule := range in.Rules(width, height) {
-							if len(rule.Labels) != 0 {
-								t.Fatal("border measurement includes labels")
+						for _, label := range labels {
+							onRule := false
+							for _, rule := range geometry {
+								if !rule.Vertical && label.Position.Y == rule.At &&
+									label.Position.X >= rule.From && label.Position.X+lipgloss.Width(label.Text) <= rule.To {
+									onRule = true
+								}
+							}
+							if !onRule {
+								t.Fatalf("label %+v is outside allocated rules %+v", label, geometry)
 							}
 						}
 					})
@@ -105,6 +107,7 @@ func TestInputRulesPreserveGeometryWithoutLabels(t *testing.T) {
 func TestInputLabelsUseCurrentDraftAfterMeasurement(t *testing.T) {
 	in := newTestInput(80)
 	in.OpenDraftEditor("first\nsecond", 0)
+	in.SetSize(80, in.MeasureHeight(80, 100))
 	in.Rules(10, 3)
 	if labels := inputLabels(in); !strings.Contains(labels, "2 lines") {
 		t.Fatalf("provisional measurement affected final labels: %q", labels)
@@ -123,7 +126,7 @@ func TestDraftEditorMeasurementAndViewDoNotChangeNavigation(t *testing.T) {
 	before := in.draftEditor.topRow
 	in.MeasureHeight(5, 24)
 	in.Rules(5, 24)
-	in.LabeledRules(5, 24)
+	in.Labels()
 	in.View()
 	if in.draftEditor.topRow != before || in.width != 40 || in.height != 7 {
 		t.Fatal("measurement or rendering changed applied geometry")

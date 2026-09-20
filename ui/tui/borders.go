@@ -9,6 +9,16 @@ import (
 	"github.com/mmcdole/rune/ui/tui/widget"
 )
 
+type borderEdges uint8
+
+const (
+	borderLeft borderEdges = 1 << iota
+	borderRight
+	borderTop
+	borderBottom
+	borderAll = borderLeft | borderRight | borderTop | borderBottom
+)
+
 // borderGrid records line connectivity independently from content rendering.
 // Titles are rendered after the grid, so a shared lower pane header naturally
 // owns a horizontal pane boundary.
@@ -133,6 +143,43 @@ func junctionGlyph(up, down, left, right bool) string {
 	return ""
 }
 
+// paneBorders maps the canonical pane border mode to rendered edges.
+func paneBorders(border ui.PaneBorder) borderEdges {
+	switch border {
+	case ui.PaneBorderNone:
+		return 0
+	case ui.PaneBorderHorizontal:
+		return borderTop | borderBottom
+	}
+	return borderAll
+}
+
+func widgetBorders(w widget.Widget, width, height int) borderEdges {
+	decorated, ok := w.(interface{ Rules(int, int) []widget.Rule })
+	if !ok || width <= 0 || height <= 0 {
+		return 0
+	}
+	var edges borderEdges
+	for _, rule := range decorated.Rules(width, height) {
+		if rule.Vertical && rule.From == 0 && rule.To == height {
+			if rule.At == 0 {
+				edges |= borderLeft
+			}
+			if rule.At == width-1 {
+				edges |= borderRight
+			}
+		} else if !rule.Vertical && rule.From == 0 && rule.To == width {
+			if rule.At == 0 {
+				edges |= borderTop
+			}
+			if rule.At == height-1 {
+				edges |= borderBottom
+			}
+		}
+	}
+	return edges
+}
+
 func borderedPane(leaf *resolvedNode) bool {
 	return leaf.node.Type == ui.LayoutTypePane && leaf.edges != 0
 }
@@ -143,6 +190,16 @@ func borderedPane(leaf *resolvedNode) bool {
 func joinableSeparator(leaf *resolvedNode) bool {
 	return leaf.node.Type == ui.LayoutTypeSeparator &&
 		leaf.node.SeparatorChar == "" && leaf.parentAxis == axisVertical
+}
+
+// Panes have external borders. Composite widgets already include their own
+// rules, and only need insets for boundaries supplied by the surrounding tree.
+// Measurement supplies anticipated edges; placement supplies the final ones.
+func contentInsets(nodeType string, edges, shared borderEdges) borderEdges {
+	if nodeType == ui.LayoutTypePane {
+		return edges | shared
+	}
+	return shared &^ edges
 }
 
 func insetBorders(rect image.Rectangle, edges borderEdges) image.Rectangle {
@@ -161,19 +218,14 @@ func insetBorders(rect image.Rectangle, edges borderEdges) image.Rectangle {
 	return rect
 }
 
-// planBorders gives every border one owner. Each bordered pane marks
-// its configured edges and insets its content rectangle; each container with
-// dividers marks the rules between its active children; each default
-// separator marks its row and gives up its content rectangle. Shared
-// coordinates merge naturally in borderGrid, including T and cross junctions.
+// planBorders adds leaf borders to the dividers marked during placement.
+// Shared coordinates merge in borderGrid, including T and cross junctions.
+// Default separators give up their content rectangle to the joined border.
 func (m *Model) planBorders(plan *layoutPlan) {
-	for _, rule := range plan.rules {
-		plan.borders.markRule(rule)
-	}
 	for i := range plan.leaves {
 		leaf := plan.leaves[i]
-		if decorated, ok := leaf.widget.(interface{ LabeledRules(int, int) []widget.Rule }); ok {
-			for _, rule := range decorated.LabeledRules(leaf.content.Dx(), leaf.content.Dy()) {
+		if decorated, ok := leaf.widget.(interface{ Rules(int, int) []widget.Rule }); ok {
+			for _, rule := range decorated.Rules(leaf.content.Dx(), leaf.content.Dy()) {
 				rule = rule.Translate(leaf.content.Min)
 				// Extend edge-aligned rules to the boundaries reserved by the
 				// surrounding layout so separators meet neighboring dividers.
@@ -192,7 +244,6 @@ func (m *Model) planBorders(plan *layoutPlan) {
 					}
 				}
 				plan.borders.markRule(rule)
-				plan.rules = append(plan.rules, rule)
 			}
 		}
 		if joinableSeparator(leaf) {

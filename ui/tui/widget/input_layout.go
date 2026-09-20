@@ -1,12 +1,6 @@
 package widget
 
-import (
-	"image"
-
-	"github.com/charmbracelet/x/ansi"
-
-	"github.com/mmcdole/rune/input"
-)
+import "image"
 
 // inputLayout describes the picker and command field separately. Both rendering
 // and shared-boundary planning use these same positions, including labels.
@@ -17,7 +11,7 @@ type inputLayout struct {
 	help           int
 	body           image.Rectangle
 	rules          []Rule
-	header, footer int
+	header, footer int // draft label rows; -1 when unavailable
 }
 
 func (i *Input) layout(width, height int) inputLayout {
@@ -77,44 +71,4 @@ func (i *Input) Rules(width, height int) []Rule {
 		return nil
 	}
 	return i.layout(width, height).rules
-}
-
-// LabeledRules adds the current input labels at its final placement. Both
-// queries use the same geometry; only the renderer's plan needs the labels.
-func (i *Input) LabeledRules(width, height int) []Rule {
-	if width <= 0 || height <= 0 {
-		return nil
-	}
-	plan := i.layout(width, height)
-	if i.draftEditor != nil && !i.SearchActive() && (!i.PickerActive() || i.PickerInline()) {
-		header, toggle, footer := i.draftLabels(i.draftEditor.lines(), width-4)
-		for n := range plan.rules {
-			rule := &plan.rules[n]
-			if rule.Vertical {
-				continue
-			}
-			switch rule.At {
-			case plan.header:
-				modeStyle := i.styles.InputText
-				if i.SubmissionMode() == input.ModeVerbatim {
-					modeStyle = i.styles.Warning
-				}
-				if header != "" {
-					rule.Labels = append(rule.Labels, RuleLabel{Text: " " + header + " ", At: 1, Style: modeStyle})
-				}
-				if toggle != "" {
-					rule.Labels = append(rule.Labels, RuleLabel{Text: " " + toggle + " ", At: width - 3 - ansi.StringWidth(toggle), Style: i.styles.Muted})
-				}
-			case plan.footer:
-				hintStyle := i.styles.Muted
-				if i.discardPending {
-					hintStyle = i.styles.Warning
-				}
-				if footer != "" {
-					rule.Labels = append(rule.Labels, RuleLabel{Text: " " + footer + " ", At: 1, Style: hintStyle})
-				}
-			}
-		}
-	}
-	return plan.rules
 }

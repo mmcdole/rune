@@ -7,7 +7,6 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/mmcdole/rune/input"
 	"github.com/mmcdole/rune/text"
 	"github.com/mmcdole/rune/ui/tui/util"
 )
@@ -212,66 +211,6 @@ func (i *Input) draftRows(bodyHeight int) []string {
 	return rows
 }
 
-// draftLabels fits complete labels in the available cells. Mode switching
-// takes precedence over line count; submit and newline precede secondary actions.
-func (i *Input) draftLabels(lines, width int) (header, toggle, footer string) {
-	mode, destination, submit := "COMMAND", "verbatim", i.actionHint("submit", "run")
-	if i.SubmissionMode() == input.ModeVerbatim {
-		mode, destination, submit = "VERBATIM", "command", i.actionHint("submit", "send")
-	}
-	word := "lines"
-	if lines == 1 {
-		word = "line"
-	}
-	title := fmt.Sprintf("%s · %d %s", mode, lines, word)
-	toggle = i.actionHint("toggle_mode", destination)
-	header = title
-	if ansi.StringWidth(header)+3+ansi.StringWidth(toggle) > width {
-		header = mode
-	}
-	if ansi.StringWidth(header)+3+ansi.StringWidth(toggle) > width {
-		toggle = ""
-		header = fitDraftHints(width, title)
-		if header == "" {
-			header = fitDraftHints(width, mode)
-		}
-	}
-	hints := []string{submit, i.actionHint("newline", "newline")}
-	cancel := i.keys.Hint("cancel")
-	if cancel != "" {
-		hints = append(hints, cancel+"×2 discard")
-	}
-	hints = append(hints, i.actionHint("open_editor", "editor"))
-	footer = fitDraftHints(width, hints...)
-	if i.discardPending && cancel != "" {
-		footer = fitDraftHints(width, cancel+" again to discard")
-		if footer == "" {
-			footer = fitDraftHints(width, cancel+" to discard")
-		}
-	}
-
-	return header, toggle, footer
-}
-
-// fitDraftHints keeps hints in priority order without cutting a key or label.
-func fitDraftHints(width int, hints ...string) string {
-	var fitted string
-	for _, hint := range hints {
-		if hint == "" {
-			continue
-		}
-		candidate := hint
-		if fitted != "" {
-			candidate = fitted + " · " + hint
-		}
-		if ansi.StringWidth(candidate) > width {
-			break
-		}
-		fitted = candidate
-	}
-	return fitted
-}
-
 func (i *Input) renderDraftRow(layout draftLayout, rowIndex int) string {
 	row := layout.rows[rowIndex]
 	var b strings.Builder
@@ -307,12 +246,4 @@ func (i *Input) renderDraftRow(layout draftLayout, rowIndex int) string {
 		view += strings.Repeat(" ", padding)
 	}
 	return util.ClipRow(view, i.width)
-}
-
-func (i *Input) actionHint(action, label string) string {
-	key := i.keys.Hint(action)
-	if key == "" {
-		return ""
-	}
-	return key + " " + label
 }

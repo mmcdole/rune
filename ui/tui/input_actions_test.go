@@ -36,11 +36,10 @@ func TestInputBindingsChangeRoutingAndHints(t *testing.T) {
 	}
 	m.Update(ui.UpdateBindsMsg(keys))
 	m.inputCtl.HandlePaste("first\nsecond")
+	m.input.SetSize(120, 5)
 	var labels string
-	for _, rule := range m.input.LabeledRules(120, 5) {
-		for _, label := range rule.Labels {
-			labels += label.Text
-		}
+	for _, label := range m.input.Labels() {
+		labels += label.Text
 	}
 	for _, want := range []string{"Ctrl+S send", "Shift+Enter newline", "Ctrl+T command"} {
 		if !strings.Contains(labels, want) {
@@ -204,12 +203,11 @@ func TestExternalEditorAndCancelHintsFollowActions(t *testing.T) {
 	bindings["f2"] = input.Binding{Action: "input.open_editor", Enabled: true}
 	m.Update(ui.UpdateBindsMsg(bindings))
 	m.inputCtl.HandlePaste("first\nsecond")
+	m.input.SetSize(140, 5)
 	labels := func() string {
 		var s string
-		for _, rule := range m.input.LabeledRules(140, 5) {
-			for _, label := range rule.Labels {
-				s += label.Text
-			}
+		for _, label := range m.input.Labels() {
+			s += label.Text
 		}
 		return s
 	}

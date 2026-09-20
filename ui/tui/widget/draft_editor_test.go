@@ -67,6 +67,7 @@ func TestPlainPasteKeepsNormalInputAndLabels(t *testing.T) {
 func TestSingleLineTabPasteUsesDraftEditorAndRetainsTab(t *testing.T) {
 	in := newTestInput(40)
 	in.InsertPaste("left\tright")
+	in.SetSize(40, in.MeasureHeight(40, 100))
 
 	if !in.DraftEditorActive() {
 		t.Fatal("a tab cannot be represented losslessly by textinput")
@@ -117,6 +118,7 @@ func TestDraftEditorLocalKeySemantics(t *testing.T) {
 func TestDraftEditorStaysVerbatimAfterLastStructureDeleted(t *testing.T) {
 	in := newTestInput(40)
 	in.OpenDraftEditor("north\neast", len([]rune("north\n")))
+	in.SetSize(40, in.MeasureHeight(40, 100))
 
 	if !in.UpdateDraftEditor(tea.KeyPressMsg{Code: tea.KeyBackspace}) {
 		t.Fatal("Backspace should be handled locally")

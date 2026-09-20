@@ -131,15 +131,6 @@ func childRect(parent image.Rectangle, axis splitAxis, position, size int) image
 	return image.Rect(parent.Min.X, position, parent.Max.X, position+size)
 }
 
-// Panes have external borders. Composite widgets already include their own
-// rules, and only need insets for boundaries supplied by the surrounding tree.
-func contentInsets(node *resolvedNode) borderEdges {
-	if node.node.Type == ui.LayoutTypePane {
-		return node.edges | node.shared
-	}
-	return node.shared &^ node.edges
-}
-
 func childSharedEdges(node *resolvedNode, inherited borderEdges, boundaries []boundary, seams bool) []borderEdges {
 	axis := nodeAxis(node.node)
 	start, end, cross := borderLeft, borderRight, borderTop|borderBottom
@@ -187,7 +178,7 @@ func (m *Model) leafPreferred(leaf *resolvedNode, axis splitAxis, cross int) int
 	if axis != axisVertical {
 		return 1
 	}
-	insets := contentInsets(leaf)
+	insets := contentInsets(leaf.node.Type, leaf.edges, leaf.shared)
 	contentWidth := max(1, max(0, cross)-countEdges(insets, borderLeft|borderRight))
 	borderRows := countEdges(insets, borderTop|borderBottom)
 	limit := ui.MaxLayoutCells
@@ -274,10 +265,11 @@ func (m *Model) minimum(node *resolvedNode, axis splitAxis) int {
 func (m *Model) intrinsicMinimum(node *resolvedNode, axis splitAxis) int {
 	if node.widget != nil {
 		minimum := node.widget.MinimumSize()
+		insets := contentInsets(node.node.Type, node.edges, node.shared)
 		if axis == axisVertical {
-			return minimum.Y + countEdges(contentInsets(node), borderTop|borderBottom)
+			return minimum.Y + countEdges(insets, borderTop|borderBottom)
 		}
-		return minimum.X + countEdges(contentInsets(node), borderLeft|borderRight)
+		return minimum.X + countEdges(insets, borderLeft|borderRight)
 	}
 
 	direction := nodeAxis(node.node)

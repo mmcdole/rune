@@ -183,30 +183,106 @@ func TestScrollStateRetriesAfterFullQueue(t *testing.T) {
 	m.Update(renderTick{})
 
 	m.Update(ui.PaneScrollUpMsg{Name: ui.OutputPaneName, Lines: 5})
-	if _, cmd := m.Update(renderTick{}); cmd == nil {
-		t.Fatal("tick chain ended with scroll state still unreported")
+	rendered := m.renders
+	for range 3 {
+		if _, cmd := m.Update(renderTick{}); cmd == nil {
+			t.Fatal("tick chain ended with scroll state still unreported")
+		}
+		if m.dirty || m.renders != rendered {
+			t.Fatal("rejected scroll report dirtied or redrew the screen")
+		}
 	}
 	<-events
-	m.Update(renderTick{})
+	if _, cmd := m.Update(renderTick{}); cmd != nil || m.throttled {
+		t.Fatal("accepted retry did not stop the tick chain")
+	}
 	if got := drainScrollReports(events); len(got) != 1 || got[0].Mode != "scrolled" {
 		t.Fatalf("retry reported %v, want one scrolled report", got)
 	}
-	m.Update(renderTick{})
-	if _, cmd := m.Update(renderTick{}); cmd != nil {
-		t.Fatal("tick chain kept running after the report was accepted")
+	if m.renders != rendered {
+		t.Fatal("accepted scroll report redrew the screen")
 	}
 }
 
-// TestUnthrottledViewRendersEveryCall covers the zero-interval mode used by
-// in-process tests: no ticks, and View always reflects current state.
-func TestUnthrottledViewRendersEveryCall(t *testing.T) {
+func TestScrollReportRetryWaitsForPendingFrame(t *testing.T) {
+	m := newThrottledModel(t)
+	m.Update(ui.PrintLineMsg(strings.Repeat("history\n", 100)))
+	m.Update(renderTick{})
+	m.Update(renderTick{})
+	events := make(chan ui.UIEvent, 1)
+	events <- ui.WindowSizeChangedMsg{Width: 80, Height: 24}
+	m.events = events
+	m.Update(ui.PaneScrollUpMsg{Name: ui.OutputPaneName, Lines: 5})
+	rendered, screen := m.renders, m.screen
+	m.Update(ui.PrintLineMsg("arrived while report was rejected"))
+	<-events
+	m.Update(struct{}{})
+	if len(events) != 0 || m.renders != rendered || m.View().Content != screen {
+		t.Fatal("pending frame or report escaped the throttle")
+	}
+	m.Update(renderTick{})
+	if m.renders != rendered+1 || m.dirty {
+		t.Fatal("pending changes were not rendered at the tick")
+	}
+	if got := drainScrollReports(events); len(got) != 1 || got[0].Mode != "scrolled" || got[0].NewLines != 1 {
+		t.Fatalf("frame reported %v, want the updated scroll state", got)
+	}
+}
+
+func TestZeroIntervalRendersDuringUpdate(t *testing.T) {
 	m := newBareModel(t)
+	rendered := m.renders
 	if _, cmd := m.Update(ui.PrintLineMsg("one")); cmd != nil {
 		t.Fatal("zero render interval scheduled a tick")
 	}
 	m.Update(ui.PrintLineMsg("two"))
-	if got := m.View().Content; !strings.Contains(got, "one") || !strings.Contains(got, "two") {
-		t.Fatal("unthrottled view is dirty")
+	if m.renders != rendered+2 || m.dirty || !strings.Contains(m.screen, "one") || !strings.Contains(m.screen, "two") {
+		t.Fatal("zero interval did not render changes during Update")
+	}
+}
+
+func TestViewOnlyReturnsPreparedScreen(t *testing.T) {
+	for _, throttled := range []bool{false, true} {
+		t.Run(fmt.Sprint(throttled), func(t *testing.T) {
+			events := make(chan ui.UIEvent, 16)
+			m := NewModel(events)
+			if throttled {
+				m.renderInterval = defaultRenderInterval
+			}
+			m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+			m.Update(ui.PrintLineMsg("one"))
+			rendered, screen, dirty, queued := m.renders, m.screen, m.dirty, len(events)
+			for range 3 {
+				if got := m.View().Content; got != screen {
+					t.Fatal("View did not return the prepared screen")
+				}
+			}
+			if m.renders != rendered || m.dirty != dirty || len(events) != queued {
+				t.Fatal("View rendered or posted an event")
+			}
+		})
+	}
+}
+
+func TestZeroIntervalRetriesScrollReportOnNextUpdate(t *testing.T) {
+	events := make(chan ui.UIEvent, 1)
+	m := NewModel(events)
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24}) // fills the queue
+	m.Update(ui.PrintLineMsg(strings.Repeat("history\n", 100)))
+	if _, cmd := m.Update(ui.PaneScrollUpMsg{Name: ui.OutputPaneName, Lines: 5}); cmd != nil || m.throttled || m.dirty {
+		t.Fatal("rejected report scheduled a timer or dirtied the screen")
+	}
+	rendered := m.renders
+	<-events
+	m.View()
+	if len(events) != 0 {
+		t.Fatal("View retried the scroll report")
+	}
+	if _, cmd := m.Update(struct{}{}); cmd != nil || m.renders != rendered {
+		t.Fatal("report retry scheduled a timer or redrew the screen")
+	}
+	if got := drainScrollReports(events); len(got) != 1 || got[0].Mode != "scrolled" {
+		t.Fatalf("next Update reported %v, want one scrolled report", got)
 	}
 }
 

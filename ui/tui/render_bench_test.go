@@ -78,8 +78,8 @@ func BenchmarkRenderNestedLayout(b *testing.B) {
 					}
 				}
 			}
-			root, ok := m.resolveNode(m.layout.Root, m.width, axisVertical)
-			if !ok {
+			root := m.resolveNode(m.layout.Root, m.width, axisVertical)
+			if root == nil {
 				b.Fatal("nested fixture did not resolve")
 			}
 			assignSharedEdges(root, 0)

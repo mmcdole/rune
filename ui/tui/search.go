@@ -18,7 +18,7 @@ type searchViewState struct {
 
 // Model implements searchEffects: the output window half of scrollback
 // search. The controller drives the mode; these methods move the
-// output window. They never report scroll state themselves: renderThrottled
+// output window. They never report scroll state themselves: renderIfDue
 // reports whatever position the update settles on.
 
 // OpenSearch snapshots the output window and committed highlight for cancel, then

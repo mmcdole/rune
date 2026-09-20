@@ -58,6 +58,7 @@ func TestLayoutChangeErasesUncoveredCells(t *testing.T) {
 	m.layout.Root = ui.LayoutNode{Type: ui.LayoutTypeColumn, Children: []ui.LayoutNode{output, chat, input}}
 	m.pane("chat").Write(strings.Repeat("GAP-MARKER\n", 8))
 	m.applyLayout()
+	m.render()
 	if !strings.Contains(m.View().Content, "GAP-MARKER") {
 		t.Fatal("setup missing marker")
 	}
@@ -65,6 +66,7 @@ func TestLayoutChangeErasesUncoveredCells(t *testing.T) {
 	m.applyLayout()
 	// Preparing borders must not consume the pending canvas clear.
 	m.resolveBorderCells(&m.layoutPlan.borders)
+	m.render()
 	if strings.Contains(m.View().Content, "GAP-MARKER") {
 		t.Fatal("removed pane remains in uncovered cells")
 	}

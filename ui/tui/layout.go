@@ -18,7 +18,6 @@ const (
 // output window for interaction and places every leaf for rendering.
 type layoutPlan struct {
 	leaves  []*resolvedNode
-	rules   []widget.Rule
 	borders borderGrid
 	output  image.Rectangle
 	// Text changes only affect geometry for these panes or their auto ancestors.
@@ -39,29 +38,19 @@ type resolvedNode struct {
 	hasInput   bool
 }
 
-type borderEdges uint8
-
-const (
-	borderLeft borderEdges = 1 << iota
-	borderRight
-	borderTop
-	borderBottom
-	borderAll = borderLeft | borderRight | borderTop | borderBottom
-)
-
 func (m *Model) resolveLayout() layoutPlan {
 	plan := layoutPlan{}
 	if m.width <= 0 || m.height <= 0 {
 		return plan
 	}
-	root, ok := m.resolveNode(m.layout.Root, m.width, axisVertical)
-	if !ok {
+	root := m.resolveNode(m.layout.Root, m.width, axisVertical)
+	if root == nil {
 		return plan
 	}
 	assignSharedEdges(root, 0)
+	plan.borders = newBorderGrid(m.width, m.height)
 	m.placeNode(root, image.Rect(0, 0, m.width, m.height), axisVertical, 0, &plan)
 	plan.collectAutoPanes(root, false)
-	plan.borders = newBorderGrid(m.width, m.height)
 	m.planBorders(&plan)
 	for _, leaf := range plan.leaves {
 		if leaf.widget == m.output {
@@ -106,81 +95,12 @@ func (m *Model) applyLayout() {
 	m.needsClear = true
 }
 
-// paneBorders maps the canonical pane border mode to rendered edges.
-func paneBorders(border ui.PaneBorder) borderEdges {
-	if border == "" {
-		return borderAll
-	}
-	switch border {
-	case ui.PaneBorderNone:
-		return 0
-	case ui.PaneBorderHorizontal:
-		return borderTop | borderBottom
-	case ui.PaneBorderFull:
-		return borderAll
-	}
-	return borderAll
-}
-
-func (m *Model) resolveWidget(node ui.LayoutNode, w widget.Widget, availableWidth int) (*resolvedNode, bool) {
-	// Empty bars collapse even when assigned a fixed track. Measuring a widget
-	// must not change the geometry used by input handling.
-	height := w.MeasureHeight(max(1, availableWidth), ui.MaxLayoutCells)
-	if height <= 0 {
-		return nil, false
-	}
-	return &resolvedNode{
-		node: node, widget: w, hasInput: w == m.input,
-		edges: widgetBorders(w, availableWidth, height),
-	}, true
-}
-
-func widgetBorders(w widget.Widget, width, height int) borderEdges {
-	decorated, ok := w.(interface{ Rules(int, int) []widget.Rule })
-	if !ok || width <= 0 || height <= 0 {
-		return 0
-	}
-	var edges borderEdges
-	for _, rule := range decorated.Rules(width, height) {
-		if rule.Vertical && rule.From == 0 && rule.To == height {
-			if rule.At == 0 {
-				edges |= borderLeft
-			}
-			if rule.At == width-1 {
-				edges |= borderRight
-			}
-		} else if !rule.Vertical && rule.From == 0 && rule.To == width {
-			if rule.At == 0 {
-				edges |= borderTop
-			}
-			if rule.At == height-1 {
-				edges |= borderBottom
-			}
-		}
-	}
-	return edges
-}
-
-func (m *Model) resolveBar(node ui.LayoutNode, name string, availableWidth int) (*resolvedNode, bool) {
-	bar, ok := m.bars[name]
-	if !ok {
-		return nil, false
-	}
-	return m.resolveWidget(node, bar, availableWidth)
-}
-
-// resolvePane selects a named buffer, creating it on first placement so a
-// declared pane renders as an empty titled box instead of silently vanishing.
-func (m *Model) resolvePane(node ui.LayoutNode, name string) (*resolvedNode, bool) {
-	pane := m.pane(name)
-	return &resolvedNode{node: node, widget: pane, edges: paneBorders(node.Border)}, true
-}
-
 // resolveNode prunes hidden placements and leaves that cannot currently
-// render. Pane and bar leaves each select their own namespace.
-func (m *Model) resolveNode(node ui.LayoutNode, availableWidth int, parentAxis splitAxis) (*resolvedNode, bool) {
+// render, returning nil for an inactive subtree. Leaf selection and initial
+// border measurement live here; placement applies the final dimensions later.
+func (m *Model) resolveNode(node ui.LayoutNode, availableWidth int, parentAxis splitAxis) *resolvedNode {
 	if node.Hidden {
-		return nil, false
+		return nil
 	}
 	if parentAxis == axisHorizontal {
 		if node.Size.Kind == ui.LayoutSizeCells {
@@ -190,54 +110,62 @@ func (m *Model) resolveNode(node ui.LayoutNode, availableWidth int, parentAxis s
 			availableWidth = min(availableWidth, maximum)
 		}
 	}
+	resolved := &resolvedNode{node: node}
 	if node.IsContainer() {
-		children := make([]*resolvedNode, 0, len(node.Children))
-		for _, child := range node.Children {
-			if resolved, ok := m.resolveNode(child, availableWidth, nodeAxis(node)); ok {
-				children = append(children, resolved)
+		resolved.children = make([]*resolvedNode, 0, len(node.Children))
+		for _, childNode := range node.Children {
+			if child := m.resolveNode(childNode, availableWidth, nodeAxis(node)); child != nil {
+				resolved.children = append(resolved.children, child)
+				resolved.hasInput = resolved.hasInput || child.hasInput
 			}
 		}
-		if len(children) == 0 {
-			return nil, false
+		if len(resolved.children) == 0 {
+			return nil
 		}
-		resolved := &resolvedNode{node: node, children: children}
-		for _, child := range children {
-			resolved.hasInput = resolved.hasInput || child.hasInput
-		}
-		resolved.edges = containerBorders(node, children)
+		resolved.edges = containerBorders(node, resolved.children)
 		// A hard cap can force descendants to drop borders. Do not promise that
 		// capped container's boundary to a neighbor before the fallback runs.
 		if maximum := nodeMaximum(node); resolved.hasInput && maximum > 0 && maximum < m.intrinsicMinimum(resolved, parentAxis) {
 			resolved.edges = 0
 		}
-		return resolved, true
+		return resolved
 	}
 
 	switch node.Type {
 	case ui.LayoutTypeInput:
-		resolved, ok := m.resolveWidget(node, m.input, availableWidth)
-		if ok && parentAxis == axisVertical {
-			height := m.input.MeasureHeight(availableWidth, ui.MaxLayoutCells)
-			if node.Size.Kind == ui.LayoutSizeCells {
-				height = node.Size.Value
-			}
+		var height int
+		if parentAxis == axisVertical && node.Size.Kind == ui.LayoutSizeCells {
+			height = node.Size.Value
+		} else {
+			height = m.input.MeasureHeight(max(1, availableWidth), ui.MaxLayoutCells)
+		}
+		if parentAxis == axisVertical {
 			if maximum := nodeMaximum(node); maximum > 0 {
 				height = min(height, maximum)
 			}
-			resolved.edges = widgetBorders(m.input, availableWidth, height)
 		}
-		return resolved, ok
+		resolved.widget, resolved.hasInput = m.input, true
+		resolved.edges = widgetBorders(m.input, availableWidth, height)
 	case ui.LayoutTypeSeparator:
 		separator := widget.NewSeparator()
 		separator.SetChar(node.SeparatorChar)
-		return m.resolveWidget(node, separator, availableWidth)
+		resolved.widget = separator
 	case ui.LayoutTypePane:
-		return m.resolvePane(node, node.Name)
+		// First placement creates an empty named buffer, so it remains a
+		// visible pane even before any text is written to it.
+		resolved.widget = m.pane(node.Name)
+		resolved.edges = paneBorders(node.Border)
 	case ui.LayoutTypeBar:
-		return m.resolveBar(node, node.Name, availableWidth)
+		bar := m.bars[node.Name]
+		// Missing and empty bars collapse even when assigned a fixed track.
+		if bar == nil || bar.MeasureHeight(availableWidth, 1) == 0 {
+			return nil
+		}
+		resolved.widget = bar
 	default:
-		return nil, false
+		return nil
 	}
+	return resolved
 }
 
 func (m *Model) placeNode(node *resolvedNode, rect image.Rectangle, parentAxis splitAxis, shared borderEdges, plan *layoutPlan) {
@@ -245,16 +173,14 @@ func (m *Model) placeNode(node *resolvedNode, rect image.Rectangle, parentAxis s
 		return
 	}
 	if node.widget != nil {
-		leaf := node
-		insets := leaf.edges | shared
+		edges := node.edges
 		if node.node.Type != ui.LayoutTypePane {
-			// Composite widgets include their own rules. Only boundaries
-			// supplied by neighbors consume additional content cells.
-			insets = shared &^ widgetBorders(leaf.widget, rect.Dx(), rect.Dy())
+			// Constrained widgets may drop borders at the allocated size.
+			edges = widgetBorders(node.widget, rect.Dx(), rect.Dy())
 		}
-		leaf.outer, leaf.content = rect, insetBorders(rect, insets)
-		leaf.parentAxis = parentAxis
-		plan.leaves = append(plan.leaves, leaf)
+		node.outer, node.content = rect, insetBorders(rect, contentInsets(node.node.Type, edges, shared))
+		node.parentAxis = parentAxis
+		plan.leaves = append(plan.leaves, node)
 		return
 	}
 
@@ -304,7 +230,7 @@ func (m *Model) placeNode(node *resolvedNode, rect image.Rectangle, parentAxis s
 				} else {
 					rule.From, rule.To = rect.Min.X, rect.Max.X
 				}
-				plan.rules = append(plan.rules, rule)
+				plan.borders.markRule(rule)
 			}
 			position += gap
 			if allocation.boundaries[i].overlap {

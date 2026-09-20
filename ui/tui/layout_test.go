@@ -20,6 +20,7 @@ func addPane(t *testing.T, m *Model, name string, lines ...string) {
 		pane.Write(line)
 	}
 	m.applyLayout()
+	m.render()
 }
 
 func resizeModel(t *testing.T, m *Model, width, height int) *Model {
@@ -31,6 +32,7 @@ func resizeModel(t *testing.T, m *Model, width, height int) *Model {
 func setLayout(m *Model, root ui.LayoutNode) {
 	m.layout = ui.LayoutTree{Root: root}
 	m.applyLayout()
+	m.render()
 }
 
 func findLeaf(t *testing.T, plan layoutPlan, kind string, name string) *resolvedNode {
@@ -102,6 +104,41 @@ func TestArbitraryTypeIsNotARegistryLookup(t *testing.T) {
 	setLayout(m, ui.LayoutNode{Type: "vitals"})
 	if got := len(m.layoutPlan.leaves); got != 0 {
 		t.Fatalf("invalid arbitrary type resolved %d leaves, want none", got)
+	}
+}
+
+func TestInactiveBarSubtreesReleaseTheirFixedTracks(t *testing.T) {
+	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 16)), 40, 12)
+	setLayout(m, ui.LayoutNode{Type: ui.LayoutTypeColumn, Children: []ui.LayoutNode{
+		{Type: ui.LayoutTypePane, Name: ui.OutputPaneName, Border: ui.PaneBorderNone},
+		{Type: ui.LayoutTypeColumn, Size: ui.Cells(3), Children: []ui.LayoutNode{
+			{Type: ui.LayoutTypeBar, Name: "status", Size: ui.Cells(3)},
+		}},
+		{Type: ui.LayoutTypeInput, Size: ui.AutoSize()},
+	}})
+	for _, step := range []struct {
+		name   string
+		bars   ui.UpdateBarsMsg
+		height int
+	}{
+		{"visible", ui.UpdateBarsMsg{"status": {Left: "STATUS"}}, 6},
+		{"empty", ui.UpdateBarsMsg{"status": {}}, 9},
+		{"restored", ui.UpdateBarsMsg{"status": {Left: "STATUS"}}, 6},
+		{"style_only", ui.UpdateBarsMsg{"status": {Left: "\x1b[31m\x1b[0m"}}, 9},
+		{"restored_again", ui.UpdateBarsMsg{"status": {Left: "STATUS"}}, 6},
+		{"removed", ui.UpdateBarsMsg{}, 9},
+	} {
+		t.Run(step.name, func(t *testing.T) {
+			m.Update(step.bars)
+			if got := m.layoutPlan.output.Dy(); got != step.height {
+				t.Fatalf("output height = %d, want %d", got, step.height)
+			}
+			view := m.View().Content
+			assertExactBlock(t, view, 40, 12)
+			if got, want := strings.Contains(ansi.Strip(view), "STATUS"), step.height == 6; got != want {
+				t.Fatalf("bar visible = %v, want %v", got, want)
+			}
+		})
 	}
 }
 
@@ -210,7 +247,7 @@ func TestLeafPreferredMatchesBorderPlacement(t *testing.T) {
 								widget: measured, edges: edges, shared: shared,
 							}
 							// Placement supplies the reference geometry, including narrow rectangles.
-							content := insetBorders(image.Rect(0, 0, max(0, width), ui.MaxLayoutCells), contentInsets(leaf))
+							content := insetBorders(image.Rect(0, 0, max(0, width), ui.MaxLayoutCells), contentInsets(kind, edges, shared))
 							rows := ui.MaxLayoutCells - content.Dy()
 							limit := ui.MaxLayoutCells
 							if limits.terminal > 0 {
@@ -242,20 +279,17 @@ func TestOnlyAutoTracksRequestIntrinsicMeasurement(t *testing.T) {
 		size  ui.LayoutSize
 		calls int
 	}{
-		{name: "fixed", size: ui.Cells(2), calls: 1},
-		{name: "fraction", size: ui.Fraction(1), calls: 1},
-		{name: "percent", size: ui.Percent(25), calls: 1},
-		{name: "auto", size: ui.AutoSize(), calls: 2},
+		{name: "fixed", size: ui.Cells(2), calls: 0},
+		{name: "fraction", size: ui.Fraction(1), calls: 0},
+		{name: "percent", size: ui.Percent(25), calls: 0},
+		{name: "auto", size: ui.AutoSize(), calls: 1},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			m := NewModel(make(chan ui.UIEvent, 8))
 			measured := &measuringWidget{preferred: func(int) int { return 2 }}
 			node := ui.LayoutNode{Type: ui.LayoutTypeBar, Name: "measured", Size: test.size}
-			child, ok := m.resolveWidget(node, measured, 20)
-			if !ok {
-				t.Fatal("measuring widget did not resolve")
-			}
+			child := &resolvedNode{node: node, widget: measured}
 			root := &resolvedNode{
 				node:     ui.LayoutNode{Type: ui.LayoutTypeColumn},
 				children: []*resolvedNode{child},
@@ -275,15 +309,9 @@ func TestAutoRowMeasuresChildrenAtAllocatedWidths(t *testing.T) {
 		text:      "wrapped",
 	}
 	wrappedNode := ui.LayoutNode{Type: ui.LayoutTypeBar, Name: "wrapped"}
-	wrappedResolved, ok := m.resolveWidget(wrappedNode, wrapped, 20)
-	if !ok {
-		t.Fatal("wrapped widget did not resolve")
-	}
+	wrappedResolved := &resolvedNode{node: wrappedNode, widget: wrapped}
 	inputNode := ui.LayoutNode{Type: ui.LayoutTypeInput}
-	inputResolved, ok := m.resolveWidget(inputNode, m.input, 20)
-	if !ok {
-		t.Fatal("input widget did not resolve")
-	}
+	inputResolved := m.resolveNode(inputNode, 20, axisHorizontal)
 	row := &resolvedNode{
 		node:     ui.LayoutNode{Type: ui.LayoutTypeRow},
 		children: []*resolvedNode{wrappedResolved, inputResolved},
@@ -308,15 +336,9 @@ func TestAutoColumnSumsNestedPreferredHeights(t *testing.T) {
 	m := NewModel(make(chan ui.UIEvent, 8))
 	twoRows := &measuringWidget{preferred: func(int) int { return 2 }, text: "two"}
 	twoNode := ui.LayoutNode{Type: ui.LayoutTypeBar, Name: "two", Size: ui.AutoSize()}
-	twoResolved, ok := m.resolveWidget(twoNode, twoRows, 30)
-	if !ok {
-		t.Fatal("two-row widget did not resolve")
-	}
+	twoResolved := &resolvedNode{node: twoNode, widget: twoRows}
 	inputNode := ui.LayoutNode{Type: ui.LayoutTypeInput, Size: ui.AutoSize()}
-	inputResolved, ok := m.resolveWidget(inputNode, m.input, 30)
-	if !ok {
-		t.Fatal("input widget did not resolve")
-	}
+	inputResolved := m.resolveNode(inputNode, 30, axisVertical)
 	column := &resolvedNode{
 		node:     ui.LayoutNode{Type: ui.LayoutTypeColumn},
 		children: []*resolvedNode{twoResolved, inputResolved},
@@ -928,15 +950,6 @@ func TestDividerJoinsBordersAndSeparatorsAboveAndBelow(t *testing.T) {
 	})
 
 	plan := m.layoutPlan
-	vertical := []widget.Rule{}
-	for _, rule := range plan.rules {
-		if rule.Vertical {
-			vertical = append(vertical, rule)
-		}
-	}
-	if len(vertical) != 1 || vertical[0].At != 10 {
-		t.Fatalf("vertical rules = %+v, want one at x=10", vertical)
-	}
 	separator := findLeaf(t, plan, "", ui.LayoutTypeSeparator)
 	if separator.outer != image.Rect(0, 8, 21, 9) || !separator.content.Empty() {
 		t.Fatalf("separator outer=%v content=%v, want row 8 drawn by the border grid", separator.outer, separator.content)
