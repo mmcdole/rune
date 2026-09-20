@@ -221,14 +221,11 @@ func (m *Model) placeNode(node *resolvedNode, rect image.Rectangle, parentAxis s
 						at--
 					}
 				}
-				rule := widget.Rule{Vertical: axis == axisHorizontal,
-					At: at}
-				if rule.Vertical {
-					rule.From, rule.To = rect.Min.Y, rect.Max.Y
+				if axis == axisHorizontal {
+					plan.borders.markVertical(at, rect.Min.Y, rect.Max.Y)
 				} else {
-					rule.From, rule.To = rect.Min.X, rect.Max.X
+					plan.borders.markHorizontal(at, rect.Min.X, rect.Max.X)
 				}
-				plan.borders.markRule(rule)
 			}
 			position += gap
 			if allocation.boundaries[i].overlap {

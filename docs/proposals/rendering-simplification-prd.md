@@ -1,6 +1,6 @@
 # Rendering Simplification PRD
 
-Status: Section 3, the scoped Section 4 contraction, the Section 5 frame lifecycle cleanup, the scoped Section 2 dispatch cleanup, the separator construction/styling cleanup, the input allocation contract cleanup, the container-border contraction, the bar construction/rendering contraction, and explicit input-rule integration are approved and implemented. Other implementation proposals remain unapproved.
+Status: Section 3, the scoped Section 4 contraction, the Section 5 frame lifecycle cleanup, the scoped Section 2 dispatch cleanup, the separator construction/styling cleanup, the input allocation contract cleanup, the container-border contraction, the bar construction/rendering contraction, explicit input-rule integration, and the rule-row representation contraction are approved and implemented. Other implementation proposals remain unapproved.
 
 Review baseline: `simplify-rendering`, commit `17b7df0`, September 20, 2026.
 
@@ -506,6 +506,12 @@ Skipping work often requires remembering more state. The goal is less total comp
 Section 3 was selected and implemented first after the workload and cleanup discussion, followed by the scoped Section 4 contraction and the Section 5 frame lifecycle cleanup recorded below. Section 1 is deferred. Review the remaining proposals one at a time; agreement on one section does not approve the others. Keep this document as the single source for decisions and revisions.
 
 ### Suggested implementation order after agreement
+
+Rule-row representation implementation record: implemented under the request to do the next cleanup and commit. This follows explicit input-rule integration: every input rule is a full-width horizontal line, and container dividers already know their orientation and endpoints. Replaced `Input.Rules` with `Input.RuleRows(width, height) []int` and changed the private layout field to `ruleRows`. Removed the generic `Rule` struct, its `Translate` method, `widget/rule.go`, and `borderGrid.markRule`.
+
+`inputBorders` now checks only whether a returned row lies on the top or bottom edge. `planBorders` adds the input content's vertical origin and marks each horizontal line across the outer rectangle, preserving extension through shared side boundaries. Container placement calls `markVertical` or `markHorizontal` directly for dividers. The general border grid and junction handling remain appropriate shared rendering machinery; no replacement wrapper or type was added.
+
+Contract: rule rows are local, full-width horizontal lines; empty allocations return none. Input determines their positions, layout reserves shared cells, and the renderer supplies coordinates, styling, and joins. Updated the existing allocation, label-placement, and measurement-purity tests for row indices. `go test -race -shuffle=on ./ui/... ./text/...`, `go vet ./ui/... ./text/...`, and `git diff --check` pass. Shared-border, divider, constrained-input, and snapshot coverage passes without snapshot changes. No quantitative speedup claim.
 
 Input-rule integration implementation record: approved and implemented. `Input` is the only implementation of `Rules(width, height)`. Removed the anonymous optional-interface assertions from border measurement and planning; the model now uses its input directly, consistently with input-label rendering.
 

@@ -6,7 +6,6 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 
 	"github.com/mmcdole/rune/ui"
-	"github.com/mmcdole/rune/ui/tui/widget"
 )
 
 type borderEdges uint8
@@ -44,14 +43,6 @@ func newBorderGrid(width, height int) borderGrid {
 
 func (f borderGrid) inside(x, y int) bool {
 	return x >= 0 && y >= 0 && x < f.width && y < f.height
-}
-
-func (f borderGrid) markRule(rule widget.Rule) {
-	if rule.Vertical {
-		f.markVertical(rule.At, rule.From, rule.To)
-	} else {
-		f.markHorizontal(rule.At, rule.From, rule.To)
-	}
 }
 
 func (f borderGrid) at(cells []bool, x, y int) bool {
@@ -159,21 +150,12 @@ func (m *Model) inputBorders(width, height int) borderEdges {
 		return 0
 	}
 	var edges borderEdges
-	for _, rule := range m.input.Rules(width, height) {
-		if rule.Vertical && rule.From == 0 && rule.To == height {
-			if rule.At == 0 {
-				edges |= borderLeft
-			}
-			if rule.At == width-1 {
-				edges |= borderRight
-			}
-		} else if !rule.Vertical && rule.From == 0 && rule.To == width {
-			if rule.At == 0 {
-				edges |= borderTop
-			}
-			if rule.At == height-1 {
-				edges |= borderBottom
-			}
+	for _, row := range m.input.RuleRows(width, height) {
+		if row == 0 {
+			edges |= borderTop
+		}
+		if row == height-1 {
+			edges |= borderBottom
 		}
 	}
 	return edges
@@ -224,25 +206,9 @@ func (m *Model) planBorders(plan *layoutPlan) {
 	for i := range plan.leaves {
 		leaf := plan.leaves[i]
 		if leaf.widget == m.input {
-			for _, rule := range m.input.Rules(leaf.content.Dx(), leaf.content.Dy()) {
-				rule = rule.Translate(leaf.content.Min)
-				// Extend edge-aligned rules to the boundaries reserved by the
-				// surrounding layout so separators meet neighboring dividers.
-				if rule.Vertical {
-					if rule.At == leaf.content.Min.X {
-						rule.At = leaf.outer.Min.X
-					} else if rule.At == leaf.content.Max.X-1 {
-						rule.At = leaf.outer.Max.X - 1
-					}
-				} else {
-					if rule.From == leaf.content.Min.X {
-						rule.From = leaf.outer.Min.X
-					}
-					if rule.To == leaf.content.Max.X {
-						rule.To = leaf.outer.Max.X
-					}
-				}
-				plan.borders.markRule(rule)
+			for _, row := range m.input.RuleRows(leaf.content.Dx(), leaf.content.Dy()) {
+				// Extend input lines through reserved side boundaries to meet dividers.
+				plan.borders.markHorizontal(leaf.content.Min.Y+row, leaf.outer.Min.X, leaf.outer.Max.X)
 			}
 		}
 		if joinableSeparator(leaf) {

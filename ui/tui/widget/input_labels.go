@@ -17,7 +17,7 @@ type Label struct {
 }
 
 // Labels supplies current styled text at the applied size. It uses the same
-// geometry as Rules and View without changing placement or navigation state.
+// geometry as RuleRows and View without changing placement or navigation state.
 func (i *Input) Labels() []Label {
 	plan := i.layout(i.width, i.height)
 	if plan.header < 0 && plan.footer < 0 {

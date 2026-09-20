@@ -31,13 +31,8 @@ func TestModalPickerShowsResultsAboveItsQueryField(t *testing.T) {
 		t.Fatalf("picker placement changed: %q", rows)
 	}
 	horizontal := make(map[int]bool)
-	for _, rule := range in.Rules(40, in.height) {
-		if rule.Vertical {
-			t.Fatal("picker must not draw a separate side wall")
-		}
-		if !rule.Vertical && rule.From == 0 && rule.To == 40 {
-			horizontal[rule.At] = true
-		}
+	for _, row := range in.RuleRows(40, in.height) {
+		horizontal[row] = true
 	}
 	if len(horizontal) != 3 || !horizontal[0] || !horizontal[plan.results.Max.Y] || !horizontal[in.height-1] {
 		t.Fatalf("picker/field boundaries disagree with assigned geometry:\n%s", strings.Join(rows, "\n"))
@@ -81,7 +76,7 @@ func TestInputRenderingHonorsAllocation(t *testing.T) {
 				for _, height := range []int{-1, 0, 1, 2, 3, 10} {
 					t.Run(fmt.Sprintf("%dx%d", width, height), func(t *testing.T) {
 						in.SetSize(width, height)
-						geometry := in.Rules(width, height)
+						geometry := in.RuleRows(width, height)
 						labels := in.Labels()
 						if width <= 0 || height <= 0 {
 							if view := in.View(); view != "" || len(geometry) != 0 || len(labels) != 0 {
@@ -95,9 +90,9 @@ func TestInputRenderingHonorsAllocation(t *testing.T) {
 						}
 						for _, label := range labels {
 							onRule := false
-							for _, rule := range geometry {
-								if !rule.Vertical && label.Position.Y == rule.At &&
-									label.Position.X >= rule.From && label.Position.X+lipgloss.Width(label.Text) <= rule.To {
+							for _, row := range geometry {
+								if label.Position.Y == row &&
+									label.Position.X >= 0 && label.Position.X+lipgloss.Width(label.Text) <= width {
 									onRule = true
 								}
 							}
@@ -116,12 +111,12 @@ func TestInputLabelsUseCurrentDraftAfterMeasurement(t *testing.T) {
 	in := newTestInput(80)
 	in.OpenDraftEditor("first\nsecond", 0)
 	in.SetSize(80, in.MeasureHeight(80, 100))
-	in.Rules(10, 3)
+	in.RuleRows(10, 3)
 	if labels := inputLabels(in); !strings.Contains(labels, "2 lines") {
 		t.Fatalf("provisional measurement affected final labels: %q", labels)
 	}
 	in.SetValue("first\nsecond\n世界")
-	in.Rules(3, 1)
+	in.RuleRows(3, 1)
 	if labels := inputLabels(in); !strings.Contains(labels, "3 lines") {
 		t.Fatalf("draft edit left stale labels: %q", labels)
 	}
@@ -133,7 +128,7 @@ func TestDraftEditorMeasurementAndViewDoNotChangeNavigation(t *testing.T) {
 	in.SetSize(40, 7)
 	before := in.draftEditor.topRow
 	in.MeasureHeight(5, 24)
-	in.Rules(5, 24)
+	in.RuleRows(5, 24)
 	in.Labels()
 	in.View()
 	if in.draftEditor.topRow != before || in.width != 40 || in.height != 7 {

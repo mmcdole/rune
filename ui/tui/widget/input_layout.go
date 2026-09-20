@@ -8,7 +8,7 @@ type inputLayout struct {
 	results        image.Rectangle
 	help           int
 	body           image.Rectangle
-	rules          []Rule
+	ruleRows       []int
 	header, footer int // draft label rows; -1 when unavailable
 }
 
@@ -25,7 +25,7 @@ func (i *Input) layout(width, height int) inputLayout {
 		pickerHeight = max(0, height-fieldHeight)
 		start := 0
 		if pickerHeight > 1 {
-			p.rules = append(p.rules, Rule{At: 0, To: width})
+			p.ruleRows = append(p.ruleRows, 0)
 			start = 1
 		}
 		p.results = image.Rect(0, start, width, pickerHeight)
@@ -39,29 +39,30 @@ func (i *Input) layout(width, height int) inputLayout {
 	if i.draftEditor != nil && !i.SearchActive() && (!i.PickerActive() || i.PickerInline()) {
 		if fieldHeight >= 2 {
 			p.header = top
-			p.rules = append(p.rules, Rule{At: top, To: width})
+			p.ruleRows = append(p.ruleRows, top)
 			top++
 		}
 		if fieldHeight >= 3 {
 			bottom--
 			p.footer = bottom
-			p.rules = append(p.rules, Rule{At: bottom, To: width})
+			p.ruleRows = append(p.ruleRows, bottom)
 		}
 	} else {
 		if fieldHeight >= 3 {
-			p.rules = append(p.rules, Rule{At: top, To: width})
+			p.ruleRows = append(p.ruleRows, top)
 			top++
 		}
 		if fieldHeight >= 2 {
 			bottom--
-			p.rules = append(p.rules, Rule{At: bottom, To: width})
+			p.ruleRows = append(p.ruleRows, bottom)
 		}
 	}
 	p.body = image.Rect(0, top, width, bottom)
 	return p
 }
 
-// Rules supplies line geometry for measurement, without formatting labels.
-func (i *Input) Rules(width, height int) []Rule {
-	return i.layout(width, height).rules
+// RuleRows returns local rows occupied by full-width horizontal lines.
+// Measurement and rendering share these positions without formatting labels.
+func (i *Input) RuleRows(width, height int) []int {
+	return i.layout(width, height).ruleRows
 }
