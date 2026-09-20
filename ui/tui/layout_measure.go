@@ -178,8 +178,9 @@ func (m *Model) leafPreferred(leaf *resolvedNode, axis splitAxis, cross int) int
 	if axis != axisVertical {
 		return 1
 	}
-	chrome := insetBorders(image.Rect(0, 0, max(0, cross), ui.MaxLayoutCells), contentInsets(leaf))
-	frameHeight := ui.MaxLayoutCells - chrome.Dy()
+	insets := contentInsets(leaf)
+	contentWidth := max(1, max(0, cross)-countEdges(insets, borderLeft|borderRight))
+	borderRows := countEdges(insets, borderTop|borderBottom)
 	limit := ui.MaxLayoutCells
 	if m.height > 0 {
 		limit = min(limit, m.height)
@@ -187,7 +188,7 @@ func (m *Model) leafPreferred(leaf *resolvedNode, axis splitAxis, cross int) int
 	if maximum := nodeMaximum(leaf.node); maximum > 0 {
 		limit = min(limit, maximum)
 	}
-	return frameHeight + leaf.widget.MeasureHeight(max(1, chrome.Dx()), max(0, limit-frameHeight))
+	return borderRows + leaf.widget.MeasureHeight(contentWidth, max(0, limit-borderRows))
 }
 
 func (m *Model) preferred(node *resolvedNode, axis splitAxis, cross int) int {

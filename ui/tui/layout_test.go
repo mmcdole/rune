@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"image"
 	"strings"
 	"testing"
@@ -172,10 +173,11 @@ func TestRecursiveRowAndColumnGeometry(t *testing.T) {
 }
 
 type measuringWidget struct {
-	width, height  int
-	preferred      func(width int) int
-	preferredCalls int
-	text           string
+	width, height                int
+	preferred                    func(width int) int
+	preferredCalls               int
+	text                         string
+	measuredWidth, measuredLimit int
 }
 
 var _ widget.Widget = (*measuringWidget)(nil)
@@ -186,10 +188,53 @@ func (w *measuringWidget) SetSize(width, height int) { w.width, w.height = width
 
 func (w *measuringWidget) MeasureHeight(width, limit int) int {
 	w.preferredCalls++
+	w.measuredWidth, w.measuredLimit = width, limit
 	return min(limit, w.preferred(max(1, width)))
 }
 
 func (w *measuringWidget) View() string { return w.text }
+
+func TestLeafPreferredMatchesBorderPlacement(t *testing.T) {
+	for _, kind := range []string{ui.LayoutTypePane, ui.LayoutTypeInput} {
+		for edges := borderEdges(0); edges <= borderAll; edges++ {
+			for _, shared := range []borderEdges{0, borderLeft | borderTop, borderAll} {
+				for _, width := range []int{-1, 0, 1, 2, 80} {
+					for _, limits := range []struct{ terminal, maximum int }{
+						{0, 0}, {1, 0}, {0, 1}, {1, 3}, {3, 1},
+						{ui.MaxLayoutCells + 1, ui.MaxLayoutCells + 1},
+					} {
+						t.Run(fmt.Sprintf("%s/edges=%d/shared=%d/width=%d/limits=%v", kind, edges, shared, width, limits), func(t *testing.T) {
+							measured := &measuringWidget{preferred: func(int) int { return 7 }}
+							leaf := &resolvedNode{
+								node:   ui.LayoutNode{Type: kind, MaxSize: &limits.maximum},
+								widget: measured, edges: edges, shared: shared,
+							}
+							// Placement supplies the reference geometry, including narrow rectangles.
+							content := insetBorders(image.Rect(0, 0, max(0, width), ui.MaxLayoutCells), contentInsets(leaf))
+							rows := ui.MaxLayoutCells - content.Dy()
+							limit := ui.MaxLayoutCells
+							if limits.terminal > 0 {
+								limit = min(limit, limits.terminal)
+							}
+							if limits.maximum > 0 {
+								limit = min(limit, limits.maximum)
+							}
+							wantWidth, wantLimit := max(1, content.Dx()), max(0, limit-rows)
+							m := Model{height: limits.terminal}
+							got := m.leafPreferred(leaf, axisVertical, width)
+							if measured.measuredWidth != wantWidth || measured.measuredLimit != wantLimit || got != rows+min(7, wantLimit) {
+								t.Fatalf("measurement (%d, %d) -> %d; want (%d, %d) -> %d", measured.measuredWidth, measured.measuredLimit, got, wantWidth, wantLimit, rows+min(7, wantLimit))
+							}
+							if got := m.leafPreferred(leaf, axisHorizontal, width); got != 1 || measured.preferredCalls != 1 {
+								t.Fatal("horizontal preference changed or measured height")
+							}
+						})
+					}
+				}
+			}
+		}
+	}
+}
 
 func TestOnlyAutoTracksRequestIntrinsicMeasurement(t *testing.T) {
 	tests := []struct {
