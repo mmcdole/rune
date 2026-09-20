@@ -1,6 +1,6 @@
 # Rendering Simplification PRD
 
-Status: Section 3, the scoped Section 4 contraction, the Section 5 frame lifecycle cleanup, the scoped Section 2 dispatch cleanup, the separator construction/styling cleanup, the input allocation contract cleanup, the container-border contraction, the bar construction/rendering contraction, explicit input-rule integration, the rule-row representation contraction, separator placement finalization, and output scroll-state ownership cleanup are approved and implemented. Other implementation proposals remain unapproved.
+Status: Section 3, the scoped Section 4 contraction, the Section 5 frame lifecycle cleanup, the scoped Section 2 dispatch cleanup, the separator construction/styling cleanup, the input allocation contract cleanup, the container-border contraction, the bar construction/rendering contraction, explicit input-rule integration, the rule-row representation contraction, separator placement finalization, output scroll-state ownership cleanup, and the pane rendering entry-point contraction are approved and implemented. Other implementation proposals remain unapproved.
 
 Review baseline: `simplify-rendering`, commit `17b7df0`, September 20, 2026.
 
@@ -506,6 +506,12 @@ Skipping work often requires remembering more state. The goal is less total comp
 Section 3 was selected and implemented first after the workload and cleanup discussion, followed by the scoped Section 4 contraction and the Section 5 frame lifecycle cleanup recorded below. Section 1 is deferred. Review the remaining proposals one at a time; agreement on one section does not approve the others. Keep this document as the single source for decisions and revisions.
 
 ### Suggested implementation order after agreement
+
+Pane rendering entry-point implementation record: implemented under the request to commit the completed work and continue with the next cleanup. Removed `Pane.ContentRows(width, height)` and moved its existing wrapping/window algorithm into `Pane.View`. Production already called it solely through `View`; tests were the only direct consumers of the alternate rendering method. The existing test helper now applies `SetSize` and splits `View` output, exercising the same allocation contract as production.
+
+Contract: `MeasureHeight` suggests space, `SetSize` assigns it, and `View` renders the pane at that allocation. Logical-line scrolling, deep-scroll window filling, wrapping, sparse padding, and empty output at nonpositive heights are preserved. Renamed the existing geometry test to `TestPaneViewUsesAllocatedGeometry` and changed its zero-height assertion to check empty rendered text. No replacement helper, interface, field, cache, or file was introduced in production.
+
+Validation: `go test -race -shuffle=on ./ui/... ./text/...`, `go vet ./ui/... ./text/...`, and `git diff --check` pass. The existing pane tests now exercise `View` for wrapping, scrolling, resize, clear, and row counts. Snapshots are unchanged. This removes one public method and one forwarding layer; no quantitative speedup claim.
 
 Output scroll-state ownership implementation record: approved and implemented. Removed the assignment to `o.offset` from `Output.View`; it now calculates its bounded window end locally. Replaced duplicate offset-bound and live-mode unseen-count handling in `RestoreScroll` with the existing `clampOffset` call after restoring the anchor and unseen count.
 

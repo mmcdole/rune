@@ -17,7 +17,8 @@ func newTestPane(t *testing.T) *Pane {
 
 func contentRows(t *testing.T, p *Pane, width, height int) []string {
 	t.Helper()
-	rows := p.ContentRows(width, height)
+	p.SetSize(width, height)
+	rows := strings.Split(p.View(), "\n")
 	if len(rows) != height {
 		t.Fatalf("content height = %d rows, want %d", len(rows), height)
 	}
@@ -267,7 +268,7 @@ func TestPaneEmptyAndClear(t *testing.T) {
 	}
 }
 
-func TestPaneContentRowsUseRequestedGeometry(t *testing.T) {
+func TestPaneViewUsesAllocatedGeometry(t *testing.T) {
 	p := newTestPane(t)
 	for i := 1; i <= 5; i++ {
 		p.Write(fmt.Sprintf("line %d", i))
@@ -287,8 +288,9 @@ func TestPaneContentRowsUseRequestedGeometry(t *testing.T) {
 	if again[0] != "line 4" || again[1] != "line 5" {
 		t.Fatalf("second two-row view = %q, want lines 4-5", again)
 	}
-	if rows := p.ContentRows(40, 0); rows != nil {
-		t.Fatalf("zero-height content = %q, want nil", rows)
+	p.SetSize(40, 0)
+	if view := p.View(); view != "" {
+		t.Fatalf("zero-height content = %q, want empty", view)
 	}
 }
 
