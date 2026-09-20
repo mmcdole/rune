@@ -25,17 +25,16 @@ type layoutPlan struct {
 }
 
 // resolvedNode is an active tree node. Leaves carry a widget and its geometry;
-// containers carry children. parentAxis determines separator orientation.
+// containers carry children.
 type resolvedNode struct {
-	node       ui.LayoutNode
-	widget     widget.Widget
-	children   []*resolvedNode
-	outer      image.Rectangle
-	content    image.Rectangle
-	edges      borderEdges // requested boundaries, used for measurement and seam allocation
-	shared     borderEdges // anticipated shared cells, used only for measurement
-	parentAxis splitAxis
-	hasInput   bool
+	node     ui.LayoutNode
+	widget   widget.Widget
+	children []*resolvedNode
+	outer    image.Rectangle
+	content  image.Rectangle
+	edges    borderEdges // requested boundaries, used for measurement and seam allocation
+	shared   borderEdges // anticipated shared cells, used only for measurement
+	hasInput bool
 }
 
 func (m *Model) resolveLayout() layoutPlan {
@@ -177,7 +176,12 @@ func (m *Model) placeNode(node *resolvedNode, rect image.Rectangle, parentAxis s
 			edges = m.inputBorders(rect.Dx(), rect.Dy())
 		}
 		node.outer, node.content = rect, insetBorders(rect, contentInsets(node.node.Type, edges, shared))
-		node.parentAxis = parentAxis
+		if node.node.Type == ui.LayoutTypeSeparator && node.node.SeparatorChar == "" && parentAxis == axisVertical {
+			// Default separators in columns join the border grid; custom
+			// characters and separators in rows keep their widget content.
+			plan.borders.markHorizontal(rect.Min.Y, rect.Min.X, rect.Max.X)
+			node.content = image.Rectangle{}
+		}
 		plan.leaves = append(plan.leaves, node)
 		return
 	}

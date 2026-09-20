@@ -1017,8 +1017,12 @@ func TestSeparatorInsideRowKeepsWidgetRendering(t *testing.T) {
 		},
 	})
 	separator := findLeaf(t, m.layoutPlan, "", ui.LayoutTypeSeparator)
-	if separator.parentAxis != axisHorizontal || separator.content.Empty() {
-		t.Fatalf("row separator parentAxis=%v content=%v, want widget rendering", separator.parentAxis, separator.content)
+	if want := image.Rect(11, 0, 12, 1); separator.content != want {
+		t.Fatalf("row separator content=%v, want %v for widget rendering", separator.content, want)
+	}
+	rows := assertExactBlock(t, m.View().Content, 12, 4)
+	if got := ansi.Strip(rows[0]); got != strings.Repeat(" ", 11)+"─" {
+		t.Fatalf("row separator rendered %q, want a rule in the final cell", got)
 	}
 }
 

@@ -1,6 +1,6 @@
 # Rendering Simplification PRD
 
-Status: Section 3, the scoped Section 4 contraction, the Section 5 frame lifecycle cleanup, the scoped Section 2 dispatch cleanup, the separator construction/styling cleanup, the input allocation contract cleanup, the container-border contraction, the bar construction/rendering contraction, explicit input-rule integration, and the rule-row representation contraction are approved and implemented. Other implementation proposals remain unapproved.
+Status: Section 3, the scoped Section 4 contraction, the Section 5 frame lifecycle cleanup, the scoped Section 2 dispatch cleanup, the separator construction/styling cleanup, the input allocation contract cleanup, the container-border contraction, the bar construction/rendering contraction, explicit input-rule integration, the rule-row representation contraction, and separator placement finalization are approved and implemented. Other implementation proposals remain unapproved.
 
 Review baseline: `simplify-rendering`, commit `17b7df0`, September 20, 2026.
 
@@ -506,6 +506,12 @@ Skipping work often requires remembering more state. The goal is less total comp
 Section 3 was selected and implemented first after the workload and cleanup discussion, followed by the scoped Section 4 contraction and the Section 5 frame lifecycle cleanup recorded below. Section 1 is deferred. Review the remaining proposals one at a time; agreement on one section does not approve the others. Keep this document as the single source for decisions and revisions.
 
 ### Suggested implementation order after agreement
+
+Separator placement implementation record: approved and implemented. `placeNode` now decides whether a default separator joins the border grid using the parent axis and final rectangle already available there. Removed the saved `resolvedNode.parentAxis` field and the later mutation of separator content geometry in `planBorders`.
+
+In `placeNode`, a default-character separator placed by a column marks its horizontal line at the outer rectangle's top edge and receives an empty content rectangle before being appended to the plan. Custom-character separators and separators placed by rows keep the existing widget path. Removed `joinableSeparator` and the separator branch in `planBorders`. Retained the parent-axis parameter to placement because it is used at the decision point. Added no replacement state, helper, interface, or file.
+
+Contract: placement finalizes leaf rectangles and contributes layout-owned dividers/separators; the border pass adds pane/input lines without rewriting leaf geometry; rendering consumes the prepared plan. Separator coordinates, configured styles, custom characters, joins, and tiny-terminal behavior are unchanged. Updated the row-separator test to assert the exact content rectangle and rendered row rather than the removed bookkeeping field. `go test -race -shuffle=on ./ui/... ./text/...`, `go vet ./ui/... ./text/...`, and `git diff --check` pass, including separator style, corner, divider-junction, constrained-layout, and snapshot coverage. No snapshot changes or quantitative speedup claim.
 
 Rule-row representation implementation record: implemented under the request to do the next cleanup and commit. This follows explicit input-rule integration: every input rule is a full-width horizontal line, and container dividers already know their orientation and endpoints. Replaced `Input.Rules` with `Input.RuleRows(width, height) []int` and changed the private layout field to `ruleRows`. Removed the generic `Rule` struct, its `Translate` method, `widget/rule.go`, and `borderGrid.markRule`.
 

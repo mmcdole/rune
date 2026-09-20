@@ -165,14 +165,6 @@ func borderedPane(leaf *resolvedNode) bool {
 	return leaf.node.Type == ui.LayoutTypePane && leaf.edges != 0
 }
 
-// joinableSeparator reports a default-character separator placed by a column. It
-// draws through the border grid so it joins dividers and pane borders. A custom
-// character, or a separator placed by a row, keeps the widget rendering.
-func joinableSeparator(leaf *resolvedNode) bool {
-	return leaf.node.Type == ui.LayoutTypeSeparator &&
-		leaf.node.SeparatorChar == "" && leaf.parentAxis == axisVertical
-}
-
 // Panes have external borders. Composite widgets already include their own
 // rules, and only need insets for boundaries supplied by the surrounding tree.
 // Measurement supplies anticipated edges; placement supplies the final ones.
@@ -199,9 +191,9 @@ func insetBorders(rect image.Rectangle, edges borderEdges) image.Rectangle {
 	return rect
 }
 
-// planBorders adds leaf borders to the dividers marked during placement.
+// planBorders adds pane and input borders to the dividers and separators
+// marked during placement, without changing leaf geometry.
 // Shared coordinates merge in borderGrid, including T and cross junctions.
-// Default separators give up their content rectangle to the joined border.
 func (m *Model) planBorders(plan *layoutPlan) {
 	for i := range plan.leaves {
 		leaf := plan.leaves[i]
@@ -210,11 +202,6 @@ func (m *Model) planBorders(plan *layoutPlan) {
 				// Extend input lines through reserved side boundaries to meet dividers.
 				plan.borders.markHorizontal(leaf.content.Min.Y+row, leaf.outer.Min.X, leaf.outer.Max.X)
 			}
-		}
-		if joinableSeparator(leaf) {
-			plan.borders.markHorizontal(leaf.outer.Min.Y, leaf.outer.Min.X, leaf.outer.Max.X)
-			leaf.content = image.Rectangle{}
-			continue
 		}
 		if !borderedPane(leaf) {
 			continue
