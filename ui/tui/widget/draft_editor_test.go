@@ -56,7 +56,7 @@ func TestPlainPasteKeepsNormalInputAndLabels(t *testing.T) {
 	if got := in.Value(); got != "say hello" {
 		t.Fatalf("Value = %q, want %q", got, "say hello")
 	}
-	if got := in.MeasureHeight(in.width, 1<<14); got != beforeHeight || got != 3 {
+	if got := in.MeasureHeight(in.width, 1<<14); got != beforeHeight || got != 1 {
 		t.Fatalf("normal measured height = %d, want unchanged height 3", got)
 	}
 	view := in.View() + inputLabels(in)
@@ -230,13 +230,13 @@ func TestDraftEditorHeightCapsAndScrollsToCursor(t *testing.T) {
 	value := strings.Join(lines, "\n")
 	in.OpenDraftEditor(value, len([]rune(value)))
 
-	if got := in.MeasureHeight(in.width, 1<<14); got != maxDraftBodyRows+2 {
-		t.Fatalf("PreferredHeight = %d, want capped %d", got, maxDraftBodyRows+2)
+	if got := in.MeasureHeight(in.width, 1<<14); got != maxDraftBodyRows {
+		t.Fatalf("PreferredHeight = %d, want capped %d", got, maxDraftBodyRows)
 	}
 	in.SetSize(80, in.MeasureHeight(in.width, 1<<14))
 	view := in.View()
-	if got := len(strings.Split(view, "\n")); got != maxDraftBodyRows+2 {
-		t.Fatalf("View rows = %d, want %d", got, maxDraftBodyRows+2)
+	if got := len(strings.Split(view, "\n")); got != maxDraftBodyRows {
+		t.Fatalf("View rows = %d, want %d", got, maxDraftBodyRows)
 	}
 	if !strings.Contains(text.StripANSI(view), "20 │ line") {
 		t.Fatalf("draft editor did not scroll to the cursor's final line: %q", text.StripANSI(view))

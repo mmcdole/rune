@@ -27,15 +27,11 @@ func TestModalPickerShowsResultsAboveItsQueryField(t *testing.T) {
 	in.SetSize(40, in.MeasureHeight(in.width, 1<<14)+2)
 	plan := in.layout(40, in.height)
 	rows := strings.Split(text.StripANSI(in.View()), "\n")
-	if len(rows) != in.height || !strings.Contains(rows[1], "north") || !strings.Contains(rows[in.height-2], "Aliases: █") {
+	if len(rows) != in.height || !strings.Contains(rows[0], "north") || !strings.Contains(rows[in.height-1], "Aliases: █") {
 		t.Fatalf("picker placement changed: %q", rows)
 	}
-	horizontal := make(map[int]bool)
-	for _, row := range in.RuleRows(40, in.height) {
-		horizontal[row] = true
-	}
-	if len(horizontal) != 3 || !horizontal[0] || !horizontal[plan.results.Max.Y] || !horizontal[in.height-1] {
-		t.Fatalf("picker/field boundaries disagree with assigned geometry:\n%s", strings.Join(rows, "\n"))
+	if row := in.SeparatorRow(40, in.height); row != plan.results.Max.Y {
+		t.Fatalf("picker separator disagrees with content geometry: %d, %+v", row, plan)
 	}
 	if strings.Contains(in.View(), "─") {
 		t.Fatal("content rendered renderer-owned rules")
@@ -76,10 +72,10 @@ func TestInputRenderingHonorsAllocation(t *testing.T) {
 				for _, height := range []int{-1, 0, 1, 2, 3, 10} {
 					t.Run(fmt.Sprintf("%dx%d", width, height), func(t *testing.T) {
 						in.SetSize(width, height)
-						geometry := in.RuleRows(width, height)
+						geometry := in.SeparatorRow(width, height)
 						labels := in.Labels()
 						if width <= 0 || height <= 0 {
-							if view := in.View(); view != "" || len(geometry) != 0 || len(labels) != 0 {
+							if view := in.View(); view != "" || geometry != -1 || len(labels) != 0 {
 								t.Fatalf("unallocated input drew content=%q, rules=%v, labels=%v", view, geometry, labels)
 							}
 						} else if rows := len(strings.Split(in.View(), "\n")); rows != height {
@@ -89,15 +85,10 @@ func TestInputRenderingHonorsAllocation(t *testing.T) {
 							t.Fatalf("inactive or unallocated draft has labels: %+v", labels)
 						}
 						for _, label := range labels {
-							onRule := false
-							for _, row := range geometry {
-								if label.Position.Y == row &&
-									label.Position.X >= 0 && label.Position.X+lipgloss.Width(label.Text) <= width {
-									onRule = true
-								}
-							}
-							if !onRule {
-								t.Fatalf("label %+v is outside allocated rules %+v", label, geometry)
+							onRule := label.Position.Y == -1 || label.Position.Y == height ||
+								(geometry >= 0 && label.Position.Y == geometry)
+							if !onRule || label.Position.X < 0 || label.Position.X+lipgloss.Width(label.Text) > width {
+								t.Fatalf("label %+v is outside its border or separator", label)
 							}
 						}
 					})
@@ -111,12 +102,12 @@ func TestInputLabelsUseCurrentDraftAfterMeasurement(t *testing.T) {
 	in := newTestInput(80)
 	in.OpenDraftEditor("first\nsecond", 0)
 	in.SetSize(80, in.MeasureHeight(80, 100))
-	in.RuleRows(10, 3)
+	in.SeparatorRow(10, 3)
 	if labels := inputLabels(in); !strings.Contains(labels, "2 lines") {
 		t.Fatalf("provisional measurement affected final labels: %q", labels)
 	}
 	in.SetValue("first\nsecond\n世界")
-	in.RuleRows(3, 1)
+	in.SeparatorRow(3, 1)
 	if labels := inputLabels(in); !strings.Contains(labels, "3 lines") {
 		t.Fatalf("draft edit left stale labels: %q", labels)
 	}
@@ -128,7 +119,7 @@ func TestDraftEditorMeasurementAndViewDoNotChangeNavigation(t *testing.T) {
 	in.SetSize(40, 7)
 	before := in.draftEditor.topRow
 	in.MeasureHeight(5, 24)
-	in.RuleRows(5, 24)
+	in.SeparatorRow(5, 24)
 	in.Labels()
 	in.View()
 	if in.draftEditor.topRow != before || in.width != 40 || in.height != 7 {
@@ -163,19 +154,19 @@ func TestSearchKeepsCursorVisibleAtNarrowWidths(t *testing.T) {
 	}
 }
 
-func TestInputViewIsBorderedField(t *testing.T) {
+func TestInputViewContainsOnlyEditableContent(t *testing.T) {
 	in := newTestInput(40)
 	in.SetValue("kill goblin")
 
 	rows := strings.Split(in.View(), "\n")
-	if len(rows) != 3 {
-		t.Fatalf("expected border/input/border, got %d rows: %q", len(rows), rows)
+	if len(rows) != 1 {
+		t.Fatalf("expected one content row, got %d rows: %q", len(rows), rows)
 	}
-	if !strings.Contains(rows[1], "kill goblin") {
-		t.Errorf("input row should show the typed text, got %q", rows[1])
+	if !strings.Contains(rows[0], "kill goblin") {
+		t.Errorf("input row should show the typed text, got %q", rows[0])
 	}
-	if in.MeasureHeight(in.width, 1<<14) != 3 {
-		t.Errorf("PreferredHeight = %d, want 3", in.MeasureHeight(in.width, 1<<14))
+	if in.MeasureHeight(in.width, 1<<14) != 1 {
+		t.Errorf("PreferredHeight = %d, want 1", in.MeasureHeight(in.width, 1<<14))
 	}
 }
 
@@ -253,8 +244,8 @@ func TestInputSelectionStylesTextWithoutFillingRow(t *testing.T) {
 	in.SelectAll()
 
 	rows := strings.Split(in.View(), "\n")
-	if len(rows) != 3 {
-		t.Fatalf("selected input rows = %d, want 3", len(rows))
+	if len(rows) != 1 {
+		t.Fatalf("selected input rows = %d, want 1", len(rows))
 	}
 	selectedText := in.styles.InputSelected.Inline(true).Render("north")
 	promptStyle := in.textinput.Styles().Blurred.Prompt
@@ -265,11 +256,11 @@ func TestInputSelectionStylesTextWithoutFillingRow(t *testing.T) {
 			lipgloss.Width(prefix), in.width)
 	}
 	want := prefix + strings.Repeat(" ", padding)
-	if rows[1] != want {
+	if rows[0] != want {
 		t.Fatalf("selected input row = %q, want exact text and plain padding %q",
-			rows[1], want)
+			rows[0], want)
 	}
-	if got := lipgloss.Width(rows[1]); got != in.width {
+	if got := lipgloss.Width(rows[0]); got != in.width {
 		t.Fatalf("selected input row width = %d, want %d", got, in.width)
 	}
 }
@@ -296,8 +287,8 @@ func TestInputPickerOverlayGrowsView(t *testing.T) {
 
 	in.HidePicker()
 	in.SetSize(in.width, in.MeasureHeight(in.width, ui.MaxLayoutCells))
-	if in.MeasureHeight(in.width, 1<<14) != 3 {
-		t.Errorf("PreferredHeight after hide = %d, want 3", in.MeasureHeight(in.width, 1<<14))
+	if in.MeasureHeight(in.width, 1<<14) != 1 {
+		t.Errorf("PreferredHeight after hide = %d, want 1", in.MeasureHeight(in.width, 1<<14))
 	}
 	if strings.Contains(text.StripANSI(in.View()), "midgaard") {
 		t.Error("hidden picker must not render")
@@ -425,11 +416,11 @@ func TestInputSearchReplacesInactiveCommandField(t *testing.T) {
 	if strings.Contains(view, "COMMAND-DRAFT") {
 		t.Fatalf("inactive command field remained visible during search:\n%s", view)
 	}
-	if got, want := in.MeasureHeight(in.width, 1<<14), 6; got != want {
+	if got, want := in.MeasureHeight(in.width, 1<<14), 4; got != want {
 		t.Fatalf("PreferredHeight = %d, want search-only height %d", got, want)
 	}
 	rows := strings.Split(view, "\n")
-	if !strings.HasPrefix(rows[len(rows)-2], "Search: thief") || strings.Count(view, "█") != 1 {
+	if !strings.HasPrefix(rows[len(rows)-1], "Search: thief") || strings.Count(view, "█") != 1 {
 		t.Fatalf("search must have one bottom query field: %q", rows)
 	}
 	if !strings.Contains(view, "↑ older") || !strings.Contains(view, "1/1") {

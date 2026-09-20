@@ -13,7 +13,7 @@ import (
 	"github.com/mmcdole/rune/ui/tui/widget"
 )
 
-// recordingSearchEffects records searchEffects calls so tests can
+// recordingSearchEffects records search calls so tests can
 // assert the settle-exactly-once invariant.
 type recordingSearchEffects struct {
 	opens    int
@@ -36,36 +36,33 @@ func (r *recordingSearchEffects) CancelSearch() { r.cancels++ }
 // controllerHarness drives an inputController directly, recording UI events
 // and submitted lines.
 type controllerHarness struct {
+	recordingSearchEffects
 	ctl        *inputController
 	events     []ui.UIEvent
 	submitted  []input.Submission
 	nextDrafts []string
 	accept     bool
-	fx         *recordingSearchEffects
 	buf        *widget.Scrollback
 }
 
 func newControllerHarness() *controllerHarness {
 	h := &controllerHarness{
 		accept: true,
-		fx:     &recordingSearchEffects{},
 		buf:    widget.NewScrollback(100),
 	}
 	styles := style.DefaultStyles()
 	draftInput := widget.NewInput(styles, widget.NewSearch(h.buf, styles))
-	h.ctl = newInputController(
-		draftInput,
-		func(ev ui.UIEvent) { h.events = append(h.events, ev) },
-		func(msg ui.InputSubmittedMsg) bool {
-			h.submitted = append(h.submitted, msg.Submission)
-			h.nextDrafts = append(h.nextDrafts, msg.NextDraft)
-			return h.accept
-		},
-		func(tea.KeyPressMsg) bool { return false },
-		h.fx,
-	)
+	h.ctl = &inputController{input: draftInput, host: h}
 	return h
 }
+
+func (h *controllerHarness) notifySession(ev ui.UIEvent) { h.events = append(h.events, ev) }
+func (h *controllerHarness) submit(msg ui.InputSubmittedMsg) bool {
+	h.submitted = append(h.submitted, msg.Submission)
+	h.nextDrafts = append(h.nextDrafts, msg.NextDraft)
+	return h.accept
+}
+func (h *controllerHarness) handleScrollKey(tea.KeyPressMsg) bool { return false }
 
 func TestReplacingPickerSettlesBothCallbacks(t *testing.T) {
 	for _, inline := range []bool{false, true} {
@@ -739,7 +736,7 @@ func TestPasteMsgEditsSearchQueryWithoutChangingDraft(t *testing.T) {
 	h := newControllerHarness()
 	h.buf.Append("a thief passes")
 	h.ctl.ShowSearch(ui.ShowSearchMsg{})
-	previews := len(h.fx.previews)
+	previews := len(h.previews)
 
 	h.ctl.HandlePaste("thief")
 	h.ctl.input.SetSize(80, h.ctl.input.MeasureHeight(80, ui.MaxLayoutCells))
@@ -748,8 +745,8 @@ func TestPasteMsgEditsSearchQueryWithoutChangingDraft(t *testing.T) {
 	if !strings.Contains(view, "Search: thief") {
 		t.Fatalf("search view after paste does not contain query: %q", view)
 	}
-	if len(h.fx.previews) != previews+1 || !h.fx.previews[len(h.fx.previews)-1] {
-		t.Fatalf("search paste previews = %v, want one additional match preview", h.fx.previews)
+	if len(h.previews) != previews+1 || !h.previews[len(h.previews)-1] {
+		t.Fatalf("search paste previews = %v, want one additional match preview", h.previews)
 	}
 	if got := h.ctl.input.Value(); got != "" {
 		t.Fatalf("search paste changed hidden draft to %q", got)
@@ -1062,7 +1059,7 @@ func TestModifiedEscapeDoesNotCancelInternalModes(t *testing.T) {
 			h := newControllerHarness()
 			tt.setup(h)
 			h.events = nil
-			cancels := h.fx.cancels
+			cancels := h.cancels
 
 			h.ctl.HandleKey(tea.KeyPressMsg{Code: tea.KeyEsc, Mod: tea.ModShift})
 
@@ -1072,8 +1069,8 @@ func TestModifiedEscapeDoesNotCancelInternalModes(t *testing.T) {
 			if selects := h.pickerSelects(); len(selects) != 0 {
 				t.Fatalf("modified Escape settled picker: %v", selects)
 			}
-			if h.fx.cancels != cancels {
-				t.Fatalf("modified Escape cancelled search: got %d cancels, want %d", h.fx.cancels, cancels)
+			if h.cancels != cancels {
+				t.Fatalf("modified Escape cancelled search: got %d cancels, want %d", h.cancels, cancels)
 			}
 		})
 	}
@@ -1305,15 +1302,15 @@ func TestSearchSettledOnEveryExit(t *testing.T) {
 			if h.ctl.mode() != modeSearch {
 				t.Fatalf("expected modeSearch after ShowSearch, got %v", h.ctl.mode())
 			}
-			if h.fx.opens != 1 {
-				t.Fatalf("expected one OpenSearch, got %d", h.fx.opens)
+			if h.opens != 1 {
+				t.Fatalf("expected one OpenSearch, got %d", h.opens)
 			}
 
 			tc.exit(h)
 
-			if h.fx.commits != tc.commits || h.fx.cancels != tc.cancels {
+			if h.commits != tc.commits || h.cancels != tc.cancels {
 				t.Fatalf("commits/cancels = %d/%d, want %d/%d",
-					h.fx.commits, h.fx.cancels, tc.commits, tc.cancels)
+					h.commits, h.cancels, tc.commits, tc.cancels)
 			}
 			if tc.name == "opening a picker cancels the search" {
 				if h.ctl.mode() != modePickerModal {
@@ -1335,20 +1332,20 @@ func TestSearchOpensWithPreviewAndSteps(t *testing.T) {
 	h.buf.Append("thief two")
 
 	h.ctl.ShowSearch(ui.ShowSearchMsg{Query: "thief"})
-	if len(h.fx.previews) != 1 || !h.fx.previews[0] {
-		t.Fatalf("open should preview the newest match, previews = %v", h.fx.previews)
+	if len(h.previews) != 1 || !h.previews[0] {
+		t.Fatalf("open should preview the newest match, previews = %v", h.previews)
 	}
 
 	h.ctl.HandleKey(keyPress(tea.KeyDown))
 	h.ctl.HandleKey(keyPress(tea.KeyUp))
-	if len(h.fx.previews) != 3 {
-		t.Fatalf("selection moves should re-preview, previews = %v", h.fx.previews)
+	if len(h.previews) != 3 {
+		t.Fatalf("selection moves should re-preview, previews = %v", h.previews)
 	}
 
 	// Editing the query re-previews; a query with no matches previews
 	// ok=false (restores the snapshot).
 	h.ctl.HandleKey(textPress("zzz"))
-	last := h.fx.previews[len(h.fx.previews)-1]
+	last := h.previews[len(h.previews)-1]
 	if last {
 		t.Fatal("no-match query must preview ok=false")
 	}
@@ -1388,7 +1385,7 @@ func TestSearchIgnoredWhileDraftEditorActive(t *testing.T) {
 	if h.ctl.mode() != modeDraftEditor {
 		t.Fatalf("search must not open over a draft editor, got %v", h.ctl.mode())
 	}
-	if h.fx.opens != 0 || len(h.fx.previews) != 0 {
+	if h.opens != 0 || len(h.previews) != 0 {
 		t.Fatal("refused ShowSearch must produce zero effects")
 	}
 }

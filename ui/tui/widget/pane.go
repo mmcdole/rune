@@ -34,8 +34,6 @@ func NewPane(name string) *Pane {
 
 func (p *Pane) SetSize(width, height int) { p.width, p.height = width, height }
 
-func (p *Pane) Name() string { return p.name }
-
 func (p *Pane) MinimumSize() image.Point { return image.Point{} }
 
 // MeasureHeight counts wrapped rows only until the layout's height budget is met.

@@ -61,6 +61,8 @@ or benchmark definitions. Changing a fixture requires a new baseline.
 | `OutputLatency/draft100_burst100` | Same 100-line burst while a multiline draft is open | Unrelated draft editing work delaying MUD output |
 | `OutputLatency/auto_side_draft1000_burst100`, `beside_pane_draft1000_burst100` | 100-line burst with a 1,000-line draft and an auto-sized pane or adjacent pane | Verify layout savings reach the terminal writer |
 | `RenderAutoLayoutOutput` | One incoming line in the default layout, with an auto-sized chat pane, or with input beside a pane in an auto-sized row | Per-message layout costs with 0/1,000 draft lines; rendering is deferred |
+| `RenderBarUpdate` | Alternate visible bar text with a 1,000-line draft, with rendering deferred | Bar snapshots repaint without resolving unchanged geometry |
+| `RenderDraftEdit` | Insert and delete a character in a 1,000-line draft, consuming Session events | Navigation savings must not add shaping work to edits |
 | `RenderDraftCursor` | Left then Right in a 1,000-line draft, processing both updates and consuming their Session events | Draft navigation and layout work; rendering is deferred |
 | `RenderUpdate` | One line inside an open render-throttle window | Per-message work, with 0/100/1,000 draft lines |
 | `RenderFlood` | 100 lines, ten prompt updates, one explicit frame boundary | Fixed-work throughput, independent of timer scheduling |
@@ -194,3 +196,10 @@ width mode. The memory/time regressions, width mismatch, and unsupported API
 outweighed the modest delivery gains. No production handoff change was accepted.
 A reusable buffer handoff remains unmeasured and needs an explicit ownership and
 width contract; this result does not justify maintaining a private renderer fork.
+
+The content-only geometry follow-up preserves the existing screen snapshots and
+passes UI race tests. A focused three-run comparison reduced normal layout
+allocations from 23 to 15, sidebar layout from 34 to 26, and draft cursor updates
+from 14 to 10. Input border queries no longer allocate. Short multicore cursor
+timings varied; an isolated single-worker comparison was unchanged (about
+0.59 ms per cursor pair). This follow-up did not repeat the full latency suite.

@@ -18,7 +18,7 @@ func (c *inputController) ShowSearch(opts ui.ShowSearchMsg) {
 		c.closePicker(false, "")
 	}
 	if c.mode() != modeSearch {
-		scope := c.search.OpenSearch()
+		scope := c.host.OpenSearch()
 		c.input.ShowSearch(opts.Query, scope)
 	} else {
 		c.input.Search().Reopen(opts.Query)
@@ -80,7 +80,7 @@ func (c *inputController) selectNewerSearch() bool {
 // query edit that empties the result set snaps back.
 func (c *inputController) previewSearch() {
 	m, ok := c.input.Search().Selected()
-	c.search.PreviewSearch(m, ok)
+	c.host.PreviewSearch(m, ok)
 }
 
 // closeSearch is the single exit path from search mode: resets the
@@ -89,8 +89,8 @@ func (c *inputController) previewSearch() {
 func (c *inputController) closeSearch(accepted bool) {
 	c.input.HideSearch()
 	if accepted {
-		c.search.CommitSearch()
+		c.host.CommitSearch()
 	} else {
-		c.search.CancelSearch()
+		c.host.CancelSearch()
 	}
 }

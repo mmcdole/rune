@@ -165,3 +165,114 @@ func TestOnlyAutoPaneContentRequestsLayout(t *testing.T) {
 		}
 	}
 }
+
+func TestInputNavigationReusesLayout(t *testing.T) {
+	for _, mode := range []string{"normal", "draft", "picker", "search"} {
+		t.Run(mode, func(t *testing.T) {
+			m := resizeModel(t, NewModel(make(chan ui.UIEvent, 100)), 40, 16)
+			probe := &countedPane{pane: m.pane("probe")}
+			m.panes["probe"] = probe
+			setLayout(m, ui.LayoutNode{Type: ui.LayoutTypeColumn, Children: []ui.LayoutNode{
+				{Type: ui.LayoutTypePane, Name: "probe", Size: ui.Cells(3)},
+				{Type: ui.LayoutTypePane, Name: ui.OutputPaneName},
+				{Type: ui.LayoutTypeInput, Size: ui.AutoSize()},
+			}})
+			m.Update(ui.PrintLineMsg("north one\nnorth two\nnorth three"))
+			switch mode {
+			case "normal":
+				m.Update(ui.SetInputMsg("look north"))
+			case "draft":
+				m.Update(ui.SetInputMsg(strings.Repeat("one two three\n", 20)))
+			case "picker":
+				m.Update(ui.ShowPickerMsg{Items: pickerTestItems})
+			case "search":
+				m.Update(ui.ShowSearchMsg{Query: "north"})
+			}
+			for _, key := range []rune{tea.KeyLeft, tea.KeyRight, tea.KeyUp, tea.KeyDown, tea.KeyF12} {
+				probe.applications = 0
+				m.Update(keyPress(key))
+				if probe.applications != 0 {
+					t.Fatalf("%v rebuilt layout", key)
+				}
+				view := m.View().Content
+				m.applyLayout()
+				m.render()
+				if view != m.View().Content {
+					t.Fatalf("%v differed from a fresh layout", key)
+				}
+			}
+		})
+	}
+}
+
+func TestInputTransitionsMatchFreshLayout(t *testing.T) {
+	for _, size := range [][2]int{{40, 16}, {20, 3}, {1, 1}} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			m := resizeModel(t, NewModel(make(chan ui.UIEvent, 100)), size[0], size[1])
+			fresh := resizeModel(t, NewModel(make(chan ui.UIEvent, 100)), size[0], size[1])
+			// The second model reapplies layout after every message, including
+			// cursor movement, to preserve the old navigation and scroll behavior.
+			messages := []tea.Msg{
+				ui.PrintLineMsg("north one\nsouth two\nnorth three"),
+				ui.SetInputMsg("look"), textPress("!"), tea.PasteMsg{Content: " north"},
+				ctrlPress('j'), textPress("界"),
+				ui.SetInputMsg(strings.Repeat("numbered draft line\n", 20)),
+				ctrlPress(tea.KeyHome), keyPress(tea.KeyDown), keyPress(tea.KeyDown),
+				ctrlPress(tea.KeyEnd), keyPress(tea.KeyUp), keyPress(tea.KeyUp),
+				ui.InputSetCursorMsg(0), keyPress(tea.KeyDown), keyPress(tea.KeyUp),
+				keyPress(tea.KeyBackspace), keyPress(tea.KeyEsc), keyPress(tea.KeyEsc),
+				ui.ShowPickerMsg{Items: pickerTestItems}, textPress("disconnect"),
+				keyPress(tea.KeyBackspace), keyPress(tea.KeyEsc),
+				ui.ShowSearchMsg{Query: "north"}, keyPress(tea.KeyUp),
+				textPress(" missing"), keyPress(tea.KeyEsc),
+			}
+			for _, msg := range messages {
+				m.Update(msg)
+				fresh.Update(msg)
+				fresh.applyLayout()
+				fresh.applySearchPosition(true)
+				fresh.render()
+				if m.View().Content != fresh.View().Content {
+					t.Fatalf("%T (%v) differed from a fresh layout", msg, msg)
+				}
+			}
+		})
+	}
+}
+
+func TestBarTextReusesLayoutAndVisibilityResizes(t *testing.T) {
+	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 100)), 40, 16)
+	probe := &countedPane{pane: m.pane("probe")}
+	m.panes["probe"] = probe
+	setLayout(m, ui.LayoutNode{Type: ui.LayoutTypeColumn, Children: []ui.LayoutNode{
+		{Type: ui.LayoutTypePane, Name: "probe", Size: ui.Cells(3)},
+		{Type: ui.LayoutTypePane, Name: ui.OutputPaneName},
+		{Type: ui.LayoutTypeBar, Name: "status", Size: ui.AutoSize()},
+		{Type: ui.LayoutTypeInput, Size: ui.AutoSize()},
+	}})
+	for _, tc := range []struct {
+		content ui.UpdateBarsMsg
+		layout  bool
+	}{
+		{ui.UpdateBarsMsg{"status": {Left: "ready"}}, true},
+		{ui.UpdateBarsMsg{"status": {Center: "busy"}}, false},
+		{ui.UpdateBarsMsg{"status": {Right: "界"}}, false},
+		{ui.UpdateBarsMsg{"status": {Left: "\x1b[31m"}}, true},
+		{ui.UpdateBarsMsg{"status": {}}, false},
+		{ui.UpdateBarsMsg{}, false},
+		{ui.UpdateBarsMsg{"status": {Left: "back"}}, true},
+		{ui.UpdateBarsMsg{}, true},
+	} {
+		probe.applications = 0
+		m.Update(tc.content)
+		if got := probe.applications > 0; got != tc.layout {
+			t.Fatalf("%v: layout = %t, want %t", tc.content, got, tc.layout)
+		}
+		view := m.View().Content
+		m.applyLayout()
+		m.render()
+		if view != m.View().Content {
+			t.Fatalf("%v differed from a fresh layout", tc.content)
+		}
+	}
+}

@@ -45,7 +45,7 @@ func TestContainedInputSharesBordersAndUsesAssignedHeight(t *testing.T) {
 					}
 				}
 				left, right := input.content.Min.X-1, input.content.Max.X
-				top, bottom := []rune(rows[input.content.Min.Y]), []rune(rows[9])
+				top, bottom := []rune(rows[input.outer.Min.Y]), []rune(rows[9])
 				if top[left] != '├' || top[right] != '┤' || bottom[left] != '└' || bottom[right] != '┘' {
 					t.Fatalf("input rules do not meet side dividers:\n%s", strings.Join(rows, "\n"))
 				}
@@ -76,8 +76,8 @@ func TestContainedPickerBordersUseColumnBoundary(t *testing.T) {
 				input := findLeaf(t, m.layoutPlan, "", ui.LayoutTypeInput)
 				rows := strings.Split(ansi.Strip(m.View().Content), "\n")
 				// Results share one separator with the query field below them.
-				pickerBottom := input.content.Max.Y - 3
-				for y := input.content.Min.Y + 1; y < pickerBottom; y++ {
+				pickerBottom := input.content.Max.Y - 2
+				for y := input.content.Min.Y; y < pickerBottom; y++ {
 					row := []rune(rows[y])
 					for _, x := range []int{input.outer.Min.X, input.outer.Max.X - 1} {
 						shared := x < input.content.Min.X || x >= input.content.Max.X
@@ -137,7 +137,7 @@ func TestInputResultsWithoutLeftNeighborHaveNoLeftWall(t *testing.T) {
 		if mode == "search" {
 			label = "Search: "
 		}
-		if mode != "inline" && !strings.HasPrefix(rows[input.content.Max.Y-2], label) {
+		if mode != "inline" && !strings.HasPrefix(rows[input.content.Max.Y-1], label) {
 			t.Fatalf("filter is not at the bottom: %q", rows)
 		}
 	}
@@ -408,7 +408,7 @@ func TestSearchToDraftEditorUsesFinalGeometry(t *testing.T) {
 	m.Update(ui.ShowSearchMsg{Query: "missing"})
 	m.Update(ui.SetInputMsg("one\ntwo\nthree\nfour\nfive"))
 	leaf := findLeaf(t, m.layoutPlan, "", ui.LayoutTypeInput)
-	if got, want := leaf.outer.Dy(), m.input.MeasureHeight(leaf.content.Dx(), ui.MaxLayoutCells); got != want {
+	if got, want := leaf.content.Dy(), m.input.MeasureHeight(leaf.content.Dx(), ui.MaxLayoutCells); got != want {
 		t.Fatalf("search -> draft editor allocated height %d, preferred %d", got, want)
 	}
 }
@@ -448,6 +448,25 @@ func TestHorizontalPressureKeepsInputReachable(t *testing.T) {
 			t.Fatalf("input disappeared at width %d", width)
 		}
 		assertExactBlock(t, m.View().Content, width, 20)
+	}
+}
+
+func TestOversizedAutoPreferenceUsesAvailableSpace(t *testing.T) {
+	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 100)), 40, 24)
+	layout := ui.LayoutTree{Root: ui.LayoutNode{Type: ui.LayoutTypeColumn, Children: []ui.LayoutNode{
+		{Type: ui.LayoutTypeColumn, Size: ui.AutoSize(), Children: []ui.LayoutNode{
+			{Type: ui.LayoutTypePane, Name: ui.OutputPaneName, Size: ui.Cells(ui.MaxLayoutCells), Border: ui.PaneBorderNone},
+			{Type: ui.LayoutTypePane, Name: "chat", Size: ui.Cells(ui.MaxLayoutCells), Border: ui.PaneBorderNone},
+		}},
+		{Type: ui.LayoutTypeInput, Size: ui.AutoSize()},
+	}}}
+	if _, err := ui.NormalizeLayoutTree(layout); err != nil {
+		t.Fatalf("fixture must be a valid layout: %v", err)
+	}
+	m.Update(ui.UpdateLayoutMsg(layout))
+	input := findLeaf(t, m.layoutPlan, "", ui.LayoutTypeInput)
+	if input.outer.Max.Y != 24 || input.content.Empty() || m.layoutPlan.output.Empty() {
+		t.Fatalf("oversized preference left usable space unallocated: input=%v output=%v", input.outer, m.layoutPlan.output)
 	}
 }
 

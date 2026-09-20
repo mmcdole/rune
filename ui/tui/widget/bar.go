@@ -10,25 +10,23 @@ import (
 	"github.com/mmcdole/rune/ui/tui/util"
 )
 
-// Compile-time check that Bar implements Widget
-var _ Widget = (*Bar)(nil)
-
 // Bar renders a Lua-defined bar with left/center/right sections.
 type Bar struct {
 	content ui.BarContent
 	width   int
 }
 
-// SetContent updates the bar's content.
-func (b *Bar) SetContent(content ui.BarContent) bool {
+// SetContent reports changed content and changed visibility separately.
+func (b *Bar) SetContent(content ui.BarContent) (changed, layout bool) {
 	if b.content == content {
-		return false
+		return false, false
 	}
+	before := b.MeasureHeight(0, 1)
 	b.content = content
-	return true
+	return true, before != b.MeasureHeight(0, 1)
 }
 
-// View implements Widget.
+// View renders the bar at its allocated width.
 func (b *Bar) View() string {
 	left := b.content.Left
 	center := b.content.Center
@@ -49,7 +47,7 @@ func (b *Bar) View() string {
 	return util.ClipRow(left+strings.Repeat(" ", centerPad)+center+strings.Repeat(" ", rightPad)+right, b.width)
 }
 
-// SetSize implements Widget.
+// SetSize applies the allocated content size.
 func (b *Bar) SetSize(width, height int) {
 	b.width = width
 	// height is ignored - bars are always 1 line

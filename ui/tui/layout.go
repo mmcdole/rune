@@ -7,6 +7,16 @@ import (
 	"github.com/mmcdole/rune/ui/tui/widget"
 )
 
+// layoutWidget supplies content measurements and renders at the allocated size.
+// All widgets exclude outside borders from measurement, sizing, and View.
+// Input owns only the separator inside its picker/search content.
+type layoutWidget interface {
+	MinimumSize() image.Point
+	SetSize(width, height int)
+	MeasureHeight(width, limit int) int
+	View() string
+}
+
 type splitAxis uint8
 
 const (
@@ -27,14 +37,15 @@ type layoutPlan struct {
 // resolvedNode is an active tree node. Leaves carry a widget and its geometry;
 // containers carry children.
 type resolvedNode struct {
-	node     ui.LayoutNode
-	widget   widget.Widget
-	children []*resolvedNode
-	outer    image.Rectangle
-	content  image.Rectangle
-	edges    borderEdges // requested boundaries, used for measurement and seam allocation
-	shared   borderEdges // anticipated shared cells, used only for measurement
-	hasInput bool
+	node       ui.LayoutNode
+	widget     layoutWidget
+	children   []*resolvedNode
+	boundaries []boundary // resolved once, shared by measurement and allocation
+	outer      image.Rectangle
+	content    image.Rectangle
+	edges      borderEdges // outside borders: requested during measurement, final after placement
+	shared     borderEdges // anticipated shared cells, used only for measurement
+	hasInput   bool
 }
 
 func (m *Model) resolveLayout() layoutPlan {
@@ -121,6 +132,7 @@ func (m *Model) resolveNode(node ui.LayoutNode, availableWidth int, parentAxis s
 		if len(resolved.children) == 0 {
 			return nil
 		}
+		resolved.boundaries = childBoundaries(node, resolved.children, nodeAxis(node))
 		resolved.edges = containerBorders(node, resolved.children)
 		// A hard cap can force descendants to drop borders. Do not promise that
 		// capped container's boundary to a neighbor before the fallback runs.
@@ -136,7 +148,7 @@ func (m *Model) resolveNode(node ui.LayoutNode, availableWidth int, parentAxis s
 		if parentAxis == axisVertical && node.Size.Kind == ui.LayoutSizeCells {
 			height = node.Size.Value
 		} else {
-			height = m.input.MeasureHeight(max(1, availableWidth), ui.MaxLayoutCells)
+			height = 2 + m.input.MeasureHeight(max(1, availableWidth), ui.MaxLayoutCells-2)
 		}
 		if parentAxis == axisVertical {
 			if maximum := nodeMaximum(node); maximum > 0 {
@@ -175,7 +187,8 @@ func (m *Model) placeNode(node *resolvedNode, rect image.Rectangle, parentAxis s
 			// Constrained input may drop borders at the allocated size.
 			edges = m.inputBorders(rect.Dx(), rect.Dy())
 		}
-		node.outer, node.content = rect, insetBorders(rect, contentInsets(node.node.Type, edges, shared))
+		node.edges = edges
+		node.outer, node.content = rect, insetBorders(rect, edges|shared)
 		if node.node.Type == ui.LayoutTypeSeparator && node.node.SeparatorChar == "" && parentAxis == axisVertical {
 			// Default separators in columns join the border grid; custom
 			// characters and separators in rows keep their widget content.
@@ -188,7 +201,6 @@ func (m *Model) placeNode(node *resolvedNode, rect image.Rectangle, parentAxis s
 
 	axis := nodeAxis(node.node)
 	allocation := m.allocateChildren(node, axisExtent(rect, axis), axis, crossExtent(rect, axis))
-	childShared := childSharedEdges(node, shared, allocation.boundaries, !allocation.constrained)
 
 	position := rect.Min.X
 	if axis == axisVertical {
@@ -197,7 +209,7 @@ func (m *Model) placeNode(node *resolvedNode, rect image.Rectangle, parentAxis s
 	for i, child := range node.children {
 		size := allocation.sizes[i]
 		childArea := childRect(rect, axis, position, size).Intersect(rect)
-		inherited := childShared[i]
+		inherited := childSharedEdges(node, i, shared, allocation.boundaries)
 		if childArea.Min.X != rect.Min.X {
 			inherited &^= shared & borderLeft
 		}

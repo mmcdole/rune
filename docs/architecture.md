@@ -141,10 +141,15 @@ separate messages; the TUI never calls Lua during measurement or rendering.
 
 The TUI prunes inactive nodes, measures widgets without resizing them, and uses
 `ui.AllocateAxis` to assign rectangles. It retains that layout until geometry
-can change: terminal size, layout declarations, input edits, changed bars, or
-text in a pane whose size, or ancestor size, is auto. The layout records those
+can change: terminal size, layout declarations, draft edits, overlay geometry, bar
+visibility, or text in a pane whose size, or ancestor size, is auto. The layout records those
 pane names; writes to other panes reuse the geometry. Geometry changes are applied
-before subsequent messages wrap output or move the search selection.
+before subsequent messages wrap output or move the search selection. Cursor
+movement updates the input window without rebuilding layout; ordinary single-line
+edits and bar text changes repaint using the existing rectangles. Input compares
+overlay/result geometry and draft text revisions without copying or reshaping
+the draft. Draft edits remain conservative because layout may measure them at
+several widths.
 
 Rendering builds the screen from that layout. `Model` renders the first change
 after idle immediately, then coalesces changes inside a 16ms window. Its timer
@@ -159,14 +164,19 @@ of a rectangle), and rules (positioned lines). A frame is a complete screen
 update. The draft editor edits input inside Rune; an external editor runs in
 `$EDITOR`. Picker and search query fields are separate from the draft editor.
 
-Pane borders, dividers, separators, and joinable input rules feed one border
-grid. A layout's first render resolves junctions into positioned cells; later
-renders reuse those cells with current labels. Widget content is clipped to its rectangle.
+All widgets measure and render content without outside borders. Layout reserves
+and draws pane and input borders with the same inset rule. Input supplies only
+its internal picker/search separator and labels for the surrounding borders.
+Borders, dividers, and separators feed one border grid. Container boundaries are
+resolved once and reused by measurement and allocation; a constrained allocation drops their seam decisions. A layout's first
+render resolves junctions into positioned cells; later renders reuse those cells
+with current labels. Widget content is clipped to its rectangle.
 Each widget draw clears that rectangle; a full canvas clear is needed only
 on the first render after layout changes. Titles cannot overwrite junctions.
 
-All leaves implement `widget.Widget`: minimum size, bounded height measurement,
-size application, and `View`. Named panes also expose text and scroll operations.
+All leaves implement the layout-owned `layoutWidget` interface: minimum size,
+bounded height measurement, size application, and `View`. Named panes also expose
+text and scroll operations.
 The model owns their map and creates missing panes on first write or placement.
 The reserved `output` entry is the same `widget.Output` used for main output,
 not a controller wrapping another widget. Output owns its prompt, scrolling,

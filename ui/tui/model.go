@@ -84,7 +84,7 @@ func NewModel(events chan<- ui.UIEvent) *Model {
 		// reports nothing.
 		reportedScroll: ui.ScrollStateChangedMsg{Mode: "live"},
 	}
-	m.inputCtl = newInputController(input, m.notifySession, m.submit, m.handleScrollKey, m)
+	m.inputCtl = &inputController{input: input, host: m}
 
 	return m
 }
@@ -130,9 +130,14 @@ func (m *Model) dispatch(msg tea.Msg) (render, layout bool) {
 		m.throttled = false
 		return false, false
 	case tea.KeyPressMsg:
+		before := m.input.LayoutState()
 		m.inputCtl.HandleKey(msg)
+		// A rejected event or submission can append a warning to output.
+		return true, before != m.input.LayoutState() || m.layoutPlan.autoPanes[ui.OutputPaneName]
 	case tea.PasteMsg:
+		before := m.input.LayoutState()
 		m.inputCtl.HandlePaste(msg.Content)
+		return true, before != m.input.LayoutState() || m.layoutPlan.autoPanes[ui.OutputPaneName]
 	case tea.MouseWheelMsg:
 		m.handleMouseWheel(msg)
 		return true, false
@@ -142,8 +147,7 @@ func (m *Model) dispatch(msg tea.Msg) (render, layout bool) {
 		m.input.SetBindings(input.Bindings(msg))
 		return true, false
 	case ui.UpdateBarsMsg:
-		changed := m.syncBars(msg)
-		return changed, changed
+		return m.syncBars(msg)
 	case ui.UpdateLayoutMsg:
 		m.layout = ui.LayoutTree(msg)
 	case ui.UpdateConfigMsg:
@@ -203,6 +207,7 @@ func (m *Model) dispatch(msg tea.Msg) (render, layout bool) {
 	case ui.InputSetCursorMsg:
 		m.input.SetCursor(int(msg))
 		m.notifySession(ui.DraftAppliedMsg{Text: m.input.Value(), Cursor: m.input.Position()})
+		return true, m.layoutPlan.autoPanes[ui.OutputPaneName]
 
 	// Clipboard (from Lua). OSC 52 asks the terminal emulator to set
 	// the system clipboard; it renders nothing, so it bypasses the
@@ -233,11 +238,12 @@ func (m *Model) dispatch(msg tea.Msg) (render, layout bool) {
 
 // syncBars reconciles the bar registry with the latest successful Lua snapshot.
 // Panes and built-in widgets have separate owners and namespaces.
-func (m *Model) syncBars(content map[string]ui.BarContent) (changed bool) {
-	for name := range m.bars {
+func (m *Model) syncBars(content map[string]ui.BarContent) (changed, layout bool) {
+	for name, bar := range m.bars {
 		if _, exists := content[name]; !exists {
 			delete(m.bars, name)
 			changed = true
+			layout = layout || bar.MeasureHeight(0, 1) != 0
 		}
 	}
 
@@ -248,9 +254,11 @@ func (m *Model) syncBars(content map[string]ui.BarContent) (changed bool) {
 			m.bars[name] = bar
 			changed = true
 		}
-		changed = bar.SetContent(barContent) || changed
+		contentChanged, visibilityChanged := bar.SetContent(barContent)
+		changed = changed || contentChanged
+		layout = layout || visibilityChanged
 	}
-	return changed
+	return changed, layout
 }
 
 // dropOutputSearch abandons an active scrollback search before the output

@@ -137,6 +137,10 @@ func (m *Model) drawLabels(canvas uv.ScreenBuffer, plan layoutPlan) {
 			continue
 		}
 		for _, label := range m.input.Labels() {
+			if (label.Position.Y < 0 && leaf.edges&borderTop == 0) ||
+				(label.Position.Y >= leaf.content.Dy() && leaf.edges&borderBottom == 0) {
+				continue
+			}
 			position := label.Position.Add(leaf.content.Min)
 			drawLabel(canvas, plan.borders, label.Text, position.X, leaf.outer.Max.X, position.Y)
 		}

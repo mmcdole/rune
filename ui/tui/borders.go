@@ -149,30 +149,25 @@ func (m *Model) inputBorders(width, height int) borderEdges {
 	if width <= 0 || height <= 0 {
 		return 0
 	}
+	// Preserve an editable row as borders degrade on tiny allocations.
+	top, bottom := height >= 3, height >= 2
+	if m.input.DraftEditorActive() {
+		top, bottom = height >= 2, height >= 3
+	}
+	if m.input.PickerActive() || m.input.SearchActive() {
+		top, bottom = height >= 5, height >= 3
+		if m.input.PickerInline() && m.input.DraftEditorActive() {
+			bottom = height >= 4
+		}
+	}
 	var edges borderEdges
-	for _, row := range m.input.RuleRows(width, height) {
-		if row == 0 {
-			edges |= borderTop
-		}
-		if row == height-1 {
-			edges |= borderBottom
-		}
+	if top {
+		edges |= borderTop
+	}
+	if bottom {
+		edges |= borderBottom
 	}
 	return edges
-}
-
-func borderedPane(leaf *resolvedNode) bool {
-	return leaf.node.Type == ui.LayoutTypePane && leaf.edges != 0
-}
-
-// Panes have external borders. Composite widgets already include their own
-// rules, and only need insets for boundaries supplied by the surrounding tree.
-// Measurement supplies anticipated edges; placement supplies the final ones.
-func contentInsets(nodeType string, edges, shared borderEdges) borderEdges {
-	if nodeType == ui.LayoutTypePane {
-		return edges | shared
-	}
-	return shared &^ edges
 }
 
 func insetBorders(rect image.Rectangle, edges borderEdges) image.Rectangle {
@@ -198,13 +193,10 @@ func (m *Model) planBorders(plan *layoutPlan) {
 	for i := range plan.leaves {
 		leaf := plan.leaves[i]
 		if leaf.widget == m.input {
-			for _, row := range m.input.RuleRows(leaf.content.Dx(), leaf.content.Dy()) {
-				// Extend input lines through reserved side boundaries to meet dividers.
+			if row := m.input.SeparatorRow(leaf.content.Dx(), leaf.content.Dy()); row >= 0 {
+				// Extend the internal separator to the surrounding side borders.
 				plan.borders.markHorizontal(leaf.content.Min.Y+row, leaf.outer.Min.X, leaf.outer.Max.X)
 			}
-		}
-		if !borderedPane(leaf) {
-			continue
 		}
 		outer := leaf.outer
 		if leaf.edges&borderTop != 0 {

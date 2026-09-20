@@ -10,42 +10,46 @@ import (
 )
 
 // Label places styled text over a horizontal rule. Position is relative to
-// the widget's allocated rectangle; the renderer translates and clips it.
+// the content rectangle. Outside-border labels use rows -1 and height;
+// the renderer places them only when the corresponding border exists.
 type Label struct {
 	Position image.Point
 	Text     string
 }
 
 // Labels supplies current styled text at the applied size. It uses the same
-// geometry as RuleRows and View without changing placement or navigation state.
+// content geometry as View without changing placement or navigation state.
 func (i *Input) Labels() []Label {
-	plan := i.layout(i.width, i.height)
-	if plan.header < 0 && plan.footer < 0 {
+	if i.width <= 0 || i.height <= 0 || i.draftEditor == nil || i.SearchActive() || (i.PickerActive() && !i.PickerInline()) {
 		return nil
+	}
+	headerRow := -1
+	if i.PickerInline() {
+		headerRow = i.SeparatorRow(i.width, i.height)
 	}
 	header, toggle, footer := i.draftLabels(i.draftEditor.lines(), i.width-4)
 	var labels []Label
-	if plan.header >= 0 {
+	if !i.PickerInline() || headerRow >= 0 {
 		modeStyle := i.styles.InputText
 		if i.SubmissionMode() == input.ModeVerbatim {
 			modeStyle = i.styles.Warning
 		}
 		if header != "" {
-			labels = append(labels, Label{Position: image.Pt(1, plan.header), Text: modeStyle.Render(" " + header + " ")})
+			labels = append(labels, Label{Position: image.Pt(1, headerRow), Text: modeStyle.Render(" " + header + " ")})
 		}
 		if toggle != "" {
 			labels = append(labels, Label{
-				Position: image.Pt(i.width-3-ansi.StringWidth(toggle), plan.header),
+				Position: image.Pt(i.width-3-ansi.StringWidth(toggle), headerRow),
 				Text:     i.styles.Muted.Render(" " + toggle + " "),
 			})
 		}
 	}
-	if plan.footer >= 0 && footer != "" {
+	if footer != "" {
 		hintStyle := i.styles.Muted
 		if i.discardPending {
 			hintStyle = i.styles.Warning
 		}
-		labels = append(labels, Label{Position: image.Pt(1, plan.footer), Text: hintStyle.Render(" " + footer + " ")})
+		labels = append(labels, Label{Position: image.Pt(1, i.height), Text: hintStyle.Render(" " + footer + " ")})
 	}
 	return labels
 }

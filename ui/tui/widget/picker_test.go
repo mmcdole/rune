@@ -116,21 +116,21 @@ func TestPickerFilterClampsSelection(t *testing.T) {
 
 func TestPickerInputMeasuredHeight(t *testing.T) {
 	p := newTestPicker(5, "a", "b", "c")
-	// 3 results + query field + three separators.
-	if got := pickerInput(p, 60, ui.MaxLayoutCells).MeasureHeight(60, 100); got != 7 {
-		t.Errorf("input height = %d, want 7", got)
+	// 3 results + query field + one internal separator.
+	if got := pickerInput(p, 60, ui.MaxLayoutCells).MeasureHeight(60, 100); got != 5 {
+		t.Errorf("input height = %d, want 5", got)
 	}
 
 	p.Filter("zzz") // empty: placeholder row + query field and separators
-	if got := pickerInput(p, 60, ui.MaxLayoutCells).MeasureHeight(60, 100); got != 5 {
-		t.Errorf("empty input height = %d, want 5", got)
+	if got := pickerInput(p, 60, ui.MaxLayoutCells).MeasureHeight(60, 100); got != 3 {
+		t.Errorf("empty input height = %d, want 3", got)
 	}
 
 	p.SetHeader("Pick: ")
 	p.Filter("")
 	// A label shares the existing query field row; it adds no height.
-	if got := pickerInput(p, 60, ui.MaxLayoutCells).MeasureHeight(60, 100); got != 7 {
-		t.Errorf("labeled input height = %d, want 7", got)
+	if got := pickerInput(p, 60, ui.MaxLayoutCells).MeasureHeight(60, 100); got != 5 {
+		t.Errorf("labeled input height = %d, want 5", got)
 	}
 }
 

@@ -186,7 +186,7 @@ func TestReboundCancelAcrossInputContexts(t *testing.T) {
 					t.Fatalf("picker completion: %+v", events)
 				}
 			}
-			if context == "search" && h.fx.cancels != 1 {
+			if context == "search" && h.cancels != 1 {
 				t.Fatal("search view was not restored")
 			}
 		})

@@ -21,14 +21,16 @@ const (
 	modeSearch                        // Scrollback-search overlay traps all keys
 )
 
-// searchEffects is the output window half of scrollback search, implemented
-// by Model. The controller owns the mode state machine; the output window
-// snapshot, centering, and highlight stay with the widget owner.
-type searchEffects interface {
-	OpenSearch() widget.SearchScope              // snapshot output window and choose the search origin
-	PreviewSearch(m widget.SearchMatch, ok bool) // center+highlight the match, or restore when none
-	CommitSearch()                               // keep the accepted match and its highlight
-	CancelSearch()                               // restore the output window and prior highlight
+// inputHost is the controller's connection to the owning Model. Input routing
+// stays here; Session delivery and output navigation stay with the host.
+type inputHost interface {
+	notifySession(ui.UIEvent)
+	submit(ui.InputSubmittedMsg) bool
+	handleScrollKey(tea.KeyPressMsg) bool
+	OpenSearch() widget.SearchScope
+	PreviewSearch(widget.SearchMatch, bool)
+	CommitSearch()
+	CancelSearch()
 }
 
 // inputController owns input transitions and Session effects:
@@ -46,26 +48,7 @@ type inputController struct {
 	historyRecall bool   // unmodified draft restored from history
 	keepOnSubmit  bool   // keep_input: keep the sent command selected
 
-	notify func(ui.UIEvent)                // state and actions sent to the session
-	submit func(ui.InputSubmittedMsg) bool // atomically transfer submission and following draft
-	scroll func(tea.KeyPressMsg) bool      // Go scroll-key fallback; true if handled
-	search searchEffects                   // output window side of scrollback search
-}
-
-func newInputController(
-	input *widget.Input,
-	notify func(ui.UIEvent),
-	submit func(ui.InputSubmittedMsg) bool,
-	scroll func(tea.KeyPressMsg) bool,
-	search searchEffects,
-) *inputController {
-	return &inputController{
-		input:  input,
-		notify: notify,
-		submit: submit,
-		scroll: scroll,
-		search: search,
-	}
+	host inputHost
 }
 
 // mode derives routing from the active widget, never a second mutable state.
@@ -126,7 +109,7 @@ func (c *inputController) HandleKey(msg tea.KeyPressMsg) {
 			if c.mode() == modePickerInline {
 				c.closePicker(false, "")
 			}
-			c.notify(ui.OpenEditorMsg{Text: c.input.Value()})
+			c.host.notifySession(ui.OpenEditorMsg{Text: c.input.Value()})
 			return
 		}
 
@@ -167,7 +150,7 @@ func (c *inputController) SetText(text string) {
 	wasInline := c.mode() == modePickerInline
 	c.input.SetValue(text)
 	c.input.CursorEnd()
-	c.notify(ui.DraftAppliedMsg{Text: c.input.Value(), Cursor: c.input.Position()})
+	c.host.notifySession(ui.DraftAppliedMsg{Text: c.input.Value(), Cursor: c.input.Position()})
 
 	if c.input.DraftEditorActive() {
 		if wasPicker {
@@ -199,7 +182,7 @@ func (c *inputController) SetSubmission(submission input.Submission) {
 		c.input.CursorEnd()
 	}
 
-	c.notify(ui.DraftAppliedMsg{Text: c.input.Value(), Cursor: c.input.Position()})
+	c.host.notifySession(ui.DraftAppliedMsg{Text: c.input.Value(), Cursor: c.input.Position()})
 	if wasPicker {
 		c.closePicker(false, "")
 	}
@@ -216,7 +199,7 @@ func (c *inputController) tryNormalBind(msg tea.KeyPressMsg) bool {
 	if msg.Text != "" && c.input.Value() != "" && !c.input.Selected() {
 		return false
 	}
-	c.notify(ui.ExecuteBindMsg(key))
+	c.host.notifySession(ui.ExecuteBindMsg(key))
 	return true
 }
 
@@ -244,7 +227,7 @@ func (c *inputController) handleNormalKey(msg tea.KeyPressMsg, action string) {
 		return
 	}
 	// Unbound scroll keys: Go fallback (keeps degraded mode scrollable)
-	if c.scroll(msg) {
+	if c.host.handleScrollKey(msg) {
 		return
 	}
 
@@ -281,7 +264,7 @@ func (c *inputController) handleDraftEditorKey(msg tea.KeyPressMsg, action strin
 			key, delta = "down", 1
 		}
 		if key != "" && !c.input.CanMoveDraftEditorVertically(delta) && c.input.Bindings().Has(key) {
-			c.notify(ui.ExecuteBindMsg(key))
+			c.host.notifySession(ui.ExecuteBindMsg(key))
 			return
 		}
 	}
@@ -297,14 +280,14 @@ func (c *inputController) handleDraftEditorKey(msg tea.KeyPressMsg, action strin
 	}
 
 	if physicalModified && physicalKey != "" && c.input.Bindings().Has(physicalKey) {
-		c.notify(ui.ExecuteBindMsg(physicalKey))
+		c.host.notifySession(ui.ExecuteBindMsg(physicalKey))
 		return
 	}
 
 	// Non-editing chords remain scriptable in draft editor mode. In
 	// particular, Ctrl+E keeps using the existing external-editor bind.
 	if keyStr := keyToString(msg); keyStr != "" && c.input.Bindings().Has(keyStr) {
-		c.notify(ui.ExecuteBindMsg(keyStr))
+		c.host.notifySession(ui.ExecuteBindMsg(keyStr))
 	}
 }
 
@@ -356,7 +339,7 @@ func (c *inputController) insertDraftText(text string) {
 func (c *inputController) cancelDraft() {
 	c.historyRecall = false
 	c.input.Reset()
-	c.notify(ui.InputChangedMsg{Text: "", Cursor: 0})
+	c.host.notifySession(ui.InputChangedMsg{Text: "", Cursor: 0})
 }
 
 // Exact physical bindings win; unbound keypad Enter shares ordinary Enter.
@@ -397,11 +380,11 @@ func (c *inputController) reportInputUpdate(oldValue string, oldCursor int) bool
 	newValue := c.input.Value()
 	newCursor := c.input.Position()
 	if newValue != oldValue {
-		c.notify(ui.InputChangedMsg{Text: newValue, Cursor: newCursor})
+		c.host.notifySession(ui.InputChangedMsg{Text: newValue, Cursor: newCursor})
 		return true
 	}
 	if newCursor != oldCursor {
-		c.notify(ui.CursorMovedMsg{Cursor: newCursor})
+		c.host.notifySession(ui.CursorMovedMsg{Cursor: newCursor})
 	}
 	return false
 }
@@ -427,7 +410,7 @@ func (c *inputController) submitInput() {
 	}
 	// Hand off the text and its following draft together. If Session cannot
 	// accept them, leave the draft editor untouched so the user can try again.
-	if !c.submit(ui.InputSubmittedMsg{Submission: submission, NextDraft: nextDraft}) {
+	if !c.host.submit(ui.InputSubmittedMsg{Submission: submission, NextDraft: nextDraft}) {
 		return
 	}
 	c.historyRecall = false

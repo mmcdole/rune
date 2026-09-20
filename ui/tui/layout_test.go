@@ -11,7 +11,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/mmcdole/rune/ui"
-	"github.com/mmcdole/rune/ui/tui/widget"
 )
 
 func addPane(t *testing.T, m *Model, name string, lines ...string) {
@@ -218,7 +217,7 @@ type measuringWidget struct {
 	measuredWidth, measuredLimit int
 }
 
-var _ widget.Widget = (*measuringWidget)(nil)
+var _ layoutWidget = (*measuringWidget)(nil)
 
 func (w *measuringWidget) MinimumSize() image.Point { return image.Point{} }
 
@@ -248,7 +247,7 @@ func TestLeafPreferredMatchesBorderPlacement(t *testing.T) {
 								widget: measured, edges: edges, shared: shared,
 							}
 							// Placement supplies the reference geometry, including narrow rectangles.
-							content := insetBorders(image.Rect(0, 0, max(0, width), ui.MaxLayoutCells), contentInsets(kind, edges, shared))
+							content := insetBorders(image.Rect(0, 0, max(0, width), ui.MaxLayoutCells), edges|shared)
 							rows := ui.MaxLayoutCells - content.Dy()
 							limit := ui.MaxLayoutCells
 							if limits.terminal > 0 {
@@ -318,6 +317,7 @@ func TestAutoRowMeasuresChildrenAtAllocatedWidths(t *testing.T) {
 		children: []*resolvedNode{wrappedResolved, inputResolved},
 		hasInput: true,
 	}
+	row.boundaries = childBoundaries(row.node, row.children, axisHorizontal)
 	if got := m.preferred(row, axisVertical, 20); got != 3 {
 		t.Fatalf("auto row preferred height = %d, want 3", got)
 	}
@@ -345,6 +345,7 @@ func TestAutoColumnSumsNestedPreferredHeights(t *testing.T) {
 		children: []*resolvedNode{twoResolved, inputResolved},
 		hasInput: true,
 	}
+	column.boundaries = childBoundaries(column.node, column.children, axisVertical)
 	if got := m.preferred(column, axisVertical, 30); got != 5 {
 		t.Fatalf("auto column preferred height = %d, want 5", got)
 	}

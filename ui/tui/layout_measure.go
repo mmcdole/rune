@@ -27,21 +27,35 @@ func seamBorders(children []*resolvedNode, index int, axis splitAxis) (before, a
 
 // boundary records the gap and shared-cell overlap between two children.
 type boundary struct {
-	gap     int
-	overlap bool
+	gap           int
+	overlap       bool
+	before, after borderEdges // shared edges supplied by each neighbor
 }
 
 // With no declared gap, a divider needs a cell only when neither child
 // supplies a border at the boundary.
 func childBoundaries(node ui.LayoutNode, children []*resolvedNode, axis splitAxis) []boundary {
 	boundaries := make([]boundary, max(0, len(children)-1))
+	start, end := borderLeft, borderRight
+	if axis == axisVertical {
+		start, end = borderTop, borderBottom
+	}
 	for i := range boundaries {
 		before, after := seamBorders(children, i, axis)
 		gap := node.Gap
 		if node.Dividers && gap == 0 && !before && !after {
 			gap = 1
 		}
-		boundaries[i] = boundary{gap: gap, overlap: gap == 0 && before && after}
+		b := boundary{gap: gap, overlap: gap == 0 && before && after}
+		if b.overlap || (gap == 0 && node.Dividers) {
+			if before {
+				b.before = end
+			}
+			if after {
+				b.after = start
+			}
+		}
+		boundaries[i] = b
 	}
 	return boundaries
 }
@@ -110,34 +124,23 @@ func childRect(parent image.Rectangle, axis splitAxis, position, size int) image
 	return image.Rect(parent.Min.X, position, parent.Max.X, position+size)
 }
 
-func childSharedEdges(node *resolvedNode, inherited borderEdges, boundaries []boundary, seams bool) []borderEdges {
-	axis := nodeAxis(node.node)
+// The allocation carries the seam decisions. Constrained allocations have
+// empty boundaries, so they inherit outer edges without sharing sibling cells.
+func childSharedEdges(node *resolvedNode, index int, inherited borderEdges, boundaries []boundary) borderEdges {
 	start, end, cross := borderLeft, borderRight, borderTop|borderBottom
-	if axis == axisVertical {
+	if nodeAxis(node.node) == axisVertical {
 		start, end, cross = borderTop, borderBottom, borderLeft|borderRight
 	}
-	shared := make([]borderEdges, len(node.children))
-	for i := range shared {
-		shared[i] = inherited & cross
-		if i == 0 {
-			shared[i] |= inherited & start
-		}
-		if i == len(shared)-1 {
-			shared[i] |= inherited & end
-		}
+	shared := inherited & cross
+	if index == 0 {
+		shared |= inherited & start
+	} else {
+		shared |= boundaries[index-1].after
 	}
-	if seams {
-		for i, boundary := range boundaries {
-			if boundary.overlap || (boundary.gap == 0 && node.node.Dividers) {
-				before, after := seamBorders(node.children, i, axis)
-				if before {
-					shared[i] |= end
-				}
-				if after {
-					shared[i+1] |= start
-				}
-			}
-		}
+	if index == len(node.children)-1 {
+		shared |= inherited & end
+	} else {
+		shared |= boundaries[index].before
 	}
 	return shared
 }
@@ -147,9 +150,8 @@ func assignSharedEdges(node *resolvedNode, inherited borderEdges) {
 	if node.widget != nil {
 		return
 	}
-	shared := childSharedEdges(node, inherited, childBoundaries(node.node, node.children, nodeAxis(node.node)), true)
 	for i, child := range node.children {
-		assignSharedEdges(child, shared[i])
+		assignSharedEdges(child, childSharedEdges(node, i, inherited, node.boundaries))
 	}
 }
 
@@ -157,7 +159,7 @@ func (m *Model) leafPreferred(leaf *resolvedNode, axis splitAxis, cross int) int
 	if axis != axisVertical {
 		return 1
 	}
-	insets := contentInsets(leaf.node.Type, leaf.edges, leaf.shared)
+	insets := leaf.edges | leaf.shared
 	contentWidth := max(1, max(0, cross)-countEdges(insets, borderLeft|borderRight))
 	borderRows := countEdges(insets, borderTop|borderBottom)
 	limit := ui.MaxLayoutCells
@@ -177,7 +179,7 @@ func (m *Model) preferred(node *resolvedNode, axis splitAxis, cross int) int {
 
 	direction := nodeAxis(node.node)
 	if direction == axis {
-		total := boundarySpace(childBoundaries(node.node, node.children, direction))
+		total := boundarySpace(node.boundaries)
 		for _, child := range node.children {
 			desired := 0
 			switch child.node.Size.Kind {
@@ -244,7 +246,7 @@ func (m *Model) minimum(node *resolvedNode, axis splitAxis) int {
 func (m *Model) intrinsicMinimum(node *resolvedNode, axis splitAxis) int {
 	if node.widget != nil {
 		minimum := node.widget.MinimumSize()
-		insets := contentInsets(node.node.Type, node.edges, node.shared)
+		insets := node.edges | node.shared
 		if axis == axisVertical {
 			return minimum.Y + countEdges(insets, borderTop|borderBottom)
 		}
@@ -253,7 +255,7 @@ func (m *Model) intrinsicMinimum(node *resolvedNode, axis splitAxis) int {
 
 	direction := nodeAxis(node.node)
 	if direction == axis {
-		total := boundarySpace(childBoundaries(node.node, node.children, direction))
+		total := boundarySpace(node.boundaries)
 		for _, child := range node.children {
 			total += m.minimum(child, axis)
 		}
@@ -328,8 +330,10 @@ func fallbackAllocation(
 		return result
 	}
 
-	// Validated trees cannot reach this branch; it keeps direct, invalid Go
-	// callers bounded and preserves any protected rows without risking a loop.
+	// A valid tree can still derive an auto preference above MaxLayoutCells.
+	// Preserve its reserved minima and fill remaining space when the relaxed
+	// allocator rejects those derived constraints. Direct invalid callers also
+	// stay bounded by the available extent and hard maxima.
 	remaining = extent
 	for i, track := range relaxed {
 		grant := min(track.Min, remaining)
@@ -364,9 +368,6 @@ func interactionMinimum(node *resolvedNode, axis splitAxis) int {
 		if axis == axisHorizontal {
 			return minimum.X
 		}
-		if node.hasInput {
-			return 1
-		}
 		return minimum.Y
 	}
 	minimum := 0
@@ -382,7 +383,7 @@ func interactionMinimum(node *resolvedNode, axis splitAxis) int {
 }
 
 func (m *Model) allocateChildren(node *resolvedNode, extent int, axis splitAxis, cross int) childAllocation {
-	boundaries := childBoundaries(node.node, node.children, axis)
+	boundaries := node.boundaries
 	space := boundarySpace(boundaries)
 	effectiveExtent := max(0, extent) - space
 	tracks := make([]ui.AxisTrack, len(node.children))

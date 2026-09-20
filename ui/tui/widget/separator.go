@@ -8,9 +8,6 @@ import (
 	"github.com/mattn/go-runewidth"
 )
 
-// Compile-time check that Separator implements Widget.
-var _ Widget = (*Separator)(nil)
-
 // Separator renders a horizontal line.
 type Separator struct {
 	width       int
@@ -27,12 +24,12 @@ func NewSeparator(char string, borderStyle lipgloss.Style) *Separator {
 	return &Separator{char: char, borderStyle: borderStyle}
 }
 
-// View implements Widget.
+// View renders the separator at its allocated width.
 func (s *Separator) View() string {
 	return s.borderStyle.Render(strings.Repeat(s.char, s.width))
 }
 
-// SetSize implements Widget.
+// SetSize applies the allocated content size.
 func (s *Separator) SetSize(width, height int) {
 	s.width = width
 }

@@ -4,7 +4,6 @@ import (
 	"image"
 	"strings"
 
-	"github.com/mmcdole/rune/ui"
 	"github.com/mmcdole/rune/ui/tui/style"
 	"github.com/mmcdole/rune/ui/tui/util"
 )
@@ -45,7 +44,6 @@ func NewOutput(capacity int, styles style.Styles) *Output {
 func (o *Output) Scrollback() *Scrollback  { return o.scrollback }
 func (o *Output) Width() int               { return o.width }
 func (o *Output) Prompt() string           { return o.prompt }
-func (o *Output) Name() string             { return ui.OutputPaneName }
 func (o *Output) Title() string            { return "" }
 func (o *Output) MinimumSize() image.Point { return image.Pt(0, 1) }
 

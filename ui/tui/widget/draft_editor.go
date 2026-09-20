@@ -9,8 +9,8 @@ import (
 )
 
 // maxDraftBodyRows keeps a pasted document useful without allowing the
-// input area to take over the terminal. The surrounding Input adds a header
-// and footer to these content rows.
+// input area to take over the terminal. Layout adds outside borders for the
+// header and footer labels.
 const maxDraftBodyRows = 8
 
 // draftEditor is the lossless editing model used for verbatim drafts, including
@@ -25,6 +25,7 @@ type draftEditor struct {
 	cached      draftLayout
 	layoutWidth int
 	lineCount   int
+	revision    uint64 // text changes that can affect wrapping at any measured width
 }
 
 func newDraftEditor(text string, cursor int) *draftEditor {
@@ -335,6 +336,7 @@ func (c *draftEditor) layout(width int) draftLayout {
 }
 
 func (c *draftEditor) invalidate() {
+	c.revision++
 	c.cached.rows = nil
 	c.lineCount = 0
 }

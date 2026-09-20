@@ -2,67 +2,69 @@ package widget
 
 import "image"
 
-// inputLayout describes the picker and command field separately. Both rendering
-// and shared-boundary planning use these same positions, including labels.
+// InputLayoutState is a comparable description of input's geometry dependencies.
+// Cursor, selection, labels, and single-line text do not change geometry.
+// Draft edits invalidate all measured widths, not just the current allocation.
+type InputLayoutState struct {
+	overlay  inputOverlay
+	draft    *draftEditor
+	revision uint64
+	results  int
+}
+
+func (i *Input) LayoutState() InputLayoutState {
+	state := InputLayoutState{overlay: i.overlay}
+	if i.SearchActive() {
+		state.results = i.search.resultHeight()
+		return state
+	}
+	if i.PickerActive() {
+		state.results = i.picker.resultHeight()
+		if !i.PickerInline() {
+			return state
+		}
+	}
+	state.draft = i.draftEditor
+	if state.draft != nil {
+		state.revision = state.draft.revision
+	}
+	return state
+}
+
+// inputLayout contains only content geometry. The surrounding layout owns
+// outside borders; an overlay has one internal separator above its query.
 type inputLayout struct {
-	results        image.Rectangle
-	help           int
-	body           image.Rectangle
-	ruleRows       []int
-	header, footer int // draft label rows; -1 when unavailable
+	results   image.Rectangle
+	help      int
+	body      image.Rectangle
+	separator int // -1 when there is no room for a separator
 }
 
 func (i *Input) layout(width, height int) inputLayout {
-	p := inputLayout{help: -1, header: -1, footer: -1}
+	p := inputLayout{help: -1, separator: -1}
 	if width <= 0 || height <= 0 {
 		return p
 	}
-	pickerHeight := 0
+	top := 0
 	if i.PickerActive() || i.SearchActive() {
-		// One input field stays at the bottom. Suggestions/results occupy the
-		// rows above it; Input owns their shared separators, with no box.
-		fieldHeight := min(3, max(1, height-1))
-		pickerHeight = max(0, height-fieldHeight)
-		start := 0
-		if pickerHeight > 1 {
-			p.ruleRows = append(p.ruleRows, 0)
-			start = 1
+		top = height - 1 // preserve one editable row below the results
+		end := top
+		if height >= 3 {
+			end--
+			p.separator = end
 		}
-		p.results = image.Rect(0, start, width, pickerHeight)
+		p.results = image.Rect(0, 0, width, end)
 		if i.SearchActive() && p.results.Dy() > 1 {
 			p.results.Max.Y--
 			p.help = p.results.Max.Y
 		}
 	}
-	top, bottom := pickerHeight, height
-	fieldHeight := bottom - top
-	if i.draftEditor != nil && !i.SearchActive() && (!i.PickerActive() || i.PickerInline()) {
-		if fieldHeight >= 2 {
-			p.header = top
-			p.ruleRows = append(p.ruleRows, top)
-			top++
-		}
-		if fieldHeight >= 3 {
-			bottom--
-			p.footer = bottom
-			p.ruleRows = append(p.ruleRows, bottom)
-		}
-	} else {
-		if fieldHeight >= 3 {
-			p.ruleRows = append(p.ruleRows, top)
-			top++
-		}
-		if fieldHeight >= 2 {
-			bottom--
-			p.ruleRows = append(p.ruleRows, bottom)
-		}
-	}
-	p.body = image.Rect(0, top, width, bottom)
+	p.body = image.Rect(0, top, width, height)
 	return p
 }
 
-// RuleRows returns local rows occupied by full-width horizontal lines.
-// Measurement and rendering share these positions without formatting labels.
-func (i *Input) RuleRows(width, height int) []int {
-	return i.layout(width, height).ruleRows
+// SeparatorRow is the internal rule between results and editable content.
+// Outside borders are not part of the widget's allocated content rectangle.
+func (i *Input) SeparatorRow(width, height int) int {
+	return i.layout(width, height).separator
 }

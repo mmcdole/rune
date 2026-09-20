@@ -5,8 +5,7 @@ import "github.com/mmcdole/rune/ui/tui/widget"
 // pane is a named widget with text and scrolling. Output also owns its prompt
 // and searchable scrollback.
 type pane interface {
-	widget.Widget
-	Name() string
+	layoutWidget
 	Write(string)
 	Clear()
 	ScrollUp(int)

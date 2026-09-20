@@ -16,7 +16,7 @@ type searchViewState struct {
 	restore         *widget.ScrollPos
 }
 
-// Model implements searchEffects: the output window half of scrollback
+// Model supplies inputHost search effects: the output window half of scrollback
 // search. The controller drives the mode; these methods move the
 // output window. They never report scroll state themselves: renderIfDue
 // reports whatever position the update settles on.

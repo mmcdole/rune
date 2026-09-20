@@ -13,9 +13,6 @@ import (
 	"github.com/mmcdole/rune/ui/tui/style"
 )
 
-// Compile-time check that Input implements Widget
-var _ Widget = (*Input)(nil)
-
 type inputOverlay uint8
 
 const (
@@ -25,7 +22,7 @@ const (
 	overlaySearch
 )
 
-// Input handles the input area including text entry, picker overlay, and borders.
+// Input owns editable content and the picker/search overlays.
 type Input struct {
 	keys        input.Bindings
 	textinput   textinput.Model
@@ -167,8 +164,7 @@ func (i *Input) View() string {
 	if i.draftEditor != nil {
 		copy(rows[plan.body.Min.Y:plan.body.Max.Y], i.draftRows(plan.body.Dy()))
 	} else if !plan.body.Empty() {
-		// Keep the ordinary one-line input in its compact three-row layout.
-		// Mode labels are rendered on the surrounding rules.
+		// Ordinary input draws one editable row; layout supplies its borders.
 		inputView := i.textinput.View()
 		if i.selected {
 			// Bubbles renders TextStyle across its width padding. Render the
@@ -188,7 +184,7 @@ func (i *Input) View() string {
 	return strings.Join(rows, "\n")
 }
 
-// SetSize implements Widget.
+// SetSize applies the allocated content size.
 func (i *Input) SetSize(width, height int) {
 	i.width = width
 	i.height = height
@@ -197,30 +193,35 @@ func (i *Input) SetSize(width, height int) {
 		i.textinput.Prompt = ""
 	}
 	i.textinput.SetWidth(max(0, width-len(i.textinput.Prompt)))
-	if width > 0 && height > 0 && i.draftEditor != nil && !i.SearchActive() {
-		layout := i.draftEditor.layout(width)
-		i.draftEditor.topRow = i.draftTopRow(layout, i.layout(width, height).body.Dy())
+	i.scrollToCursor()
+}
+
+// Cursor navigation updates the local window even when outer geometry is reused.
+func (i *Input) scrollToCursor() {
+	if i.width > 0 && i.height > 0 && i.draftEditor != nil && !i.SearchActive() {
+		layout := i.draftEditor.layout(i.width)
+		i.draftEditor.topRow = i.draftTopRow(layout, i.layout(i.width, i.height).body.Dy())
 	}
 }
 
 func (i *Input) MinimumSize() image.Point {
-	return image.Pt(3, 3)
+	return image.Pt(3, 1)
 }
 
 // MeasureHeight does not resize the draft editor or its children.
 func (i *Input) MeasureHeight(width, limit int) int {
 	if i.SearchActive() {
-		// Matching rows, one help row, one query row, and three separators.
-		return min(limit, i.search.resultHeight()+5)
+		// Matching rows, help, an internal separator, and the query field.
+		return min(limit, i.search.resultHeight()+3)
 	}
 	if i.PickerActive() && !i.PickerInline() {
-		return min(limit, i.picker.resultHeight()+4)
+		return min(limit, i.picker.resultHeight()+2)
 	}
 
-	h := 3 // normal: top border + input + bottom border
+	h := 1 // ordinary editable row
 	if i.draftEditor != nil {
 		bodyRows := i.draftEditor.measureRows(width)
-		h = bodyRows + 2 // status header + content + key footer
+		h = bodyRows
 	}
 	if i.PickerActive() {
 		h += i.picker.resultHeight() + 1
@@ -279,6 +280,7 @@ func (i *Input) SetCursor(pos int) {
 	i.Deselect()
 	if i.draftEditor != nil {
 		i.draftEditor.SetCursor(pos)
+		i.scrollToCursor()
 		return
 	}
 	i.textinput.SetCursor(pos)
@@ -381,9 +383,14 @@ func (i *Input) UpdateDraftEditor(msg tea.KeyPressMsg) bool {
 			return true
 		}
 	}
+	revision := i.draftEditor.revision
 	handled := i.draftEditor.Update(msg, i.width)
 	if handled {
 		i.discardPending = false
+		// Text edits get their final width and scroll position from SetSize.
+		if i.draftEditor.revision == revision {
+			i.scrollToCursor()
+		}
 	}
 	return handled
 }
