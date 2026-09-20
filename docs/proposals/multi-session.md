@@ -1,6 +1,8 @@
 # Multi-session support: config isolation, worlds, and characters
 
-Status: proposal (revised after design review and MUD-client survey)
+Status: partially implemented proposal. Whole-profile isolation has shipped as
+`--config-dir` / `RUNE_CONFIG_DIR`; the shared-profile world/character layers and
+concurrent-store design below remain proposed.
 
 ## Terminology
 
@@ -14,9 +16,9 @@ Rune is one process = one connection; playing two MUDs or two characters means t
 processes, however the user arranges them (terminal windows, tmux, screen). That
 workflow is under-supported:
 
-1. **No config isolation.** No config-dir flag; the only override is setting
-   `XDG_CONFIG_HOME` at launch, which is awkward and redirects anything else that
-   process reads through XDG.
+1. **Config isolation is available.** `--config-dir` / `RUNE_CONFIG_DIR` already
+   give each process a separate home. The remaining proposal concerns shared
+   configuration and world/character-specific state.
 2. **Concurrent processes clobber shared state.** `store.json` is read once at boot and
    rewritten whole on every `set`, so two processes silently erase each other's writes —
    including the world bookmarks, which live inside it. Logs default to one shared file
@@ -59,9 +61,9 @@ and one global store with author-named keys (Blightmud). This proposal is the se
 model with its two known gaps closed: identity exposure and ergonomic key scoping, plus
 multi-process write safety that neither camp has.
 
-## Mechanism 1 (coarse): `--config <dir>`
+## Mechanism 1 (coarse): `--config-dir <dir>`
 
-`rune --config ~/muds/tank` uses that directory as the complete home: its `init.lua`,
+`rune --config-dir ~/muds/tank` uses that directory as the complete home: its `init.lua`,
 its `store.json`, its `worlds.json`, its `logs/`. `RUNE_CONFIG_DIR` is the env twin;
 the flag wins. A directory containing only an `init.lua` is a complete rune experience.
 
@@ -69,12 +71,12 @@ This is whole-profile isolation for users who want fully separate homes, accepti
 config duplication as the price. It is also the only mechanism a user ever *needs* —
 everything below is optional refinement within one home.
 
-With `--config` in place, **positional `.lua` script arguments are removed** (breaking
-change). The CLI narrows to flags plus an optional connect target: `rune [--config
+With `--config-dir` in place, **positional `.lua` script arguments are removed** (breaking
+change). The CLI narrows to flags plus an optional connect target: `rune [--config-dir
 <dir>] [world[:char] | host:port]`. Every script rune runs is now reachable from the
 config dir — global `init.lua` (which can `rune._load` anything else) and the `worlds/`
 layers — so there is exactly one loading story, one boot path, and ad-hoc experiments
-use a scratch `--config` dir instead of a side channel.
+use a scratch `--config-dir` dir instead of a side channel.
 
 ## Mechanism 2 (fine): worlds and characters as convention files
 
@@ -271,14 +273,14 @@ Two breaking changes, each with a clear error message:
 - `rune.session` → `rune.temp`, with a boot-time tombstone error for old callers
   naming the new location.
 - Positional `.lua` CLI args are removed; passing one produces an error pointing at
-  `init.lua` / `--config`. Users move the script into their config dir (or `rune._load`
+  `init.lua` / `--config-dir`. Users move the script into their config dir (or `rune._load`
   it from `init.lua`).
 
 ## Go/Lua split
 
 Go (primitives only):
 
-- `--config` flag / `RUNE_CONFIG_DIR` wiring in `cmd/rune` (`session.Config.ConfigDir`
+- `--config-dir` flag / `RUNE_CONFIG_DIR` wiring in `cmd/rune` (`session.Config.ConfigDir`
   already exists), and removal of positional `.lua` script args
   (`session.Config.UserScripts` and its loader path go away).
 - The locked delta-write path in the store primitive (prefix-agnostic; `store.world`
@@ -308,8 +310,8 @@ Per `docs/testing.md`, lowest layer that can express each failure:
 
 Each lands independently useful:
 
-1. **`--config` + `RUNE_CONFIG_DIR`, and removal of positional `.lua` args.** The CLI
-   becomes `rune [--config <dir>] [target]`; whole-profile isolation ships immediately.
+1. **`--config-dir` + `RUNE_CONFIG_DIR`, and removal of positional `.lua` args.** The CLI
+   becomes `rune [--config-dir <dir>] [target]`; whole-profile isolation ships immediately.
 2. **Locked delta-writes + `worlds.json` split + migration.** Concurrent processes stop
    eating each other's data — including everyone already running two rune windows
    today.
@@ -357,6 +359,6 @@ Each lands independently useful:
 7. Layer resolution is `require`-style (`X.lua` else `X/init.lua`), the single
    sanctioned file-or-directory duality; character layers resolve inside the world's
    directory form.
-8. Positional `.lua` CLI args are removed. `--config` supersedes them as the coarse
+8. Positional `.lua` CLI args are removed. `--config-dir` supersedes them as the coarse
    mechanism and `worlds/` layers as the fine one; everything rune loads is reachable
    from the config dir, so there is one loading story and one boot path.

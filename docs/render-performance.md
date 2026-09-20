@@ -26,6 +26,11 @@ source hashes, Go/environment settings, and test output. Existing result
 directories are never overwritten. Artifacts under `perf-results/` are ignored
 by Git. `--skip-tests` is appropriate only after this revision's UI tests passed.
 
+Keep the matched raw runs until the change is reviewed. Afterward, record the
+decision and essential measurements here, then delete the generated run
+directories, test binaries, profiles, and logs. They are disposable investigation
+artifacts, not permanent project documentation.
+
 For the primary output-latency workloads, use longer measurements:
 
 ```sh
@@ -146,3 +151,46 @@ checks for key negotiation or display artifacts follow `docs/testing.md`.
 Prefer removing work and ownership layers before introducing another cache or
 renderer. A change should identify which dependency invalidates geometry, text,
 or rendering, and should have a benchmark that would reveal its regression.
+
+
+## Reviewed results
+
+These are historical measurements on an AMD Ryzen 7 4800U, Linux/amd64,
+Go `1.27.1-X:nodwarf5`, for the specific revisions below; they are not a universal
+latency guarantee. The initial simplification compared `8eaa1a6` with `2776f35`
+(five one-second runs); the draft/layout follow-up compared `2696987` with
+`da88a67` (five 500ms runs with matching benchmark fixtures).
+
+| Change and incoming-output workload | Before mean | After mean |
+|---|---:|---:|
+| Initial simplification: 1,000-line burst | 109.52 ms | 39.81 ms |
+| Initial simplification: 100-line burst with 100-line draft | 1,312.58 ms | 46.55 ms |
+| Follow-up: 100-line burst, 1,000-line draft beside a pane | 2,829.97 ms | 44.32 ms |
+
+Values are medians of run means, from UI enqueue to the terminal writer.
+The slow draft cases had only one burst per baseline run; these comparisons
+support mean improvements, not tail-latency claims. Gains came from avoiding
+layout and draft shaping on ordinary output updates. Idle-line delivery remained
+around 20 ms. Ordinary render/resize workloads showed no uniform speedup.
+Current ownership and invalidation rules are documented in [Architecture](architecture.md).
+
+A direct-cell handoff experiment against `00a0d8f` was **rejected**. It patched
+Bubble Tea v2.0.9 to accept immutable cell snapshots, retaining both frame clocks.
+Ten one-second pipeline runs per version at 270×66 and five ten-second runs for
+each of two writer-latency cases produced these medians:
+
+| Measurement | Existing renderer | Snapshot handoff |
+|---|---:|---:|
+| Prompt pipeline time | 4.96 ms | 8.24 ms |
+| Scroll pipeline time | 5.28 ms | 8.17 ms |
+| Allocated bytes per scroll frame | 214 KB | 2,222 KB |
+| Single-line delivery mean | 22.28 ms | 19.90 ms |
+| 1,000-line burst delivery mean | 36.70 ms | 33.27 ms |
+
+Delivery p95 improved by only about 0.4 ms. Snapshot copying accounted for 97%
+of sampled allocated bytes. UI race tests and existing goldens passed, but the
+real renderer comparison found different joined-emoji widths in legacy terminal
+width mode. The memory/time regressions, width mismatch, and unsupported API
+outweighed the modest delivery gains. No production handoff change was accepted.
+A reusable buffer handoff remains unmeasured and needs an explicit ownership and
+width contract; this result does not justify maintaining a private renderer fork.
