@@ -93,7 +93,7 @@ func (o *Output) SetFallbackSize(width, height int) {
 	}
 }
 
-// View renders the current scrollback window.
+// View renders and caches the current scrollback window without changing scroll state.
 func (o *Output) View() string {
 	if o.cacheValid {
 		return o.cachedView
@@ -115,8 +115,7 @@ func (o *Output) View() string {
 	}
 
 	// Sequence anchors live in the scrollback; only this window's indices are relative.
-	o.offset = min(o.offset, o.scrollback.Count())
-	end := o.scrollback.Count() - o.offset
+	end := max(0, o.scrollback.Count()-o.offset)
 	start := max(0, end-contentHeight)
 	padding := contentHeight - (end - start)
 	highlight := -1
@@ -347,15 +346,8 @@ func (o *Output) RestoreScroll(p ScrollPos) {
 	} else {
 		o.offset = o.maxOffset()
 	}
-	if max := o.maxOffset(); o.offset > max {
-		o.offset = max
-	}
-	if o.offset <= 0 {
-		o.offset = 0
-		o.newLines = 0
-	} else {
-		o.newLines = p.NewLines + int(o.scrollback.appended-p.Appended)
-	}
+	o.newLines = p.NewLines + int(o.scrollback.appended-p.Appended)
+	o.clampOffset()
 	o.cacheValid = false
 }
 

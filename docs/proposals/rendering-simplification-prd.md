@@ -1,6 +1,6 @@
 # Rendering Simplification PRD
 
-Status: Section 3, the scoped Section 4 contraction, the Section 5 frame lifecycle cleanup, the scoped Section 2 dispatch cleanup, the separator construction/styling cleanup, the input allocation contract cleanup, the container-border contraction, the bar construction/rendering contraction, explicit input-rule integration, the rule-row representation contraction, and separator placement finalization are approved and implemented. Other implementation proposals remain unapproved.
+Status: Section 3, the scoped Section 4 contraction, the Section 5 frame lifecycle cleanup, the scoped Section 2 dispatch cleanup, the separator construction/styling cleanup, the input allocation contract cleanup, the container-border contraction, the bar construction/rendering contraction, explicit input-rule integration, the rule-row representation contraction, separator placement finalization, and output scroll-state ownership cleanup are approved and implemented. Other implementation proposals remain unapproved.
 
 Review baseline: `simplify-rendering`, commit `17b7df0`, September 20, 2026.
 
@@ -506,6 +506,12 @@ Skipping work often requires remembering more state. The goal is less total comp
 Section 3 was selected and implemented first after the workload and cleanup discussion, followed by the scoped Section 4 contraction and the Section 5 frame lifecycle cleanup recorded below. Section 1 is deferred. Review the remaining proposals one at a time; agreement on one section does not approve the others. Keep this document as the single source for decisions and revisions.
 
 ### Suggested implementation order after agreement
+
+Output scroll-state ownership implementation record: approved and implemented. Removed the assignment to `o.offset` from `Output.View`; it now calculates its bounded window end locally. Replaced duplicate offset-bound and live-mode unseen-count handling in `RestoreScroll` with the existing `clampOffset` call after restoring the anchor and unseen count.
+
+Preserved the height backstop for an oversized offset, rendered-view cache, sequence-based anchor lookup, append handling, scrollback storage, search anchors, and cache invalidation. Added no scroll setter, interface, helper, field, or file. The production change removes eight net lines.
+
+Contract: operations that change scroll position normalize it before rendering; drawing may cache its result but must not change navigation state. Restoring a snapshot still returns to the same surviving text, counts intervening appends, and pins an evicted anchor to the oldest available window. Extended the existing output-height regression to assert both fresh and cached rendering leave scroll state unchanged. Added a restoration-after-resize case to ensure a window that now fits the buffer returns to live mode and clears the saved unseen count before rendering. `go test -race -shuffle=on ./ui/... ./text/...`, `go vet ./ui/... ./text/...`, and `git diff --check` pass, including restore-after-append, eviction, live-mode, and search-cancel coverage. No snapshot changes or quantitative speedup claim.
 
 Separator placement implementation record: approved and implemented. `placeNode` now decides whether a default separator joins the border grid using the parent axis and final rectangle already available there. Removed the saved `resolvedNode.parentAxis` field and the later mutation of separator content geometry in `planBorders`.
 

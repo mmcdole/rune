@@ -293,10 +293,15 @@ func TestOutputScrolledSurvivesRingBufferEviction(t *testing.T) {
 func TestOutputViewNeverExceedsHeight(t *testing.T) {
 	v, _ := newTestOutput(40, 3, "a", "b", "c", "d", "e")
 	v.offset = 999
+	before := v.SaveScroll()
 
 	rows := viewRows(v)
 	if len(rows) != 3 {
 		t.Fatalf("View emitted %d rows with a corrupt offset, want 3: %q", len(rows), rows)
+	}
+	v.View() // The cached path must preserve the same navigation state.
+	if v.offset != 999 || v.SaveScroll() != before {
+		t.Fatal("rendering changed scroll state")
 	}
 }
 
@@ -471,6 +476,19 @@ func TestOutputRestoreScrollFromLiveReturnsToLive(t *testing.T) {
 	rows := viewRows(v)
 	if rows[len(rows)-1] != "four" {
 		t.Errorf("restored live view should show the newest line, got %q", rows)
+	}
+}
+
+func TestOutputRestoreScrollClampsAfterResize(t *testing.T) {
+	v, _ := newTestOutput(40, 2, "one", "two", "three")
+	v.ScrollToTop()
+	v.Write("four")
+	saved := v.SaveScroll()
+
+	v.SetSize(40, 10) // The larger window now fits the entire buffer.
+	v.RestoreScroll(saved)
+	if v.offset != 0 || v.Mode() != ModeLive || v.NewLineCount() != 0 {
+		t.Fatal("restoring into a larger window must return to live with no unseen rows")
 	}
 }
 
