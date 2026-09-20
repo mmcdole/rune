@@ -1,22 +1,23 @@
 package util
 
 import (
-	"github.com/charmbracelet/x/ansi"
 	"slices"
 	"testing"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestTerminalCellWidths(t *testing.T) {
 	for _, value := range []string{"❤️", "1️⃣", "👩‍💻", "🇺🇸", "界", "\x1b[31m❤️\x1b[0m"} {
-		if got := VisibleLen(value); got != 2 {
-			t.Errorf("VisibleLen(%q) = %d, want 2", value, got)
+		if got := ansi.StringWidth(value); got != 2 {
+			t.Errorf("ansi.StringWidth(%q) = %d, want 2", value, got)
 		}
 		if got := ExpandTabs(value + "\tx"); got != value+"      x" {
 			t.Errorf("tab after %q: %q", value, got)
 		}
 		for _, row := range WrapLine(value+value+"x", 3) {
 			if ansi.StringWidth(row) > 3 {
-				t.Errorf("wrapped row exceeds compositor width: %q", row)
+				t.Errorf("wrapped row exceeds renderer width: %q", row)
 			}
 		}
 	}
@@ -102,8 +103,8 @@ func TestWrapLine(t *testing.T) {
 			t.Fatalf("expected 2 rows, got %d: %q", len(rows), rows)
 		}
 		for i, r := range rows {
-			if VisibleLen(r) > 5 {
-				t.Errorf("row %d exceeds width: %q (%d cols)", i, r, VisibleLen(r))
+			if ansi.StringWidth(r) > 5 {
+				t.Errorf("row %d exceeds width: %q (%d cols)", i, r, ansi.StringWidth(r))
 			}
 		}
 	})

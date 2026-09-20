@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+
 	"github.com/mmcdole/rune/ui"
 )
 
@@ -44,7 +45,7 @@ func TestContainedInputSharesBordersAndUsesAssignedHeight(t *testing.T) {
 					}
 				}
 				left, right := input.content.Min.X-1, input.content.Max.X
-				top, bottom := []rune(rows[input.content.Min.Y]), []rune(rows[9])
+				top, bottom := []rune(rows[input.outer.Min.Y]), []rune(rows[9])
 				if top[left] != '├' || top[right] != '┤' || bottom[left] != '└' || bottom[right] != '┘' {
 					t.Fatalf("input rules do not meet side dividers:\n%s", strings.Join(rows, "\n"))
 				}
@@ -74,9 +75,9 @@ func TestContainedPickerBordersUseColumnBoundary(t *testing.T) {
 				m.Update(ui.ShowPickerMsg{Title: "Aliases", Inline: inline, Items: []ui.PickerItem{{Text: "north"}, {Text: "south"}}})
 				input := findLeaf(t, m.layoutPlan, "", ui.LayoutTypeInput)
 				rows := strings.Split(ansi.Strip(m.View().Content), "\n")
-				// Results share one separator with the editor below them.
-				pickerBottom := input.content.Max.Y - 3
-				for y := input.content.Min.Y + 1; y < pickerBottom; y++ {
+				// Results share one separator with the query field below them.
+				pickerBottom := input.content.Max.Y - 2
+				for y := input.content.Min.Y; y < pickerBottom; y++ {
 					row := []rune(rows[y])
 					for _, x := range []int{input.outer.Min.X, input.outer.Max.X - 1} {
 						shared := x < input.content.Min.X || x >= input.content.Max.X
@@ -136,14 +137,14 @@ func TestInputResultsWithoutLeftNeighborHaveNoLeftWall(t *testing.T) {
 		if mode == "search" {
 			label = "Search: "
 		}
-		if mode != "inline" && !strings.HasPrefix(rows[input.content.Max.Y-2], label) {
+		if mode != "inline" && !strings.HasPrefix(rows[input.content.Max.Y-1], label) {
 			t.Fatalf("filter is not at the bottom: %q", rows)
 		}
 	}
 }
 
 func TestContainedInputModesPreserveLabelsAndCursor(t *testing.T) {
-	for _, mode := range []string{"normal", "composer", "picker", "search"} {
+	for _, mode := range []string{"normal", "draft_editor", "picker", "search"} {
 		for _, size := range []image.Point{image.Pt(100, 30), image.Pt(20, 8), image.Pt(3, 3), image.Pt(1, 1)} {
 			t.Run(fmt.Sprintf("%s/%dx%d", mode, size.X, size.Y), func(t *testing.T) {
 				m := resizeModel(t, NewModel(make(chan ui.UIEvent, 100)), size.X, size.Y)
@@ -151,7 +152,7 @@ func TestContainedInputModesPreserveLabelsAndCursor(t *testing.T) {
 				switch mode {
 				case "normal":
 					m.Update(ui.SetInputMsg("north"))
-				case "composer":
+				case "draft_editor":
 					m.Update(ui.SetInputMsg("first\nsecond"))
 				case "picker":
 					m.Update(ui.ShowPickerMsg{Title: "Aliases", Items: []ui.PickerItem{{Text: "north"}, {Text: "south"}}})
@@ -173,7 +174,7 @@ func TestContainedInputModesPreserveLabelsAndCursor(t *testing.T) {
 					switch mode {
 					case "normal":
 						labels = []string{"north"}
-					case "composer":
+					case "draft_editor":
 						labels = []string{"VERBATIM", "Enter send", "first", "second"}
 					case "picker":
 						labels = []string{"Aliases:", "north", "south", "> "}
@@ -190,19 +191,19 @@ func TestContainedInputModesPreserveLabelsAndCursor(t *testing.T) {
 }
 
 type countedPane struct {
-	paneResource
+	pane
 	applications int
 }
 
 func (p *countedPane) SetSize(width, height int) {
 	p.applications++
-	p.paneResource.SetSize(width, height)
+	p.pane.SetSize(width, height)
 }
 
 func TestUpdateAppliesGeometryOnce(t *testing.T) {
 	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 100)), 80, 30)
-	probe := &countedPane{paneResource: m.panes.Create("probe")}
-	m.panes.byName["probe"] = probe
+	probe := &countedPane{pane: m.pane("probe")}
+	m.panes["probe"] = probe
 	setLayout(m, ui.LayoutNode{Type: ui.LayoutTypeColumn, Children: []ui.LayoutNode{
 		{Type: ui.LayoutTypePane, Name: "probe", Size: ui.Cells(3)},
 		{Type: ui.LayoutTypePane, Name: ui.OutputPaneName},
@@ -210,7 +211,7 @@ func TestUpdateAppliesGeometryOnce(t *testing.T) {
 	}})
 	for _, msg := range []tea.Msg{
 		tea.WindowSizeMsg{Width: 90, Height: 30},
-		ui.UpdateBarsMsg{},
+		ui.UpdateBarsMsg{"status": {Left: "changed status"}},
 		ui.ShowSearchMsg{Query: "test"},
 		tea.KeyPressMsg{Code: tea.KeyEsc},
 		ui.SetInputMsg("first\nsecond"),
@@ -236,7 +237,7 @@ func TestNestedConstrainedInputDoesNotShareItsEditableRow(t *testing.T) {
 		}})
 		m.Update(ui.SetInputMsg("EDIT"))
 		if !strings.Contains(ansi.Strip(m.View().Content), "EDIT") {
-			t.Fatalf("height %d: neighboring frame erased input:\n%s", height, ansi.Strip(m.View().Content))
+			t.Fatalf("height %d: neighboring border erased input:\n%s", height, ansi.Strip(m.View().Content))
 		}
 	}
 }
@@ -280,24 +281,24 @@ func TestStaggeredBandsAndInputJoinDividers(t *testing.T) {
 	}
 }
 
-func TestResolveAndViewDoNotResizeSurfaces(t *testing.T) {
+func TestResolveAndViewDoNotResizeWidgets(t *testing.T) {
 	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 100)), 80, 24)
 	m.Update(ui.SetInputMsg(strings.Repeat("a\nb\n", 12)))
 	before := m.layoutPlan
-	mode, count := m.output.viewport.Mode(), m.output.viewport.NewLineCount()
+	mode, count := m.output.Mode(), m.output.NewLineCount()
 	for range 3 {
 		m.resolveLayout()
 		m.View()
 	}
 	if before.leaves[0] != m.layoutPlan.leaves[0] || before.output != m.layoutPlan.output ||
-		mode != m.output.viewport.Mode() || count != m.output.viewport.NewLineCount() {
-		t.Fatal("measurement or painting changed applied geometry/navigation")
+		mode != m.output.Mode() || count != m.output.NewLineCount() {
+		t.Fatal("measurement or rendering changed applied geometry/navigation")
 	}
 }
 
 func TestAutoPaneMeasuresWrappedContentAndBounds(t *testing.T) {
 	for _, test := range []struct{ width, limit, want int }{
-		{12, 20, 4}, // 20 cells at inner width 10, plus two frame rows.
+		{12, 20, 4}, // 20 cells at inner width 10, plus two border rows.
 		{7, 20, 6},
 		{7, 4, 4},
 	} {
@@ -334,7 +335,7 @@ func TestTitleCannotCoverStaggeredJunction(t *testing.T) {
 }
 
 func TestOutputTitleDefaultsToEmpty(t *testing.T) {
-	custom, empty := "Transcript", ""
+	custom, empty := "Custom output", ""
 	for _, border := range []ui.PaneBorder{ui.PaneBorderFull, ui.PaneBorderHorizontal} {
 		for _, tc := range []struct {
 			name  string
@@ -391,27 +392,28 @@ func BenchmarkLayoutFrame(b *testing.B) {
 	m.layout = ui.LayoutTree{Root: staggeredLayout()}
 	m.applyLayout()
 	for _, name := range []string{"map", "chat", "targets", "stats", "group", ui.OutputPaneName} {
-		m.panes.Write(name, strings.Repeat("sample text\n", 30))
+		m.pane(name).Write(strings.Repeat("sample text\n", 30))
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
 		m.applyLayout()
+		m.render()
 		m.View()
 	}
 }
 
-func TestSearchToComposerUsesFinalGeometry(t *testing.T) {
+func TestSearchToDraftEditorUsesFinalGeometry(t *testing.T) {
 	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 100)), 80, 30)
 	m.Update(ui.ShowSearchMsg{Query: "missing"})
 	m.Update(ui.SetInputMsg("one\ntwo\nthree\nfour\nfive"))
 	leaf := findLeaf(t, m.layoutPlan, "", ui.LayoutTypeInput)
-	if got, want := leaf.outer.Dy(), m.input.MeasureHeight(leaf.content.Dx(), ui.MaxLayoutCells); got != want {
-		t.Fatalf("search -> composer allocated height %d, preferred %d", got, want)
+	if got, want := leaf.content.Dy(), m.input.MeasureHeight(leaf.content.Dx(), ui.MaxLayoutCells); got != want {
+		t.Fatalf("search -> draft editor allocated height %d, preferred %d", got, want)
 	}
 }
 
-func TestFixedNestedFramesShareBoundary(t *testing.T) {
+func TestFixedNestedBordersShareBoundary(t *testing.T) {
 	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 100)), 30, 11)
 	setLayout(m, ui.LayoutNode{Type: ui.LayoutTypeColumn, Children: []ui.LayoutNode{
 		{Type: ui.LayoutTypeRow, Children: []ui.LayoutNode{
@@ -449,16 +451,35 @@ func TestHorizontalPressureKeepsInputReachable(t *testing.T) {
 	}
 }
 
+func TestOversizedAutoPreferenceUsesAvailableSpace(t *testing.T) {
+	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 100)), 40, 24)
+	layout := ui.LayoutTree{Root: ui.LayoutNode{Type: ui.LayoutTypeColumn, Children: []ui.LayoutNode{
+		{Type: ui.LayoutTypeColumn, Size: ui.AutoSize(), Children: []ui.LayoutNode{
+			{Type: ui.LayoutTypePane, Name: ui.OutputPaneName, Size: ui.Cells(ui.MaxLayoutCells), Border: ui.PaneBorderNone},
+			{Type: ui.LayoutTypePane, Name: "chat", Size: ui.Cells(ui.MaxLayoutCells), Border: ui.PaneBorderNone},
+		}},
+		{Type: ui.LayoutTypeInput, Size: ui.AutoSize()},
+	}}}
+	if _, err := ui.NormalizeLayoutTree(layout); err != nil {
+		t.Fatalf("fixture must be a valid layout: %v", err)
+	}
+	m.Update(ui.UpdateLayoutMsg(layout))
+	input := findLeaf(t, m.layoutPlan, "", ui.LayoutTypeInput)
+	if input.outer.Max.Y != 24 || input.content.Empty() || m.layoutPlan.output.Empty() {
+		t.Fatalf("oversized preference left usable space unallocated: input=%v output=%v", input.outer, m.layoutPlan.output)
+	}
+}
+
 func TestNestedInputSurvivesConstrainedGeometryInEveryMode(t *testing.T) {
 	for _, width := range []int{1, 2, 3, 40, 100} {
 		for _, height := range []int{1, 2, 3, 8, 30} {
-			for _, mode := range []string{"normal", "composer", "search"} {
+			for _, mode := range []string{"normal", "draft_editor", "search"} {
 				m := resizeModel(t, NewModel(make(chan ui.UIEvent, 100)), width, height)
 				setLayout(m, staggeredLayout())
 				switch mode {
 				case "normal":
 					m.Update(ui.SetInputMsg("edit"))
-				case "composer":
+				case "draft_editor":
 					m.Update(ui.SetInputMsg("one\ntwo\nthree\nfour\nfive"))
 				case "search":
 					m.Update(ui.ShowSearchMsg{Query: "query"})

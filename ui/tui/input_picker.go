@@ -14,8 +14,8 @@ func (c *inputController) ShowPicker(opts ui.ShowPickerMsg) {
 	// Completion/history pickers are single-line concepts. If a script
 	// asks for one while a structured draft is active, settle its callback
 	// immediately instead of layering conflicting input modes.
-	if c.input.IsComposing() {
-		c.notify(ui.PickerSelectMsg{CallbackID: opts.CallbackID, Accepted: false})
+	if c.input.DraftEditorActive() {
+		c.host.notifySession(ui.PickerSelectMsg{CallbackID: opts.CallbackID, Accepted: false})
 		return
 	}
 	// Picker and search overlays are mutually exclusive; the newcomer
@@ -38,7 +38,7 @@ func (c *inputController) ShowPicker(opts ui.ShowPickerMsg) {
 // or its callback is stranded on the session side.
 func (c *inputController) closePicker(accepted bool, value string) {
 	c.input.HidePicker()
-	c.notify(ui.PickerSelectMsg{CallbackID: c.pickerCB, Value: value, Accepted: accepted})
+	c.host.notifySession(ui.PickerSelectMsg{CallbackID: c.pickerCB, Value: value, Accepted: accepted})
 	c.pickerCB = ""
 	c.pickerDismiss = false
 }
@@ -73,7 +73,7 @@ func (c *inputController) handleInlineKey(msg tea.KeyPressMsg, action string) {
 	// the NumLock-off form becomes the local navigation key engraved on it.
 	if info, ok := numpadNavigation(msg); ok {
 		if key := keyToString(msg); key != "" && c.input.Bindings().Has(key) {
-			c.notify(ui.ExecuteBindMsg(key))
+			c.host.notifySession(ui.ExecuteBindMsg(key))
 			return
 		}
 		msg = info.navigationFallback(msg)
@@ -81,7 +81,7 @@ func (c *inputController) handleInlineKey(msg tea.KeyPressMsg, action string) {
 	keyStr := keyToString(msg)
 	// Don't send picker navigation keys to Lua - handle them locally
 	if keyStr != "" && c.input.Bindings().Has(keyStr) && !inlinePickerLocalKeys[keyStr] {
-		c.notify(ui.ExecuteBindMsg(keyStr))
+		c.host.notifySession(ui.ExecuteBindMsg(keyStr))
 		return
 	}
 
@@ -100,7 +100,7 @@ func (c *inputController) handleInlineKey(msg tea.KeyPressMsg, action string) {
 			c.input.CursorEnd()
 			// Report the completed text before the selection fires so
 			// the session's input state is fresh inside the callback.
-			c.notify(ui.InputChangedMsg{Text: c.input.Value(), Cursor: c.input.Position()})
+			c.host.notifySession(ui.InputChangedMsg{Text: c.input.Value(), Cursor: c.input.Position()})
 			c.closePicker(true, item.GetValue())
 		} else {
 			c.closePicker(false, "")
@@ -116,7 +116,7 @@ func (c *inputController) handleInlineKey(msg tea.KeyPressMsg, action string) {
 		return
 	}
 
-	if c.scroll(msg) {
+	if c.host.handleScrollKey(msg) {
 		return
 	}
 

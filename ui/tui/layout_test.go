@@ -1,23 +1,26 @@
 package tui
 
 import (
+	"fmt"
 	"image"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+
 	"github.com/mmcdole/rune/ui"
-	"github.com/mmcdole/rune/ui/tui/widget"
 )
 
 func addPane(t *testing.T, m *Model, name string, lines ...string) {
 	t.Helper()
-	pane := m.panes.Create(name)
+	pane := m.pane(name)
 	for _, line := range lines {
 		pane.Write(line)
 	}
 	m.applyLayout()
+	m.render()
 }
 
 func resizeModel(t *testing.T, m *Model, width, height int) *Model {
@@ -29,9 +32,10 @@ func resizeModel(t *testing.T, m *Model, width, height int) *Model {
 func setLayout(m *Model, root ui.LayoutNode) {
 	m.layout = ui.LayoutTree{Root: root}
 	m.applyLayout()
+	m.render()
 }
 
-func findLeaf(t *testing.T, plan layoutPlan, kind string, name string) *layoutNode {
+func findLeaf(t *testing.T, plan layoutPlan, kind string, name string) *resolvedNode {
 	t.Helper()
 	for _, leaf := range plan.leaves {
 		if (leaf.node.Type == ui.LayoutTypePane) != (kind == ui.LayoutTypePane) {
@@ -103,7 +107,42 @@ func TestArbitraryTypeIsNotARegistryLookup(t *testing.T) {
 	}
 }
 
-func TestOutputPaneAndSameNamedBarRemainSeparateResources(t *testing.T) {
+func TestInactiveBarSubtreesReleaseTheirFixedTracks(t *testing.T) {
+	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 16)), 40, 12)
+	setLayout(m, ui.LayoutNode{Type: ui.LayoutTypeColumn, Children: []ui.LayoutNode{
+		{Type: ui.LayoutTypePane, Name: ui.OutputPaneName, Border: ui.PaneBorderNone},
+		{Type: ui.LayoutTypeColumn, Size: ui.Cells(3), Children: []ui.LayoutNode{
+			{Type: ui.LayoutTypeBar, Name: "status", Size: ui.Cells(3)},
+		}},
+		{Type: ui.LayoutTypeInput, Size: ui.AutoSize()},
+	}})
+	for _, step := range []struct {
+		name   string
+		bars   ui.UpdateBarsMsg
+		height int
+	}{
+		{"visible", ui.UpdateBarsMsg{"status": {Left: "STATUS"}}, 6},
+		{"empty", ui.UpdateBarsMsg{"status": {}}, 9},
+		{"restored", ui.UpdateBarsMsg{"status": {Left: "STATUS"}}, 6},
+		{"style_only", ui.UpdateBarsMsg{"status": {Left: "\x1b[31m\x1b[0m"}}, 9},
+		{"restored_again", ui.UpdateBarsMsg{"status": {Left: "STATUS"}}, 6},
+		{"removed", ui.UpdateBarsMsg{}, 9},
+	} {
+		t.Run(step.name, func(t *testing.T) {
+			m.Update(step.bars)
+			if got := m.layoutPlan.output.Dy(); got != step.height {
+				t.Fatalf("output height = %d, want %d", got, step.height)
+			}
+			view := m.View().Content
+			assertExactBlock(t, view, 40, 12)
+			if got, want := strings.Contains(ansi.Strip(view), "STATUS"), step.height == 6; got != want {
+				t.Fatalf("bar visible = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+func TestOutputPaneAndSameNamedBarRemainSeparateWidgets(t *testing.T) {
 	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 8)), 20, 5)
 	m.syncBars(map[string]ui.BarContent{ui.OutputPaneName: {Left: "bar output"}})
 	setLayout(m, ui.LayoutNode{
@@ -171,13 +210,14 @@ func TestRecursiveRowAndColumnGeometry(t *testing.T) {
 }
 
 type measuringWidget struct {
-	width, height  int
-	preferred      func(width int) int
-	preferredCalls int
-	text           string
+	width, height                int
+	preferred                    func(width int) int
+	preferredCalls               int
+	text                         string
+	measuredWidth, measuredLimit int
 }
 
-var _ widget.Widget = (*measuringWidget)(nil)
+var _ layoutWidget = (*measuringWidget)(nil)
 
 func (w *measuringWidget) MinimumSize() image.Point { return image.Point{} }
 
@@ -185,10 +225,53 @@ func (w *measuringWidget) SetSize(width, height int) { w.width, w.height = width
 
 func (w *measuringWidget) MeasureHeight(width, limit int) int {
 	w.preferredCalls++
+	w.measuredWidth, w.measuredLimit = width, limit
 	return min(limit, w.preferred(max(1, width)))
 }
 
 func (w *measuringWidget) View() string { return w.text }
+
+func TestLeafPreferredMatchesBorderPlacement(t *testing.T) {
+	for _, kind := range []string{ui.LayoutTypePane, ui.LayoutTypeInput} {
+		for edges := borderEdges(0); edges <= borderAll; edges++ {
+			for _, shared := range []borderEdges{0, borderLeft | borderTop, borderAll} {
+				for _, width := range []int{-1, 0, 1, 2, 80} {
+					for _, limits := range []struct{ terminal, maximum int }{
+						{0, 0}, {1, 0}, {0, 1}, {1, 3}, {3, 1},
+						{ui.MaxLayoutCells + 1, ui.MaxLayoutCells + 1},
+					} {
+						t.Run(fmt.Sprintf("%s/edges=%d/shared=%d/width=%d/limits=%v", kind, edges, shared, width, limits), func(t *testing.T) {
+							measured := &measuringWidget{preferred: func(int) int { return 7 }}
+							leaf := &resolvedNode{
+								node:   ui.LayoutNode{Type: kind, MaxSize: &limits.maximum},
+								widget: measured, edges: edges, shared: shared,
+							}
+							// Placement supplies the reference geometry, including narrow rectangles.
+							content := insetBorders(image.Rect(0, 0, max(0, width), ui.MaxLayoutCells), edges|shared)
+							rows := ui.MaxLayoutCells - content.Dy()
+							limit := ui.MaxLayoutCells
+							if limits.terminal > 0 {
+								limit = min(limit, limits.terminal)
+							}
+							if limits.maximum > 0 {
+								limit = min(limit, limits.maximum)
+							}
+							wantWidth, wantLimit := max(1, content.Dx()), max(0, limit-rows)
+							m := Model{height: limits.terminal}
+							got := m.leafPreferred(leaf, axisVertical, width)
+							if measured.measuredWidth != wantWidth || measured.measuredLimit != wantLimit || got != rows+min(7, wantLimit) {
+								t.Fatalf("measurement (%d, %d) -> %d; want (%d, %d) -> %d", measured.measuredWidth, measured.measuredLimit, got, wantWidth, wantLimit, rows+min(7, wantLimit))
+							}
+							if got := m.leafPreferred(leaf, axisHorizontal, width); got != 1 || measured.preferredCalls != 1 {
+								t.Fatal("horizontal preference changed or measured height")
+							}
+						})
+					}
+				}
+			}
+		}
+	}
+}
 
 func TestOnlyAutoTracksRequestIntrinsicMeasurement(t *testing.T) {
 	tests := []struct {
@@ -196,23 +279,20 @@ func TestOnlyAutoTracksRequestIntrinsicMeasurement(t *testing.T) {
 		size  ui.LayoutSize
 		calls int
 	}{
-		{name: "fixed", size: ui.Cells(2), calls: 1},
-		{name: "fraction", size: ui.Fraction(1), calls: 1},
-		{name: "percent", size: ui.Percent(25), calls: 1},
-		{name: "auto", size: ui.AutoSize(), calls: 2},
+		{name: "fixed", size: ui.Cells(2), calls: 0},
+		{name: "fraction", size: ui.Fraction(1), calls: 0},
+		{name: "percent", size: ui.Percent(25), calls: 0},
+		{name: "auto", size: ui.AutoSize(), calls: 1},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			m := NewModel(make(chan ui.UIEvent, 8))
 			measured := &measuringWidget{preferred: func(int) int { return 2 }}
 			node := ui.LayoutNode{Type: ui.LayoutTypeBar, Name: "measured", Size: test.size}
-			child, ok := m.resolveWidget(node, measured, 20)
-			if !ok {
-				t.Fatal("measuring widget did not resolve")
-			}
-			root := &layoutNode{
+			child := &resolvedNode{node: node, widget: measured}
+			root := &resolvedNode{
 				node:     ui.LayoutNode{Type: ui.LayoutTypeColumn},
-				children: []*layoutNode{child},
+				children: []*resolvedNode{child},
 			}
 			m.allocateChildren(root, 12, axisVertical, 20)
 			if measured.preferredCalls != test.calls {
@@ -229,20 +309,15 @@ func TestAutoRowMeasuresChildrenAtAllocatedWidths(t *testing.T) {
 		text:      "wrapped",
 	}
 	wrappedNode := ui.LayoutNode{Type: ui.LayoutTypeBar, Name: "wrapped"}
-	wrappedResolved, ok := m.resolveWidget(wrappedNode, wrapped, 20)
-	if !ok {
-		t.Fatal("wrapped widget did not resolve")
-	}
+	wrappedResolved := &resolvedNode{node: wrappedNode, widget: wrapped}
 	inputNode := ui.LayoutNode{Type: ui.LayoutTypeInput}
-	inputResolved, ok := m.resolveWidget(inputNode, m.input, 20)
-	if !ok {
-		t.Fatal("input widget did not resolve")
-	}
-	row := &layoutNode{
+	inputResolved := m.resolveNode(inputNode, 20, axisHorizontal)
+	row := &resolvedNode{
 		node:     ui.LayoutNode{Type: ui.LayoutTypeRow},
-		children: []*layoutNode{wrappedResolved, inputResolved},
+		children: []*resolvedNode{wrappedResolved, inputResolved},
 		hasInput: true,
 	}
+	row.boundaries = childBoundaries(row.node, row.children, axisHorizontal)
 	if got := m.preferred(row, axisVertical, 20); got != 3 {
 		t.Fatalf("auto row preferred height = %d, want 3", got)
 	}
@@ -262,20 +337,15 @@ func TestAutoColumnSumsNestedPreferredHeights(t *testing.T) {
 	m := NewModel(make(chan ui.UIEvent, 8))
 	twoRows := &measuringWidget{preferred: func(int) int { return 2 }, text: "two"}
 	twoNode := ui.LayoutNode{Type: ui.LayoutTypeBar, Name: "two", Size: ui.AutoSize()}
-	twoResolved, ok := m.resolveWidget(twoNode, twoRows, 30)
-	if !ok {
-		t.Fatal("two-row widget did not resolve")
-	}
+	twoResolved := &resolvedNode{node: twoNode, widget: twoRows}
 	inputNode := ui.LayoutNode{Type: ui.LayoutTypeInput, Size: ui.AutoSize()}
-	inputResolved, ok := m.resolveWidget(inputNode, m.input, 30)
-	if !ok {
-		t.Fatal("input widget did not resolve")
-	}
-	column := &layoutNode{
+	inputResolved := m.resolveNode(inputNode, 30, axisVertical)
+	column := &resolvedNode{
 		node:     ui.LayoutNode{Type: ui.LayoutTypeColumn},
-		children: []*layoutNode{twoResolved, inputResolved},
+		children: []*resolvedNode{twoResolved, inputResolved},
 		hasInput: true,
 	}
+	column.boundaries = childBoundaries(column.node, column.children, axisVertical)
 	if got := m.preferred(column, axisVertical, 30); got != 5 {
 		t.Fatalf("auto column preferred height = %d, want 5", got)
 	}
@@ -294,13 +364,13 @@ func TestOutputPaneWrapsAtItsResolvedWidth(t *testing.T) {
 
 	next, _ := m.Update(ui.EchoLineMsg("abcdefghijklmn"))
 	m = next.(*Model)
-	if got := m.output.buffer.Count(); got != 2 {
+	if got := m.output.Scrollback().Count(); got != 2 {
 		t.Fatalf("scrollback row count = %d, want 2", got)
 	}
-	if got := m.output.buffer.At(0); got != "abcdefghijkl" {
+	if got := m.output.Scrollback().At(0); got != "abcdefghijkl" {
 		t.Fatalf("first physical row = %q, want twelve cells", got)
 	}
-	if got := m.output.buffer.At(1); got != "mn" {
+	if got := m.output.Scrollback().At(1); got != "mn" {
 		t.Fatalf("second physical row = %q, want remainder", got)
 	}
 }
@@ -318,7 +388,7 @@ func TestResizeReallocatesTreeWithoutReflowingExistingOutputRows(t *testing.T) {
 
 	next, _ := m.Update(ui.EchoLineMsg(strings.Repeat("a", 35)))
 	m = next.(*Model)
-	if got := m.output.buffer.Count(); got != 2 {
+	if got := m.output.Scrollback().Count(); got != 2 {
 		t.Fatalf("rows appended at thirty-cell output width = %d, want 2", got)
 	}
 
@@ -326,12 +396,12 @@ func TestResizeReallocatesTreeWithoutReflowingExistingOutputRows(t *testing.T) {
 	if got := m.layoutPlan.output.Dx(); got != 60 {
 		t.Fatalf("resized output width = %d, want 60", got)
 	}
-	if got := m.output.buffer.Count(); got != 2 {
+	if got := m.output.Scrollback().Count(); got != 2 {
 		t.Fatalf("resize reflowed existing rows: count = %d, want 2", got)
 	}
 	next, _ = m.Update(ui.EchoLineMsg(strings.Repeat("b", 50)))
 	m = next.(*Model)
-	if got := m.output.buffer.Count(); got != 3 {
+	if got := m.output.Scrollback().Count(); got != 3 {
 		t.Fatalf("new fifty-cell line at resized width added count = %d, want 3", got)
 	}
 }
@@ -482,7 +552,7 @@ func TestFallbackDropsOversizedGapsInsideParent(t *testing.T) {
 	assertExactBlock(t, m.View().Content, 16, 2)
 }
 
-func TestHorizontalPaneFrameKeepsFullContentWidth(t *testing.T) {
+func TestHorizontalPaneBorderKeepsFullContentWidth(t *testing.T) {
 	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 8)), 20, 4)
 	addPane(t, m, "chat", "12345678901234567890", "second")
 	setLayout(m, ui.LayoutNode{
@@ -494,7 +564,7 @@ func TestHorizontalPaneFrameKeepsFullContentWidth(t *testing.T) {
 	plan := m.layoutPlan
 	pane := findLeaf(t, plan, ui.LayoutTypePane, "chat")
 	if got, want := pane.content, image.Rect(0, 1, 20, 3); got != want {
-		t.Fatalf("horizontal-frame content = %v, want %v", got, want)
+		t.Fatalf("horizontal-border content = %v, want %v", got, want)
 	}
 	rows := assertExactBlock(t, m.View().Content, 20, 4)
 	plain := make([]string, len(rows))
@@ -512,17 +582,17 @@ func TestHorizontalPaneFrameKeepsFullContentWidth(t *testing.T) {
 	}
 }
 
-func TestPaneFrameEdgesAreLogicalTrackMinima(t *testing.T) {
+func TestPaneBorderEdgesAreLogicalTrackMinima(t *testing.T) {
 	tests := []struct {
 		name   string
 		root   string
 		border ui.PaneBorder
 		want   int
 	}{
-		{name: "full frame height", root: ui.LayoutTypeColumn, want: 2},
-		{name: "full frame width", root: ui.LayoutTypeRow, want: 2},
-		{name: "horizontal frame height", root: ui.LayoutTypeColumn, border: ui.PaneBorderHorizontal, want: 2},
-		{name: "horizontal frame has no width minimum", root: ui.LayoutTypeRow, border: ui.PaneBorderHorizontal, want: 1},
+		{name: "full border height", root: ui.LayoutTypeColumn, want: 2},
+		{name: "full border width", root: ui.LayoutTypeRow, want: 2},
+		{name: "horizontal border height", root: ui.LayoutTypeColumn, border: ui.PaneBorderHorizontal, want: 2},
+		{name: "horizontal border has no width minimum", root: ui.LayoutTypeRow, border: ui.PaneBorderHorizontal, want: 1},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -548,7 +618,7 @@ func TestPaneFrameEdgesAreLogicalTrackMinima(t *testing.T) {
 	}
 }
 
-func TestExplicitMaximumCanClipPaneChromeWithoutFallingBackParent(t *testing.T) {
+func TestExplicitMaximumCanClipPaneBordersWithoutFallingBackParent(t *testing.T) {
 	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 8)), 20, 10)
 	addPane(t, m, "chat")
 	one := 1
@@ -593,7 +663,7 @@ func TestTinyFallbackStillRespectsHardMaximum(t *testing.T) {
 	}
 }
 
-func TestNestedMinimumIncludesGapsAndSharedFrameSeams(t *testing.T) {
+func TestNestedMinimumIncludesGapsAndSharedBorderSeams(t *testing.T) {
 	for _, test := range []struct {
 		name string
 		gap  int
@@ -700,8 +770,8 @@ func TestSearchUsesTheSameResolvedOutputRectangleAsView(t *testing.T) {
 	if got := plan.output.Dy(); got != 10 {
 		t.Fatalf("search output height = %d, want 10", got)
 	}
-	if got := len(strings.Split(m.output.viewport.View(), "\n")); got != plan.output.Dy() {
-		t.Fatalf("viewport height = %d, want resolved output height %d", got, plan.output.Dy())
+	if got := len(strings.Split(m.output.View(), "\n")); got != plan.output.Dy() {
+		t.Fatalf("output window height = %d, want resolved output height %d", got, plan.output.Dy())
 	}
 	assertExactBlock(t, m.View().Content, 40, 16)
 }
@@ -761,7 +831,7 @@ func TestContainerDividersDrawBetweenActiveChildren(t *testing.T) {
 	}
 }
 
-func TestContainerDividersReuseFramedPaneSeams(t *testing.T) {
+func TestContainerDividersReuseBorderedPaneSeams(t *testing.T) {
 	noTitle := ""
 	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 8)), 20, 6)
 	addPane(t, m, "left")
@@ -822,7 +892,7 @@ func TestColumnDividerDrawsInsideDeclaredGap(t *testing.T) {
 	}
 }
 
-func TestDividerContainerPropagatesItsContinuousFrame(t *testing.T) {
+func TestDividerContainerPropagatesItsContinuousBorder(t *testing.T) {
 	noTitle := ""
 	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 8)), 20, 8)
 	for _, name := range []string{"left", "right", "bottom"} {
@@ -882,18 +952,9 @@ func TestDividerJoinsBordersAndSeparatorsAboveAndBelow(t *testing.T) {
 	})
 
 	plan := m.layoutPlan
-	vertical := []widget.Rule{}
-	for _, rule := range plan.rules {
-		if rule.Vertical {
-			vertical = append(vertical, rule)
-		}
-	}
-	if len(vertical) != 1 || vertical[0].At != 10 {
-		t.Fatalf("vertical rules = %+v, want one at x=10", vertical)
-	}
 	separator := findLeaf(t, plan, "", ui.LayoutTypeSeparator)
 	if separator.outer != image.Rect(0, 8, 21, 9) || !separator.content.Empty() {
-		t.Fatalf("separator outer=%v content=%v, want row 8 drawn by the frame grid", separator.outer, separator.content)
+		t.Fatalf("separator outer=%v content=%v, want row 8 drawn by the border grid", separator.outer, separator.content)
 	}
 
 	rows := assertExactBlock(t, m.View().Content, 21, 12)
@@ -957,13 +1018,17 @@ func TestSeparatorInsideRowKeepsWidgetRendering(t *testing.T) {
 		},
 	})
 	separator := findLeaf(t, m.layoutPlan, "", ui.LayoutTypeSeparator)
-	if separator.parentAxis != axisHorizontal || separator.content.Empty() {
-		t.Fatalf("row separator parentAxis=%v content=%v, want widget rendering", separator.parentAxis, separator.content)
+	if want := image.Rect(11, 0, 12, 1); separator.content != want {
+		t.Fatalf("row separator content=%v, want %v for widget rendering", separator.content, want)
+	}
+	rows := assertExactBlock(t, m.View().Content, 12, 4)
+	if got := ansi.Strip(rows[0]); got != strings.Repeat(" ", 11)+"─" {
+		t.Fatalf("row separator rendered %q, want a rule in the final cell", got)
 	}
 }
 
 // TestBarNameDoesNotReplaceBuiltinWidget verifies that bar and built-in names
-// belong to independent resource namespaces.
+// belong to independent namespaces.
 func TestBarNameDoesNotReplaceBuiltinWidget(t *testing.T) {
 	m := newTestModel(t)
 	inputWidget := m.input
@@ -986,28 +1051,41 @@ func TestBarNameDoesNotReplaceBuiltinWidget(t *testing.T) {
 	}
 }
 
-// TestSeparatorLeafCharactersAreIndependent verifies that configured and
-// default separator characters belong to their individual leaves.
-func TestSeparatorLeafCharactersAreIndependent(t *testing.T) {
-	m := newTestModel(t)
+func TestSeparatorLeavesKeepCharactersAndShareBorderStyle(t *testing.T) {
+	m := NewModel(make(chan ui.UIEvent, 16))
+	m.styles.PaneBorder = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	m = resizeModel(t, m, 40, 12)
 
-	// No "input" entry: the input widget draws its own default rule,
-	// which would mask a separator that failed to reset.
+	// Exercise a custom rule, a standalone default rule inside a row, and
+	// a default rule owned by the border grid. No input rules can mask them.
 	next, _ := m.Update(ui.UpdateLayoutMsg(ui.LayoutTree{Root: ui.LayoutNode{
 		Type: ui.LayoutTypeColumn,
 		Children: []ui.LayoutNode{
 			{Type: ui.LayoutTypeSeparator, SeparatorChar: "═", Size: ui.AutoSize()},
+			{Type: ui.LayoutTypeRow, Size: ui.Cells(1), Children: []ui.LayoutNode{
+				{Type: ui.LayoutTypeSeparator},
+			}},
 			{Type: ui.LayoutTypePane, Name: ui.OutputPaneName, Border: ui.PaneBorderNone},
 			{Type: ui.LayoutTypeSeparator, Size: ui.AutoSize()},
 		},
 	}}))
 	m = next.(*Model)
 
-	view := ansi.Strip(m.View().Content)
-	if !strings.Contains(view, strings.Repeat("═", m.width)) {
-		t.Error("configured separator rule missing from view")
-	}
-	if !strings.Contains(view, strings.Repeat("─", m.width)) {
-		t.Error("default separator did not retain its own rule character")
+	rows := assertExactBlock(t, m.View().Content, m.width, m.height)
+	expected := styledCell(m.styles.PaneBorder.Render("─"))
+	for _, row := range []int{0, 1, m.height - 1} {
+		char := "─"
+		if row == 0 {
+			char = "═"
+		}
+		if got := ansi.Strip(rows[row]); got != strings.Repeat(char, m.width) {
+			t.Fatalf("row %d = %q, want an independent %s separator", row, got, char)
+		}
+		for x := range m.width {
+			cell := m.canvas.CellAt(x, row)
+			if cell == nil || !cell.Style.Equal(&expected.Style) {
+				t.Fatalf("separator cell (%d,%d) does not use the configured border style", x, row)
+			}
+		}
 	}
 }

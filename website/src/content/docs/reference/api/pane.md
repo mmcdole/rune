@@ -29,7 +29,7 @@ opposite of [bars](/reference/api/ui/), whose callbacks Rune polls. An ordinary
 pane grows to 1000 logical lines, then trims to the newest 500. Its lines
 soft-wrap to the assigned content width during rendering, so they re-fit after
 a resize or layout change. The specialized `output` pane keeps up to 100,000
-physical transcript rows wrapped at append time; existing output therefore does
+physical scrollback rows wrapped at append time; existing output therefore does
 not reflow after a resize.
 
 A pane's buffer and its placement are separate things. Placing
@@ -95,7 +95,7 @@ on the history being read. With the default title its header shows
 `name · scroll +N`; a custom `title` replaces that suffix too. Calling
 `scroll_down` until it reaches the end, or calling `scroll_to_bottom`, returns
 it to live mode. User-created panes scroll by logical lines as written. The
-specialized `output` transcript instead scrolls its stored physical rows.
+`output` pane scrolls the physical rows stored in its scrollback.
 
 ```lua
 rune.bind("shift+pgup", function()

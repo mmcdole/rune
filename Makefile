@@ -5,7 +5,7 @@ GO      ?= go
 VERSION ?= $(shell git describe --tags --always --dirty)
 LDFLAGS := -s -w -X github.com/mmcdole/rune/version.Number=$(VERSION)
 
-.PHONY: build build-jit test test-jit check bench clean require-luajit
+.PHONY: build build-jit test test-jit check bench bench-render clean require-luajit
 
 # Preflight for the tagged targets. Without the headers cgo fails with a
 # bare "lua.h: No such file or directory"; say what to install instead.
@@ -50,6 +50,11 @@ check: require-luajit
 bench: require-luajit
 	$(GO) test ./lua/ -run '^$$' -bench EngineScriptWork -benchtime=2s
 	$(GO) test -tags luajit ./lua/ -run '^$$' -bench EngineScriptWork -benchtime=2s
+
+# Quick rendering check; tools/render-perf.py saves comparable baseline runs.
+bench-render:
+	$(GO) test -race -shuffle=on ./ui/...
+	$(GO) test ./ui/tui ./ui/tui/widget -run '^$$' -bench '^(BenchmarkRender|BenchmarkOutputLatency)' -benchmem -benchtime=1x
 
 clean:
 	rm -rf bin/

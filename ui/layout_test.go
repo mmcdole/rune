@@ -310,12 +310,12 @@ func TestValidateLayoutTreeRejectsInvalidStructure(t *testing.T) {
 		{
 			name: "hidden region contains input",
 			tree: LayoutTree{Root: LayoutNode{Type: LayoutTypeColumn, Children: []LayoutNode{
-				{Type: LayoutTypeRow, ID: "composer", Hidden: true, Children: []LayoutNode{
+				{Type: LayoutTypeRow, ID: "input_region", Hidden: true, Children: []LayoutNode{
 					{Type: LayoutTypePane, Name: OutputPaneName}, {Type: LayoutTypeInput},
 				}},
 				testBar("status"),
 			}}},
-			want: `region "composer" contains input and cannot be hidden`,
+			want: `region "input_region" contains input and cannot be hidden`,
 		},
 		{
 			name: "hidden ancestor region contains nested input",
@@ -589,6 +589,15 @@ func TestAllocateAxis(t *testing.T) {
 			tracks: []AxisTrack{{Size: Percent(50)}, {Size: Percent(50)}, {Size: Percent(50)}},
 			want:   []int{0, 0, 1},
 		},
+		{
+			name:   "capped fixed and auto shrink together after fraction and percentage minima",
+			extent: 9,
+			tracks: []AxisTrack{
+				{Size: Cells(4), Max: 4}, {Size: AutoSize(), Auto: 10, Max: 4},
+				{Size: Fraction(1), Min: 2}, {Size: Percent(10), Min: 2},
+			},
+			want: []int{2, 3, 2, 2},
+		},
 	}
 
 	for _, test := range tests {
@@ -604,6 +613,35 @@ func TestAllocateAxis(t *testing.T) {
 				t.Fatalf("allocation %v plus gaps exceeds extent %d", got, test.extent)
 			}
 		})
+	}
+}
+
+func BenchmarkAllocateAxis(b *testing.B) {
+	for _, count := range []int{2, 8, 32} {
+		for _, workload := range []struct {
+			name string
+			pair [2]AxisTrack
+		}{
+			{"unconstrained", [2]AxisTrack{{Size: Cells(10)}, {Size: Fraction(1)}}},
+			// Raising every other fraction above its equal share forces fraction shrink.
+			{"shrink_fraction", [2]AxisTrack{{Size: Fraction(1), Min: 25}, {Size: Fraction(1)}}},
+			{"shrink_percent", [2]AxisTrack{{Size: Percent(80)}, {Size: Percent(80)}}},
+			// No earlier kind can absorb the excess; both fixed and auto must shrink.
+			{"shrink_fixed_auto", [2]AxisTrack{{Size: Cells(30)}, {Size: AutoSize(), Auto: 30, Max: 25}}},
+		} {
+			b.Run(workload.name+"/tracks="+strconv.Itoa(count), func(b *testing.B) {
+				tracks := make([]AxisTrack, count)
+				for i := range tracks {
+					tracks[i] = workload.pair[i%2]
+				}
+				b.ReportAllocs()
+				for b.Loop() {
+					if _, err := AllocateAxis(20*count, 0, tracks); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+		}
 	}
 }
 

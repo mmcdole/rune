@@ -6,12 +6,13 @@ import (
 	"testing"
 
 	runetext "github.com/mmcdole/rune/text"
+	"github.com/mmcdole/rune/ui"
 	"github.com/mmcdole/rune/ui/tui/style"
 	"github.com/mmcdole/rune/ui/tui/util"
 )
 
-func newTestBuffer(lines ...string) *ScrollbackBuffer {
-	buf := NewScrollbackBuffer(1000)
+func newTestBuffer(lines ...string) *Scrollback {
+	buf := NewScrollback(1000)
 	for _, l := range lines {
 		buf.Append(l)
 	}
@@ -103,7 +104,7 @@ func TestScanBackwardNonASCIIQuery(t *testing.T) {
 }
 
 func TestScanOlderPagesNearestMatches(t *testing.T) {
-	buf := NewScrollbackBuffer(1000)
+	buf := NewScrollback(1000)
 	for i := 0; i < 300; i++ {
 		buf.Append(fmt.Sprintf("thief %d", i))
 	}
@@ -120,7 +121,7 @@ func TestScanOlderPagesNearestMatches(t *testing.T) {
 	}
 
 	// Exactly one page, all scanned: no older matches remain.
-	buf2 := NewScrollbackBuffer(1000)
+	buf2 := NewScrollback(1000)
 	for i := 0; i < searchPageSize; i++ {
 		buf2.Append("thief")
 	}
@@ -134,11 +135,11 @@ func newTestSearch(lines ...string) *Search {
 	return NewSearch(newTestBuffer(lines...), style.DefaultStyles())
 }
 
-// Preserve the search state while exercising its production Input renderer.
-func searchInput(s *Search, width, height int) *Input {
+// Preserve search state and allocate its Input renderer within the limit.
+func searchInput(s *Search, width, limit int) *Input {
 	in := NewInput(s.styles, s)
 	in.overlay = overlaySearch
-	in.SetSize(width, height)
+	in.SetSize(width, in.MeasureHeight(width, limit))
 	return in
 }
 
@@ -198,7 +199,7 @@ func TestSearchSelectionUsesChronologicalOlderNewerWithoutWrapping(t *testing.T)
 }
 
 func TestSearchStartsAtScrolledOriginRatherThanNewestPage(t *testing.T) {
-	buf := NewScrollbackBuffer(1000)
+	buf := NewScrollback(1000)
 	for i := 0; i < 10; i++ {
 		text := "quiet"
 		if i == 5 {
@@ -215,12 +216,12 @@ func TestSearchStartsAtScrolledOriginRatherThanNewestPage(t *testing.T) {
 	s.Open("thief", SearchScope{OriginSeq: origin, OriginSet: true})
 	m, ok := s.Selected()
 	if !ok || m.Stripped != "nearby thief" {
-		t.Fatalf("selected %+v, want closest older match at the viewport origin", m)
+		t.Fatalf("selected %+v, want closest older match at the output window origin", m)
 	}
 }
 
 func TestSearchLoadsAnotherOlderPageWithoutWrapping(t *testing.T) {
-	buf := NewScrollbackBuffer(1000)
+	buf := NewScrollback(1000)
 	for i := 0; i < 300; i++ {
 		buf.Append(fmt.Sprintf("thief %d", i))
 	}
@@ -273,7 +274,7 @@ func TestSearchViewHeaderAndRows(t *testing.T) {
 	s := newTestSearch("one thief", "two", "THIEF two")
 	s.Open("thief", SearchScope{})
 
-	view := runetext.StripANSI(searchInput(s, 60, 0).View())
+	view := runetext.StripANSI(searchInput(s, 60, ui.MaxLayoutCells).View())
 	if !strings.Contains(view, "2/2") {
 		t.Errorf("header should show newest as the final chronological match, view:\n%s", view)
 	}
@@ -288,7 +289,7 @@ func TestSearchViewHeaderAndRows(t *testing.T) {
 		t.Errorf("footer should explain temporal navigation, view:\n%s", view)
 	}
 	s.SelectOlder()
-	if view := runetext.StripANSI(searchInput(s, 60, 0).View()); !strings.Contains(view, "1/2") {
+	if view := runetext.StripANSI(searchInput(s, 60, ui.MaxLayoutCells).View()); !strings.Contains(view, "1/2") {
 		t.Errorf("count should follow selection, view:\n%s", view)
 	}
 }
@@ -297,7 +298,7 @@ func TestSearchViewNoMatches(t *testing.T) {
 	s := newTestSearch("nothing here")
 	s.Open("zzz", SearchScope{})
 
-	view := runetext.StripANSI(searchInput(s, 60, 0).View())
+	view := runetext.StripANSI(searchInput(s, 60, ui.MaxLayoutCells).View())
 	if !strings.Contains(view, "0/0") || !strings.Contains(view, "No matches") {
 		t.Errorf("empty result view wrong:\n%s", view)
 	}
@@ -326,14 +327,14 @@ func TestConstrainedSearchAlwaysRendersSelectedMatch(t *testing.T) {
 }
 
 func TestSearchViewPartialCount(t *testing.T) {
-	buf := NewScrollbackBuffer(1000)
+	buf := NewScrollback(1000)
 	for i := 0; i < 300; i++ {
 		buf.Append("thief")
 	}
 	s := NewSearch(buf, style.DefaultStyles())
 	s.Open("thief", SearchScope{})
 
-	if view := runetext.StripANSI(searchInput(s, 60, 0).View()); !strings.Contains(view, "250+ matches") {
+	if view := runetext.StripANSI(searchInput(s, 60, ui.MaxLayoutCells).View()); !strings.Contains(view, "250+ matches") {
 		t.Errorf("partial scan should avoid a false ordinal, view:\n%s", view)
 	}
 }
@@ -341,15 +342,15 @@ func TestSearchViewPartialCount(t *testing.T) {
 func TestSearchInputMeasuredHeight(t *testing.T) {
 	s := newTestSearch("thief 1", "thief 2")
 	s.Open("thief", SearchScope{})
-	// 2 results + help + editor + three separators
-	if got := searchInput(s, 60, 0).MeasureHeight(60, 100); got != 7 {
-		t.Errorf("input height = %d, want 7", got)
+	// 2 results + help + query field + one internal separator
+	if got := searchInput(s, 60, ui.MaxLayoutCells).MeasureHeight(60, 100); got != 5 {
+		t.Errorf("input height = %d, want 5", got)
 	}
 	s.Open("", SearchScope{})
 	s.TypeRunes([]rune("zzz"))
-	// Placeholder + help + editor + three separators
-	if got := searchInput(s, 60, 0).MeasureHeight(60, 100); got != 6 {
-		t.Errorf("input height = %d, want 6", got)
+	// Placeholder + help + query field + one internal separator
+	if got := searchInput(s, 60, ui.MaxLayoutCells).MeasureHeight(60, 100); got != 4 {
+		t.Errorf("input height = %d, want 4", got)
 	}
 }
 
@@ -360,14 +361,14 @@ func TestSearchInputMeasuredHeightCapsAtFiveResults(t *testing.T) {
 	}
 	s := newTestSearch(lines...)
 	s.Open("thief", SearchScope{})
-	// Five results + help + editor + three separators
-	if got := searchInput(s, 60, 0).MeasureHeight(60, 100); got != 10 {
-		t.Errorf("input height = %d, want 10", got)
+	// Five results + help + query field + one internal separator
+	if got := searchInput(s, 60, ui.MaxLayoutCells).MeasureHeight(60, 100); got != 8 {
+		t.Errorf("input height = %d, want 8", got)
 	}
 }
 
 func TestSearchSeqStableAcrossEviction(t *testing.T) {
-	buf := NewScrollbackBuffer(5)
+	buf := NewScrollback(5)
 	buf.Append("the thief")
 	for i := 0; i < 4; i++ {
 		buf.Append("filler")

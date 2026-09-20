@@ -3,6 +3,7 @@ package ui
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -29,11 +30,11 @@ const (
 	LayoutTypeBar       = "bar"
 
 	// OutputPaneName is the pre-created system pane that receives the MUD
-	// transcript, local echo, and prompts.
+	// output, local echo, and prompts.
 	OutputPaneName = "output"
 )
 
-// PaneBorder is the closed set of pane-frame modes. The zero value has
+// PaneBorder is the closed set of pane border modes. The zero value has
 // PaneBorderFull semantics, matching an omitted border field.
 type PaneBorder string
 
@@ -170,7 +171,7 @@ func NormalizeLayoutTree(tree LayoutTree) (LayoutTree, error) {
 // along the parent's axis. The root has no parent and cannot carry those
 // constraints or visibility state. Gap and Dividers are container-only: Gap
 // reserves cells between active children, and Dividers draws a rule between
-// them when their frames do not already provide one. Hidden is the
+// them when their borders do not already provide one. Hidden is the
 // local hidden state: valid on identified regions and pane
 // placements (name is the runtime handle for the latter). Title and Border
 // are pane-only; SeparatorChar is separator-only. A non-nil empty Title
@@ -325,7 +326,7 @@ var ErrLayoutTooSmall = errors.New("layout extent is smaller than its minimum si
 
 // ValidateLayoutTree validates structural shape and constraints. Widget
 // registration and application-level requirements, such as the mandatory input
-// composer, belong to the loader.
+// input widget, belong to the loader.
 func ValidateLayoutTree(tree LayoutTree) error {
 	state := layoutValidation{
 		ids:       make(map[string]string),
@@ -470,7 +471,7 @@ func validateLeafFields(node LayoutNode, path string) error {
 	return nil
 }
 
-// validateRegionContents keeps the input composer reachable. A region may
+// validateRegionContents keeps the input widget reachable. A region may
 // carry an id while it contains input, so ids stay usable as plain handles,
 // but it cannot be declared hidden while it does. The region API refuses to
 // hide such a region at runtime for the same reason.
@@ -491,8 +492,8 @@ func validateRegionContents(node LayoutNode, path string) (containsInput bool, e
 }
 
 // RegionContainsInput reports whether the identified region holds the input
-// composer at any depth. Such a region exists and may be shown or queried,
-// but hiding it would make the composer unreachable.
+// input widget at any depth. Such a region exists and may be shown or queried,
+// but hiding it would make the input widget unreachable.
 func (t LayoutTree) RegionContainsInput(id string) (containsInput, found bool) {
 	if id == "" {
 		return false, false
@@ -715,15 +716,11 @@ func shrinkTracks(sizes []int, tracks []AxisTrack, amount int, kinds ...LayoutSi
 	if amount <= 0 {
 		return 0
 	}
-	wanted := make(map[LayoutSizeKind]bool, len(kinds))
-	for _, kind := range kinds {
-		wanted[kind] = true
-	}
 	indices := make([]int, 0, len(tracks))
 	capacities := make([]int, 0, len(tracks))
 	totalCapacity := 0
 	for i, track := range tracks {
-		if !wanted[track.Size.Kind] || sizes[i] <= track.Min {
+		if !slices.Contains(kinds, track.Size.Kind) || sizes[i] <= track.Min {
 			continue
 		}
 		capacity := sizes[i] - track.Min

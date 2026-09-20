@@ -1,6 +1,9 @@
 # Large CBOR encoding: measured bottlenecks and optimization options
 
-Status: proposal
+Status: historical investigation; the native CBOR option remains unimplemented.
+The measurements and gopher-lua-specific implementation suggestions below
+predate the switch to Lunar. Rebaseline against the current Lunar/LuaJIT
+backends before selecting performance work.
 
 ## Problem
 
@@ -160,8 +163,8 @@ collections. These figures are graph deltas from the loaded wrapper, not estimat
 The clocks and memory owners differ across the Go and native processes, so these are
 investigation measurements rather than a portable benchmark score. The order-of-
 magnitude retained-memory difference is nevertheless unambiguous. The runtime
-replacement implications are developed separately in
-[Replacing gopher-lua](lua-runtime-replacement.md).
+replacement has since shipped; current backend ownership is documented in
+[Architecture](../architecture.md).
 
 ### Why gopher-lua retains so much
 

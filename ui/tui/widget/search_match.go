@@ -21,7 +21,7 @@ type rowMatcher func(stripped string) [][2]int
 // same row would re-center the same text.
 type SearchMatch struct {
 	Seq      uint64          // absolute row sequence number
-	Ranges   []util.ColRange // occurrences as visible columns (viewport splice)
+	Ranges   []util.ColRange // occurrences as visible columns (output window splice)
 	ByteRuns [][2]int        // occurrences as byte offsets into Stripped (list render)
 	Stripped string          // ANSI-stripped row text
 }
@@ -130,7 +130,7 @@ func foldEq(a, b rune) bool {
 	return false
 }
 
-func matchBufferRow(buf *ScrollbackBuffer, index int, match rowMatcher) (SearchMatch, bool) {
+func matchBufferRow(buf *Scrollback, index int, match rowMatcher) (SearchMatch, bool) {
 	row := buf.At(index)
 	stripped := row
 	if strings.IndexByte(row, 0x1b) >= 0 {
@@ -143,7 +143,7 @@ func matchBufferRow(buf *ScrollbackBuffer, index int, match rowMatcher) (SearchM
 
 	m := SearchMatch{Seq: buf.Seq(index), ByteRuns: runs, Stripped: stripped}
 	for _, r := range runs {
-		// Columns measured the same way the viewport splice cuts
+		// Columns measured the same way the output window splice cuts
 		// (ansi.StringWidth), so wide runes stay aligned.
 		start := ansi.StringWidth(stripped[:r[0]])
 		end := start + ansi.StringWidth(stripped[r[0]:r[1]])
@@ -152,7 +152,7 @@ func matchBufferRow(buf *ScrollbackBuffer, index int, match rowMatcher) (SearchM
 	return m, true
 }
 
-func indexAtOrBefore(buf *ScrollbackBuffer, seq uint64) int {
+func indexAtOrBefore(buf *Scrollback, seq uint64) int {
 	if buf.Count() == 0 || seq < buf.Seq(0) {
 		return -1
 	}
@@ -170,7 +170,7 @@ func indexAtOrBefore(buf *ScrollbackBuffer, seq uint64) int {
 // scanOlder collects the nearest matches at-or-older-than throughSeq and
 // returns them in chronological order. more reports a confirmed additional
 // match beyond the returned page, not merely unscanned buffer rows.
-func scanOlder(buf *ScrollbackBuffer, match rowMatcher, throughSeq uint64, limit int) (matches []SearchMatch, more bool) {
+func scanOlder(buf *Scrollback, match rowMatcher, throughSeq uint64, limit int) (matches []SearchMatch, more bool) {
 	for i := indexAtOrBefore(buf, throughSeq); i >= 0; i-- {
 		m, ok := matchBufferRow(buf, i, match)
 		if !ok {
@@ -192,7 +192,7 @@ func scanOlder(buf *ScrollbackBuffer, match rowMatcher, throughSeq uint64, limit
 
 // scanNewer collects the nearest matches strictly newer than afterSeq,
 // stopping at the frozen search-session tail.
-func scanNewer(buf *ScrollbackBuffer, match rowMatcher, afterSeq, throughSeq uint64, limit int) (matches []SearchMatch, more bool) {
+func scanNewer(buf *Scrollback, match rowMatcher, afterSeq, throughSeq uint64, limit int) (matches []SearchMatch, more bool) {
 	end := indexAtOrBefore(buf, throughSeq)
 	if end < 0 {
 		return nil, false

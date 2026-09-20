@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
 	"github.com/mmcdole/rune/input"
 	"github.com/mmcdole/rune/ui"
 )
@@ -20,8 +21,8 @@ func TestDraftModeTogglePreservesEditingState(t *testing.T) {
 			eventCount := len(h.events)
 			for range 2 {
 				h.ctl.HandleKey(tea.KeyPressMsg{Code: 'v', Mod: tea.ModAlt})
-				if !h.ctl.input.IsComposing() {
-					t.Fatal("explicit mode switch must open and retain the composer")
+				if !h.ctl.input.DraftEditorActive() {
+					t.Fatal("explicit mode switch must open and retain the draft editor")
 				}
 				if h.ctl.input.Value() != draft || h.ctl.input.Position() != 3 || !h.ctl.input.Selected() {
 					t.Fatal("mode switch changed text, cursor, or selection")
@@ -136,7 +137,7 @@ func TestRejectedCommandPreservesDraftAndCanBeSentVerbatim(t *testing.T) {
 	if m.input.Value() != "north\x1blook" || m.input.SubmissionMode() != input.ModeCommand {
 		t.Fatal("invalid command lost draft")
 	}
-	if m.output.buffer.Count() == 0 || !strings.Contains(m.output.buffer.At(0), "Command not run") {
+	if m.output.Scrollback().Count() == 0 || !strings.Contains(m.output.Scrollback().At(0), "Command not run") {
 		t.Fatal("missing rejection feedback")
 	}
 	for len(events) > 0 {
@@ -152,17 +153,16 @@ func TestRejectedCommandPreservesDraftAndCanBeSentVerbatim(t *testing.T) {
 	}
 }
 
-func TestComposerEditorHintTracksBindingUpdates(t *testing.T) {
+func TestExternalEditorHintTracksBindingUpdates(t *testing.T) {
 	m := newBareModel(t)
 	m.input.SetSize(100, 0)
 	m.inputCtl.HandlePaste("first\nsecond")
 	for _, available := range []bool{false, true, false} {
 		m.Update(ui.UpdateBindsMsg{"ctrl+e": {Action: "input.open_editor", Enabled: available}})
+		m.input.SetSize(100, 4)
 		var labels string
-		for _, rule := range m.input.Rules(100, 4) {
-			for _, label := range rule.Labels {
-				labels += label.Text
-			}
+		for _, label := range m.input.Labels() {
+			labels += label.Text
 		}
 		if strings.Contains(labels, "Ctrl+E editor") != available {
 			t.Fatalf("editor hint with binding=%v: %q", available, labels)
@@ -178,12 +178,12 @@ func TestEscapeConfirmationDoesNotConsumeSubmit(t *testing.T) {
 	if len(h.submitted) != 1 || h.submitted[0] != input.Verbatim("first\nsecond") {
 		t.Fatalf("Enter after Escape = %+v", h.submitted)
 	}
-	if h.ctl.input.IsComposing() || h.ctl.input.Value() != "" {
-		t.Fatal("accepted submission retained composer")
+	if h.ctl.input.DraftEditorActive() || h.ctl.input.Value() != "" {
+		t.Fatal("accepted submission retained draft editor")
 	}
 }
 
-func TestComposerWrapDoesNotSplitSlashCommand(t *testing.T) {
+func TestDraftEditorWrapDoesNotSplitSlashCommand(t *testing.T) {
 	for _, prefix := range []string{"/lua rune.echo('", "/echo "} {
 		t.Run(prefix, func(t *testing.T) {
 			h := newControllerHarness()
@@ -193,7 +193,7 @@ func TestComposerWrapDoesNotSplitSlashCommand(t *testing.T) {
 				draft += "')"
 			}
 			h.ctl.SetSubmission(input.Command(draft))
-			// Open the composer and return to Command mode at a narrow width.
+			// Open the draft editor and return to Command mode at a narrow width.
 			h.ctl.HandleKey(tea.KeyPressMsg{Code: 'v', Mod: tea.ModAlt})
 			h.ctl.HandleKey(tea.KeyPressMsg{Code: 'v', Mod: tea.ModAlt})
 			if h.ctl.input.MeasureHeight(30, 30) <= 3 {

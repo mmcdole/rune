@@ -12,7 +12,7 @@ import (
 // placement state owned by the layout tree, never by the buffer.
 //
 // Lines are stored as written (logical lines) and soft-wrapped to the
-// requested width when ContentRows is called, so a resize re-fits
+// allocated width when View is called, so a resize re-fits
 // everything. Scrolling is tracked as a logical-line offset from the
 // newest line; while scrolled the view stays anchored on the same
 // history and new writes are counted for the title indicator.
@@ -34,11 +34,7 @@ func NewPane(name string) *Pane {
 
 func (p *Pane) SetSize(width, height int) { p.width, p.height = width, height }
 
-func (p *Pane) Name() string { return p.name }
-
 func (p *Pane) MinimumSize() image.Point { return image.Point{} }
-
-func (p *Pane) View() string { return strings.Join(p.ContentRows(p.width, p.height), "\n") }
 
 // MeasureHeight counts wrapped rows only until the layout's height budget is met.
 func (p *Pane) MeasureHeight(width, limit int) int {
@@ -66,14 +62,15 @@ func (p *Pane) Title() string {
 	return p.name + " · scroll"
 }
 
-// ContentRows returns exactly height rows of wrapped content for the current
+// View returns exactly the allocated height of wrapped content for the current
 // scroll position. The window is anchored at the logical line end =
 // len(lines)-offset; when a deep scroll leaves it underfull, it extends
 // forward so the pane stays full whenever the buffer allows. Visibility is a
 // layout concern and does not affect the returned content.
-func (p *Pane) ContentRows(width, height int) []string {
+func (p *Pane) View() string {
+	width, height := p.width, p.height
 	if height <= 0 {
-		return nil
+		return ""
 	}
 
 	end := len(p.lines) - p.offset
@@ -81,26 +78,24 @@ func (p *Pane) ContentRows(width, height int) []string {
 		end = 0
 	}
 
-	var rows []string
-	for i := end - 1; i >= 0 && len(rows) < height; i-- {
-		rows = append(util.WrapLine(p.lines[i], width), rows...)
+	rows := make([]string, height)
+	start := height
+	for i := end - 1; i >= 0 && start > 0; i-- {
+		wrapped := util.WrapLine(p.lines[i], width)
+		n := min(start, len(wrapped))
+		start -= n
+		copy(rows[start:], wrapped[len(wrapped)-n:])
+	}
+	if start > 0 {
+		// Deep scrolls extend forward to fill the window; sparse panes pad below.
+		used := copy(rows, rows[start:])
+		clear(rows[used:])
+		for i := end; i < len(p.lines) && used < height; i++ {
+			used += copy(rows[used:], util.WrapLine(p.lines[i], width))
+		}
 	}
 
-	if len(rows) >= height {
-		rows = rows[len(rows)-height:]
-	} else {
-		for i := end; i < len(p.lines) && len(rows) < height; i++ {
-			rows = append(rows, util.WrapLine(p.lines[i], width)...)
-		}
-		if len(rows) > height {
-			rows = rows[:height]
-		}
-	}
-
-	for len(rows) < height {
-		rows = append(rows, "")
-	}
-	return rows
+	return strings.Join(rows, "\n")
 }
 
 // Write appends text as logical lines, one per line break. While

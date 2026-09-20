@@ -5,10 +5,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
+
 	runetext "github.com/mmcdole/rune/text"
 	"github.com/mmcdole/rune/ui"
 	"github.com/mmcdole/rune/ui/tui/style"
-	"github.com/mmcdole/rune/ui/tui/util"
 )
 
 func newTestPicker(maxVisible int, texts ...string) *Picker {
@@ -21,12 +22,12 @@ func newTestPicker(maxVisible int, texts ...string) *Picker {
 	return p
 }
 
-// Render through Input, the production owner of picker composition and sizing.
-func pickerInput(p *Picker, width, height int) *Input {
+// Measure and allocate Input within the supplied limit before rendering.
+func pickerInput(p *Picker, width, limit int) *Input {
 	in := newTestInput(width)
 	in.picker = p
 	in.overlay = overlayPickerModal
-	in.SetSize(width, height)
+	in.SetSize(width, in.MeasureHeight(width, limit))
 	return in
 }
 
@@ -38,14 +39,14 @@ func TestPickerFilterNarrowsMatches(t *testing.T) {
 	if !ok || sel.Text != "banana" {
 		t.Fatalf("Selected = %v (%v), want banana", sel, ok)
 	}
-	view := runetext.StripANSI(pickerInput(p, 60, 0).View())
+	view := runetext.StripANSI(pickerInput(p, 60, ui.MaxLayoutCells).View())
 	if strings.Contains(view, "apple") || strings.Contains(view, "cherry") {
 		t.Errorf("filtered view should only show matches, got %q", view)
 	}
 
 	// Clearing the query restores every item.
 	p.Filter("")
-	view = runetext.StripANSI(pickerInput(p, 60, 0).View())
+	view = runetext.StripANSI(pickerInput(p, 60, ui.MaxLayoutCells).View())
 	for _, want := range []string{"apple", "banana", "cherry"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("unfiltered view missing %q", want)
@@ -60,7 +61,7 @@ func TestPickerNoMatchesShowsEmptyText(t *testing.T) {
 	if _, ok := p.Selected(); ok {
 		t.Error("Selected should report no item when nothing matches")
 	}
-	if view := runetext.StripANSI(pickerInput(p, 60, 0).View()); !strings.Contains(view, "No matches") {
+	if view := runetext.StripANSI(pickerInput(p, 60, ui.MaxLayoutCells).View()); !strings.Contains(view, "No matches") {
 		t.Errorf("empty view should show placeholder, got %q", view)
 	}
 }
@@ -89,7 +90,7 @@ func TestPickerScrollWindowFollowsSelection(t *testing.T) {
 		p.SelectDown()
 	}
 	// Selection is item06; the 3-row window must have scrolled to it.
-	view := runetext.StripANSI(pickerInput(p, 60, 0).View())
+	view := runetext.StripANSI(pickerInput(p, 60, ui.MaxLayoutCells).View())
 	if !strings.Contains(view, "item06") {
 		t.Errorf("window should follow the selection, got %q", view)
 	}
@@ -115,21 +116,21 @@ func TestPickerFilterClampsSelection(t *testing.T) {
 
 func TestPickerInputMeasuredHeight(t *testing.T) {
 	p := newTestPicker(5, "a", "b", "c")
-	// 3 results + editor + three separators.
-	if got := pickerInput(p, 60, 0).MeasureHeight(60, 100); got != 7 {
-		t.Errorf("input height = %d, want 7", got)
+	// 3 results + query field + one internal separator.
+	if got := pickerInput(p, 60, ui.MaxLayoutCells).MeasureHeight(60, 100); got != 5 {
+		t.Errorf("input height = %d, want 5", got)
 	}
 
-	p.Filter("zzz") // empty: placeholder row + editor and separators
-	if got := pickerInput(p, 60, 0).MeasureHeight(60, 100); got != 5 {
-		t.Errorf("empty input height = %d, want 5", got)
+	p.Filter("zzz") // empty: placeholder row + query field and separators
+	if got := pickerInput(p, 60, ui.MaxLayoutCells).MeasureHeight(60, 100); got != 3 {
+		t.Errorf("empty input height = %d, want 3", got)
 	}
 
 	p.SetHeader("Pick: ")
 	p.Filter("")
-	// A label shares the existing editor row; it adds no height.
-	if got := pickerInput(p, 60, 0).MeasureHeight(60, 100); got != 7 {
-		t.Errorf("labeled input height = %d, want 7", got)
+	// A label shares the existing query field row; it adds no height.
+	if got := pickerInput(p, 60, ui.MaxLayoutCells).MeasureHeight(60, 100); got != 5 {
+		t.Errorf("labeled input height = %d, want 5", got)
 	}
 }
 
@@ -139,7 +140,7 @@ func TestPickerRendersUntrustedTextAsOneSafeRow(t *testing.T) {
 	p.SetItems([]ui.PickerItem{{Text: raw, Description: "desc\x00\u202e", Value: raw}})
 	p.Filter("\n\x1b")
 
-	in := pickerInput(p, 32, 0)
+	in := pickerInput(p, 32, ui.MaxLayoutCells)
 	view := in.View()
 	plain := runetext.StripANSI(view)
 	if strings.Contains(view, "\x1b]52") || strings.ContainsRune(view, '\a') || strings.ContainsRune(view, '\t') {
@@ -154,7 +155,7 @@ func TestPickerRendersUntrustedTextAsOneSafeRow(t *testing.T) {
 		t.Fatalf("rendered rows = %d, measured height = %d: %q", rows, want, plain)
 	}
 	for n, row := range strings.Split(view, "\n") {
-		if width := util.VisibleLen(row); width > 32 {
+		if width := ansi.StringWidth(row); width > 32 {
 			t.Fatalf("row %d width = %d, exceeds input width 32: %q", n, width, row)
 		}
 	}

@@ -2,6 +2,7 @@ package util
 
 import (
 	"github.com/charmbracelet/x/ansi"
+
 	"github.com/mmcdole/rune/text"
 )
 

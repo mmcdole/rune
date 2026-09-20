@@ -1,112 +1,70 @@
 package widget
 
-import (
-	"image"
-	"strings"
+import "image"
 
-	"github.com/charmbracelet/x/ansi"
-	"github.com/mmcdole/rune/input"
-)
+// InputLayoutState is a comparable description of input's geometry dependencies.
+// Cursor, selection, labels, and single-line text do not change geometry.
+// Draft edits invalidate all measured widths, not just the current allocation.
+type InputLayoutState struct {
+	overlay  inputOverlay
+	draft    *draftEditor
+	revision uint64
+	results  int
+}
 
-// inputLayout describes the picker and command field separately. Both painting
-// and shared-boundary planning use these same positions, including labels.
+func (i *Input) LayoutState() InputLayoutState {
+	state := InputLayoutState{overlay: i.overlay}
+	if i.SearchActive() {
+		state.results = i.search.resultHeight()
+		return state
+	}
+	if i.PickerActive() {
+		state.results = i.picker.resultHeight()
+		if !i.PickerInline() {
+			return state
+		}
+	}
+	state.draft = i.draftEditor
+	if state.draft != nil {
+		state.revision = state.draft.revision
+	}
+	return state
+}
+
+// inputLayout contains only content geometry. The surrounding layout owns
+// outside borders; an overlay has one internal separator above its query.
 type inputLayout struct {
-	height         int
-	pickerHeight   int
-	results        image.Rectangle
-	help           int
-	body           image.Rectangle
-	rules          []Rule
-	header, footer int
+	results   image.Rectangle
+	help      int
+	body      image.Rectangle
+	separator int // -1 when there is no room for a separator
 }
 
 func (i *Input) layout(width, height int) inputLayout {
-	if height <= 0 {
-		height = i.MeasureHeight(width, 1<<14)
-	}
-	p := inputLayout{height: height, help: -1, header: -1, footer: -1}
-	if width <= 0 {
+	p := inputLayout{help: -1, separator: -1}
+	if width <= 0 || height <= 0 {
 		return p
 	}
+	top := 0
 	if i.PickerActive() || i.SearchActive() {
-		// One editor stays at the bottom. Suggestions/results occupy the
-		// rows above it; Input owns their shared separators, with no box.
-		fieldHeight := min(3, max(1, height-1))
-		p.pickerHeight = max(0, height-fieldHeight)
-		start := 0
-		if p.pickerHeight > 1 {
-			p.rules = append(p.rules, Rule{At: 0, To: width})
-			start = 1
+		top = height - 1 // preserve one editable row below the results
+		end := top
+		if height >= 3 {
+			end--
+			p.separator = end
 		}
-		p.results = image.Rect(0, start, width, p.pickerHeight)
+		p.results = image.Rect(0, 0, width, end)
 		if i.SearchActive() && p.results.Dy() > 1 {
 			p.results.Max.Y--
 			p.help = p.results.Max.Y
 		}
 	}
-	top, bottom := p.pickerHeight, height
-	fieldHeight := bottom - top
-	if i.composer != nil && !i.SearchActive() && (!i.PickerActive() || i.PickerInline()) {
-		if fieldHeight >= 2 {
-			p.header = top
-			p.rules = append(p.rules, Rule{At: top, To: width})
-			top++
-		}
-		if fieldHeight >= 3 {
-			bottom--
-			p.footer = bottom
-			p.rules = append(p.rules, Rule{At: bottom, To: width})
-		}
-	} else {
-		if fieldHeight >= 3 {
-			p.rules = append(p.rules, Rule{At: top, To: width})
-			top++
-		}
-		if fieldHeight >= 2 {
-			bottom--
-			p.rules = append(p.rules, Rule{At: bottom, To: width})
-		}
-	}
-	p.body = image.Rect(0, top, width, bottom)
+	p.body = image.Rect(0, top, width, height)
 	return p
 }
 
-// Rules supplies compositor-owned decoration around View's content. Label
-// styling is deferred until painting; layout itself computes only geometry.
-func (i *Input) Rules(width, height int) []Rule {
-	if width <= 0 || height <= 0 {
-		return nil
-	}
-	plan := i.layout(width, height)
-	if i.composer != nil && !i.SearchActive() && (!i.PickerActive() || i.PickerInline()) {
-		header, toggle, footer := i.composeLabels(strings.Count(i.Value(), "\n")+1, width-4)
-		for n := range plan.rules {
-			rule := &plan.rules[n]
-			if rule.Vertical {
-				continue
-			}
-			switch rule.At {
-			case plan.header:
-				modeStyle := i.styles.InputText
-				if i.SubmissionMode() == input.ModeVerbatim {
-					modeStyle = i.styles.Warning
-				}
-				if header != "" {
-					rule.Labels = append(rule.Labels, RuleLabel{Text: " " + header + " ", At: 1, Style: modeStyle})
-				}
-				if toggle != "" {
-					rule.Labels = append(rule.Labels, RuleLabel{Text: " " + toggle + " ", At: width - 3 - ansi.StringWidth(toggle), Style: i.styles.Muted})
-				}
-			case plan.footer:
-				hintStyle := i.styles.Muted
-				if i.discardPending {
-					hintStyle = i.styles.Warning
-				}
-				if footer != "" {
-					rule.Labels = append(rule.Labels, RuleLabel{Text: " " + footer + " ", At: 1, Style: hintStyle})
-				}
-			}
-		}
-	}
-	return plan.rules
+// SeparatorRow is the internal rule between results and editable content.
+// Outside borders are not part of the widget's allocated content rectangle.
+func (i *Input) SeparatorRow(width, height int) int {
+	return i.layout(width, height).separator
 }

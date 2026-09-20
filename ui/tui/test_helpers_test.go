@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
 	"github.com/mmcdole/rune/ui"
 )
 
@@ -40,11 +41,11 @@ func newBareModel(t *testing.T) *Model {
 
 func wantScrollback(t *testing.T, m *Model, want ...string) {
 	t.Helper()
-	if got := m.output.buffer.Count(); got != len(want) {
+	if got := m.output.Scrollback().Count(); got != len(want) {
 		t.Fatalf("scrollback has %d rows, want %d", got, len(want))
 	}
 	for i, w := range want {
-		if got := m.output.buffer.At(i); got != w {
+		if got := m.output.Scrollback().At(i); got != w {
 			t.Fatalf("scrollback[%d] = %q, want %q", i, got, w)
 		}
 	}

@@ -1,0 +1,2 @@
+# Render snapshots compare serialized rows byte-for-byte on every platform.
+ui/tui/testdata/render/*.golden text eol=lf

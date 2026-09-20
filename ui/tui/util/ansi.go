@@ -6,11 +6,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// VisibleLen returns the visible display width of a string (excluding ANSI codes).
-func VisibleLen(s string) int {
-	return ansi.StringWidth(s)
-}
-
 // SplitLines splits text into lines, treating lone CR and CRLF as
 // line breaks.
 func SplitLines(s string) []string {
@@ -28,16 +23,16 @@ func SplitLines(s string) []string {
 // byte-length check is a fast bound: a rune's display width never
 // exceeds its byte count.
 func WrapLine(line string, width int) []string {
-	if width < 1 || len(line) <= width || VisibleLen(line) <= width {
+	if width < 1 || len(line) <= width || ansi.StringWidth(line) <= width {
 		return []string{line}
 	}
 	var rows []string
 	for _, row := range strings.Split(ansi.Wrap(line, width, ""), "\n") {
-		if VisibleLen(row) <= width {
+		if ansi.StringWidth(row) <= width {
 			rows = append(rows, row)
 		} else {
 			// The ANSI word wrapper can split ASCII-led graphemes (keycap
-			// emoji). Enforce the compositor's cell budget on those rows.
+			// emoji). Enforce the renderer's cell budget on those rows.
 			rows = append(rows, wrapCells(row, width)...)
 		}
 	}
@@ -78,7 +73,7 @@ const tabStop = 8
 
 // ExpandTabs replaces each tab with spaces up to the next 8-column tab
 // stop, measured in visible cells (ANSI sequences are zero-width). A raw
-// \t must never reach the renderer: bubbletea repaints only rows that
+// \t must never reach the renderer: bubbletea rerenders only rows that
 // changed, and a tab makes the terminal skip cells without erasing them,
 // resurrecting content from the previous frame as ghost columns.
 func ExpandTabs(line string) string {
@@ -95,10 +90,18 @@ func ExpandTabs(line string) string {
 		}
 		seg := line[:i]
 		b.WriteString(seg)
-		col += VisibleLen(seg)
+		col += ansi.StringWidth(seg)
 		pad := tabStop - col%tabStop
 		b.WriteString(strings.Repeat(" ", pad))
 		col += pad
 		line = line[i+1:]
 	}
+}
+
+// ClipRow truncates a styled row to the available terminal cells.
+func ClipRow(s string, width int) string {
+	if width < 1 || len(s) <= width || ansi.StringWidth(s) <= width {
+		return s
+	}
+	return ansi.Truncate(s, width, "")
 }

@@ -6,46 +6,47 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
 	"github.com/mmcdole/rune/ui"
 )
 
-// newThrottledModel builds a sized model with the production compose interval,
+// newThrottledModel builds a sized model with the production render interval,
 // then ends the throttle window its setup started so each test starts idle.
 func newThrottledModel(t testing.TB) *Model {
 	t.Helper()
 	m := NewModel(make(chan ui.UIEvent, 4096))
-	m.composeInterval = defaultComposeInterval
+	m.renderInterval = defaultRenderInterval
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	m.Update(composeTick{})
-	if m.throttled || m.stale {
-		t.Fatal("test setup did not settle the compose throttle")
+	m.Update(renderTick{})
+	if m.throttled || m.dirty {
+		t.Fatal("test setup did not settle the render throttle")
 	}
 	return m
 }
 
-// TestFirstChangeComposesImmediately verifies the idle->hot transition: a
+// TestFirstChangeRendersImmediately verifies the idle->hot transition: a
 // change arriving while unthrottled is on screen right away (not parked
 // until a tick) and starts a throttle window for what follows.
-func TestFirstChangeComposesImmediately(t *testing.T) {
+func TestFirstChangeRendersImmediately(t *testing.T) {
 	m := newThrottledModel(t)
-	before := m.compositions
+	before := m.renders
 
 	_, cmd := m.Update(ui.PrintLineMsg("hello"))
-	if m.compositions != before+1 || !strings.Contains(m.View().Content, "hello") {
-		t.Fatal("first line was not composed immediately")
+	if m.renders != before+1 || !strings.Contains(m.View().Content, "hello") {
+		t.Fatal("first line was not rendered immediately")
 	}
 	if cmd == nil || !m.throttled {
 		t.Fatal("first change did not start a throttle window")
 	}
 }
 
-// TestThrottledChangesComposeOnce verifies every message type is throttled
+// TestThrottledChangesRenderOnce verifies every message type is throttled
 // by the same rule: state applies at once, the screen waits for the tick.
-func TestThrottledChangesComposeOnce(t *testing.T) {
+func TestThrottledChangesRenderOnce(t *testing.T) {
 	m := newThrottledModel(t)
 	m.Update(ui.PrintLineMsg("first-visible"))
 	first := m.View().Content
-	composed := m.compositions
+	rendered := m.renders
 
 	for _, msg := range []tea.Msg{
 		ui.PrintLineMsg("server-line"),
@@ -63,14 +64,14 @@ func TestThrottledChangesComposeOnce(t *testing.T) {
 			t.Fatalf("%T changed the screen while throttled", msg)
 		}
 	}
-	if m.compositions != composed {
-		t.Fatalf("composed %d times inside one interval", m.compositions-composed)
+	if m.renders != rendered {
+		t.Fatalf("rendered %d times inside one interval", m.renders-rendered)
 	}
 	wantScrollback(t, m, "first-visible", "server-line", "echo-line", "committed-prompt")
 
-	_, cmd := m.Update(composeTick{})
-	if m.compositions != composed+1 {
-		t.Fatalf("tick composed %d times, want 1", m.compositions-composed)
+	_, cmd := m.Update(renderTick{})
+	if m.renders != rendered+1 {
+		t.Fatalf("tick rendered %d times, want 1", m.renders-rendered)
 	}
 	if cmd == nil {
 		t.Fatal("tick with pending changes did not re-arm")
@@ -91,19 +92,19 @@ func TestTickChainStopsWhenIdle(t *testing.T) {
 	m.Update(ui.PrintLineMsg("line 1"))
 	m.Update(ui.PrintLineMsg("line 2"))
 
-	if _, cmd := m.Update(composeTick{}); cmd == nil {
+	if _, cmd := m.Update(renderTick{}); cmd == nil {
 		t.Fatal("tick with pending changes did not re-arm")
 	}
-	composed := m.compositions
-	if _, cmd := m.Update(composeTick{}); cmd != nil {
+	rendered := m.renders
+	if _, cmd := m.Update(renderTick{}); cmd != nil {
 		t.Fatal("tick with nothing pending did not stop the chain")
 	}
-	if m.throttled || m.compositions != composed {
-		t.Fatal("idle tick left the throttle on or composed again")
+	if m.throttled || m.renders != rendered {
+		t.Fatal("idle tick left the throttle on or rendered again")
 	}
 }
 
-// TestThrottleNeverShowsStaleGeometry verifies a change that was never composed
+// TestThrottleNeverShowsStaleGeometry verifies a change that was never rendered
 // survives messages that arrive inside the same interval, including a resize
 // and a clear.
 func TestThrottleNeverShowsStaleGeometry(t *testing.T) {
@@ -111,13 +112,13 @@ func TestThrottleNeverShowsStaleGeometry(t *testing.T) {
 	m.Update(ui.PrintLineMsg("first-visible"))
 	m.Update(tea.WindowSizeMsg{Width: 40, Height: 12})
 	m.Update(ui.PrintLineMsg("after-resize"))
-	m.Update(composeTick{})
+	m.Update(renderTick{})
 	assertExactBlock(t, m.View().Content, 40, 12)
 
 	m.Update(ui.PaneClearMsg{Name: ui.OutputPaneName})
-	m.Update(composeTick{})
+	m.Update(renderTick{})
 	if strings.Contains(m.View().Content, "first-visible") {
-		t.Fatal("clear left stale rows on screen")
+		t.Fatal("clear left dirty rows on screen")
 	}
 }
 
@@ -141,13 +142,13 @@ func drainScrollReports(events chan ui.UIEvent) (reports []ui.ScrollStateChanged
 func TestScrollStateReportsOnlyChangesOncePerInterval(t *testing.T) {
 	events := make(chan ui.UIEvent, 4096)
 	m := NewModel(events)
-	m.composeInterval = defaultComposeInterval
+	m.renderInterval = defaultRenderInterval
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	for range 100 {
 		m.Update(ui.PrintLineMsg("history"))
 	}
-	m.Update(composeTick{})
-	m.Update(composeTick{})
+	m.Update(renderTick{})
+	m.Update(renderTick{})
 	if got := drainScrollReports(events); len(got) != 0 {
 		t.Fatalf("live output posted unchanged scroll state: %v", got)
 	}
@@ -162,7 +163,7 @@ func TestScrollStateReportsOnlyChangesOncePerInterval(t *testing.T) {
 	if got := drainScrollReports(events); len(got) != 0 {
 		t.Fatalf("lines posted %d scroll reports while throttled, want 0", len(got))
 	}
-	m.Update(composeTick{})
+	m.Update(renderTick{})
 	if got := drainScrollReports(events); len(got) != 1 || got[0].NewLines != 50 {
 		t.Fatalf("tick reported %v, want one report of 50 new lines", got)
 	}
@@ -173,39 +174,115 @@ func TestScrollStateReportsOnlyChangesOncePerInterval(t *testing.T) {
 func TestScrollStateRetriesAfterFullQueue(t *testing.T) {
 	events := make(chan ui.UIEvent, 1)
 	m := NewModel(events)
-	m.composeInterval = defaultComposeInterval
+	m.renderInterval = defaultRenderInterval
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24}) // fills the queue
 	for range 100 {
 		m.Update(ui.PrintLineMsg("history"))
 	}
-	m.Update(composeTick{})
-	m.Update(composeTick{})
+	m.Update(renderTick{})
+	m.Update(renderTick{})
 
 	m.Update(ui.PaneScrollUpMsg{Name: ui.OutputPaneName, Lines: 5})
-	if _, cmd := m.Update(composeTick{}); cmd == nil {
-		t.Fatal("tick chain ended with scroll state still unreported")
+	rendered := m.renders
+	for range 3 {
+		if _, cmd := m.Update(renderTick{}); cmd == nil {
+			t.Fatal("tick chain ended with scroll state still unreported")
+		}
+		if m.dirty || m.renders != rendered {
+			t.Fatal("rejected scroll report dirtied or redrew the screen")
+		}
 	}
 	<-events
-	m.Update(composeTick{})
+	if _, cmd := m.Update(renderTick{}); cmd != nil || m.throttled {
+		t.Fatal("accepted retry did not stop the tick chain")
+	}
 	if got := drainScrollReports(events); len(got) != 1 || got[0].Mode != "scrolled" {
 		t.Fatalf("retry reported %v, want one scrolled report", got)
 	}
-	m.Update(composeTick{})
-	if _, cmd := m.Update(composeTick{}); cmd != nil {
-		t.Fatal("tick chain kept running after the report was accepted")
+	if m.renders != rendered {
+		t.Fatal("accepted scroll report redrew the screen")
 	}
 }
 
-// TestUnthrottledViewComposesEveryCall covers the zero-interval mode used by
-// in-process tests: no ticks, and View always reflects current state.
-func TestUnthrottledViewComposesEveryCall(t *testing.T) {
+func TestScrollReportRetryWaitsForPendingFrame(t *testing.T) {
+	m := newThrottledModel(t)
+	m.Update(ui.PrintLineMsg(strings.Repeat("history\n", 100)))
+	m.Update(renderTick{})
+	m.Update(renderTick{})
+	events := make(chan ui.UIEvent, 1)
+	events <- ui.WindowSizeChangedMsg{Width: 80, Height: 24}
+	m.events = events
+	m.Update(ui.PaneScrollUpMsg{Name: ui.OutputPaneName, Lines: 5})
+	rendered, screen := m.renders, m.screen
+	m.Update(ui.PrintLineMsg("arrived while report was rejected"))
+	<-events
+	m.Update(struct{}{})
+	if len(events) != 0 || m.renders != rendered || m.View().Content != screen {
+		t.Fatal("pending frame or report escaped the throttle")
+	}
+	m.Update(renderTick{})
+	if m.renders != rendered+1 || m.dirty {
+		t.Fatal("pending changes were not rendered at the tick")
+	}
+	if got := drainScrollReports(events); len(got) != 1 || got[0].Mode != "scrolled" || got[0].NewLines != 1 {
+		t.Fatalf("frame reported %v, want the updated scroll state", got)
+	}
+}
+
+func TestZeroIntervalRendersDuringUpdate(t *testing.T) {
 	m := newBareModel(t)
+	rendered := m.renders
 	if _, cmd := m.Update(ui.PrintLineMsg("one")); cmd != nil {
-		t.Fatal("zero compose interval scheduled a tick")
+		t.Fatal("zero render interval scheduled a tick")
 	}
 	m.Update(ui.PrintLineMsg("two"))
-	if got := m.View().Content; !strings.Contains(got, "one") || !strings.Contains(got, "two") {
-		t.Fatal("unthrottled view is stale")
+	if m.renders != rendered+2 || m.dirty || !strings.Contains(m.screen, "one") || !strings.Contains(m.screen, "two") {
+		t.Fatal("zero interval did not render changes during Update")
+	}
+}
+
+func TestViewOnlyReturnsPreparedScreen(t *testing.T) {
+	for _, throttled := range []bool{false, true} {
+		t.Run(fmt.Sprint(throttled), func(t *testing.T) {
+			events := make(chan ui.UIEvent, 16)
+			m := NewModel(events)
+			if throttled {
+				m.renderInterval = defaultRenderInterval
+			}
+			m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+			m.Update(ui.PrintLineMsg("one"))
+			rendered, screen, dirty, queued := m.renders, m.screen, m.dirty, len(events)
+			for range 3 {
+				if got := m.View().Content; got != screen {
+					t.Fatal("View did not return the prepared screen")
+				}
+			}
+			if m.renders != rendered || m.dirty != dirty || len(events) != queued {
+				t.Fatal("View rendered or posted an event")
+			}
+		})
+	}
+}
+
+func TestZeroIntervalRetriesScrollReportOnNextUpdate(t *testing.T) {
+	events := make(chan ui.UIEvent, 1)
+	m := NewModel(events)
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24}) // fills the queue
+	m.Update(ui.PrintLineMsg(strings.Repeat("history\n", 100)))
+	if _, cmd := m.Update(ui.PaneScrollUpMsg{Name: ui.OutputPaneName, Lines: 5}); cmd != nil || m.throttled || m.dirty {
+		t.Fatal("rejected report scheduled a timer or dirtied the screen")
+	}
+	rendered := m.renders
+	<-events
+	m.View()
+	if len(events) != 0 {
+		t.Fatal("View retried the scroll report")
+	}
+	if _, cmd := m.Update(struct{}{}); cmd != nil || m.renders != rendered {
+		t.Fatal("report retry scheduled a timer or redrew the screen")
+	}
+	if got := drainScrollReports(events); len(got) != 1 || got[0].Mode != "scrolled" {
+		t.Fatalf("next Update reported %v, want one scrolled report", got)
 	}
 }
 
@@ -214,7 +291,7 @@ func TestUnthrottledViewComposesEveryCall(t *testing.T) {
 func BenchmarkOutputFlood(b *testing.B) {
 	m := newThrottledModel(b)
 	m.Update(tea.WindowSizeMsg{Width: 270, Height: 66})
-	m.Update(composeTick{})
+	m.Update(renderTick{})
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := range b.N {
@@ -225,30 +302,30 @@ func BenchmarkOutputFlood(b *testing.B) {
 			m.View()
 		}
 		if i%100 == 99 {
-			m.Update(composeTick{})
+			m.Update(renderTick{})
 			m.View()
 		}
 	}
 }
 
-// BenchmarkIdleMessage is the unthrottled cost: one change from idle, composed
+// BenchmarkIdleMessage is the unthrottled cost: one change from idle, rendered
 // immediately.
 func BenchmarkIdleMessage(b *testing.B) {
 	m := newThrottledModel(b)
 	m.Update(tea.WindowSizeMsg{Width: 270, Height: 66})
-	m.Update(composeTick{})
+	m.Update(renderTick{})
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
 		m.Update(ui.PrintLineMsg("a line of MUD output"))
 		m.View()
-		m.Update(composeTick{})
+		m.Update(renderTick{})
 	}
 }
 
-// BenchmarkCompose is one full-screen paint at a large terminal size: colored
-// scrollback, a framed side pane with a title, dividers, and a prompt.
-func BenchmarkCompose(b *testing.B) {
+// BenchmarkScreen is one full-screen render at a large terminal size: colored
+// scrollback, a bordered side pane with a title, dividers, and a prompt.
+func BenchmarkScreen(b *testing.B) {
 	m := NewModel(make(chan ui.UIEvent, 4096))
 	m.Update(tea.WindowSizeMsg{Width: 270, Height: 66})
 	m.Update(ui.UpdateLayoutMsg{Root: ui.LayoutNode{Type: ui.LayoutTypeColumn, Children: []ui.LayoutNode{
@@ -267,6 +344,6 @@ func BenchmarkCompose(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		m.compose()
+		m.render()
 	}
 }

@@ -1,14 +1,16 @@
 package tui
 
 import (
-	tea "charm.land/bubbletea/v2"
-	"github.com/mmcdole/rune/input"
-	"github.com/mmcdole/rune/ui"
 	"strings"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/mmcdole/rune/input"
+	"github.com/mmcdole/rune/ui"
 )
 
-func TestDefaultNewlineBindingsInBothEditors(t *testing.T) {
+func TestDefaultNewlineBindingsInBothInputModes(t *testing.T) {
 	for _, msg := range []tea.KeyPressMsg{
 		{Code: 'j', Mod: tea.ModCtrl}, {Code: tea.KeyEnter, Mod: tea.ModShift},
 		{Code: tea.KeyEnter, Mod: tea.ModCtrl}, {Code: tea.KeyKpEnter, Mod: tea.ModShift},
@@ -23,7 +25,7 @@ func TestDefaultNewlineBindingsInBothEditors(t *testing.T) {
 	}
 }
 
-func TestEditorBindingsChangeRoutingAndHints(t *testing.T) {
+func TestInputBindingsChangeRoutingAndHints(t *testing.T) {
 	m := newBareModel(t)
 	m.input.SetSize(120, 0)
 	keys := input.Bindings{
@@ -34,11 +36,10 @@ func TestEditorBindingsChangeRoutingAndHints(t *testing.T) {
 	}
 	m.Update(ui.UpdateBindsMsg(keys))
 	m.inputCtl.HandlePaste("first\nsecond")
+	m.input.SetSize(120, 5)
 	var labels string
-	for _, rule := range m.input.Rules(120, 5) {
-		for _, label := range rule.Labels {
-			labels += label.Text
-		}
+	for _, label := range m.input.Labels() {
+		labels += label.Text
 	}
 	for _, want := range []string{"Ctrl+S send", "Shift+Enter newline", "Ctrl+T command"} {
 		if !strings.Contains(labels, want) {
@@ -66,7 +67,7 @@ func TestEditorBindingsChangeRoutingAndHints(t *testing.T) {
 	}
 }
 
-func TestEditorBindingsRespectModalPicker(t *testing.T) {
+func TestInputActionsRespectModalPicker(t *testing.T) {
 	h := newControllerHarness()
 	h.ctl.input.SetBindings(input.Bindings{
 		"f1": {Action: "input.submit", Enabled: true},
@@ -79,7 +80,7 @@ func TestEditorBindingsRespectModalPicker(t *testing.T) {
 		h.ctl.HandleKey(keyPress(code))
 	}
 	if h.ctl.input.Value() != "draft" || len(h.submitted) != 0 || h.ctl.input.SubmissionMode() != input.ModeCommand {
-		t.Fatal("editor action escaped modal picker")
+		t.Fatal("input action escaped modal picker")
 	}
 }
 
@@ -106,7 +107,7 @@ func TestBindingReplacementRemovalAndDisabledHints(t *testing.T) {
 	m.inputCtl.SetText("draft")
 	m.inputCtl.HandleKey(keyPress(tea.KeyEnter))
 	if m.input.Value() != "draft" || m.input.Bindings().Hint("submit") != "" {
-		t.Fatal("callback replacement retained editor behavior or hint")
+		t.Fatal("callback replacement retained submit behavior or hint")
 	}
 	bindings = input.DefaultBindings()
 	binding := bindings["ctrl+j"]
@@ -142,7 +143,7 @@ func TestNamedActionRespectsTypingAndPhysicalKeypad(t *testing.T) {
 }
 
 func TestReboundCancelAcrossInputContexts(t *testing.T) {
-	for _, context := range []string{"normal", "composer", "inline", "modal", "search"} {
+	for _, context := range []string{"normal", "draft_editor", "inline", "modal", "search"} {
 		t.Run(context, func(t *testing.T) {
 			h := newControllerHarness()
 			bindings := input.DefaultBindings()
@@ -151,7 +152,7 @@ func TestReboundCancelAcrossInputContexts(t *testing.T) {
 			h.ctl.input.SetBindings(bindings)
 			h.ctl.SetText("draft")
 			switch context {
-			case "composer":
+			case "draft_editor":
 				h.ctl.SetText("first\nsecond")
 			case "inline", "modal":
 				h.ctl.ShowPicker(ui.ShowPickerMsg{Items: pickerTestItems, CallbackID: "test", Inline: context == "inline"})
@@ -164,16 +165,16 @@ func TestReboundCancelAcrossInputContexts(t *testing.T) {
 				t.Fatal("unbound Escape still cancels")
 			}
 			h.ctl.HandleKey(ctrlPress('g'))
-			if context == "composer" {
+			if context == "draft_editor" {
 				if h.ctl.input.Value() != draft {
-					t.Fatal("first cancel discarded composer")
+					t.Fatal("first cancel discarded draft editor")
 				}
 				h.ctl.HandleKey(ctrlPress('g'))
 			}
 			if h.ctl.mode() != modeNormal {
 				t.Fatal("cancel did not close context")
 			}
-			if context == "normal" || context == "composer" {
+			if context == "normal" || context == "draft_editor" {
 				if h.ctl.input.Value() != "" {
 					t.Fatal("cancel did not clear draft")
 				}
@@ -185,14 +186,14 @@ func TestReboundCancelAcrossInputContexts(t *testing.T) {
 					t.Fatalf("picker completion: %+v", events)
 				}
 			}
-			if context == "search" && h.fx.cancels != 1 {
+			if context == "search" && h.cancels != 1 {
 				t.Fatal("search view was not restored")
 			}
 		})
 	}
 }
 
-func TestEditorAndCancelHintsFollowActions(t *testing.T) {
+func TestExternalEditorAndCancelHintsFollowActions(t *testing.T) {
 	m := newBareModel(t)
 	m.input.SetSize(140, 0)
 	bindings := input.DefaultBindings()
@@ -202,12 +203,11 @@ func TestEditorAndCancelHintsFollowActions(t *testing.T) {
 	bindings["f2"] = input.Binding{Action: "input.open_editor", Enabled: true}
 	m.Update(ui.UpdateBindsMsg(bindings))
 	m.inputCtl.HandlePaste("first\nsecond")
+	m.input.SetSize(140, 5)
 	labels := func() string {
 		var s string
-		for _, rule := range m.input.Rules(140, 5) {
-			for _, label := range rule.Labels {
-				s += label.Text
-			}
+		for _, label := range m.input.Labels() {
+			s += label.Text
 		}
 		return s
 	}
@@ -236,8 +236,8 @@ func TestEditorAndCancelHintsFollowActions(t *testing.T) {
 	}
 }
 
-func TestReboundEditorUsesDraftAndRespectsOverlays(t *testing.T) {
-	for _, context := range []string{"normal", "composer", "inline", "modal", "search"} {
+func TestReboundExternalEditorUsesDraftAndRespectsOverlays(t *testing.T) {
+	for _, context := range []string{"normal", "draft_editor", "inline", "modal", "search"} {
 		t.Run(context, func(t *testing.T) {
 			h := newControllerHarness()
 			bindings := input.DefaultBindings()
@@ -246,7 +246,7 @@ func TestReboundEditorUsesDraftAndRespectsOverlays(t *testing.T) {
 			h.ctl.input.SetBindings(bindings)
 			h.ctl.SetText("draft")
 			switch context {
-			case "composer":
+			case "draft_editor":
 				h.ctl.SetText("first\nsecond")
 			case "inline", "modal":
 				h.ctl.ShowPicker(ui.ShowPickerMsg{Items: pickerTestItems, CallbackID: "test", Inline: context == "inline"})
@@ -261,7 +261,7 @@ func TestReboundEditorUsesDraftAndRespectsOverlays(t *testing.T) {
 				if editor, ok := event.(ui.OpenEditorMsg); ok {
 					count++
 					if editor.Text != h.ctl.input.Value() {
-						t.Fatal("editor got stale draft")
+						t.Fatal("editor got dirty draft")
 					}
 				}
 			}

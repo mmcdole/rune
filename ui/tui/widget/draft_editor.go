@@ -8,127 +8,129 @@ import (
 	"github.com/mmcdole/rune/input"
 )
 
-// maxComposerBodyRows keeps a pasted document useful without allowing the
-// input area to take over the terminal. The surrounding Input adds a header
-// and footer to these content rows.
-const maxComposerBodyRows = 8
+// maxDraftBodyRows keeps a pasted document useful without allowing the
+// input area to take over the terminal. Layout adds outside borders for the
+// header and footer labels.
+const maxDraftBodyRows = 8
 
-// composer is the lossless editing model used for verbatim drafts, including
+// draftEditor is the lossless editing model used for verbatim drafts, including
 // physical structure that bubbles/textinput cannot represent (LF or TAB).
 // Cursor positions are rune offsets, matching the existing Rune input API.
-type composer struct {
+type draftEditor struct {
 	text    []rune
 	cursor  int
 	goalCol int // retained display column during vertical movement; -1 = unset
-	topRow  int // first visual row shown by the input viewport
+	topRow  int // first visual row shown by the input window
+
+	cached      draftLayout
+	layoutWidth int
+	lineCount   int
+	revision    uint64 // text changes that can affect wrapping at any measured width
 }
 
-func newComposer(text string, cursor int) *composer {
-	c := &composer{goalCol: -1}
+func newDraftEditor(text string, cursor int) *draftEditor {
+	c := &draftEditor{goalCol: -1}
 	c.Set(text, cursor)
 	return c
 }
 
-// RequiresComposer reports whether the neutral input policy requires the
-// lossless editor. Kept as a widget-level name for the local call sites; the
-// admission rule itself belongs to the input package.
-func RequiresComposer(value string) bool {
-	return input.RequiresStructuredEditor(value)
-}
-
-func (c *composer) Value() string {
+func (c *draftEditor) Value() string {
 	return string(c.text)
 }
 
-func (c *composer) Position() int {
+func (c *draftEditor) Position() int {
 	return c.cursor
 }
 
-func (c *composer) Set(text string, cursor int) {
+func (c *draftEditor) Set(text string, cursor int) {
 	c.text = []rune(input.NormalizeDraftText(text))
+	c.invalidate()
 	c.SetCursor(cursor)
 	c.goalCol = -1
 	c.topRow = 0
 }
 
-func (c *composer) SetCursor(cursor int) {
+func (c *draftEditor) SetCursor(cursor int) {
 	c.cursor = clampInt(cursor, 0, len(c.text))
 	c.goalCol = -1
 }
 
-func (c *composer) CursorEnd() {
+func (c *draftEditor) CursorEnd() {
 	c.SetCursor(len(c.text))
 }
 
-func (c *composer) Insert(text string) {
+func (c *draftEditor) Insert(text string) {
 	runes := []rune(input.NormalizeDraftText(text))
 	if len(runes) == 0 {
 		return
 	}
 
 	tail := append([]rune(nil), c.text[c.cursor:]...)
+	c.invalidate()
 	c.text = append(c.text[:c.cursor], runes...)
 	c.cursor += len(runes)
 	c.text = append(c.text, tail...)
 	c.goalCol = -1
 }
 
-func (c *composer) Backspace() {
+func (c *draftEditor) Backspace() {
 	if c.cursor == 0 {
 		return
 	}
+	c.invalidate()
 	c.text = append(c.text[:c.cursor-1], c.text[c.cursor:]...)
 	c.cursor--
 	c.goalCol = -1
 }
 
-func (c *composer) Delete() {
+func (c *draftEditor) Delete() {
 	if c.cursor >= len(c.text) {
 		return
 	}
+	c.invalidate()
 	c.text = append(c.text[:c.cursor], c.text[c.cursor+1:]...)
 	c.goalCol = -1
 }
 
-func (c *composer) Left() {
+func (c *draftEditor) Left() {
 	if c.cursor > 0 {
 		c.cursor--
 	}
 	c.goalCol = -1
 }
 
-func (c *composer) Right() {
+func (c *draftEditor) Right() {
 	if c.cursor < len(c.text) {
 		c.cursor++
 	}
 	c.goalCol = -1
 }
 
-func (c *composer) LineStart() {
+func (c *draftEditor) LineStart() {
 	for c.cursor > 0 && c.text[c.cursor-1] != '\n' {
 		c.cursor--
 	}
 	c.goalCol = -1
 }
 
-func (c *composer) LineEnd() {
+func (c *draftEditor) LineEnd() {
 	for c.cursor < len(c.text) && c.text[c.cursor] != '\n' {
 		c.cursor++
 	}
 	c.goalCol = -1
 }
 
-func (c *composer) DocStart() {
+func (c *draftEditor) DocStart() {
 	c.cursor = 0
 	c.goalCol = -1
 }
 
-func (c *composer) DocEnd() {
+func (c *draftEditor) DocEnd() {
 	c.cursor = len(c.text)
 	c.goalCol = -1
 }
 
-func (c *composer) WordLeft() {
+func (c *draftEditor) WordLeft() {
 	for c.cursor > 0 && unicode.IsSpace(c.text[c.cursor-1]) {
 		c.cursor--
 	}
@@ -138,7 +140,7 @@ func (c *composer) WordLeft() {
 	c.goalCol = -1
 }
 
-func (c *composer) WordRight() {
+func (c *draftEditor) WordRight() {
 	for c.cursor < len(c.text) && !unicode.IsSpace(c.text[c.cursor]) {
 		c.cursor++
 	}
@@ -148,33 +150,35 @@ func (c *composer) WordRight() {
 	c.goalCol = -1
 }
 
-func (c *composer) DeleteWordBack() {
+func (c *draftEditor) DeleteWordBack() {
 	end := c.cursor
 	c.WordLeft()
 	if c.cursor == end {
 		return
 	}
+	c.invalidate()
 	c.text = append(c.text[:c.cursor], c.text[end:]...)
 	c.goalCol = -1
 }
 
-func (c *composer) DeleteToLineStart() {
+func (c *draftEditor) DeleteToLineStart() {
 	end := c.cursor
 	c.LineStart()
 	if c.cursor == end {
 		return
 	}
+	c.invalidate()
 	c.text = append(c.text[:c.cursor], c.text[end:]...)
 	c.goalCol = -1
 }
 
-func (c *composer) DeleteToLineEnd() {
+func (c *draftEditor) DeleteToLineEnd() {
 	start := c.cursor
 	c.LineEnd()
 	end := c.cursor
 	c.cursor = start
 	if start == end {
-		// Match terminal editor behavior: at EOL, Ctrl+K joins the next
+		// Match terminal editing behavior: at EOL, Ctrl+K joins the next
 		// physical line instead of becoming a no-op.
 		if end < len(c.text) && c.text[end] == '\n' {
 			end++
@@ -182,14 +186,15 @@ func (c *composer) DeleteToLineEnd() {
 			return
 		}
 	}
+	c.invalidate()
 	c.text = append(c.text[:start], c.text[end:]...)
 	c.goalCol = -1
 }
 
-// Update applies keys that have local editing meaning in compose mode. The
-// controller handles configured editor actions first. Escape, Ctrl+C, and
+// Update applies keys that have local editing meaning in draft editor mode. The
+// controller handles configured input actions first. Escape, Ctrl+C, and
 // Ctrl+E remain available for cancellation and Lua bindings.
-func (c *composer) Update(msg tea.KeyPressMsg, widgetWidth int) bool {
+func (c *draftEditor) Update(msg tea.KeyPressMsg, widgetWidth int) bool {
 	if msg.Text != "" {
 		c.Insert(msg.Text)
 		return true
@@ -255,10 +260,10 @@ func (c *composer) Update(msg tea.KeyPressMsg, widgetWidth int) bool {
 		c.DeleteToLineEnd()
 		return true
 	case matchesKey(msg, tea.KeyPgUp, 0):
-		c.moveVertical(-maxComposerBodyRows, widgetWidth)
+		c.moveVertical(-maxDraftBodyRows, widgetWidth)
 		return true
 	case matchesKey(msg, tea.KeyPgDown, 0):
-		c.moveVertical(maxComposerBodyRows, widgetWidth)
+		c.moveVertical(maxDraftBodyRows, widgetWidth)
 		return true
 	}
 
@@ -277,8 +282,8 @@ func matchesEnterKey(msg tea.KeyPressMsg, modifiers tea.KeyMod) bool {
 		msg.Mod&keyModifiers == modifiers
 }
 
-func (c *composer) moveVertical(delta, widgetWidth int) {
-	layout := buildComposerLayout(c.text, c.cursor, widgetWidth)
+func (c *draftEditor) moveVertical(delta, widgetWidth int) {
+	layout := c.layout(widgetWidth)
 	if len(layout.rows) == 0 {
 		return
 	}
@@ -318,4 +323,44 @@ func absInt(value int) int {
 		return -value
 	}
 	return value
+}
+
+// layout shares the same shaped draft across measurement, rendering, and
+// navigation. Text edits invalidate it; an unchanged draft needs no reshaping.
+func (c *draftEditor) layout(width int) draftLayout {
+	if c.cached.rows == nil || c.layoutWidth != width {
+		c.cached = buildDraftLayout(c.text, width, c.lines(), 0)
+		c.layoutWidth = width
+	}
+	return c.cached.withCursor(c.cursor)
+}
+
+func (c *draftEditor) invalidate() {
+	c.revision++
+	c.cached.rows = nil
+	c.lineCount = 0
+}
+
+func (c *draftEditor) lines() int {
+	if c.lineCount == 0 {
+		c.lineCount = 1
+		for _, r := range c.text {
+			if r == '\n' {
+				c.lineCount++
+			}
+		}
+	}
+	return c.lineCount
+}
+
+// Measurement must not evict the layout at the actual editing width. Most
+// large drafts already reach the height cap without examining their wrapping.
+func (c *draftEditor) measureRows(width int) int {
+	if c.lines() >= maxDraftBodyRows {
+		return maxDraftBodyRows
+	}
+	if c.cached.rows != nil && c.layoutWidth == width {
+		return min(len(c.cached.rows), maxDraftBodyRows)
+	}
+	return min(len(buildDraftLayout(c.text, width, c.lines(), maxDraftBodyRows).rows), maxDraftBodyRows)
 }

@@ -5,7 +5,7 @@ A terminal MUD client built with Go and Lua.
 [![CI](https://github.com/mmcdole/rune/actions/workflows/ci.yml/badge.svg)](https://github.com/mmcdole/rune/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/mmcdole/rune/graph/badge.svg)](https://codecov.io/gh/mmcdole/rune)
 
-![One rune session: the world picker, tab completion cycling, history search, combat, and the multiline verbatim composer](.github/montage.gif)
+![One rune session: the world picker, tab completion cycling, history search, combat, and the multiline verbatim draft editor](.github/montage.gif)
 
 Go handles networking, terminal rendering, and concurrent I/O. Lua scripts define aliases, triggers, key bindings, layouts, and client commands.
 

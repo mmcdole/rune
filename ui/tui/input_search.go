@@ -11,14 +11,14 @@ import (
 // is active is a plain no-op. An open picker settles first: overlays
 // are mutually exclusive and the newcomer wins.
 func (c *inputController) ShowSearch(opts ui.ShowSearchMsg) {
-	if c.input.IsComposing() {
+	if c.input.DraftEditorActive() {
 		return
 	}
 	if c.mode() == modePickerModal || c.mode() == modePickerInline {
 		c.closePicker(false, "")
 	}
 	if c.mode() != modeSearch {
-		scope := c.search.OpenSearch()
+		scope := c.host.OpenSearch()
 		c.input.ShowSearch(opts.Query, scope)
 	} else {
 		c.input.Search().Reopen(opts.Query)
@@ -75,22 +75,22 @@ func (c *inputController) selectNewerSearch() bool {
 	return true
 }
 
-// previewSearch centers the viewport on the current selection (live
+// previewSearch centers the output window on the current selection (live
 // preview); with no match it restores the pre-search position so a
 // query edit that empties the result set snaps back.
 func (c *inputController) previewSearch() {
 	m, ok := c.input.Search().Selected()
-	c.search.PreviewSearch(m, ok)
+	c.host.PreviewSearch(m, ok)
 }
 
 // closeSearch is the single exit path from search mode: resets the
-// mode, hides the overlay, and settles the viewport exactly once -
+// mode, hides the overlay, and settles the output window exactly once -
 // committed (stay at the match) or cancelled (restore the snapshot).
 func (c *inputController) closeSearch(accepted bool) {
 	c.input.HideSearch()
 	if accepted {
-		c.search.CommitSearch()
+		c.host.CommitSearch()
 	} else {
-		c.search.CancelSearch()
+		c.host.CancelSearch()
 	}
 }

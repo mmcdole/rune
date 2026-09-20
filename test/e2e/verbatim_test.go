@@ -8,7 +8,7 @@ import (
 )
 
 // TestVerbatimSubmissionReachesWireExactly is the live-client contract for
-// structured input. Bubble Tea's paste-to-composer transition is covered in
+// structured input. Bubble Tea's paste-to-draft-editor transition is covered in
 // ui/tui; this test starts at the UI submission boundary and proves that the
 // real event loop, Lua core, and TCP client preserve every physical line.
 func TestVerbatimSubmissionReachesWireExactly(t *testing.T) {

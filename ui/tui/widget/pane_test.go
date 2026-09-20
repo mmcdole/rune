@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/mmcdole/rune/ui/tui/util"
 )
 
@@ -15,7 +17,8 @@ func newTestPane(t *testing.T) *Pane {
 
 func contentRows(t *testing.T, p *Pane, width, height int) []string {
 	t.Helper()
-	rows := p.ContentRows(width, height)
+	p.SetSize(width, height)
+	rows := strings.Split(p.View(), "\n")
 	if len(rows) != height {
 		t.Fatalf("content height = %d rows, want %d", len(rows), height)
 	}
@@ -70,8 +73,8 @@ func TestPaneWrapsLongLines(t *testing.T) {
 
 	rows := contentRows(t, p, 20, 4)
 	for i, r := range rows {
-		if util.VisibleLen(r) > 20 {
-			t.Errorf("row %d exceeds width: %q (%d cols)", i, r, util.VisibleLen(r))
+		if ansi.StringWidth(r) > 20 {
+			t.Errorf("row %d exceeds width: %q (%d cols)", i, r, ansi.StringWidth(r))
 		}
 	}
 	joined := strings.Join(rows, " ")
@@ -265,7 +268,7 @@ func TestPaneEmptyAndClear(t *testing.T) {
 	}
 }
 
-func TestPaneContentRowsUseRequestedGeometry(t *testing.T) {
+func TestPaneViewUsesAllocatedGeometry(t *testing.T) {
 	p := newTestPane(t)
 	for i := 1; i <= 5; i++ {
 		p.Write(fmt.Sprintf("line %d", i))
@@ -285,22 +288,23 @@ func TestPaneContentRowsUseRequestedGeometry(t *testing.T) {
 	if again[0] != "line 4" || again[1] != "line 5" {
 		t.Fatalf("second two-row view = %q, want lines 4-5", again)
 	}
-	if rows := p.ContentRows(40, 0); rows != nil {
-		t.Fatalf("zero-height content = %q, want nil", rows)
+	p.SetSize(40, 0)
+	if view := p.View(); view != "" {
+		t.Fatalf("zero-height content = %q, want empty", view)
 	}
 }
 
 func TestClipRowTruncatesOverlongRows(t *testing.T) {
 	long := strings.Repeat("x", 50)
-	clipped := clipRow(long, 20)
-	if util.VisibleLen(clipped) != 20 {
-		t.Errorf("clipped to %d cols, want 20", util.VisibleLen(clipped))
+	clipped := util.ClipRow(long, 20)
+	if ansi.StringWidth(clipped) != 20 {
+		t.Errorf("clipped to %d cols, want 20", ansi.StringWidth(clipped))
 	}
-	if clipRow("short", 20) != "short" {
+	if util.ClipRow("short", 20) != "short" {
 		t.Error("short rows must pass through untouched")
 	}
 	styled := "\x1b[1;32m" + strings.Repeat("y", 50) + "\x1b[m"
-	if got := util.VisibleLen(clipRow(styled, 20)); got != 20 {
+	if got := ansi.StringWidth(util.ClipRow(styled, 20)); got != 20 {
 		t.Errorf("ANSI row clipped to %d cols, want 20", got)
 	}
 }
