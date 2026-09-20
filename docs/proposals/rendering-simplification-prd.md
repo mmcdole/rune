@@ -1,6 +1,6 @@
 # Rendering Simplification PRD
 
-Status: Section 3, the scoped Section 4 contraction, and the Section 5 frame lifecycle cleanup are approved and implemented. Other implementation proposals remain unapproved.
+Status: Section 3, the scoped Section 4 contraction, the Section 5 frame lifecycle cleanup, and the scoped Section 2 dispatch cleanup are approved and implemented. Other implementation proposals remain unapproved.
 
 Review baseline: `simplify-rendering`, commit `17b7df0`, September 20, 2026.
 
@@ -507,6 +507,14 @@ Section 3 was selected and implemented first after the workload and cleanup disc
 
 ### Suggested implementation order after agreement
 
+Section 2 implementation record: the scoped dispatch cleanup is approved and implemented. Mouse-wheel navigation, explicit pane scrolling, binding-hint updates, and configuration updates now return `true, false` from their existing dispatch cases, requesting repaint without rebuilding layout. Non-output pane clear/replace reuse `layoutPlan.autoPanes` to request layout only when content affects sizing, matching the existing append behavior.
+
+Keyboard/paste/controller transitions and output clear/replace retain their current layout behavior. Clearing output can close search; setting the cursor acknowledges an event whose rejected delivery can append a warning to content-sized output. These paths need their complete effects accounted for before narrowing their layout requests. No before/after draft scan, effect registry, new flags, widget interface, or controller rewrite was added.
+
+Production changes are confined to `dispatch`: ten added lines, including one explanatory comment. Existing tests now verify that appearance changes produce the same screen as fresh layout without resizing unrelated widgets, that fixed and unplaced pane clear/replace avoid layout, and that directly or indirectly content-sized panes still grow and shrink. Output clear/replace tests also assert that closing search restores the normal output rectangle. A fixed neighbouring pane counts sizing calls even when an emptied auto pane has no content rectangle.
+
+Validation: `go test -race -shuffle=on ./ui/... ./text/...`, `go vet ./ui/... ./text/...`, and `git diff --check` pass. The implemented contract is that appearance-only operations reuse assigned rectangles, while size-affecting operations still apply layout before navigation and rendering. This is a small reduction in unnecessary execution; no quantitative speedup is claimed. Broader Section 2 changes remain unapproved.
+
 Section 5 implementation record: frame execution and scroll reporting are approved and implemented after an independent simplification review. Previously production rendered from `Update`, while zero-interval mode rendered on every `View`. Rejected scroll-state reports also set `dirty`, forcing redraws solely to retry delivery. Both sources of duplication are removed.
 
 Implemented contract: `Update` applies state, geometry, and search positioning, then invokes `renderIfDue`; `View` only returns the prepared screen and terminal options. The helper returns while throttled, draws pending changes, attempts scroll reporting, and starts another interval only after drawing or rejected delivery. It owns clearing `dirty`; `render` draws. Report-only retries use the existing timer and last accepted scroll state without redrawing. Successful retries stop immediately when there are no new pixels. Zero interval renders pending changes during `Update`, schedules no timers, and retries failed reports on the next `Update`. No scheduler object, new interface, or extra pending field was added.
@@ -515,9 +523,9 @@ Code changes: renamed and modified the existing `renderThrottled` helper as `ren
 
 Validation: `go test -race -shuffle=on ./ui/... ./text/...`, `go vet ./ui/... ./text/...`, and `git diff --check` pass. Tests cover immediate first frames, burst batching, idle timer shutdown, repeated rejected reports with no extra redraws, successful retry shutdown, new changes waiting behind the throttle before reporting, side-effect-free `View` calls, and immediate zero-interval rendering with retries on subsequent updates. More precise per-message layout invalidation remains a separate discussion.
 
-1. Completed: Section 3 and its rule/label contract cleanup, the scoped Section 4 implementation contraction, and the Section 5 frame lifecycle cleanup.
+1. Completed: Section 3 and its rule/label contract cleanup, the scoped Section 4 implementation contraction, the Section 5 frame lifecycle cleanup, and the scoped Section 2 dispatch cleanup.
 2. Discuss any further Section 4 proposals individually before implementing them.
-3. Discuss Section 2's more precise invalidation using the clarified ownership; Section 5's execution and reporting lifecycle is complete.
+3. Discuss any further Section 2 changes individually; the scoped dispatch cleanup and Section 5's execution and reporting lifecycle are complete.
 4. Sections 7–9: take any subsequently agreed cleanup items individually, close to their owning code.
 5. Section 6: investigate representation changes only if realistic workloads justify the complexity.
 6. Sections 1 and 10: revisit deferred optimizations only with evidence from the expected workload.

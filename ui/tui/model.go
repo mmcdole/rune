@@ -135,10 +135,12 @@ func (m *Model) dispatch(msg tea.Msg) (render, layout bool) {
 		m.inputCtl.HandlePaste(msg.Content)
 	case tea.MouseWheelMsg:
 		m.handleMouseWheel(msg)
+		return true, false
 
 	// Session config updates
 	case ui.UpdateBindsMsg:
 		m.input.SetBindings(input.Bindings(msg))
+		return true, false
 	case ui.UpdateBarsMsg:
 		changed := m.syncBars(msg)
 		return changed, changed
@@ -148,6 +150,7 @@ func (m *Model) dispatch(msg tea.Msg) (render, layout bool) {
 		m.inputCtl.SetKeepOnSubmit(msg.KeepInput)
 		m.mouseEnabled = msg.Mouse
 		m.numpadMode = msg.Numpad
+		return true, false
 
 	// Scrollback appends and the prompt overlay. Server lines and local
 	// echoes differ only in where Session sends them from.
@@ -177,11 +180,14 @@ func (m *Model) dispatch(msg tea.Msg) (render, layout bool) {
 		p := m.pane(msg.Name)
 		p.Clear()
 		p.Write(msg.Text)
+		// Clearing output can also close search and resize the input area.
+		return true, msg.Name == ui.OutputPaneName || m.layoutPlan.autoPanes[msg.Name]
 	case ui.PaneClearMsg:
 		m.dropOutputSearch(msg.Name)
 		if p, ok := m.panes[msg.Name]; ok {
 			p.Clear()
 		}
+		return true, msg.Name == ui.OutputPaneName || m.layoutPlan.autoPanes[msg.Name]
 
 	// Input control
 	case ui.ShowPickerMsg:
@@ -209,12 +215,16 @@ func (m *Model) dispatch(msg tea.Msg) (render, layout bool) {
 	// contract.
 	case ui.PaneScrollUpMsg:
 		m.scrollPane(msg.Name, func(pane pane) { pane.ScrollUp(msg.Lines) })
+		return true, false
 	case ui.PaneScrollDownMsg:
 		m.scrollPane(msg.Name, func(pane pane) { pane.ScrollDown(msg.Lines) })
+		return true, false
 	case ui.PaneScrollToTopMsg:
 		m.scrollPane(msg.Name, func(pane pane) { pane.ScrollToTop() })
+		return true, false
 	case ui.PaneScrollToBottomMsg:
 		m.scrollPane(msg.Name, func(pane pane) { pane.ScrollToBottom() })
+		return true, false
 	default:
 		return false, false
 	}

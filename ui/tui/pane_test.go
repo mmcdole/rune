@@ -158,6 +158,7 @@ func TestOutputPaneBuffersWhileHiddenOrUnplacedAtRetainedWidth(t *testing.T) {
 
 func TestClearOutputPaneResetsSearchAndScrollingButPreservesPrompt(t *testing.T) {
 	m := newBareModel(t)
+	normalOutput := m.layoutPlan.output
 
 	next, _ := m.Update(ui.SetPromptMsg("HP> "))
 	m = next.(*Model)
@@ -178,6 +179,9 @@ func TestClearOutputPaneResetsSearchAndScrollingButPreservesPrompt(t *testing.T)
 	if !m.input.SearchActive() || m.searchView.focus == nil {
 		t.Fatal("test setup did not establish an active output search")
 	}
+	if m.layoutPlan.output == normalOutput {
+		t.Fatal("test setup did not resize output for search")
+	}
 
 	next, _ = m.Update(ui.PaneClearMsg{Name: ui.OutputPaneName})
 	m = next.(*Model)
@@ -186,6 +190,9 @@ func TestClearOutputPaneResetsSearchAndScrollingButPreservesPrompt(t *testing.T)
 	}
 	if m.input.SearchActive() || m.searchView.focus != nil || m.searchView.priorFocus != nil {
 		t.Fatalf("clear retained search state: active=%v state=%+v", m.input.SearchActive(), m.searchView)
+	}
+	if m.layoutPlan.output != normalOutput {
+		t.Fatal("clear did not restore output geometry after closing search")
 	}
 	if mode := m.output.Mode(); mode != widget.ModeLive {
 		t.Fatalf("clear left output window mode %v, want live", mode)
@@ -267,6 +274,7 @@ func TestOrdinaryPaneLifecycle(t *testing.T) {
 // then holds only the new rows, all within one Update.
 func TestReplaceOutputPaneIsOneClearAndWrite(t *testing.T) {
 	m := newBareModel(t)
+	normalOutput := m.layoutPlan.output
 
 	next, _ := m.Update(ui.SetPromptMsg("HP> "))
 	m = next.(*Model)
@@ -284,6 +292,9 @@ func TestReplaceOutputPaneIsOneClearAndWrite(t *testing.T) {
 	if !m.input.SearchActive() || m.output.Mode() != widget.ModeScrolled {
 		t.Fatal("test setup did not scroll and search output")
 	}
+	if m.layoutPlan.output == normalOutput {
+		t.Fatal("test setup did not resize output for search")
+	}
 	next, _ = m.Update(ui.PaneReplaceMsg{Name: ui.OutputPaneName, Text: "first\nsecond"})
 	m = next.(*Model)
 	if got := m.output.Scrollback().Count(); got != 2 {
@@ -294,6 +305,9 @@ func TestReplaceOutputPaneIsOneClearAndWrite(t *testing.T) {
 	}
 	if m.input.SearchActive() || m.searchView.focus != nil {
 		t.Fatal("replace retained search state")
+	}
+	if m.layoutPlan.output != normalOutput {
+		t.Fatal("replace did not restore output geometry after closing search")
 	}
 	if mode := m.output.Mode(); mode != widget.ModeLive {
 		t.Fatalf("replace left output window mode %v, want live", mode)
