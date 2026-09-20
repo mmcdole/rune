@@ -310,12 +310,12 @@ func TestValidateLayoutTreeRejectsInvalidStructure(t *testing.T) {
 		{
 			name: "hidden region contains input",
 			tree: LayoutTree{Root: LayoutNode{Type: LayoutTypeColumn, Children: []LayoutNode{
-				{Type: LayoutTypeRow, ID: "composer", Hidden: true, Children: []LayoutNode{
+				{Type: LayoutTypeRow, ID: "input_region", Hidden: true, Children: []LayoutNode{
 					{Type: LayoutTypePane, Name: OutputPaneName}, {Type: LayoutTypeInput},
 				}},
 				testBar("status"),
 			}}},
-			want: `region "composer" contains input and cannot be hidden`,
+			want: `region "input_region" contains input and cannot be hidden`,
 		},
 		{
 			name: "hidden ancestor region contains nested input",

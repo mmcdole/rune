@@ -131,7 +131,7 @@ func childRect(parent image.Rectangle, axis splitAxis, position, size int) image
 	return image.Rect(parent.Min.X, position, parent.Max.X, position+size)
 }
 
-// Panes have external chrome. Composite widgets already include their own
+// Panes have external borders. Composite widgets already include their own
 // rules, and only need insets for boundaries supplied by the surrounding tree.
 func contentInsets(node *resolvedNode) borderEdges {
 	if node.node.Type == ui.LayoutTypePane {
@@ -260,7 +260,7 @@ func (m *Model) minimum(node *resolvedNode, axis splitAxis) int {
 		minimum = min(minimum, node.node.Size.Value)
 	}
 	// max_size is a hard user constraint. If it is smaller than intrinsic
-	// chrome, degrade that chrome inside the capped rectangle instead of making
+	// borders, degrade those borders inside the capped rectangle instead of making
 	// the parent allocation inconsistent and triggering a global fallback.
 	if maximum := nodeMaximum(node.node); maximum > 0 {
 		minimum = min(minimum, maximum)
@@ -385,7 +385,7 @@ func fallbackAllocation(
 	return result
 }
 
-// Under pressure, preserve content rather than the chrome included in normal
+// Under pressure, preserve content rather than the borders included in normal
 // minima. In particular the input can fall back to one editable row.
 func interactionMinimum(node *resolvedNode, axis splitAxis) int {
 	if node.widget != nil {

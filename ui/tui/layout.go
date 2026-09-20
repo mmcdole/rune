@@ -205,7 +205,7 @@ func (m *Model) resolveNode(node ui.LayoutNode, availableWidth int, parentAxis s
 			resolved.hasInput = resolved.hasInput || child.hasInput
 		}
 		resolved.edges = containerBorders(node, children)
-		// A hard cap can force descendants to drop chrome. Do not promise that
+		// A hard cap can force descendants to drop borders. Do not promise that
 		// capped container's boundary to a neighbor before the fallback runs.
 		if maximum := nodeMaximum(node); resolved.hasInput && maximum > 0 && maximum < m.intrinsicMinimum(resolved, parentAxis) {
 			resolved.edges = 0

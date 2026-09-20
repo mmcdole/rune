@@ -11,7 +11,7 @@ import (
 	"github.com/mmcdole/rune/ui"
 )
 
-func TestPasteMessageRoutesAtomicallyToEditor(t *testing.T) {
+func TestPasteMessageRoutesAtomicallyToDraftEditor(t *testing.T) {
 	events := make(chan ui.UIEvent, 4)
 	m := NewModel(events)
 
@@ -19,7 +19,7 @@ func TestPasteMessageRoutesAtomicallyToEditor(t *testing.T) {
 	m = next.(*Model)
 
 	if m.inputCtl.mode() != modeDraftEditor {
-		t.Fatalf("paste mode = %v, want editor", m.inputCtl.mode())
+		t.Fatalf("paste mode = %v, want draft editor", m.inputCtl.mode())
 	}
 	if got := m.input.Value(); got != "say hello\nsay goodbye" {
 		t.Fatalf("pasted input = %q", got)
@@ -142,7 +142,7 @@ func TestSetInputSubmissionMessageForcesVerbatimMode(t *testing.T) {
 	m = next.(*Model)
 
 	if m.inputCtl.mode() != modeDraftEditor || !m.input.DraftEditorActive() {
-		t.Fatal("explicit verbatim message did not enter editor")
+		t.Fatal("explicit verbatim message did not enter draft editor")
 	}
 	if got := m.input.Value(); got != "one line;still data" {
 		t.Fatalf("input = %q", got)
@@ -159,7 +159,7 @@ func TestPushedDraftAcknowledgesStateWithoutReportingUserEdit(t *testing.T) {
 		select {
 		case event := <-events:
 			if event != (ui.DraftAppliedMsg{Text: "script edit", Cursor: cursor}) {
-				t.Fatalf("pushed editor state produced %#v", event)
+				t.Fatalf("pushed draft editor state produced %#v", event)
 			}
 		default:
 			t.Fatal("missing applied-state acknowledgment")

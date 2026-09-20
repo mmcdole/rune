@@ -1,9 +1,9 @@
 ---
 title: Key Bindings
-description: Bind keys and chords to editor actions or Lua callbacks. The default keymap is a script too.
+description: Bind keys and chords to input actions or Lua callbacks. The default keymap is a script too.
 ---
 
-A bind attaches an editor action or Lua callback to a key or chord, so a keypress can do what
+A bind attaches an input action or Lua callback to a key or chord, so a keypress can do what
 would otherwise take a typed command. The default keymap (history, completion,
 scrolling, `$EDITOR`) is built from the same function, so anything it binds you
 can rebind.
@@ -14,7 +14,7 @@ rune.bind("ctrl+g", function() rune.pane.toggle("map") end)
 rune.unbind("f1")
 ```
 
-A binding accepts a function or a named editor action such as `"input.submit"`.
+A binding accepts a function or a named input action such as `"input.submit"`.
 To send a command, call `rune.send` inside a callback. Strings are action names,
 not commands to send.
 
@@ -89,9 +89,11 @@ rune.bind("numpad3", function() rune.send("down") end)
 `numpad8` always means the 8 key on the number pad. The number-row key remains
 `8`.
 
-### Editor action keys
+<span id="editor-action-keys"></span>
 
-| Key | Normal input | Composer |
+### Input action keys
+
+| Key | Normal input | Draft editor |
 |---|---|---|
 | `enter` | Submit the command | Submit using the displayed mode |
 | `alt+v` | Open the draft editor in Verbatim mode | Toggle Command/Verbatim |
@@ -99,7 +101,7 @@ rune.bind("numpad3", function() rune.send("down") end)
 | `ctrl+e` | Edit the draft in `$EDITOR` | Edit the draft in `$EDITOR` |
 | `esc` | Clear the draft | Confirm, then discard on the second press |
 
-These are ordinary bindings to named editor actions:
+These are ordinary bindings to named input actions:
 
 ```lua
 rune.bind("enter", "input.submit")
@@ -121,7 +123,7 @@ Arrays create independent bindings and return an array of handles. Removing one
 alias leaves the others intact. Defaults load before user scripts, so removal
 also works for defaults; there is no hidden default underneath an unbound key.
 
-Composer hints show the earliest registered active binding for each action.
+Draft editor hints show the earliest registered active binding for each action.
 Removing or disabling that binding promotes the next alias. An action with no
 active bindings has no hint. To prefer Shift+Enter while keeping Ctrl+J, rebind
 Ctrl+J after the default Shift+Enter binding:
@@ -148,7 +150,7 @@ modified keypad Enter.
 | Inline picker | Configured cancel or `ctrl+c` closes; `up`/`down` navigate; `tab` accepts; `enter` accepts; configured submit accepts and submits; newline starts the draft editor; editor closes the picker and edits the draft; unbound text filters | Any other bound key runs, including printable keys |
 | Modal picker | Configured cancel closes; all other keys stay in the picker | None |
 | Scrollback search | Configured cancel closes; all other keys stay in search | None |
-| Composer | Text entry, editing and navigation, literal `tab`, submit, newline, external editor, and two-step configured cancel | Unused chords can run |
+| Draft editor | Text entry, editing and navigation, literal `tab`, submit, newline, external editor, and two-step configured cancel | Unused chords can run |
 
 This lets a printable hotkey coexist with typing: type `jump` normally, but
 press a bound `j` on an empty line and its callback runs. A fully selected

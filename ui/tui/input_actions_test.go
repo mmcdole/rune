@@ -68,7 +68,7 @@ func TestInputBindingsChangeRoutingAndHints(t *testing.T) {
 	}
 }
 
-func TestEditorBindingsRespectModalPicker(t *testing.T) {
+func TestInputActionsRespectModalPicker(t *testing.T) {
 	h := newControllerHarness()
 	h.ctl.input.SetBindings(input.Bindings{
 		"f1": {Action: "input.submit", Enabled: true},
@@ -81,7 +81,7 @@ func TestEditorBindingsRespectModalPicker(t *testing.T) {
 		h.ctl.HandleKey(keyPress(code))
 	}
 	if h.ctl.input.Value() != "draft" || len(h.submitted) != 0 || h.ctl.input.SubmissionMode() != input.ModeCommand {
-		t.Fatal("editor action escaped modal picker")
+		t.Fatal("input action escaped modal picker")
 	}
 }
 
@@ -108,7 +108,7 @@ func TestBindingReplacementRemovalAndDisabledHints(t *testing.T) {
 	m.inputCtl.SetText("draft")
 	m.inputCtl.HandleKey(keyPress(tea.KeyEnter))
 	if m.input.Value() != "draft" || m.input.Bindings().Hint("submit") != "" {
-		t.Fatal("callback replacement retained editor behavior or hint")
+		t.Fatal("callback replacement retained submit behavior or hint")
 	}
 	bindings = input.DefaultBindings()
 	binding := bindings["ctrl+j"]
@@ -168,7 +168,7 @@ func TestReboundCancelAcrossInputContexts(t *testing.T) {
 			h.ctl.HandleKey(ctrlPress('g'))
 			if context == "draft_editor" {
 				if h.ctl.input.Value() != draft {
-					t.Fatal("first cancel discarded editor")
+					t.Fatal("first cancel discarded draft editor")
 				}
 				h.ctl.HandleKey(ctrlPress('g'))
 			}
@@ -194,7 +194,7 @@ func TestReboundCancelAcrossInputContexts(t *testing.T) {
 	}
 }
 
-func TestEditorAndCancelHintsFollowActions(t *testing.T) {
+func TestExternalEditorAndCancelHintsFollowActions(t *testing.T) {
 	m := newBareModel(t)
 	m.input.SetSize(140, 0)
 	bindings := input.DefaultBindings()
@@ -238,7 +238,7 @@ func TestEditorAndCancelHintsFollowActions(t *testing.T) {
 	}
 }
 
-func TestReboundEditorUsesDraftAndRespectsOverlays(t *testing.T) {
+func TestReboundExternalEditorUsesDraftAndRespectsOverlays(t *testing.T) {
 	for _, context := range []string{"normal", "draft_editor", "inline", "modal", "search"} {
 		t.Run(context, func(t *testing.T) {
 			h := newControllerHarness()

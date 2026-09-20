@@ -145,23 +145,23 @@ func joinableSeparator(leaf *resolvedNode) bool {
 		leaf.node.SeparatorChar == "" && leaf.parentAxis == axisVertical
 }
 
-func insetBorders(rect image.Rectangle, frames borderEdges) image.Rectangle {
-	if frames&borderLeft != 0 && rect.Min.X < rect.Max.X {
+func insetBorders(rect image.Rectangle, edges borderEdges) image.Rectangle {
+	if edges&borderLeft != 0 && rect.Min.X < rect.Max.X {
 		rect.Min.X++
 	}
-	if frames&borderRight != 0 && rect.Min.X < rect.Max.X {
+	if edges&borderRight != 0 && rect.Min.X < rect.Max.X {
 		rect.Max.X--
 	}
-	if frames&borderTop != 0 && rect.Min.Y < rect.Max.Y {
+	if edges&borderTop != 0 && rect.Min.Y < rect.Max.Y {
 		rect.Min.Y++
 	}
-	if frames&borderBottom != 0 && rect.Min.Y < rect.Max.Y {
+	if edges&borderBottom != 0 && rect.Min.Y < rect.Max.Y {
 		rect.Max.Y--
 	}
 	return rect
 }
 
-// planBorders gives every piece of chrome one owner. Each framed pane marks
+// planBorders gives every border one owner. Each bordered pane marks
 // its configured edges and insets its content rectangle; each container with
 // dividers marks the rules between its active children; each default
 // separator marks its row and gives up its content rectangle. Shared

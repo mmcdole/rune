@@ -341,13 +341,13 @@ func TestSearchViewPartialCount(t *testing.T) {
 func TestSearchInputMeasuredHeight(t *testing.T) {
 	s := newTestSearch("thief 1", "thief 2")
 	s.Open("thief", SearchScope{})
-	// 2 results + help + editor + three separators
+	// 2 results + help + query field + three separators
 	if got := searchInput(s, 60, 0).MeasureHeight(60, 100); got != 7 {
 		t.Errorf("input height = %d, want 7", got)
 	}
 	s.Open("", SearchScope{})
 	s.TypeRunes([]rune("zzz"))
-	// Placeholder + help + editor + three separators
+	// Placeholder + help + query field + three separators
 	if got := searchInput(s, 60, 0).MeasureHeight(60, 100); got != 6 {
 		t.Errorf("input height = %d, want 6", got)
 	}
@@ -360,7 +360,7 @@ func TestSearchInputMeasuredHeightCapsAtFiveResults(t *testing.T) {
 	}
 	s := newTestSearch(lines...)
 	s.Open("thief", SearchScope{})
-	// Five results + help + editor + three separators
+	// Five results + help + query field + three separators
 	if got := searchInput(s, 60, 0).MeasureHeight(60, 100); got != 10 {
 		t.Errorf("input height = %d, want 10", got)
 	}

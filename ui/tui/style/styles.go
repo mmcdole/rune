@@ -17,7 +17,7 @@ func RenderBorder(width int, char string) string {
 
 // Styles holds the lipgloss styles the widgets render with. Server
 // output and bar/status text arrive pre-styled from Lua (rune.style);
-// only chrome the TUI draws itself is styled here.
+// text, borders, and labels drawn by the TUI are styled here.
 type Styles struct {
 	// Input
 	InputText     lipgloss.Style

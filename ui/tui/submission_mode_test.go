@@ -22,7 +22,7 @@ func TestDraftModeTogglePreservesEditingState(t *testing.T) {
 			for range 2 {
 				h.ctl.HandleKey(tea.KeyPressMsg{Code: 'v', Mod: tea.ModAlt})
 				if !h.ctl.input.DraftEditorActive() {
-					t.Fatal("explicit mode switch must open and retain the editor")
+					t.Fatal("explicit mode switch must open and retain the draft editor")
 				}
 				if h.ctl.input.Value() != draft || h.ctl.input.Position() != 3 || !h.ctl.input.Selected() {
 					t.Fatal("mode switch changed text, cursor, or selection")
@@ -153,7 +153,7 @@ func TestRejectedCommandPreservesDraftAndCanBeSentVerbatim(t *testing.T) {
 	}
 }
 
-func TestEditorEditorHintTracksBindingUpdates(t *testing.T) {
+func TestExternalEditorHintTracksBindingUpdates(t *testing.T) {
 	m := newBareModel(t)
 	m.input.SetSize(100, 0)
 	m.inputCtl.HandlePaste("first\nsecond")
@@ -180,11 +180,11 @@ func TestEscapeConfirmationDoesNotConsumeSubmit(t *testing.T) {
 		t.Fatalf("Enter after Escape = %+v", h.submitted)
 	}
 	if h.ctl.input.DraftEditorActive() || h.ctl.input.Value() != "" {
-		t.Fatal("accepted submission retained editor")
+		t.Fatal("accepted submission retained draft editor")
 	}
 }
 
-func TestEditorWrapDoesNotSplitSlashCommand(t *testing.T) {
+func TestDraftEditorWrapDoesNotSplitSlashCommand(t *testing.T) {
 	for _, prefix := range []string{"/lua rune.echo('", "/echo "} {
 		t.Run(prefix, func(t *testing.T) {
 			h := newControllerHarness()
@@ -194,7 +194,7 @@ func TestEditorWrapDoesNotSplitSlashCommand(t *testing.T) {
 				draft += "')"
 			}
 			h.ctl.SetSubmission(input.Command(draft))
-			// Open the editor and return to Command mode at a narrow width.
+			// Open the draft editor and return to Command mode at a narrow width.
 			h.ctl.HandleKey(tea.KeyPressMsg{Code: 'v', Mod: tea.ModAlt})
 			h.ctl.HandleKey(tea.KeyPressMsg{Code: 'v', Mod: tea.ModAlt})
 			if h.ctl.input.MeasureHeight(30, 30) <= 3 {

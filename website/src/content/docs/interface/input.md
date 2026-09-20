@@ -234,7 +234,7 @@ after processing, so echo hooks and command handlers no longer see the current
 submission already in history. Scripts that intentionally send several lines can
 call `rune.send` or `rune.send_raw` and return `false` to consume the original line.
 
-Composer editing keys are handled locally rather than by Lua binds. `Up`/`Down`
+The draft editor handles editing keys locally. `Up`/`Down`
 move through the draft's visual rows, `PageUp`/`PageDown` move by a draft editor
 page, and the mouse wheel still scrolls output when mouse capture is enabled.
 The ordinary one-line input and its bindings return after the draft editor closes.

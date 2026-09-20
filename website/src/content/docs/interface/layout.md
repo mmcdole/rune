@@ -60,7 +60,7 @@ rune.ui.layout({
 ```
 
 Declaring a pane creates its buffer if needed. An empty pane displays its
-frame; scripts fill it with `rune.pane.write` or `rune.pane.replace`.
+border; scripts fill it with `rune.pane.write` or `rune.pane.replace`.
 Containers may have zero, one, or many children. Empty containers take no space.
 
 ## Sizing
@@ -95,7 +95,7 @@ unused space at the end; include an uncapped `fr` child to fill it.
 
 Input measures its current editing mode, a non-empty bar uses one row, and
 a separator uses one row. A pane measures its content at the assigned width,
-plus frame rows, bounded by the terminal height and `max_size`. Use a fixed
+plus border rows, bounded by the terminal height and `max_size`. Use a fixed
 or fractional height for a log that should not grow as lines arrive.
 
 An auto-height row first assigns its children's widths, then uses their tallest
@@ -113,15 +113,15 @@ set an explicit `title` to label it.
 
 Containers do not draw outer borders. `dividers = true` draws between active
 children: vertical rules in a row, horizontal rules in a column. With no gap,
-adjacent pane frames share a cell; a divider uses that seam or reserves a cell
-when no frame provides one.
+adjacent pane borders share a cell; a divider uses that seam or reserves a cell
+when no border provides one.
 
 A positive `gap` reserves that many cells between children. With dividers
-enabled, the rule sits near the middle of that gap. Shared pane frames,
+enabled, the rule sits near the middle of that gap. Shared pane borders,
 dividers, default separators, and input rules join at tees and crosses.
 
 A separator is `{ type = "separator" }`. Set `char = "═"` or another
-single-cell character for a standalone rule that does not join the frame grid.
+single-cell character for a standalone rule that does not join the border grid.
 
 ## Visibility and regions
 

@@ -21,7 +21,7 @@ func newTestInput(width int) *Input {
 	return in
 }
 
-func TestModalPickerShowsResultsAboveItsOnlyDraftEditor(t *testing.T) {
+func TestModalPickerShowsResultsAboveItsQueryField(t *testing.T) {
 	in := newTestInput(40)
 	in.SetValue("unfinished command")
 	in.ShowPicker(ui.ShowPickerMsg{Title: "Aliases", Items: []ui.PickerItem{{Text: "north"}, {Text: "south"}}})
@@ -47,7 +47,7 @@ func TestModalPickerShowsResultsAboveItsOnlyDraftEditor(t *testing.T) {
 		t.Fatal("content rendered renderer-owned rules")
 	}
 	if strings.Contains(in.View(), "unfinished command") || strings.Count(in.View(), "█") != 1 {
-		t.Fatal("modal picker exposed the inactive command editor")
+		t.Fatal("modal picker exposed the inactive command input")
 	}
 	in.HidePicker()
 	if in.Value() != "unfinished command" || !strings.Contains(text.StripANSI(in.View()), "unfinished command") {
@@ -364,7 +364,7 @@ func TestConstrainedDraftEditorKeepsEditableBodyVisible(t *testing.T) {
 
 	rows := strings.Split(text.StripANSI(in.View()), "\n")
 	if len(rows) != 1 || !strings.Contains(rows[0], "say north") {
-		t.Fatalf("one-row editor hid editable body: %q", rows)
+		t.Fatalf("one-row draft editor hid editable body: %q", rows)
 	}
 }
 
@@ -420,7 +420,7 @@ func TestInputSearchReplacesInactiveCommandField(t *testing.T) {
 	}
 	rows := strings.Split(view, "\n")
 	if !strings.HasPrefix(rows[len(rows)-2], "Search: thief") || strings.Count(view, "█") != 1 {
-		t.Fatalf("search must have one bottom editor: %q", rows)
+		t.Fatalf("search must have one bottom query field: %q", rows)
 	}
 	if !strings.Contains(view, "↑ older") || !strings.Contains(view, "1/1") {
 		t.Fatalf("search lost help or match count: %q", rows)

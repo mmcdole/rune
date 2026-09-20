@@ -30,11 +30,11 @@ const (
 	LayoutTypeBar       = "bar"
 
 	// OutputPaneName is the pre-created system pane that receives the MUD
-	// transcript, local echo, and prompts.
+	// output, local echo, and prompts.
 	OutputPaneName = "output"
 )
 
-// PaneBorder is the closed set of pane-frame modes. The zero value has
+// PaneBorder is the closed set of pane border modes. The zero value has
 // PaneBorderFull semantics, matching an omitted border field.
 type PaneBorder string
 
@@ -171,7 +171,7 @@ func NormalizeLayoutTree(tree LayoutTree) (LayoutTree, error) {
 // along the parent's axis. The root has no parent and cannot carry those
 // constraints or visibility state. Gap and Dividers are container-only: Gap
 // reserves cells between active children, and Dividers draws a rule between
-// them when their frames do not already provide one. Hidden is the
+// them when their borders do not already provide one. Hidden is the
 // local hidden state: valid on identified regions and pane
 // placements (name is the runtime handle for the latter). Title and Border
 // are pane-only; SeparatorChar is separator-only. A non-nil empty Title

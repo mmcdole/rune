@@ -528,7 +528,7 @@ func TestFallbackDropsOversizedGapsInsideParent(t *testing.T) {
 	assertExactBlock(t, m.View().Content, 16, 2)
 }
 
-func TestHorizontalPaneFrameKeepsFullContentWidth(t *testing.T) {
+func TestHorizontalPaneBorderKeepsFullContentWidth(t *testing.T) {
 	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 8)), 20, 4)
 	addPane(t, m, "chat", "12345678901234567890", "second")
 	setLayout(m, ui.LayoutNode{
@@ -540,7 +540,7 @@ func TestHorizontalPaneFrameKeepsFullContentWidth(t *testing.T) {
 	plan := m.layoutPlan
 	pane := findLeaf(t, plan, ui.LayoutTypePane, "chat")
 	if got, want := pane.content, image.Rect(0, 1, 20, 3); got != want {
-		t.Fatalf("horizontal-frame content = %v, want %v", got, want)
+		t.Fatalf("horizontal-border content = %v, want %v", got, want)
 	}
 	rows := assertExactBlock(t, m.View().Content, 20, 4)
 	plain := make([]string, len(rows))
@@ -558,17 +558,17 @@ func TestHorizontalPaneFrameKeepsFullContentWidth(t *testing.T) {
 	}
 }
 
-func TestPaneFrameEdgesAreLogicalTrackMinima(t *testing.T) {
+func TestPaneBorderEdgesAreLogicalTrackMinima(t *testing.T) {
 	tests := []struct {
 		name   string
 		root   string
 		border ui.PaneBorder
 		want   int
 	}{
-		{name: "full frame height", root: ui.LayoutTypeColumn, want: 2},
-		{name: "full frame width", root: ui.LayoutTypeRow, want: 2},
-		{name: "horizontal frame height", root: ui.LayoutTypeColumn, border: ui.PaneBorderHorizontal, want: 2},
-		{name: "horizontal frame has no width minimum", root: ui.LayoutTypeRow, border: ui.PaneBorderHorizontal, want: 1},
+		{name: "full border height", root: ui.LayoutTypeColumn, want: 2},
+		{name: "full border width", root: ui.LayoutTypeRow, want: 2},
+		{name: "horizontal border height", root: ui.LayoutTypeColumn, border: ui.PaneBorderHorizontal, want: 2},
+		{name: "horizontal border has no width minimum", root: ui.LayoutTypeRow, border: ui.PaneBorderHorizontal, want: 1},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -594,7 +594,7 @@ func TestPaneFrameEdgesAreLogicalTrackMinima(t *testing.T) {
 	}
 }
 
-func TestExplicitMaximumCanClipPaneChromeWithoutFallingBackParent(t *testing.T) {
+func TestExplicitMaximumCanClipPaneBordersWithoutFallingBackParent(t *testing.T) {
 	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 8)), 20, 10)
 	addPane(t, m, "chat")
 	one := 1
@@ -639,7 +639,7 @@ func TestTinyFallbackStillRespectsHardMaximum(t *testing.T) {
 	}
 }
 
-func TestNestedMinimumIncludesGapsAndSharedFrameSeams(t *testing.T) {
+func TestNestedMinimumIncludesGapsAndSharedBorderSeams(t *testing.T) {
 	for _, test := range []struct {
 		name string
 		gap  int
@@ -807,7 +807,7 @@ func TestContainerDividersDrawBetweenActiveChildren(t *testing.T) {
 	}
 }
 
-func TestContainerDividersReuseFramedPaneSeams(t *testing.T) {
+func TestContainerDividersReuseBorderedPaneSeams(t *testing.T) {
 	noTitle := ""
 	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 8)), 20, 6)
 	addPane(t, m, "left")
@@ -868,7 +868,7 @@ func TestColumnDividerDrawsInsideDeclaredGap(t *testing.T) {
 	}
 }
 
-func TestDividerContainerPropagatesItsContinuousFrame(t *testing.T) {
+func TestDividerContainerPropagatesItsContinuousBorder(t *testing.T) {
 	noTitle := ""
 	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 8)), 20, 8)
 	for _, name := range []string{"left", "right", "bottom"} {
@@ -939,7 +939,7 @@ func TestDividerJoinsBordersAndSeparatorsAboveAndBelow(t *testing.T) {
 	}
 	separator := findLeaf(t, plan, "", ui.LayoutTypeSeparator)
 	if separator.outer != image.Rect(0, 8, 21, 9) || !separator.content.Empty() {
-		t.Fatalf("separator outer=%v content=%v, want row 8 drawn by the frame grid", separator.outer, separator.content)
+		t.Fatalf("separator outer=%v content=%v, want row 8 drawn by the border grid", separator.outer, separator.content)
 	}
 
 	rows := assertExactBlock(t, m.View().Content, 21, 12)

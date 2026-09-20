@@ -154,6 +154,11 @@ that shows it, retrying if Session's queue is full. Identical prompt and bar
 snapshots do not schedule a render. Input's minimum remains protected on both
 axes when constraints cannot fit.
 
+Rendering terminology distinguishes borders (widget boundaries), edges (sides
+of a rectangle), and rules (positioned lines). A frame is a complete screen
+update. The draft editor edits input inside Rune; an external editor runs in
+`$EDITOR`. Picker and search query fields are separate from the draft editor.
+
 Pane borders, dividers, separators, and joinable input rules feed one border
 grid. A layout's first render resolves junctions into positioned cells; later
 renders reuse those cells with current labels. Widget content is clipped to its rectangle.

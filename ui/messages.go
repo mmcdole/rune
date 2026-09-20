@@ -191,7 +191,7 @@ type SetInputMsg string
 
 // SetInputSubmissionMsg restores both draft text and interpretation.
 // History recall uses this for one-line verbatim entries that have no
-// structural character from which the UI could infer compose mode.
+// structural character from which the UI could infer draft editor mode.
 type SetInputSubmissionMsg input.Submission
 
 // --- Picker Messages (UI -> Session) ---

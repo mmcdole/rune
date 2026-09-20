@@ -8,18 +8,10 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/mmcdole/rune/text"
-	"github.com/mmcdole/rune/ui/tui/style"
 )
 
-func newEditorInput(width int) *Input {
-	styles := style.DefaultStyles()
-	in := NewInput(styles, NewSearch(NewScrollback(100), styles))
-	in.SetSize(width, 0)
-	return in
-}
-
 func TestDraftEditorNormalizesNewlinesAndPreservesWhitespace(t *testing.T) {
-	in := newEditorInput(80)
+	in := newTestInput(80)
 	original := "  first;  \r\n\tsecond\r\n\r\nlast  "
 	in.OpenDraftEditor(original, len([]rune(original)))
 
@@ -28,7 +20,7 @@ func TestDraftEditorNormalizesNewlinesAndPreservesWhitespace(t *testing.T) {
 		t.Fatalf("Value = %q, want %q", got, want)
 	}
 	if !in.DraftEditorActive() {
-		t.Fatal("structured whitespace must activate the draftEditor")
+		t.Fatal("structured whitespace must activate the draft editor")
 	}
 	if got, wantCursor := in.Position(), len([]rune(want)); got != wantCursor {
 		t.Fatalf("Position = %d, want %d", got, wantCursor)
@@ -36,7 +28,7 @@ func TestDraftEditorNormalizesNewlinesAndPreservesWhitespace(t *testing.T) {
 }
 
 func TestDraftEditorPasteSplicesAtNormalInputCursor(t *testing.T) {
-	in := newEditorInput(80)
+	in := newTestInput(80)
 	in.SetValue("prepost")
 	in.SetCursor(3)
 	in.InsertPaste("  a;\r\n\tb  ")
@@ -50,8 +42,8 @@ func TestDraftEditorPasteSplicesAtNormalInputCursor(t *testing.T) {
 	}
 }
 
-func TestPlainPasteKeepsNormalInputAndChrome(t *testing.T) {
-	in := newEditorInput(40)
+func TestPlainPasteKeepsNormalInputAndLabels(t *testing.T) {
+	in := newTestInput(40)
 	in.SetValue("sa")
 	in.CursorEnd()
 	beforeHeight := in.MeasureHeight(in.width, 1<<14)
@@ -64,16 +56,16 @@ func TestPlainPasteKeepsNormalInputAndChrome(t *testing.T) {
 		t.Fatalf("Value = %q, want %q", got, "say hello")
 	}
 	if got := in.MeasureHeight(in.width, 1<<14); got != beforeHeight || got != 3 {
-		t.Fatalf("normal PreferredHeight = %d, want unchanged height 3", got)
+		t.Fatalf("normal measured height = %d, want unchanged height 3", got)
 	}
 	view := in.View() + inputLabels(in)
 	if strings.Contains(view, "VERBATIM") || strings.Contains(view, "COMMAND") || strings.Contains(view, "Ctrl+Enter") {
-		t.Fatalf("normal input gained draftEditor artifacts: %q", view)
+		t.Fatalf("normal input gained draft editor artifacts: %q", view)
 	}
 }
 
 func TestSingleLineTabPasteUsesDraftEditorAndRetainsTab(t *testing.T) {
-	in := newEditorInput(40)
+	in := newTestInput(40)
 	in.InsertPaste("left\tright")
 
 	if !in.DraftEditorActive() {
@@ -88,7 +80,7 @@ func TestSingleLineTabPasteUsesDraftEditorAndRetainsTab(t *testing.T) {
 }
 
 func TestDraftEditorLocalKeySemantics(t *testing.T) {
-	in := newEditorInput(50)
+	in := newTestInput(50)
 	in.OpenDraftEditor("one\ntwo", len([]rune("one\ntwo")))
 
 	for _, msg := range []tea.KeyPressMsg{
@@ -112,7 +104,7 @@ func TestDraftEditorLocalKeySemantics(t *testing.T) {
 		t.Fatalf("plain Enter mutated draft: %q", got)
 	}
 	if in.UpdateDraftEditor(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl}) {
-		t.Fatal("Ctrl+E must remain available to the external-draftEditor binding")
+		t.Fatal("Ctrl+E must remain available to the external editor binding")
 	}
 	if in.UpdateDraftEditor(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt}) {
 		t.Fatal("Alt+Enter should remain available as an Lua binding")
@@ -123,7 +115,7 @@ func TestDraftEditorLocalKeySemantics(t *testing.T) {
 }
 
 func TestDraftEditorStaysVerbatimAfterLastStructureDeleted(t *testing.T) {
-	in := newEditorInput(40)
+	in := newTestInput(40)
 	in.OpenDraftEditor("north\neast", len([]rune("north\n")))
 
 	if !in.UpdateDraftEditor(tea.KeyPressMsg{Code: tea.KeyBackspace}) {
@@ -141,7 +133,7 @@ func TestDraftEditorStaysVerbatimAfterLastStructureDeleted(t *testing.T) {
 }
 
 func TestSetValueAdmitsAndKeepsVerbatimSticky(t *testing.T) {
-	in := newEditorInput(40)
+	in := newTestInput(40)
 
 	// A command-mode input becomes verbatim when a replacement contains
 	// physical structure.
@@ -154,24 +146,24 @@ func TestSetValueAdmitsAndKeepsVerbatimSticky(t *testing.T) {
 	// submission semantics.
 	in.SetValue("one;two")
 	if !in.DraftEditorActive() || in.Value() != "one;two" {
-		t.Fatalf("plain draftEditor result changed mode/value: draftEditor active=%v value=%q", in.DraftEditorActive(), in.Value())
+		t.Fatalf("plain draft editor result changed mode/value: draft editor active=%v value=%q", in.DraftEditorActive(), in.Value())
 	}
 
 	// Empty is the explicit reset back to ordinary command input.
 	in.SetValue("")
 	if in.DraftEditorActive() || in.Value() != "" {
-		t.Fatalf("clearing input did not cancel draftEditor: draftEditor active=%v value=%q", in.DraftEditorActive(), in.Value())
+		t.Fatalf("clearing input did not cancel draft editor: draft editor active=%v value=%q", in.DraftEditorActive(), in.Value())
 	}
 
 	// Terminal controls also require verbatim admission even without LF/TAB.
 	in.SetValue("safe\x1b[31m")
 	if !in.DraftEditorActive() || in.Value() != "safe\x1b[31m" {
-		t.Fatalf("control SetValue was not admitted verbatim: draftEditor active=%v value=%q", in.DraftEditorActive(), in.Value())
+		t.Fatalf("control SetValue was not admitted verbatim: draft editor active=%v value=%q", in.DraftEditorActive(), in.Value())
 	}
 }
 
 func TestDraftEditorRenderExpandsTabsWithoutMutatingDraft(t *testing.T) {
-	in := newEditorInput(50)
+	in := newTestInput(50)
 	in.OpenDraftEditor("a\tb\n\tindent", len([]rune("a\tb\n\tindent")))
 
 	view := in.View()
@@ -191,11 +183,11 @@ func TestDraftEditorRenderExpandsTabsWithoutMutatingDraft(t *testing.T) {
 }
 
 func TestDraftEditorRenderEscapesControlSequences(t *testing.T) {
-	in := newEditorInput(50)
+	in := newTestInput(50)
 	raw := "safe\x1b[31mred\x00"
 	in.InsertPaste(raw)
 	if !in.DraftEditorActive() || in.Value() != raw {
-		t.Fatalf("one-line control paste was not preserved in draftEditor: draftEditor active=%v value=%q", in.DraftEditorActive(), in.Value())
+		t.Fatalf("one-line control paste was not preserved in draft editor: draft editor active=%v value=%q", in.DraftEditorActive(), in.Value())
 	}
 
 	view := in.View()
@@ -209,7 +201,7 @@ func TestDraftEditorRenderEscapesControlSequences(t *testing.T) {
 }
 
 func TestDraftEditorDistinguishesHardLinesAndSoftWraps(t *testing.T) {
-	in := newEditorInput(16) // 4-cell gutter, 12-cell content
+	in := newTestInput(16) // 4-cell gutter, 12-cell content
 	in.OpenDraftEditor("abcdefghijklmnop\nnext", 0)
 	plain := text.StripANSI(in.View())
 
@@ -225,7 +217,7 @@ func TestDraftEditorDistinguishesHardLinesAndSoftWraps(t *testing.T) {
 }
 
 func TestDraftEditorHeightCapsAndScrollsToCursor(t *testing.T) {
-	in := newEditorInput(80)
+	in := newTestInput(80)
 	var lines []string
 	for n := 1; n <= 20; n++ {
 		lines = append(lines, "line")
@@ -242,12 +234,12 @@ func TestDraftEditorHeightCapsAndScrollsToCursor(t *testing.T) {
 		t.Fatalf("View rows = %d, want %d", got, maxDraftBodyRows+2)
 	}
 	if !strings.Contains(text.StripANSI(view), "20 │ line") {
-		t.Fatalf("draftEditor did not scroll to the cursor's final line: %q", text.StripANSI(view))
+		t.Fatalf("draft editor did not scroll to the cursor's final line: %q", text.StripANSI(view))
 	}
 }
 
 func TestDraftEditorHonorsAllocatedHeight(t *testing.T) {
-	in := newEditorInput(40)
+	in := newTestInput(40)
 	in.OpenDraftEditor("one\ntwo\nthree\nfour", 0)
 	in.SetSize(40, 5)
 
@@ -274,7 +266,7 @@ func TestDraftEditorWideRunesWrapWithoutOverflow(t *testing.T) {
 		t.Fatalf("wide-rune line did not soft-wrap: %+v", layout.rows)
 	}
 
-	in := newEditorInput(10)
+	in := newTestInput(10)
 	in.OpenDraftEditor("abcd界x", len([]rune("abcd界x")))
 	for n, row := range strings.Split(in.View(), "\n") {
 		if width := ansi.StringWidth(row); width > 10 {
@@ -308,7 +300,7 @@ func TestDraftEditorVerticalMovementRetainsDisplayColumn(t *testing.T) {
 }
 
 func TestDraftEditorAltArrowsMoveByWord(t *testing.T) {
-	in := newEditorInput(40)
+	in := newTestInput(40)
 	in.OpenDraftEditor("one two\nthree", len([]rune("one two\nthree")))
 
 	if !in.UpdateDraftEditor(tea.KeyPressMsg{Code: tea.KeyLeft, Mod: tea.ModAlt}) {
@@ -328,7 +320,7 @@ func TestDraftEditorAltArrowsMoveByWord(t *testing.T) {
 func TestDraftEditorTinyWidthsDoNotPanicOrLeakTabs(t *testing.T) {
 	for width := 0; width <= 8; width++ {
 		t.Run(string(rune('0'+width)), func(t *testing.T) {
-			in := newEditorInput(width)
+			in := newTestInput(width)
 			in.OpenDraftEditor("\t界\ntext", len([]rune("\t界\ntext")))
 			view := in.View()
 			if strings.Contains(view, "\t") {

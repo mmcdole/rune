@@ -328,7 +328,7 @@ func (s *Session) handleServerLine(payload string) {
 	}
 	if show {
 		// Display egress owns terminal safety: strip everything but
-		// SGR so server clear/cursor sequences cannot wipe UI chrome
+		// SGR so server clear/cursor sequences cannot erase UI borders and input
 		// (issue #69). Lua hooks above saw the raw line.
 		s.ui.Print(text.SanitizeDisplay(modified))
 	}

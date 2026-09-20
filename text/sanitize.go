@@ -10,7 +10,7 @@ import "strings"
 // MUD-side editors (e.g. Aardwolf's OLC editor) send clear-screen and
 // cursor-addressing sequences. Rune's scrollback is an append-only row
 // model, so replaying such a sequence from inside a rendered row would
-// wipe UI chrome (separators, input line, bars) instead of "clearing
+// erase separators, the input line, or bars instead of "clearing
 // the screen"; like CMUD and MUSHclient, Rune ignores them. Tabs, CR,
 // and LF pass through - later display stages own tab expansion and
 // line splitting.

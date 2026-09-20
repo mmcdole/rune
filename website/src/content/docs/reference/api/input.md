@@ -78,7 +78,7 @@ Any intervening non-cancel key or binding update dismisses multiline discard
 confirmation. Rebinding cancel changes it across all these contexts. Ctrl+C also
 remains an overlay interrupt; outside overlays it keeps its existing Lua binding.
 Modal pickers and search capture other actions. Printable bindings retain the
-input contexts' typing protection; prefer non-printable keys for editor actions.
+input contexts' typing protection; prefer non-printable keys for input actions.
 
 A new key adds an alias; an existing key replaces its assignment. To move an
 action, bind the new key and explicitly unbind the old one:
@@ -103,7 +103,7 @@ reporting; Ctrl+J is the portable newline alternative.
 Callbacks execute through Session and Lua. Internal actions are resolved by the
 TUI; submission proceeds to Session for processing, and opening the external
 editor asks Session to suspend the terminal and apply the edited result. No Lua
-callback or Lua watchdog is involved in a named editor action. Action strings
+callback or Lua watchdog is involved in a named input action. Action strings
 are identifiers, not commands to send or Lua expressions; unknown names are errors.
 
 The `input.open_editor` binding edits the current draft automatically. The Lua

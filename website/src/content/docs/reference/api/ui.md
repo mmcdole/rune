@@ -136,12 +136,12 @@ first `write`, or explicitly with `create`. Placing a pane shows it; declare
 `hidden = true` on the leaf for a pane that starts hidden.
 
 Input can appear anywhere, including inside an identified region. Its automatic
-height follows the active editor/picker/search mode. Pane automatic height
-measures content at the assigned inner width, plus frame rows, bounded by the
+height follows the active input mode. Pane automatic height
+measures content at the assigned inner width, plus border rows, bounded by the
 terminal height and `max_size`.
 
 Ordinary pane buffers store logical lines and re-wrap at their current width.
-The `output` pane keeps transcript rows at their append-time width, so existing
+The `output` pane keeps scrollback rows at their append-time width, so existing
 server output does not reflow after a resize. While `output` is hidden or
 omitted, new rows use its last placement width; before its first placement they
 use the terminal width, or 80 columns if no terminal size has arrived. Pane

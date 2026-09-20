@@ -248,7 +248,7 @@ func BenchmarkIdleMessage(b *testing.B) {
 }
 
 // BenchmarkScreen is one full-screen render at a large terminal size: colored
-// scrollback, a framed side pane with a title, dividers, and a prompt.
+// scrollback, a bordered side pane with a title, dividers, and a prompt.
 func BenchmarkScreen(b *testing.B) {
 	m := NewModel(make(chan ui.UIEvent, 4096))
 	m.Update(tea.WindowSizeMsg{Width: 270, Height: 66})

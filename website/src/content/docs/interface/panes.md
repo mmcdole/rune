@@ -90,7 +90,7 @@ default, draws all four sides. `border = "none"`
 gives the whole assigned rectangle to content. `border = "horizontal"` draws
 only the titled top and closing bottom rules. Lines in user-created panes
 soft-wrap at render time and re-fit when the terminal or layout changes. The
-reserved output transcript retains its append-time wrapping.
+reserved output scrollback retains its append-time wrapping.
 
 See [Layout & UI](/interface/layout/) for nested sidebars and size constraints.
 
@@ -116,7 +116,7 @@ writes continue landing in the buffer. With the default generated title, its
 header shows `chat · scroll +N`; a custom `title` replaces that suffix
 along with the pane name. `scroll_down` past the end or `scroll_to_bottom`
 returns the pane to live tailing. User-created panes scroll by logical lines as
-written; the specialized output transcript scrolls its stored physical rows.
+written; the output pane scrolls the physical rows stored in its scrollback.
 
 ## The mirror pattern
 

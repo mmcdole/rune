@@ -289,7 +289,7 @@ func TestOutputScrolledSurvivesRingBufferEviction(t *testing.T) {
 }
 
 // View must never emit more rows than its height, whatever state the
-// offset is in - the frame-geometry backstop behind the onNewRows clamp.
+// offset is in - the output-height backstop behind the onNewRows clamp.
 func TestOutputViewNeverExceedsHeight(t *testing.T) {
 	v, _ := newTestOutput(40, 3, "a", "b", "c", "d", "e")
 	v.offset = 999
@@ -359,7 +359,7 @@ func TestOutputCenterOn(t *testing.T) {
 		t.Error("centering into history should enter scrolled mode")
 	}
 
-	// Near the top: clamps so the frame stays full.
+	// Near the top: clamps so the output window stays full.
 	v.CenterOn(buf.Seq(0))
 	rows = viewRows(v)
 	if rows[0] != "line 1" {

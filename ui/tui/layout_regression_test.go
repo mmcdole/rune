@@ -75,7 +75,7 @@ func TestContainedPickerBordersUseColumnBoundary(t *testing.T) {
 				m.Update(ui.ShowPickerMsg{Title: "Aliases", Inline: inline, Items: []ui.PickerItem{{Text: "north"}, {Text: "south"}}})
 				input := findLeaf(t, m.layoutPlan, "", ui.LayoutTypeInput)
 				rows := strings.Split(ansi.Strip(m.View().Content), "\n")
-				// Results share one separator with the editor below them.
+				// Results share one separator with the query field below them.
 				pickerBottom := input.content.Max.Y - 3
 				for y := input.content.Min.Y + 1; y < pickerBottom; y++ {
 					row := []rune(rows[y])
@@ -144,7 +144,7 @@ func TestInputResultsWithoutLeftNeighborHaveNoLeftWall(t *testing.T) {
 }
 
 func TestContainedInputModesPreserveLabelsAndCursor(t *testing.T) {
-	for _, mode := range []string{"normal", "editor", "picker", "search"} {
+	for _, mode := range []string{"normal", "draft_editor", "picker", "search"} {
 		for _, size := range []image.Point{image.Pt(100, 30), image.Pt(20, 8), image.Pt(3, 3), image.Pt(1, 1)} {
 			t.Run(fmt.Sprintf("%s/%dx%d", mode, size.X, size.Y), func(t *testing.T) {
 				m := resizeModel(t, NewModel(make(chan ui.UIEvent, 100)), size.X, size.Y)
@@ -152,7 +152,7 @@ func TestContainedInputModesPreserveLabelsAndCursor(t *testing.T) {
 				switch mode {
 				case "normal":
 					m.Update(ui.SetInputMsg("north"))
-				case "editor":
+				case "draft_editor":
 					m.Update(ui.SetInputMsg("first\nsecond"))
 				case "picker":
 					m.Update(ui.ShowPickerMsg{Title: "Aliases", Items: []ui.PickerItem{{Text: "north"}, {Text: "south"}}})
@@ -174,7 +174,7 @@ func TestContainedInputModesPreserveLabelsAndCursor(t *testing.T) {
 					switch mode {
 					case "normal":
 						labels = []string{"north"}
-					case "editor":
+					case "draft_editor":
 						labels = []string{"VERBATIM", "Enter send", "first", "second"}
 					case "picker":
 						labels = []string{"Aliases:", "north", "south", "> "}
@@ -237,7 +237,7 @@ func TestNestedConstrainedInputDoesNotShareItsEditableRow(t *testing.T) {
 		}})
 		m.Update(ui.SetInputMsg("EDIT"))
 		if !strings.Contains(ansi.Strip(m.View().Content), "EDIT") {
-			t.Fatalf("height %d: neighboring frame erased input:\n%s", height, ansi.Strip(m.View().Content))
+			t.Fatalf("height %d: neighboring border erased input:\n%s", height, ansi.Strip(m.View().Content))
 		}
 	}
 }
@@ -298,7 +298,7 @@ func TestResolveAndViewDoNotResizeWidgets(t *testing.T) {
 
 func TestAutoPaneMeasuresWrappedContentAndBounds(t *testing.T) {
 	for _, test := range []struct{ width, limit, want int }{
-		{12, 20, 4}, // 20 cells at inner width 10, plus two frame rows.
+		{12, 20, 4}, // 20 cells at inner width 10, plus two border rows.
 		{7, 20, 6},
 		{7, 4, 4},
 	} {
@@ -402,17 +402,17 @@ func BenchmarkLayoutFrame(b *testing.B) {
 	}
 }
 
-func TestSearchToEditorUsesFinalGeometry(t *testing.T) {
+func TestSearchToDraftEditorUsesFinalGeometry(t *testing.T) {
 	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 100)), 80, 30)
 	m.Update(ui.ShowSearchMsg{Query: "missing"})
 	m.Update(ui.SetInputMsg("one\ntwo\nthree\nfour\nfive"))
 	leaf := findLeaf(t, m.layoutPlan, "", ui.LayoutTypeInput)
 	if got, want := leaf.outer.Dy(), m.input.MeasureHeight(leaf.content.Dx(), ui.MaxLayoutCells); got != want {
-		t.Fatalf("search -> editor allocated height %d, preferred %d", got, want)
+		t.Fatalf("search -> draft editor allocated height %d, preferred %d", got, want)
 	}
 }
 
-func TestFixedNestedFramesShareBoundary(t *testing.T) {
+func TestFixedNestedBordersShareBoundary(t *testing.T) {
 	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 100)), 30, 11)
 	setLayout(m, ui.LayoutNode{Type: ui.LayoutTypeColumn, Children: []ui.LayoutNode{
 		{Type: ui.LayoutTypeRow, Children: []ui.LayoutNode{
@@ -453,13 +453,13 @@ func TestHorizontalPressureKeepsInputReachable(t *testing.T) {
 func TestNestedInputSurvivesConstrainedGeometryInEveryMode(t *testing.T) {
 	for _, width := range []int{1, 2, 3, 40, 100} {
 		for _, height := range []int{1, 2, 3, 8, 30} {
-			for _, mode := range []string{"normal", "editor", "search"} {
+			for _, mode := range []string{"normal", "draft_editor", "search"} {
 				m := resizeModel(t, NewModel(make(chan ui.UIEvent, 100)), width, height)
 				setLayout(m, staggeredLayout())
 				switch mode {
 				case "normal":
 					m.Update(ui.SetInputMsg("edit"))
-				case "editor":
+				case "draft_editor":
 					m.Update(ui.SetInputMsg("one\ntwo\nthree\nfour\nfive"))
 				case "search":
 					m.Update(ui.ShowSearchMsg{Query: "query"})

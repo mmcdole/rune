@@ -3,7 +3,7 @@ title: rune.bind
 description: Signatures, options, and registry management for key bindings.
 ---
 
-Key bindings run named editor actions or Lua callbacks on key presses. For a task-oriented
+Key bindings run named input actions or Lua callbacks on key presses. For a task-oriented
 introduction, see [Keybindings](/scripting/keybindings/).
 
 ## Quick reference
@@ -41,7 +41,7 @@ handles. The entire key array and options type are checked before registration.
 A single key still returns one handle. Existing callback bindings are unchanged.
 `:action()` returns the registered function or action string; only functions can
 be called directly. Hints use the earliest registered active alias for each
-editor action and disappear when none remain.
+input action and disappear when none remain.
 
 To extend a default rather than discard it, capture its action first:
 

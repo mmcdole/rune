@@ -213,7 +213,7 @@ func TestHistoryPickerRestoresVerbatimMode(t *testing.T) {
 	assertInputMode(t, host, input.ModeCommand)
 }
 
-func TestInputSetPreservesComposeButRestoreForcesMode(t *testing.T) {
+func TestInputSetPreservesSubmissionModeButRestoreForcesMode(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 	host.SetInputSubmission(input.Verbatim("one line"))

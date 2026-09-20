@@ -272,14 +272,14 @@ func TestAcceptedSubmissionClearsLocalDraftOnce(t *testing.T) {
 	}
 }
 
-func TestKeypadEnterSubmitsNormalAndEditorInput(t *testing.T) {
+func TestKeypadEnterSubmitsNormalAndDraftEditorInput(t *testing.T) {
 	tests := []struct {
 		name  string
 		draft string
 		want  input.Submission
 	}{
 		{name: "normal input", draft: "look north", want: input.Command("look north")},
-		{name: "editor", draft: "say one\nsay two", want: input.Verbatim("say one\nsay two")},
+		{name: "draft_editor", draft: "say one\nsay two", want: input.Verbatim("say one\nsay two")},
 	}
 
 	for _, tt := range tests {
@@ -341,7 +341,7 @@ func TestModifiedNumpadBindUsesSameNameAcrossInputEncodings(t *testing.T) {
 		draft string
 	}{
 		{name: "normal", draft: "look"},
-		{name: "editor", draft: "say one\nsay two"},
+		{name: "draft_editor", draft: "say one\nsay two"},
 	}
 
 	for _, encoding := range encodings {
@@ -417,7 +417,7 @@ func TestUnboundKpNavigationActsAsNavigationKey(t *testing.T) {
 	})
 }
 
-func TestEditorKpNavigationUsesEditingBeforeBinds(t *testing.T) {
+func TestDraftEditorKpNavigationUsesEditingBeforeBinds(t *testing.T) {
 	t.Run("unmodified key stays local", func(t *testing.T) {
 		h := newControllerHarness()
 		h.ctl.input.Bindings()["numpad8"] = input.Binding{Enabled: true}
@@ -428,13 +428,13 @@ func TestEditorKpNavigationUsesEditingBeforeBinds(t *testing.T) {
 		h.ctl.HandleKey(keyPress(tea.KeyKpUp))
 
 		if binds := h.executeBinds(); len(binds) != 0 {
-			t.Fatalf("editor dispatched keypad navigation bind: %v", binds)
+			t.Fatalf("draft editor dispatched keypad navigation bind: %v", binds)
 		}
 		if got := h.ctl.input.Position(); got != 3 {
-			t.Fatalf("keypad Up moved editor cursor to %d, want 3", got)
+			t.Fatalf("keypad Up moved draft editor cursor to %d, want 3", got)
 		}
 		if got := h.ctl.input.Value(); got != "one\ntwo" {
-			t.Fatalf("keypad Up changed editor to %q", got)
+			t.Fatalf("keypad Up changed draft editor to %q", got)
 		}
 	})
 
@@ -447,10 +447,10 @@ func TestEditorKpNavigationUsesEditingBeforeBinds(t *testing.T) {
 		h.ctl.HandleKey(tea.KeyPressMsg{Code: tea.KeyKpHome, Mod: tea.ModCtrl})
 
 		if binds := h.executeBinds(); len(binds) != 0 {
-			t.Fatalf("editor dispatched consumed keypad chord: %v", binds)
+			t.Fatalf("draft editor dispatched consumed keypad chord: %v", binds)
 		}
 		if got := h.ctl.input.Position(); got != 0 {
-			t.Fatalf("Ctrl+keypad Home moved editor cursor to %d, want 0", got)
+			t.Fatalf("Ctrl+keypad Home moved draft editor cursor to %d, want 0", got)
 		}
 	})
 
@@ -465,7 +465,7 @@ func TestEditorKpNavigationUsesEditingBeforeBinds(t *testing.T) {
 		h.ctl.HandleKey(tea.KeyPressMsg{Code: tea.KeyKpUp, Mod: tea.ModCtrl})
 
 		if binds := h.executeBinds(); len(binds) != 1 || binds[0] != ui.ExecuteBindMsg("ctrl+numpad8") {
-			t.Fatalf("editor keypad chord binds = %v, want [ctrl+numpad8]", binds)
+			t.Fatalf("draft editor keypad chord binds = %v, want [ctrl+numpad8]", binds)
 		}
 		if got := h.ctl.input.Position(); got != wantCursor {
 			t.Fatalf("unconsumed keypad chord moved cursor to %d, want %d", got, wantCursor)
@@ -481,7 +481,7 @@ func TestEditorKpNavigationUsesEditingBeforeBinds(t *testing.T) {
 		h.ctl.HandleKey(keyPress(tea.KeyKpBegin))
 
 		if binds := h.executeBinds(); len(binds) != 0 {
-			t.Fatalf("editor dispatched unmodified keypad bind: %v", binds)
+			t.Fatalf("draft editor dispatched unmodified keypad bind: %v", binds)
 		}
 	})
 
@@ -494,7 +494,7 @@ func TestEditorKpNavigationUsesEditingBeforeBinds(t *testing.T) {
 		h.ctl.HandleKey(tea.KeyPressMsg{Code: tea.KeyKpUp, Mod: tea.ModCtrl})
 
 		if binds := h.executeBinds(); len(binds) != 1 || binds[0] != ui.ExecuteBindMsg("ctrl+up") {
-			t.Fatalf("editor fallback binds = %v, want [ctrl+up]", binds)
+			t.Fatalf("draft editor fallback binds = %v, want [ctrl+up]", binds)
 		}
 	})
 }
@@ -610,7 +610,7 @@ func TestBoundNumpadEnterPrecedesSubmit(t *testing.T) {
 		draft string
 	}{
 		{name: "normal", draft: "look"},
-		{name: "editor", draft: "say one\nsay two"},
+		{name: "draft_editor", draft: "say one\nsay two"},
 	}
 
 	for _, tt := range tests {
@@ -675,14 +675,14 @@ func TestBracketedPasteBypassesPrintableBind(t *testing.T) {
 	}
 }
 
-func TestOneLineControlPasteEntersEditorWithoutLosingData(t *testing.T) {
+func TestOneLineControlPasteEntersDraftEditorWithoutLosingData(t *testing.T) {
 	h := newControllerHarness()
 	raw := "say\x1b]52;c;x\a\x00"
 
 	h.ctl.HandlePaste(raw)
 
 	if got := h.ctl.input.Value(); got != raw || !h.ctl.input.DraftEditorActive() {
-		t.Fatalf("control paste = %q, editor active=%v; want exact verbatim draft", got, h.ctl.input.DraftEditorActive())
+		t.Fatalf("control paste = %q, draft editor active=%v; want exact verbatim draft", got, h.ctl.input.DraftEditorActive())
 	}
 	h.ctl.HandleKey(keyPress(tea.KeyEnter))
 	if len(h.submitted) != 1 || h.submitted[0] != input.Verbatim(raw) {
@@ -690,10 +690,10 @@ func TestOneLineControlPasteEntersEditorWithoutLosingData(t *testing.T) {
 	}
 }
 
-// TestMultilinePasteEntersEditorLosslessly verifies bracketed paste is
+// TestMultilinePasteEntersDraftEditorLosslessly verifies bracketed paste is
 // normalized only for newline convention. It must not submit or route source
 // semicolons through command expansion merely because text was pasted.
-func TestMultilinePasteEntersEditorLosslessly(t *testing.T) {
+func TestMultilinePasteEntersDraftEditorLosslessly(t *testing.T) {
 	h := newControllerHarness()
 	pasted := "  player->command(\"turn on <channel>\");\r\n\t// PLAYER_SILENT  \r\n\r\nlast;  "
 	want := "  player->command(\"turn on <channel>\");\n\t// PLAYER_SILENT  \n\nlast;  "
@@ -704,7 +704,7 @@ func TestMultilinePasteEntersEditorLosslessly(t *testing.T) {
 		t.Fatalf("pasted input:\n%q\nwant:\n%q", got, want)
 	}
 	if !h.ctl.input.DraftEditorActive() {
-		t.Fatal("multiline paste did not enter editor")
+		t.Fatal("multiline paste did not enter draft editor")
 	}
 	if len(h.submitted) != 0 {
 		t.Fatalf("paste submitted without Enter: %+v", h.submitted)
@@ -814,7 +814,7 @@ func TestAltGrTextIsTypedInEveryInputMode(t *testing.T) {
 		}
 	})
 
-	t.Run("editor", func(t *testing.T) {
+	t.Run("draft_editor", func(t *testing.T) {
 		h := newControllerHarness()
 		h.ctl.SetText("say\n")
 		h.events = nil
@@ -822,15 +822,15 @@ func TestAltGrTextIsTypedInEveryInputMode(t *testing.T) {
 		h.ctl.HandleKey(altGrPress('h', "ħ"))
 
 		if got := h.ctl.input.Value(); got != "say\nħ" {
-			t.Fatalf("editor AltGr input = %q, want %q", got, "say\nħ")
+			t.Fatalf("draft editor AltGr input = %q, want %q", got, "say\nħ")
 		}
 	})
 }
 
-// TestCtrlJInsertsEditorNewline pins the portable terminal representation
+// TestCtrlJInsertsDraftEditorNewline pins the portable terminal representation
 // of Ctrl+Enter. It inserts LF and transitions an ordinary draft into the
-// visible editor instead of submitting it or delegating to Lua.
-func TestCtrlJInsertsEditorNewline(t *testing.T) {
+// visible draft editor instead of submitting it or delegating to Lua.
+func TestCtrlJInsertsDraftEditorNewline(t *testing.T) {
 	h := newControllerHarness()
 	h.ctl.SetText("hello")
 	h.events = nil
@@ -841,7 +841,7 @@ func TestCtrlJInsertsEditorNewline(t *testing.T) {
 		t.Fatalf("input after Ctrl+J = %q, want %q", got, "hello\n")
 	}
 	if !h.ctl.input.DraftEditorActive() {
-		t.Fatal("Ctrl+J newline did not enter editor")
+		t.Fatal("Ctrl+J newline did not enter draft editor")
 	}
 	if len(h.submitted) != 0 {
 		t.Fatalf("Ctrl+J submitted input: %+v", h.submitted)
@@ -855,10 +855,10 @@ func TestCtrlJInsertsEditorNewline(t *testing.T) {
 	}
 }
 
-// TestCtrlEnterInEditorInsertsNewline covers the unambiguous main and
+// TestCtrlEnterInDraftEditorInsertsNewline covers the unambiguous main and
 // keypad events reported by terminals with keyboard enhancement support.
 // Neither may fall through to ordinary Enter submission.
-func TestCtrlEnterInEditorInsertsNewline(t *testing.T) {
+func TestCtrlEnterInDraftEditorInsertsNewline(t *testing.T) {
 	tests := []struct {
 		name string
 		code rune
@@ -878,7 +878,7 @@ func TestCtrlEnterInEditorInsertsNewline(t *testing.T) {
 				t.Fatalf("input after Ctrl+Enter = %q, want %q", got, "hello\nworld\n")
 			}
 			if len(h.submitted) != 0 {
-				t.Fatalf("Ctrl+Enter submitted editor input: %+v", h.submitted)
+				t.Fatalf("Ctrl+Enter submitted draft editor input: %+v", h.submitted)
 			}
 			changes := h.inputChanges()
 			if len(changes) != 1 || changes[0].Text != "hello\nworld\n" || changes[0].Cursor != 12 {
@@ -888,7 +888,7 @@ func TestCtrlEnterInEditorInsertsNewline(t *testing.T) {
 	}
 }
 
-func TestCtrlJLeavesInlinePickerForEditor(t *testing.T) {
+func TestCtrlJLeavesInlinePickerForDraftEditor(t *testing.T) {
 	h := newControllerHarness()
 	h.ctl.ShowPicker(ui.ShowPickerMsg{
 		Items:      pickerTestItems,
@@ -904,7 +904,7 @@ func TestCtrlJLeavesInlinePickerForEditor(t *testing.T) {
 		t.Fatalf("input after Ctrl+J = %q, want %q", got, "/con\n")
 	}
 	if h.ctl.mode() != modeDraftEditor || !h.ctl.input.DraftEditorActive() {
-		t.Fatalf("Ctrl+J left mode %v, editor active %v", h.ctl.mode(), h.ctl.input.DraftEditorActive())
+		t.Fatalf("Ctrl+J left mode %v, draft editor active %v", h.ctl.mode(), h.ctl.input.DraftEditorActive())
 	}
 	selects := h.pickerSelects()
 	if len(selects) != 1 || selects[0].CallbackID != "cb" || selects[0].Accepted {
@@ -918,10 +918,10 @@ func TestCtrlJLeavesInlinePickerForEditor(t *testing.T) {
 	}
 }
 
-// TestEditorEnterSubmitsVerbatimExactAndClears verifies mode and content
+// TestDraftEditorEnterSubmitsVerbatimExactAndClears verifies mode and content
 // cross the controller boundary together; command separators and whitespace
 // are still untouched when ownership transfers to the session.
-func TestEditorEnterSubmitsVerbatimExactAndClears(t *testing.T) {
+func TestDraftEditorEnterSubmitsVerbatimExactAndClears(t *testing.T) {
 	h := newControllerHarness()
 	draft := "  say one; say two  \n\t#2 north  \n\n/quit"
 	h.ctl.SetText(draft)
@@ -937,14 +937,14 @@ func TestEditorEnterSubmitsVerbatimExactAndClears(t *testing.T) {
 		t.Fatalf("accepted draft was not cleared: %q", got)
 	}
 	if h.ctl.input.DraftEditorActive() {
-		t.Fatal("accepted draft left editor active")
+		t.Fatal("accepted draft left draft editor active")
 	}
 	if changes := h.inputChanges(); len(changes) != 0 {
 		t.Fatalf("accepted submission emitted redundant input changes: %+v", changes)
 	}
 }
 
-func TestEditorModeStaysVerbatimAfterJoiningLines(t *testing.T) {
+func TestDraftEditorModeStaysVerbatimAfterJoiningLines(t *testing.T) {
 	h := newControllerHarness()
 	h.ctl.SetText("one;\ntwo")
 	h.ctl.input.SetCursor(len([]rune("one;\n")))
@@ -952,7 +952,7 @@ func TestEditorModeStaysVerbatimAfterJoiningLines(t *testing.T) {
 
 	h.ctl.HandleKey(keyPress(tea.KeyBackspace))
 	if got := h.ctl.input.Value(); got != "one;two" || !h.ctl.input.DraftEditorActive() {
-		t.Fatalf("joined draft = %q, editor active=%v; want sticky verbatim", got, h.ctl.input.DraftEditorActive())
+		t.Fatalf("joined draft = %q, draft editor active=%v; want sticky verbatim", got, h.ctl.input.DraftEditorActive())
 	}
 
 	h.ctl.HandleKey(keyPress(tea.KeyEnter))
@@ -961,10 +961,10 @@ func TestEditorModeStaysVerbatimAfterJoiningLines(t *testing.T) {
 	}
 }
 
-// TestFailedEditorSubmissionRetainsDraft ensures backpressure cannot destroy
+// TestFailedDraftEditorSubmissionRetainsDraft ensures backpressure cannot destroy
 // the text the user just tried to submit. No cleared-state notification is
 // valid until the receiver accepts ownership.
-func TestFailedEditorSubmissionRetainsDraft(t *testing.T) {
+func TestFailedDraftEditorSubmissionRetainsDraft(t *testing.T) {
 	h := newControllerHarness()
 	h.accept = false
 	draft := "first;  \n\tsecond"
@@ -981,14 +981,14 @@ func TestFailedEditorSubmissionRetainsDraft(t *testing.T) {
 		t.Fatalf("failed submission changed draft to %q, want %q", got, draft)
 	}
 	if !h.ctl.input.DraftEditorActive() {
-		t.Fatal("failed submission exited editor")
+		t.Fatal("failed submission exited draft editor")
 	}
 	if changes := h.inputChanges(); len(changes) != 0 {
 		t.Fatalf("failed submission reported a text change: %+v", changes)
 	}
 }
 
-func TestEditorEscapeRequiresConfirmation(t *testing.T) {
+func TestDraftEditorEscapeRequiresConfirmation(t *testing.T) {
 	h := newControllerHarness()
 	h.ctl.input.SetSize(80, 0)
 	draft := "first\nsecond"
@@ -997,7 +997,7 @@ func TestEditorEscapeRequiresConfirmation(t *testing.T) {
 
 	h.ctl.HandleKey(keyPress(tea.KeyEsc))
 	if got := h.ctl.input.Value(); got != draft || !h.ctl.input.DraftEditorActive() {
-		t.Fatalf("first Escape discarded draft: value=%q editor active=%v", got, h.ctl.input.DraftEditorActive())
+		t.Fatalf("first Escape discarded draft: value=%q draft editor active=%v", got, h.ctl.input.DraftEditorActive())
 	}
 	var labels string
 	for _, rule := range h.ctl.input.LabeledRules(80, h.ctl.input.MeasureHeight(80, 100)) {
@@ -1014,7 +1014,7 @@ func TestEditorEscapeRequiresConfirmation(t *testing.T) {
 
 	h.ctl.HandleKey(keyPress(tea.KeyEsc))
 	if got := h.ctl.input.Value(); got != "" || h.ctl.input.DraftEditorActive() {
-		t.Fatalf("confirmed discard left value=%q editor active=%v", got, h.ctl.input.DraftEditorActive())
+		t.Fatalf("confirmed discard left value=%q draft editor active=%v", got, h.ctl.input.DraftEditorActive())
 	}
 	changes := h.inputChanges()
 	if len(changes) != 1 || changes[0].Text != "" {
@@ -1029,7 +1029,7 @@ func TestModifiedEscapeDoesNotCancelInternalModes(t *testing.T) {
 		mode  inputMode
 	}{
 		{
-			name: "editor",
+			name: "draft_editor",
 			setup: func(h *controllerHarness) {
 				h.ctl.SetText("first\nsecond")
 			},
@@ -1080,8 +1080,8 @@ func TestModifiedEscapeDoesNotCancelInternalModes(t *testing.T) {
 	}
 }
 
-// TestCtrlEInEditorRequestsEditor verifies the current draft reaches Session.
-func TestCtrlEInEditorRequestsEditor(t *testing.T) {
+// TestCtrlEInDraftEditorRequestsExternalEditor verifies the current draft reaches Session.
+func TestCtrlEInDraftEditorRequestsExternalEditor(t *testing.T) {
 	h := newControllerHarness()
 	draft := "one\ntwo"
 	h.ctl.SetText(draft)
@@ -1090,7 +1090,7 @@ func TestCtrlEInEditorRequestsEditor(t *testing.T) {
 	h.ctl.HandleKey(ctrlPress('e'))
 
 	if len(h.events) != 1 || h.events[0] != (ui.OpenEditorMsg{Text: draft}) {
-		t.Fatalf("editor events = %v", h.events)
+		t.Fatalf("external editor events = %v", h.events)
 	}
 
 	if got := h.ctl.input.Value(); got != draft {
@@ -1101,7 +1101,7 @@ func TestCtrlEInEditorRequestsEditor(t *testing.T) {
 	}
 }
 
-func TestSetSubmissionForcesOneLineVerbatimEditor(t *testing.T) {
+func TestSetSubmissionForcesOneLineVerbatimDraftEditor(t *testing.T) {
 	h := newControllerHarness()
 	h.ctl.SetSubmission(input.Verbatim("say hello;look"))
 
@@ -1112,7 +1112,7 @@ func TestSetSubmissionForcesOneLineVerbatimEditor(t *testing.T) {
 		t.Fatalf("restored input = %q", got)
 	}
 
-	// Ordinary script replacement while editor active keeps interpretation sticky.
+	// Ordinary script replacement while draft editor active keeps interpretation sticky.
 	h.ctl.SetText("edited;still verbatim")
 	if h.ctl.mode() != modeDraftEditor || !h.ctl.input.DraftEditorActive() {
 		t.Fatal("ordinary SetText discarded restored verbatim mode")
@@ -1176,13 +1176,13 @@ func TestEditingRecalledVerbatimKeepsArrowsLocal(t *testing.T) {
 	}
 }
 
-func TestSetSubmissionCommandOverridesStickyEditor(t *testing.T) {
+func TestSetSubmissionCommandOverridesStickyDraftEditor(t *testing.T) {
 	h := newControllerHarness()
 	h.ctl.SetSubmission(input.Verbatim("same"))
 	h.ctl.SetSubmission(input.Command("same"))
 
 	if h.ctl.mode() != modeNormal || h.ctl.input.DraftEditorActive() {
-		t.Fatal("explicit command recall did not leave sticky editor")
+		t.Fatal("explicit command recall did not leave sticky draft editor")
 	}
 	h.submitted = nil
 	h.ctl.HandleKey(keyPress(tea.KeyEnter))
@@ -1375,9 +1375,9 @@ func TestSearchTrapsBoundKeys(t *testing.T) {
 	}
 }
 
-// TestSearchIgnoredWhileComposing verifies ShowSearch over a structured
+// TestSearchIgnoredWhileDraftEditorActive verifies ShowSearch over a structured
 // draft is a no-op: no mode change, no effects.
-func TestSearchIgnoredWhileComposing(t *testing.T) {
+func TestSearchIgnoredWhileDraftEditorActive(t *testing.T) {
 	h := newControllerHarness()
 	h.ctl.SetText("line one\nline two")
 	if h.ctl.mode() != modeDraftEditor {
@@ -1387,7 +1387,7 @@ func TestSearchIgnoredWhileComposing(t *testing.T) {
 	h.ctl.ShowSearch(ui.ShowSearchMsg{Query: "thief"})
 
 	if h.ctl.mode() != modeDraftEditor {
-		t.Fatalf("search must not open over an editor, got %v", h.ctl.mode())
+		t.Fatalf("search must not open over a draft editor, got %v", h.ctl.mode())
 	}
 	if h.fx.opens != 0 || len(h.fx.previews) != 0 {
 		t.Fatal("refused ShowSearch must produce zero effects")
