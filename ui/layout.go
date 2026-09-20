@@ -3,6 +3,7 @@ package ui
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -715,15 +716,11 @@ func shrinkTracks(sizes []int, tracks []AxisTrack, amount int, kinds ...LayoutSi
 	if amount <= 0 {
 		return 0
 	}
-	wanted := make(map[LayoutSizeKind]bool, len(kinds))
-	for _, kind := range kinds {
-		wanted[kind] = true
-	}
 	indices := make([]int, 0, len(tracks))
 	capacities := make([]int, 0, len(tracks))
 	totalCapacity := 0
 	for i, track := range tracks {
-		if !wanted[track.Size.Kind] || sizes[i] <= track.Min {
+		if !slices.Contains(kinds, track.Size.Kind) || sizes[i] <= track.Min {
 			continue
 		}
 		capacity := sizes[i] - track.Min
