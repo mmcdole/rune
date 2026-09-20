@@ -160,7 +160,7 @@ func TestEditorEditorHintTracksBindingUpdates(t *testing.T) {
 	for _, available := range []bool{false, true, false} {
 		m.Update(ui.UpdateBindsMsg{"ctrl+e": {Action: "input.open_editor", Enabled: available}})
 		var labels string
-		for _, rule := range m.input.Rules(100, 4) {
+		for _, rule := range m.input.LabeledRules(100, 4) {
 			for _, label := range rule.Labels {
 				labels += label.Text
 			}

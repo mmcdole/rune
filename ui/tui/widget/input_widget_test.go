@@ -1,6 +1,8 @@
 package widget
 
 import (
+	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -55,12 +57,63 @@ func TestModalPickerShowsResultsAboveItsOnlyDraftEditor(t *testing.T) {
 
 func inputLabels(in *Input) string {
 	var labels []string
-	for _, rule := range in.Rules(in.width, in.MeasureHeight(in.width, 1<<14)) {
+	for _, rule := range in.LabeledRules(in.width, in.MeasureHeight(in.width, 1<<14)) {
 		for _, label := range rule.Labels {
 			labels = append(labels, label.Text)
 		}
 	}
 	return strings.Join(labels, "\n")
+}
+
+func TestInputRulesPreserveGeometryWithoutLabels(t *testing.T) {
+	for _, mode := range []string{"normal", "draft", "inline", "modal", "search"} {
+		t.Run(mode, func(t *testing.T) {
+			in := newTestInput(80)
+			in.SetValue("say 世界")
+			if mode != "normal" {
+				in.OpenDraftEditor("say 世界\nsay e\u0301", 0)
+			}
+			switch mode {
+			case "inline", "modal":
+				in.ShowPicker(ui.ShowPickerMsg{Inline: mode == "inline", Items: []ui.PickerItem{{Text: "世界"}}})
+			case "search":
+				in.ShowSearch("世界", SearchScope{})
+			}
+			for _, width := range []int{0, 1, 2, 3, 10, 80} {
+				for _, height := range []int{0, 1, 2, 3, 10} {
+					t.Run(fmt.Sprintf("%dx%d", width, height), func(t *testing.T) {
+						geometry := in.Rules(width, height)
+						labeled := in.LabeledRules(width, height)
+						for n := range labeled {
+							labeled[n].Labels = nil
+						}
+						if !reflect.DeepEqual(geometry, labeled) {
+							t.Fatalf("label formatting changed geometry: %+v vs %+v", geometry, labeled)
+						}
+						for _, rule := range in.Rules(width, height) {
+							if len(rule.Labels) != 0 {
+								t.Fatal("border measurement includes labels")
+							}
+						}
+					})
+				}
+			}
+		})
+	}
+}
+
+func TestInputLabelsUseCurrentDraftAfterMeasurement(t *testing.T) {
+	in := newTestInput(80)
+	in.OpenDraftEditor("first\nsecond", 0)
+	in.Rules(10, 3)
+	if labels := inputLabels(in); !strings.Contains(labels, "2 lines") {
+		t.Fatalf("provisional measurement affected final labels: %q", labels)
+	}
+	in.SetValue("first\nsecond\n世界")
+	in.Rules(3, 1)
+	if labels := inputLabels(in); !strings.Contains(labels, "3 lines") {
+		t.Fatalf("draft edit left stale labels: %q", labels)
+	}
 }
 
 func TestDraftEditorMeasurementAndViewDoNotChangeNavigation(t *testing.T) {
@@ -70,6 +123,7 @@ func TestDraftEditorMeasurementAndViewDoNotChangeNavigation(t *testing.T) {
 	before := in.draftEditor.topRow
 	in.MeasureHeight(5, 24)
 	in.Rules(5, 24)
+	in.LabeledRules(5, 24)
 	in.View()
 	if in.draftEditor.topRow != before || in.width != 40 || in.height != 7 {
 		t.Fatal("measurement or rendering changed applied geometry")

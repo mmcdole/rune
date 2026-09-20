@@ -37,7 +37,7 @@ func TestInputBindingsChangeRoutingAndHints(t *testing.T) {
 	m.Update(ui.UpdateBindsMsg(keys))
 	m.inputCtl.HandlePaste("first\nsecond")
 	var labels string
-	for _, rule := range m.input.Rules(120, 5) {
+	for _, rule := range m.input.LabeledRules(120, 5) {
 		for _, label := range rule.Labels {
 			labels += label.Text
 		}
@@ -206,7 +206,7 @@ func TestEditorAndCancelHintsFollowActions(t *testing.T) {
 	m.inputCtl.HandlePaste("first\nsecond")
 	labels := func() string {
 		var s string
-		for _, rule := range m.input.Rules(140, 5) {
+		for _, rule := range m.input.LabeledRules(140, 5) {
 			for _, label := range rule.Labels {
 				s += label.Text
 			}

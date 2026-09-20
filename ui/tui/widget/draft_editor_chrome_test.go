@@ -64,7 +64,7 @@ func TestDraftEditorLabelsStayCompleteAndInsideTheirRules(t *testing.T) {
 		for _, confirmation := range []bool{false, true} {
 			in.discardPending = confirmation
 			for width := 1; width <= 120; width++ {
-				for _, rule := range in.Rules(width, in.MeasureHeight(width, 100)) {
+				for _, rule := range in.LabeledRules(width, in.MeasureHeight(width, 100)) {
 					end := 0
 					for _, label := range rule.Labels {
 						if label.At <= end || label.At+ansi.StringWidth(label.Text) >= width {

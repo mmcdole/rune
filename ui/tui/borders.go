@@ -172,8 +172,8 @@ func (m *Model) planBorders(plan *layoutPlan) {
 	}
 	for i := range plan.leaves {
 		leaf := plan.leaves[i]
-		if decorated, ok := leaf.widget.(interface{ Rules(int, int) []widget.Rule }); ok {
-			for _, rule := range decorated.Rules(leaf.content.Dx(), leaf.content.Dy()) {
+		if decorated, ok := leaf.widget.(interface{ LabeledRules(int, int) []widget.Rule }); ok {
+			for _, rule := range decorated.LabeledRules(leaf.content.Dx(), leaf.content.Dy()) {
 				rule = rule.Translate(leaf.content.Min)
 				// Extend edge-aligned rules to the boundaries reserved by the
 				// surrounding layout so separators meet neighboring dividers.

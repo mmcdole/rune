@@ -28,6 +28,7 @@ def run(args, output):
         for line in process.stdout:
             print(line, end="", flush=True)
             log.write(line)
+            log.flush()
         if process.wait():
             raise RuntimeError(f"command failed; see {output}")
 

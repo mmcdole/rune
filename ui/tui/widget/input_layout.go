@@ -71,9 +71,17 @@ func (i *Input) layout(width, height int) inputLayout {
 	return p
 }
 
-// Rules supplies renderer-owned decoration around View's content. Label
-// styling is deferred until rendering; layout itself computes only geometry.
+// Rules supplies line geometry for measurement, without formatting labels.
 func (i *Input) Rules(width, height int) []Rule {
+	if width <= 0 || height <= 0 {
+		return nil
+	}
+	return i.layout(width, height).rules
+}
+
+// LabeledRules adds the current input labels at its final placement. Both
+// queries use the same geometry; only the renderer's plan needs the labels.
+func (i *Input) LabeledRules(width, height int) []Rule {
 	if width <= 0 || height <= 0 {
 		return nil
 	}

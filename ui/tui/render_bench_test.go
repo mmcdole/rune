@@ -187,3 +187,17 @@ func BenchmarkRenderResize(b *testing.B) {
 		n++
 	}
 }
+
+// Border discovery visits provisional and final widths during layout. Draft
+// label formatting is deliberately outside the work this query needs.
+func BenchmarkRenderInputBorders(b *testing.B) {
+	for _, width := range []int{180, 270} {
+		b.Run(fmt.Sprintf("width=%d", width), func(b *testing.B) {
+			m := autoLayoutFixture("input_beside_pane", 1000)
+			b.ReportAllocs()
+			for b.Loop() {
+				widgetBorders(m.input, width, 10)
+			}
+		})
+	}
+}
