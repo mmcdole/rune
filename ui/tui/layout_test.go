@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/mmcdole/rune/ui"
@@ -1045,28 +1046,41 @@ func TestBarNameDoesNotReplaceBuiltinWidget(t *testing.T) {
 	}
 }
 
-// TestSeparatorLeafCharactersAreIndependent verifies that configured and
-// default separator characters belong to their individual leaves.
-func TestSeparatorLeafCharactersAreIndependent(t *testing.T) {
-	m := newTestModel(t)
+func TestSeparatorLeavesKeepCharactersAndShareBorderStyle(t *testing.T) {
+	m := NewModel(make(chan ui.UIEvent, 16))
+	m.styles.PaneBorder = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	m = resizeModel(t, m, 40, 12)
 
-	// No "input" entry: the input widget draws its own default rule,
-	// which would mask a separator that failed to reset.
+	// Exercise a custom rule, a standalone default rule inside a row, and
+	// a default rule owned by the border grid. No input rules can mask them.
 	next, _ := m.Update(ui.UpdateLayoutMsg(ui.LayoutTree{Root: ui.LayoutNode{
 		Type: ui.LayoutTypeColumn,
 		Children: []ui.LayoutNode{
 			{Type: ui.LayoutTypeSeparator, SeparatorChar: "═", Size: ui.AutoSize()},
+			{Type: ui.LayoutTypeRow, Size: ui.Cells(1), Children: []ui.LayoutNode{
+				{Type: ui.LayoutTypeSeparator},
+			}},
 			{Type: ui.LayoutTypePane, Name: ui.OutputPaneName, Border: ui.PaneBorderNone},
 			{Type: ui.LayoutTypeSeparator, Size: ui.AutoSize()},
 		},
 	}}))
 	m = next.(*Model)
 
-	view := ansi.Strip(m.View().Content)
-	if !strings.Contains(view, strings.Repeat("═", m.width)) {
-		t.Error("configured separator rule missing from view")
-	}
-	if !strings.Contains(view, strings.Repeat("─", m.width)) {
-		t.Error("default separator did not retain its own rule character")
+	rows := assertExactBlock(t, m.View().Content, m.width, m.height)
+	expected := styledCell(m.styles.PaneBorder.Render("─"))
+	for _, row := range []int{0, 1, m.height - 1} {
+		char := "─"
+		if row == 0 {
+			char = "═"
+		}
+		if got := ansi.Strip(rows[row]); got != strings.Repeat(char, m.width) {
+			t.Fatalf("row %d = %q, want an independent %s separator", row, got, char)
+		}
+		for x := range m.width {
+			cell := m.canvas.CellAt(x, row)
+			if cell == nil || !cell.Style.Equal(&expected.Style) {
+				t.Fatalf("separator cell (%d,%d) does not use the configured border style", x, row)
+			}
+		}
 	}
 }

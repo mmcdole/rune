@@ -1,6 +1,6 @@
 # Rendering Simplification PRD
 
-Status: Section 3, the scoped Section 4 contraction, the Section 5 frame lifecycle cleanup, and the scoped Section 2 dispatch cleanup are approved and implemented. Other implementation proposals remain unapproved.
+Status: Section 3, the scoped Section 4 contraction, the Section 5 frame lifecycle cleanup, the scoped Section 2 dispatch cleanup, and the separator construction/styling cleanup are approved and implemented. Other implementation proposals remain unapproved.
 
 Review baseline: `simplify-rendering`, commit `17b7df0`, September 20, 2026.
 
@@ -506,6 +506,12 @@ Skipping work often requires remembering more state. The goal is less total comp
 Section 3 was selected and implemented first after the workload and cleanup discussion, followed by the scoped Section 4 contraction and the Section 5 frame lifecycle cleanup recorded below. Section 1 is deferred. Review the remaining proposals one at a time; agreement on one section does not approve the others. Keep this document as the single source for decisions and revisions.
 
 ### Suggested implementation order after agreement
+
+Separator construction and styling implementation record: approved and implemented. Removed the single-caller `style.RenderBorder` helper and the unused post-construction `SetChar` mutation. Layout now creates each separator in one call with its character and configured border style. `style/styles.go` holds style definitions without the separator drawing helper.
+
+`NewSeparator(char, borderStyle)` normalizes the character once, retaining the existing single-cell validation and default rule fallback. `Separator.View` repeats that character and applies its supplied style directly. The Widget implementation and default-separator junction ownership remain intact. No new interface or file was added. Custom and standalone separators now use `Styles.PaneBorder` instead of hard-coded ANSI 90, intentionally matching joined borders. Two functions and the extra construction step are removed.
+
+Validation: `go test -race -shuffle=on ./ui/... ./text/...`, `go vet ./ui/... ./text/...`, and `git diff --check` pass. Updated existing tests cover constructor validation and supplied styling; the separator layout test checks independent glyphs and matching configured cell styles across custom, standalone default, and joined default separators. Existing junction and snapshot tests pass without snapshot changes.
 
 Section 2 implementation record: the scoped dispatch cleanup is approved and implemented. Mouse-wheel navigation, explicit pane scrolling, binding-hint updates, and configuration updates now return `true, false` from their existing dispatch cases, requesting repaint without rebuilding layout. Non-output pane clear/replace reuse `layoutPlan.autoPanes` to request layout only when content affects sizing, matching the existing append behavior.
 

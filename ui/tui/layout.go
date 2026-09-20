@@ -147,9 +147,7 @@ func (m *Model) resolveNode(node ui.LayoutNode, availableWidth int, parentAxis s
 		resolved.widget, resolved.hasInput = m.input, true
 		resolved.edges = widgetBorders(m.input, availableWidth, height)
 	case ui.LayoutTypeSeparator:
-		separator := widget.NewSeparator()
-		separator.SetChar(node.SeparatorChar)
-		resolved.widget = separator
+		resolved.widget = widget.NewSeparator(node.SeparatorChar, m.styles.PaneBorder)
 	case ui.LayoutTypePane:
 		// First placement creates an empty named buffer, so it remains a
 		// visible pane even before any text is written to it.
