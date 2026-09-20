@@ -19,11 +19,6 @@ type Bar struct {
 	width   int
 }
 
-// NewBar creates a new bar renderer.
-func NewBar() *Bar {
-	return &Bar{}
-}
-
 // SetContent updates the bar's content.
 func (b *Bar) SetContent(content ui.BarContent) bool {
 	if b.content == content {
@@ -39,29 +34,19 @@ func (b *Bar) View() string {
 	center := b.content.Center
 	right := b.content.Right
 
-	leftLen := ansi.StringWidth(left)
-	centerLen := ansi.StringWidth(center)
-	rightLen := ansi.StringWidth(right)
+	leftWidth := ansi.StringWidth(left)
+	centerWidth := ansi.StringWidth(center)
+	rightWidth := ansi.StringWidth(right)
 
-	if centerLen > 0 {
-		// Three-part layout
-		leftPad := (b.width-centerLen)/2 - leftLen
-		if leftPad < 1 {
-			leftPad = 1
-		}
-		rightPad := b.width - leftLen - leftPad - centerLen - rightLen
-		if rightPad < 1 {
-			rightPad = 1
-		}
-		return util.ClipRow(left+strings.Repeat(" ", leftPad)+center+strings.Repeat(" ", rightPad)+right, b.width)
+	centerPad := 0
+	if centerWidth > 0 {
+		centerPad = max(1, (b.width-centerWidth)/2-leftWidth)
+	} else {
+		center = ""
 	}
 
-	// Two-part layout
-	pad := b.width - leftLen - rightLen
-	if pad < 1 {
-		pad = 1
-	}
-	return util.ClipRow(left+strings.Repeat(" ", pad)+right, b.width)
+	rightPad := max(1, b.width-leftWidth-centerPad-centerWidth-rightWidth)
+	return util.ClipRow(left+strings.Repeat(" ", centerPad)+center+strings.Repeat(" ", rightPad)+right, b.width)
 }
 
 // SetSize implements Widget.

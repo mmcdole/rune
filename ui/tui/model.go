@@ -244,7 +244,7 @@ func (m *Model) syncBars(content map[string]ui.BarContent) (changed bool) {
 	for name, barContent := range content {
 		bar, exists := m.bars[name]
 		if !exists {
-			bar = widget.NewBar()
+			bar = new(widget.Bar)
 			m.bars[name] = bar
 			changed = true
 		}

@@ -1,6 +1,6 @@
 # Rendering Simplification PRD
 
-Status: Section 3, the scoped Section 4 contraction, the Section 5 frame lifecycle cleanup, the scoped Section 2 dispatch cleanup, the separator construction/styling cleanup, the input allocation contract cleanup, and the container-border contraction are approved and implemented. Other implementation proposals remain unapproved.
+Status: Section 3, the scoped Section 4 contraction, the Section 5 frame lifecycle cleanup, the scoped Section 2 dispatch cleanup, the separator construction/styling cleanup, the input allocation contract cleanup, the container-border contraction, and the bar construction/rendering contraction are approved and implemented. Other implementation proposals remain unapproved.
 
 Review baseline: `simplify-rendering`, commit `17b7df0`, September 20, 2026.
 
@@ -506,6 +506,12 @@ Skipping work often requires remembering more state. The goal is less total comp
 Section 3 was selected and implemented first after the workload and cleanup discussion, followed by the scoped Section 4 contraction and the Section 5 frame lifecycle cleanup recorded below. Section 1 is deferred. Review the remaining proposals one at a time; agreement on one section does not approve the others. Keep this document as the single source for decisions and revisions.
 
 ### Suggested implementation order after agreement
+
+Bar construction/rendering implementation record: approved and implemented after independent simplification and idiomatic Go proposal review. Removed the empty `NewBar` constructor; `syncBars` now uses `new(widget.Bar)` and widget tests use `var bar Bar`. Kept the existing widget and its content-change signal.
+
+`Bar.View` now calculates optional center padding, then calculates right padding and assembles the complete row in one concatenation before clipping. It uses `max(1, ...)` for minimum spacing instead of repeated guards, and names measured cell widths as widths. It explicitly omits center content when its display width is zero, preserving current ANSI-only behavior. This removes the duplicated centered/uncentered finish without introducing a helper, type, cache, interface, or file. Independent simplification and idiomatic Go review recommended this refinement over accumulating an intermediate row string and tracking its width. The production change removes 15 net lines.
+
+Contract: preserve current display-cell centering, minimum one-space separation, ANSI and wide-character handling, and narrow-width clipping. A center section with zero display width remains omitted. Empty-content measurement and existing allocation behavior remain unchanged. Expanded the existing alignment test to 12 cases covering centered and uncentered rows, even widths, center-only content, crowded/narrow layouts, styled and wide content, and ANSI-only center omission. `go test -race -shuffle=on ./ui/... ./text/...` and `go vet ./ui/... ./text/...` pass. This is a readability contraction; no quantitative speedup is claimed.
 
 Container-border implementation record: approved and implemented. `containerBorders` now chooses start, end, and cross-axis masks according to orientation, then accumulates border edges in one child pass. Removed its local `any` closure, repeated scans, and mirrored row/column branches. The production diff removes 21 net lines without adding a function, type, field, or file.
 
