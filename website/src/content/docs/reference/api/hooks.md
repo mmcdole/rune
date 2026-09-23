@@ -181,7 +181,7 @@ All handlers run; return values are ignored.
 | `ready` | none | After core and user scripts load during startup or `/reload`, before Rune applies their settings and UI state |
 | `connecting` | address | Dial started |
 | `connected` | address | Connection established |
-| `disconnecting` | none | Disconnect requested |
+| `disconnecting` | none | Local disconnect requested, before the connection closes |
 | `disconnected` | none | Connection closed |
 | `reloading` / `reloaded` | none | Around `/reload` (order: `reloading`, `ready`, `reloaded`) |
 | `loaded` | path | After `/load` or `rune.load` loads a file (not for startup auto-load) |

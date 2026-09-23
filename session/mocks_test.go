@@ -16,14 +16,15 @@ import (
 // validates the connection ID on every send, so ordering bugs between hook
 // dispatch and connection turnover fail here too.
 type mockNetwork struct {
-	mu           sync.Mutex
-	sent         []string
-	gmcpSent     []struct{ Package, Data string }
-	connected    bool
-	connectionID uint64   // ID BeginConnect reserved; sends must carry it
-	connectedTo  []string // every Connect address, in order
-	inbound      chan network.Inbound
-	frames       [][]byte
+	mu              sync.Mutex
+	sent            []string
+	gmcpSent        []struct{ Package, Data string }
+	connected       bool
+	connectionID    uint64   // ID BeginConnect reserved; sends must carry it
+	connectedTo     []string // every Connect address, in order
+	inbound         chan network.Inbound
+	frames          [][]byte
+	disconnectCalls int
 }
 
 var _ Network = (*mockNetwork)(nil)
@@ -61,6 +62,7 @@ func (m *mockNetwork) dialed() []string {
 func (m *mockNetwork) Disconnect() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.disconnectCalls++
 	m.connected = false
 }
 

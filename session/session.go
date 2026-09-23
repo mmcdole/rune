@@ -228,7 +228,7 @@ func (s *Session) handleInbound(inbound network.Inbound) {
 
 	switch inbound.Kind {
 	case network.InboundDisconnect:
-		s.Disconnect()
+		s.handleConnectionClosed()
 	case network.InboundBatch:
 		s.handleEventBatch(inbound.ConnectionID, inbound.Batch)
 	}
