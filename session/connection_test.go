@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mmcdole/rune/network"
 )
@@ -186,15 +187,68 @@ func TestInboundDisconnectUpdatesStateAndRunsHook(t *testing.T) {
 	s, net, uiMock := newTestSession(t)
 	net.connected = true
 	s.clientState.Connected = true
+	s.clientState.Address = "old.example:4000"
+	s.engine.UpdateState(s.clientState)
+	serverNegotiatesGMCP(s)
+	serverData(s, "unfinished prompt")
+	assertSessionLua(t, s.engine, `
+		closedHooks = {}
+		rune.hooks.on("disconnecting", function() table.insert(closedHooks, "disconnecting") end)
+		rune.hooks.on("disconnected", function()
+			table.insert(closedHooks, "disconnected")
+			connectedAtClose = rune.state.connected
+		end)
+	`)
+	connectionID := s.connectionID
+	net.connected = false // The transport has already retired the connection.
 
-	s.handleInbound(network.Inbound{Kind: network.InboundDisconnect, ConnectionID: s.connectionID})
+	s.handleInbound(network.Inbound{Kind: network.InboundDisconnect, ConnectionID: connectionID})
+	s.handleInbound(network.Inbound{Kind: network.InboundDisconnect, ConnectionID: connectionID})
 
-	if s.clientState.Connected {
-		t.Error("clientState still connected after disconnect")
+	if s.clientState.Connected || s.clientState.Address != "" || s.connectionID == connectionID {
+		t.Errorf("connection state not cleared: id=%d state=%+v", s.connectionID, s.clientState)
 	}
+	if s.prompt.active || s.partialLine.peek() != "" || s.GMCPActive() {
+		t.Error("connection-scoped prompt or protocol state survived closure")
+	}
+	if net.disconnectCalls != 0 {
+		t.Errorf("remote closure called transport Disconnect %d times", net.disconnectCalls)
+	}
+	assertSessionLua(t, s.engine, `
+		assert(table.concat(closedHooks, ",") == "disconnected")
+		assert(connectedAtClose == false)
+	`)
 	if printed := uiMock.drainPrinted(); !contains(printed, "Disconnected") {
 		t.Errorf("expected disconnect notice, got %v", printed)
 	}
+}
+
+func TestInboundDisconnectHookCanReconnectAndIgnoresStaleClosure(t *testing.T) {
+	s, net, _ := newTestSession(t)
+	assertSessionLua(t, s.engine, `
+		closedCount = 0
+		rune.hooks.on("disconnected", function()
+			closedCount = closedCount + 1
+			rune.connect("next.example:4000")
+		end)
+	`)
+	oldID := s.connectionID
+	s.handleInbound(network.Inbound{Kind: network.InboundDisconnect, ConnectionID: oldID})
+	select {
+	case event := <-s.internalEvents:
+		s.handleInternalEvent(event)
+	case <-time.After(time.Second):
+		t.Fatal("reconnect did not finish")
+	}
+	newID := s.connectionID
+	s.handleInbound(network.Inbound{Kind: network.InboundDisconnect, ConnectionID: oldID})
+	if s.connectionID != newID || !s.clientState.Connected || s.clientState.Address != "next.example:4000" {
+		t.Fatalf("stale closure changed reconnected state: id=%d state=%+v", s.connectionID, s.clientState)
+	}
+	if net.disconnectCalls != 0 {
+		t.Fatal("closure handler disconnected the transport")
+	}
+	assertSessionLua(t, s.engine, `assert(closedCount == 1)`)
 }
 
 func TestConnectingHookSendsOnTheExistingConnection(t *testing.T) {
@@ -225,7 +279,12 @@ func TestDisconnectingHookSendsOnTheLiveConnection(t *testing.T) {
 	net.connected = true
 
 	if err := s.engine.DoString("hook", `
-		rune.hooks.on("disconnecting", function() rune.send_raw("farewell") end)
+		localHooks = {}
+		rune.hooks.on("disconnecting", function()
+			table.insert(localHooks, "disconnecting")
+			rune.send_raw("farewell")
+		end)
+		rune.hooks.on("disconnected", function() table.insert(localHooks, "disconnected") end)
 	`); err != nil {
 		t.Fatal(err)
 	}
@@ -235,4 +294,8 @@ func TestDisconnectingHookSendsOnTheLiveConnection(t *testing.T) {
 	if sent := net.drainSent(); !slices.Equal(sent, []string{"farewell"}) {
 		t.Fatalf("disconnecting hook sent %q, want farewell on the live connection", sent)
 	}
+	if net.disconnectCalls != 1 || net.connected {
+		t.Fatalf("local disconnect did not close transport exactly once: calls=%d connected=%v", net.disconnectCalls, net.connected)
+	}
+	assertSessionLua(t, s.engine, `assert(table.concat(localHooks, ",") == "disconnecting,disconnected")`)
 }

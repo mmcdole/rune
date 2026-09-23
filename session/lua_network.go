@@ -79,9 +79,21 @@ func (s *Session) Disconnect() {
 		return // the hook replaced the connection
 	}
 
+	s.net.Disconnect()
+	s.finishDisconnect()
+}
+
+// handleConnectionClosed observes a closure already handled by the transport.
+// There is no live connection for a disconnecting hook to send on.
+func (s *Session) handleConnectionClosed() {
+	s.finishDisconnect()
+}
+
+// finishDisconnect invalidates old work and publishes the closed state before
+// notifying scripts, which may start a new connection from disconnected.
+func (s *Session) finishDisconnect() {
 	s.connectionID++
 	s.resetConnectionState()
-	s.net.Disconnect()
 	s.clientState.Connected = false
 	s.clientState.Address = ""
 	s.engine.UpdateState(s.clientState)
