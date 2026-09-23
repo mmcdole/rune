@@ -17,10 +17,12 @@ func (s *Session) Quit() {
 // The send is non-blocking by necessity: Reload runs ON the session
 // goroutine (called from inside a Lua dispatch), so blocking on the
 // internal-event channel here would deadlock the loop that drains it.
+// Scripts are told about the reload only once it is queued, so a full
+// queue never leaves them prepared for a reload that will not happen.
 func (s *Session) Reload() {
-	s.engine.NotifyReloading()
 	select {
 	case s.internalEvents <- reloadRequested{}:
+		s.engine.NotifyReloading()
 	default:
 		s.ui.Print(text.Red("Reload Failed: event queue full"))
 	}

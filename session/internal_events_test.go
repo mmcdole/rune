@@ -35,15 +35,26 @@ func TestStaleConnectCompletionCannotReplaceCurrentConnection(t *testing.T) {
 
 func TestReloadReportsWhenInternalEventQueueIsFull(t *testing.T) {
 	s, _, uiMock := newTestSession(t)
+	if err := s.engine.DoString("setup", `
+		reloading_fired = false
+		rune.hooks.on("reloading", function() reloading_fired = true end)
+	`); err != nil {
+		t.Fatal(err)
+	}
 	for len(s.internalEvents) < cap(s.internalEvents) {
 		s.internalEvents <- reloadRequested{}
 	}
 
 	s.Reload()
 
-	if printed := uiMock.drainPrinted(); !contains(printed, "Reload Failed: event queue full") {
+	printed := uiMock.drainPrinted()
+	if !contains(printed, "Reload Failed: event queue full") {
 		t.Fatalf("queue saturation was not reported: %v", printed)
 	}
+	if contains(printed, "Reloading scripts") {
+		t.Errorf("announced a reload that was never queued: %v", printed)
+	}
+	assertSessionLua(t, s.engine, `assert(not reloading_fired, "reloading hook fired for a dropped reload")`)
 }
 
 func TestPostAfterSessionEndsIsRejectedEvenWithQueueSpace(t *testing.T) {
