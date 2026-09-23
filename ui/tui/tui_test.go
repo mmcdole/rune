@@ -2,6 +2,7 @@ package tui
 
 import (
 	"bytes"
+	"io"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -9,6 +10,20 @@ import (
 
 	"github.com/mmcdole/rune/ui"
 )
+
+func TestQuitBeforeRunDoesNotStartProgram(t *testing.T) {
+	b := NewBubbleTeaUI()
+	b.output = io.Discard
+	b.Print("queued during boot")
+	b.Quit()
+
+	if err := b.Run(); err != nil {
+		t.Fatalf("Run after Quit: %v", err)
+	}
+	if b.program != nil {
+		t.Fatal("Run started a program after Quit")
+	}
+}
 
 func TestKeypadModeSequence(t *testing.T) {
 	if got := keypadModeSequence(true); got != ansi.KeypadApplicationMode {

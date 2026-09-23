@@ -17,8 +17,9 @@ import (
 
 // BubbleTeaUI implements ui.UI with Bubble Tea.
 type BubbleTeaUI struct {
-	program *tea.Program
-	output  io.Writer
+	programMu sync.RWMutex
+	program   *tea.Program
+	output    io.Writer
 
 	// Message queue - buffered channel drained by a single goroutine.
 	// This decouples callers from tea.Program.Send() which can block.
@@ -110,7 +111,20 @@ func (b *BubbleTeaUI) CommitPrompt(text string) {
 func (b *BubbleTeaUI) Run() (err error) {
 	model := NewModel(b.events)
 	model.renderInterval = defaultRenderInterval
-	b.program = tea.NewProgram(model, tea.WithOutput(b.output))
+	program := tea.NewProgram(model, tea.WithOutput(b.output))
+
+	// Quit can run during boot, before Run starts. Check its signal and
+	// publish the program under the same lock used by Quit so a request
+	// cannot be lost between those two steps.
+	b.programMu.Lock()
+	select {
+	case <-b.done:
+		b.programMu.Unlock()
+		return nil
+	default:
+	}
+	b.program = program
+	b.programMu.Unlock()
 
 	defer func() {
 		if resetErr := b.writeKeypadMode(false); err == nil {
@@ -131,24 +145,27 @@ func (b *BubbleTeaUI) Run() (err error) {
 			case <-b.done:
 				return
 			case msg := <-b.msgQueue:
-				b.program.Send(msg)
+				program.Send(msg)
 			}
 		}
 	}()
 
 	// Run blocks until quit
-	_, err = b.program.Run()
+	_, err = program.Run()
 	return err
 }
 
 // Quit signals the TUI to exit.
 func (b *BubbleTeaUI) Quit() {
-	if b.program != nil {
-		b.program.Quit()
-	}
+	b.programMu.Lock()
 	b.doneOnce.Do(func() {
 		close(b.done)
 	})
+	program := b.program
+	b.programMu.Unlock()
+	if program != nil {
+		program.Quit()
+	}
 }
 
 // CreatePane creates a new named pane.
@@ -233,7 +250,10 @@ func (b *BubbleTeaUI) InputSetCursor(pos int) {
 // Returns the edited content and whether the edit was successful.
 func (b *BubbleTeaUI) OpenEditor(initial string) (string, bool) {
 	// This is synchronous - we need to suspend the TUI
-	if b.program == nil {
+	b.programMu.RLock()
+	program := b.program
+	b.programMu.RUnlock()
+	if program == nil {
 		return "", false
 	}
 
@@ -253,7 +273,7 @@ func (b *BubbleTeaUI) OpenEditor(initial string) (string, bool) {
 	}
 
 	// Suspend TUI
-	if err := b.program.ReleaseTerminal(); err != nil {
+	if err := program.ReleaseTerminal(); err != nil {
 		_ = b.writeKeypadMode(false)
 		return "", false
 	}
@@ -274,7 +294,7 @@ func (b *BubbleTeaUI) OpenEditor(initial string) (string, bool) {
 	err = cmd.Run()
 
 	// Resume TUI
-	restoreErr := b.program.RestoreTerminal()
+	restoreErr := program.RestoreTerminal()
 	if restoreErr == nil {
 		_ = b.writeKeypadMode(b.keypadMode())
 	}
