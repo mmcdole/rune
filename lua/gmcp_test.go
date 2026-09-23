@@ -162,6 +162,37 @@ func TestGMCPMalformedJSONDroppedAndReported(t *testing.T) {
 	}
 }
 
+// TestGMCPNestingBoundedWhileDecoding verifies server-controlled nesting
+// is rejected by the decoder itself. Checking depth only after a full
+// recursive decode let a ~10 MB message overflow the goroutine stack.
+func TestGMCPNestingBoundedWhileDecoding(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	if err := engine.DoString("setup", `
+		gmcp_count = 0
+		rune.gmcp.on("Test.Deep", function() gmcp_count = gmcp_count + 1 end)
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	nested := func(depth int) string {
+		return strings.Repeat("[", depth) + strings.Repeat("]", depth)
+	}
+
+	engine.OnGMCP("Test.Deep", nested(jsonMaxDepth))
+	engine.OnGMCP("Test.Deep", nested(jsonMaxDepth+1))
+	engine.OnGMCP("Test.Deep", nested(5_000_000))
+
+	printed := strings.Join(host.DrainPrintCalls(), "\n")
+	if got := strings.Count(printed, "container levels"); got != 2 {
+		t.Errorf("expected 2 depth reports, got %d: %s", got, printed)
+	}
+	if err := engine.DoString("check", `assert(gmcp_count == 1, "gmcp_count = " .. gmcp_count)`); err != nil {
+		t.Error(err)
+	}
+}
+
 // TestGMCPHandshakeAndSubscriptions verifies the gmcp_enabled hook
 // sends Core.Hello (with the real version) and Core.Supports.Set, and
 // that subscribing while enabled re-sends the full set.
