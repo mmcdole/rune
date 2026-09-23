@@ -156,16 +156,19 @@ func (e *Engine) pushModuleTable(path string, create bool) bool {
 }
 
 func (e *Engine) installModule(m moduleDecl) {
+	base := C.lua_gettop(e.l)
+	defer C.lua_settop(e.l, base)
 	e.pushModuleTable(m.path, true)
 	for name, fn := range m.fns {
 		e.pushGoFunction(fn)
 		e.setField(-2, name)
 	}
 	for name, v := range m.fields {
-		e.pushAny(v)
+		if err := e.pushAny(v); err != nil {
+			panic(err)
+		}
 		e.setField(-2, name)
 	}
-	e.pop(1)
 }
 
 func (e *Engine) installType(t typeDecl) {
@@ -187,10 +190,13 @@ func (e *Engine) SetModuleField(path, key string, value any) {
 	if e.l == nil {
 		return
 	}
+	base := C.lua_gettop(e.l)
+	defer C.lua_settop(e.l, base)
 	if e.pushModuleTable(path, true) {
-		e.pushAny(value)
+		if err := e.pushAny(value); err != nil {
+			panic(err)
+		}
 		e.setField(-2, key)
-		e.pop(1)
 	}
 }
 
@@ -267,6 +273,8 @@ func (e *Engine) CallModule(module, fn string, nret int, args ...any) ([]script.
 }
 
 func (e *Engine) CallModuleScoped(module, fn string, nret int, args []any, consume func([]script.Value) error) (bool, error) {
+	base := int(C.lua_gettop(e.l))
+	defer C.lua_settop(e.l, C.int(base))
 	if !e.pushModuleTable(module, false) {
 		return false, nil
 	}
@@ -277,19 +285,17 @@ func (e *Engine) CallModuleScoped(module, fn string, nret int, args []any, consu
 		return false, nil
 	}
 	for _, a := range args {
-		e.pushAny(a)
+		if err := e.pushAny(a); err != nil {
+			return true, err
+		}
 	}
 	if err := e.pcall(len(args), nret); err != nil {
 		return true, err
 	}
 	scope := &callScope{e: e}
-	base := int(C.lua_gettop(e.l)) - nret
 	e.borrowDepth++
 	defer func() { e.borrowDepth-- }()
-	defer func() {
-		scope.release()
-		C.lua_settop(e.l, C.int(base))
-	}()
+	defer scope.release()
 
 	vals := make([]script.Value, nret)
 	for i := 0; i < nret; i++ {
@@ -303,21 +309,23 @@ func (e *Engine) Call(fn script.FuncRef, nret int, args ...any) ([]script.Result
 	if !ok {
 		return nil, errors.New("script function is no longer available")
 	}
+	base := int(C.lua_gettop(e.l))
+	defer C.lua_settop(e.l, C.int(base))
 	C.lua_rawgeti(e.l, C.LUA_REGISTRYINDEX, ref)
 	for _, a := range args {
-		e.pushAny(a)
+		if err := e.pushAny(a); err != nil {
+			return nil, err
+		}
 	}
 	if err := e.pcall(len(args), nret); err != nil {
 		return nil, err
 	}
 	results := make([]script.Result, nret)
-	base := int(C.lua_gettop(e.l)) - nret
 	scope := &callScope{e: e}
 	for i := 0; i < nret; i++ {
 		results[i] = materialize(scope.wrap(base + 1 + i))
 	}
 	scope.release()
-	C.lua_settop(e.l, C.int(base))
 	return results, nil
 }
 
@@ -478,7 +486,8 @@ func (e *Engine) pushGoFunction(fn script.GoFunc) {
 }
 
 // pushAny converts a seam argument (see script.go) onto the stack.
-func (e *Engine) pushAny(v any) {
+// On failure, the caller must restore the stack to discard partial results.
+func (e *Engine) pushAny(v any) error {
 	switch val := v.(type) {
 	case nil:
 		C.lua_pushnil(e.l)
@@ -495,7 +504,7 @@ func (e *Engine) pushAny(v any) {
 	case string:
 		e.pushString(val)
 	case script.Tree:
-		e.pushTree(val.V)
+		return e.pushTree(val.V)
 	case script.Obj:
 		block := C.lua_newuserdata(e.l, C.size_t(unsafe.Sizeof(uintptr(0))))
 		*(*cgo.Handle)(block) = cgo.NewHandle(val.Payload)
@@ -512,18 +521,23 @@ func (e *Engine) pushAny(v any) {
 	case script.Value:
 		e.pushValue(val)
 	default:
-		panic(fmt.Sprintf("script: unsupported argument type %T", v))
+		return fmt.Errorf("script: unsupported argument type %T", v)
 	}
+	return nil
 }
 
 func (e *Engine) pushValue(v script.Value) {
 	switch v.Kind() {
 	case script.KindBool:
-		e.pushAny(v.Bool())
+		if v.Bool() {
+			C.lua_pushboolean(e.l, 1)
+		} else {
+			C.lua_pushboolean(e.l, 0)
+		}
 	case script.KindNumber:
-		e.pushAny(v.Num())
+		C.lua_pushnumber(e.l, C.lua_Number(v.Num()))
 	case script.KindString:
-		e.pushAny(v.Str())
+		e.pushString(v.Str())
 	case script.KindTable:
 		if tv, ok := v.Table().(*tableView); ok {
 			C.lua_rawgeti(e.l, C.LUA_REGISTRYINDEX, tv.ref)
@@ -555,23 +569,17 @@ func (e *Engine) checkStack(n int) {
 // views or refs — the point of the Tree contract. Each nesting level
 // holds its table (plus a pending key) on the stack, so recursion
 // reserves slots per level.
-func (e *Engine) pushTree(v any) {
+func (e *Engine) pushTree(v any) error {
 	switch val := v.(type) {
-	case nil:
-		C.lua_pushnil(e.l)
-	case bool:
-		e.pushAny(val)
-	case int:
-		e.pushAny(val)
-	case float64:
-		e.pushAny(val)
-	case string:
-		e.pushString(val)
+	case nil, bool, int, float64, string:
+		return e.pushAny(v)
 	case []any:
 		e.checkStack(4)
 		C.lua_createtable(e.l, C.int(len(val)), 0)
 		for i, item := range val {
-			e.pushTree(item)
+			if err := e.pushTree(item); err != nil {
+				return err
+			}
 			C.lua_rawseti(e.l, -2, C.int(i+1))
 		}
 	case map[string]any:
@@ -579,12 +587,15 @@ func (e *Engine) pushTree(v any) {
 		C.lua_createtable(e.l, 0, C.int(len(val)))
 		for k, item := range val {
 			e.pushString(k)
-			e.pushTree(item)
+			if err := e.pushTree(item); err != nil {
+				return err
+			}
 			C.lua_rawset(e.l, -3)
 		}
 	default:
-		panic(fmt.Sprintf("script: unsupported tree leaf %T", v))
+		return fmt.Errorf("script: unsupported tree leaf %T", v)
 	}
+	return nil
 }
 
 func materialize(v script.Value) script.Result {

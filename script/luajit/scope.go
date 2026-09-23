@@ -307,8 +307,12 @@ func runeSeamDispatch(l *C.lua_State) C.int {
 	if callErr != nil {
 		return pushDispatchError(l, callErr.Error())
 	}
+	base := C.lua_gettop(l)
 	for _, r := range scope.rets {
-		e.pushAny(r)
+		if err := e.pushAny(r); err != nil {
+			C.lua_settop(l, base)
+			return pushDispatchError(l, err.Error())
+		}
 	}
 	return C.int(len(scope.rets))
 }
