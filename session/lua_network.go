@@ -38,7 +38,7 @@ func (s *Session) Connect(addr string) {
 	s.engine.UpdateState(s.clientState)
 	s.pushBarUpdates()
 	backgroundCtx := s.backgroundCtx
-	go func() {
+	s.backgroundWork.Go(func() {
 		ctx, cancel := context.WithTimeout(backgroundCtx, 10*time.Second)
 		defer cancel()
 
@@ -48,7 +48,7 @@ func (s *Session) Connect(addr string) {
 			address:      addr,
 			err:          err,
 		})
-	}()
+	})
 }
 
 func (s *Session) handleConnectFinished(event connectFinished) {

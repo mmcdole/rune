@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/mmcdole/rune/input"
@@ -70,6 +71,7 @@ type Session struct {
 	presentationDirty    bool
 	backgroundCtx        context.Context
 	cancelBackgroundWork context.CancelFunc
+	backgroundWork       sync.WaitGroup // dial and HTTP workers; only Session starts work
 
 	// Client and connection state
 	clientState  lua.ClientState
@@ -136,22 +138,25 @@ func New(net Network, uiInstance ui.UI, cfg Config) *Session {
 	return s
 }
 
-// Run starts the session and blocks until exit.
+// Run starts the session and blocks until exit and background I/O cleanup.
 func (s *Session) Run(ctx context.Context) error {
 	// The event loop and its asynchronous producers share the caller's lifetime.
 	s.cancelBackgroundWork()
+	s.backgroundWork.Wait()
 	ctx, cancel := context.WithCancel(ctx)
 	s.backgroundCtx = ctx
 	s.cancelBackgroundWork = cancel
 
 	defer func() {
 		cancel()
+		s.net.Disconnect()
+		// The event loop has stopped, so no more workers can be started.
+		s.backgroundWork.Wait()
 		s.engine.Close()
 		if s.barTicker != nil {
 			s.barTicker.Stop()
 		}
 		s.timer.Stop()
-		s.net.Disconnect()
 		s.LogStop()
 		s.ui.Quit()
 	}()

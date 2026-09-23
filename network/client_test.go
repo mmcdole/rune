@@ -803,3 +803,84 @@ func TestBlockedLineWriteDoesNotStopIncomingParsing(t *testing.T) {
 		t.Fatal("processIncoming stopped during blocked write test")
 	}
 }
+
+func TestSupersededDialCancelsTLSHandshake(t *testing.T) {
+	for _, action := range []string{"reconnect", "disconnect"} {
+		t.Run(action, func(t *testing.T) {
+			ln, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer ln.Close()
+			c := NewTCPClient()
+			defer c.Disconnect()
+			c.BeginConnect(1)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			finished := make(chan error, 1)
+			go func() { finished <- c.Connect(ctx, "tls+insecure://"+ln.Addr().String(), 1) }()
+			if err := ln.(*net.TCPListener).SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+				t.Fatal(err)
+			}
+			peer, err := ln.Accept()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer peer.Close()
+			// Wait for the ClientHello, then leave the TLS handshake pending.
+			if err := peer.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := peer.Read(make([]byte, 4096)); err != nil {
+				t.Fatal(err)
+			}
+			if action == "reconnect" {
+				c.BeginConnect(2)
+			} else {
+				c.Disconnect()
+			}
+			select {
+			case err := <-finished:
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("Connect error = %v, want cancellation", err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("superseded dial is still waiting for the TLS handshake")
+			}
+			if action == "reconnect" {
+				if err := c.Connect(ctx, ln.Addr().String(), 2); err != nil {
+					t.Fatalf("replacement connection: %v", err)
+				}
+				replacement, err := ln.Accept()
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer replacement.Close()
+				if err := c.SendLine(2, "hello"); err != nil {
+					t.Fatal(err)
+				}
+				if err := replacement.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+					t.Fatal(err)
+				}
+				data := make([]byte, len("hello\r\n"))
+				if _, err := io.ReadFull(replacement, data); err != nil {
+					t.Fatal(err)
+				}
+				if string(data) != "hello\r\n" {
+					t.Fatalf("replacement received %q", data)
+				}
+			}
+		})
+	}
+}
+
+func TestSupersededDialIsRejectedBeforeNetworkIO(t *testing.T) {
+	c := NewTCPClient()
+	c.BeginConnect(2)
+	// Invalid addresses normally fail during dialing. A stale request should
+	// be rejected before address resolution or any network traffic.
+	err := c.Connect(context.Background(), "invalid-address", 1)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("stale dial = %v, want context.Canceled", err)
+	}
+}

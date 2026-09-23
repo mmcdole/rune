@@ -22,11 +22,11 @@ const (
 // HTTPRequest implements lua.Host. The request runs in its own goroutine and
 // returns a typed event, so the Lua callback still executes on the Session
 // goroutine under the watchdog. Session shutdown cancels both the request and
-// any wait to publish its result.
+// any wait to publish its result, then waits for the worker to exit.
 func (s *Session) HTTPRequest(id int, req lua.HTTPRequest) {
 	luaGeneration := s.luaGeneration
 	backgroundCtx := s.backgroundCtx
-	go func() {
+	s.backgroundWork.Go(func() {
 		resp, err := doHTTPRequest(backgroundCtx, req)
 		errMsg := ""
 		if err != nil {
@@ -38,7 +38,7 @@ func (s *Session) HTTPRequest(id int, req lua.HTTPRequest) {
 			response:      resp,
 			errorText:     errMsg,
 		})
-	}()
+	})
 }
 
 func (s *Session) handleHTTPFinished(event httpFinished) {
