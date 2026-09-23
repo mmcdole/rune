@@ -278,8 +278,8 @@ func (m *mockUI) pushedBinds() input.Bindings {
 	return m.bindsPushed
 }
 
-func (m *mockUI) ShowPicker(opts ui.ShowPickerMsg) {}
-func (m *mockUI) ShowSearch(opts ui.ShowSearchMsg) {}
+func (m *mockUI) ShowPicker(opts ui.PickerOptions) {}
+func (m *mockUI) ShowSearch(opts ui.SearchOptions) {}
 func (m *mockUI) SetClipboard(text string)         {}
 func (m *mockUI) CreatePane(name string)           {}
 func (m *mockUI) WritePane(name, text string)      {}

@@ -3,20 +3,18 @@ package tui
 import (
 	"strings"
 	"testing"
-
-	"github.com/mmcdole/rune/ui"
 )
 
 func TestOrderedPromptCommitThenLocalSubmissionOutput(t *testing.T) {
 	m := newBareModel(t)
 
-	next, _ := m.Update(ui.SetPromptMsg("HP>"))
+	next, _ := m.Update(setPromptMsg("HP>"))
 	m = next.(*Model)
-	next, _ = m.Update(ui.CommitPromptMsg("HP>"))
+	next, _ = m.Update(commitPromptMsg("HP>"))
 	m = next.(*Model)
-	next, _ = m.Update(ui.EchoLineMsg("> /help"))
+	next, _ = m.Update(echoLineMsg("> /help"))
 	m = next.(*Model)
-	next, _ = m.Update(ui.PrintLineMsg("local help"))
+	next, _ = m.Update(printLineMsg("local help"))
 	m = next.(*Model)
 
 	wantScrollback(t, m, "HP>", "> /help", "local help")
@@ -28,9 +26,9 @@ func TestOrderedPromptCommitThenLocalSubmissionOutput(t *testing.T) {
 func TestPromptClearClearsOverlay(t *testing.T) {
 	m := newBareModel(t)
 
-	next, _ := m.Update(ui.SetPromptMsg("User"))
+	next, _ := m.Update(setPromptMsg("User"))
 	m = next.(*Model)
-	next, _ = m.Update(ui.SetPromptMsg("Username:"))
+	next, _ = m.Update(setPromptMsg("Username:"))
 	m = next.(*Model)
 
 	wantScrollback(t, m)
@@ -38,7 +36,7 @@ func TestPromptClearClearsOverlay(t *testing.T) {
 		t.Fatalf("prompt overlay = %q, want %q", got, "Username:")
 	}
 
-	next, _ = m.Update(ui.SetPromptMsg(""))
+	next, _ = m.Update(setPromptMsg(""))
 	m = next.(*Model)
 
 	wantScrollback(t, m)
@@ -53,7 +51,7 @@ func TestPromptClearClearsOverlay(t *testing.T) {
 func TestMultiLinePrintSplitsIntoRows(t *testing.T) {
 	m := newBareModel(t)
 
-	next, _ := m.Update(ui.PrintLineMsg("row 1\rrow 2\r\nrow 3"))
+	next, _ := m.Update(printLineMsg("row 1\rrow 2\r\nrow 3"))
 	m = next.(*Model)
 
 	wantScrollback(t, m, "row 1", "row 2", "row 3")
@@ -67,7 +65,7 @@ func TestOverlongPrintWordWrapsToWidth(t *testing.T) {
 
 	head := strings.Repeat("x", 60)
 	tail := strings.Repeat("y", 30)
-	next, _ := m.Update(ui.PrintLineMsg(head + " " + tail))
+	next, _ := m.Update(printLineMsg(head + " " + tail))
 	m = next.(*Model)
 
 	wantScrollback(t, m, head, tail)
@@ -78,7 +76,7 @@ func TestOverlongPrintWordWrapsToWidth(t *testing.T) {
 func TestOverlongUnbreakableWordHardWraps(t *testing.T) {
 	m := newBareModel(t)
 
-	next, _ := m.Update(ui.EchoLineMsg(strings.Repeat("z", 100)))
+	next, _ := m.Update(echoLineMsg(strings.Repeat("z", 100)))
 	m = next.(*Model)
 
 	wantScrollback(t, m, strings.Repeat("z", 80), strings.Repeat("z", 20))
@@ -90,7 +88,7 @@ func TestOverlongUnbreakableWordHardWraps(t *testing.T) {
 func TestMultiLineEchoSplitsIntoRows(t *testing.T) {
 	m := newBareModel(t)
 
-	next, _ := m.Update(ui.EchoLineMsg("> dump\na\tb"))
+	next, _ := m.Update(echoLineMsg("> dump\na\tb"))
 	m = next.(*Model)
 
 	wantScrollback(t, m, "> dump", "a       b")
@@ -99,7 +97,7 @@ func TestMultiLineEchoSplitsIntoRows(t *testing.T) {
 func TestEchoExpandsPreservedTabsBeforeScrollback(t *testing.T) {
 	m := newBareModel(t)
 
-	next, _ := m.Update(ui.EchoLineMsg("> a\tb"))
+	next, _ := m.Update(echoLineMsg("> a\tb"))
 	m = next.(*Model)
 
 	got := m.output.Scrollback().At(0)
@@ -118,7 +116,7 @@ func TestEchoExpandsPreservedTabsBeforeScrollback(t *testing.T) {
 // this pins the model-layer guarantee that scrollback rows are tab-free.
 func TestPrintedTabsAreExpanded(t *testing.T) {
 	m := newTestModel(t)
-	next, _ := m.Update(ui.PrintLineMsg("\tDead-file cleanup"))
+	next, _ := m.Update(printLineMsg("\tDead-file cleanup"))
 	m = next.(*Model)
 	found := false
 	for i := 0; i < m.output.Scrollback().Count(); i++ {
@@ -133,7 +131,7 @@ func TestPrintedTabsAreExpanded(t *testing.T) {
 	if !found {
 		t.Errorf("expanded row not found in scrollback")
 	}
-	next, _ = m.Update(ui.SetPromptMsg("HP\t> "))
+	next, _ = m.Update(setPromptMsg("HP\t> "))
 	m = next.(*Model)
 	if got := m.output.Prompt(); got != "HP      > " {
 		t.Errorf("prompt = %q, want tab expanded", got)

@@ -143,14 +143,14 @@ func (m *Model) dispatch(msg tea.Msg) (render, layout bool) {
 		return true, false
 
 	// Session config updates
-	case ui.UpdateBindsMsg:
+	case updateBindsMsg:
 		m.input.SetBindings(input.Bindings(msg))
 		return true, false
-	case ui.UpdateBarsMsg:
+	case updateBarsMsg:
 		return m.syncBars(msg)
-	case ui.UpdateLayoutMsg:
+	case updateLayoutMsg:
 		m.layout = ui.LayoutTree(msg)
-	case ui.UpdateConfigMsg:
+	case updateConfigMsg:
 		m.inputCtl.SetKeepOnSubmit(msg.KeepInput)
 		m.mouseEnabled = msg.Mouse
 		m.numpadMode = msg.Numpad
@@ -158,35 +158,35 @@ func (m *Model) dispatch(msg tea.Msg) (render, layout bool) {
 
 	// Scrollback appends and the prompt overlay. Server lines and local
 	// echoes differ only in where Session sends them from.
-	case ui.PrintLineMsg:
+	case printLineMsg:
 		m.output.Write(string(msg))
 		return true, m.layoutPlan.autoPanes[ui.OutputPaneName]
-	case ui.EchoLineMsg:
+	case echoLineMsg:
 		m.output.Write(string(msg))
 		return true, m.layoutPlan.autoPanes[ui.OutputPaneName]
-	case ui.SetPromptMsg:
+	case setPromptMsg:
 		changed := m.output.SetPrompt(string(msg))
 		return changed, changed && m.layoutPlan.autoPanes[ui.OutputPaneName]
-	case ui.CommitPromptMsg:
+	case commitPromptMsg:
 		changed := m.output.CommitPrompt(string(msg))
 		return changed, changed && m.layoutPlan.autoPanes[ui.OutputPaneName]
 
 	// Pane buffer content. Placement and visibility are layout-tree state
 	// and arrive as UpdateLayoutMsg instead.
-	case ui.PaneCreateMsg:
+	case paneCreateMsg:
 		m.pane(msg.Name)
 		return false, false
-	case ui.PaneWriteMsg:
+	case paneWriteMsg:
 		m.pane(msg.Name).Write(msg.Text)
 		return true, m.layoutPlan.autoPanes[msg.Name]
-	case ui.PaneReplaceMsg:
+	case paneReplaceMsg:
 		m.dropOutputSearch(msg.Name)
 		p := m.pane(msg.Name)
 		p.Clear()
 		p.Write(msg.Text)
 		// Clearing output can also close search and resize the input area.
 		return true, msg.Name == ui.OutputPaneName || m.layoutPlan.autoPanes[msg.Name]
-	case ui.PaneClearMsg:
+	case paneClearMsg:
 		m.dropOutputSearch(msg.Name)
 		if p, ok := m.panes[msg.Name]; ok {
 			p.Clear()
@@ -194,17 +194,17 @@ func (m *Model) dispatch(msg tea.Msg) (render, layout bool) {
 		return true, msg.Name == ui.OutputPaneName || m.layoutPlan.autoPanes[msg.Name]
 
 	// Input control
-	case ui.ShowPickerMsg:
-		m.inputCtl.ShowPicker(msg)
-	case ui.ShowSearchMsg:
-		m.inputCtl.ShowSearch(msg)
-	case ui.SetInputMsg:
+	case showPickerMsg:
+		m.inputCtl.ShowPicker(msg.options)
+	case showSearchMsg:
+		m.inputCtl.ShowSearch(msg.options)
+	case setInputMsg:
 		m.inputCtl.SetText(string(msg))
-	case ui.SetInputSubmissionMsg:
+	case setInputSubmissionMsg:
 		m.inputCtl.SetSubmission(input.Submission(msg))
 
 	// Input primitives (from Lua)
-	case ui.InputSetCursorMsg:
+	case inputSetCursorMsg:
 		m.input.SetCursor(int(msg))
 		m.notifySession(ui.DraftAppliedMsg{Text: m.input.Value(), Cursor: m.input.Position()})
 		return true, m.layoutPlan.autoPanes[ui.OutputPaneName]
@@ -212,22 +212,22 @@ func (m *Model) dispatch(msg tea.Msg) (render, layout bool) {
 	// Clipboard (from Lua). OSC 52 asks the terminal emulator to set
 	// the system clipboard; it renders nothing, so it bypasses the
 	// renderer and goes to the terminal on stderr.
-	case ui.SetClipboardMsg:
+	case setClipboardMsg:
 		osc52.New(string(msg)).WriteTo(os.Stderr) //nolint:errcheck // best-effort: no way to report terminal-side failure
 		return false, false
 
 	// Pane scrolling (from Lua). Every named pane follows the same pane
 	// contract.
-	case ui.PaneScrollUpMsg:
+	case paneScrollUpMsg:
 		m.scrollPane(msg.Name, func(pane pane) { pane.ScrollUp(msg.Lines) })
 		return true, false
-	case ui.PaneScrollDownMsg:
+	case paneScrollDownMsg:
 		m.scrollPane(msg.Name, func(pane pane) { pane.ScrollDown(msg.Lines) })
 		return true, false
-	case ui.PaneScrollToTopMsg:
+	case paneScrollToTopMsg:
 		m.scrollPane(msg.Name, func(pane pane) { pane.ScrollToTop() })
 		return true, false
-	case ui.PaneScrollToBottomMsg:
+	case paneScrollToBottomMsg:
 		m.scrollPane(msg.Name, func(pane pane) { pane.ScrollToBottom() })
 		return true, false
 	default:

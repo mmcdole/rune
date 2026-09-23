@@ -10,7 +10,7 @@ import (
 // there is no callback to settle, so refusing while a structured draft
 // is active is a plain no-op. An open picker settles first: overlays
 // are mutually exclusive and the newcomer wins.
-func (c *inputController) ShowSearch(opts ui.ShowSearchMsg) {
+func (c *inputController) ShowSearch(opts ui.SearchOptions) {
 	if c.input.DraftEditorActive() {
 		return
 	}

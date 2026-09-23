@@ -429,7 +429,7 @@ func (i *Input) CanMoveDraftEditorVertically(delta int) bool {
 // ShowPicker displays the picker with items. The picker's session-side
 // state (callback ID, dismiss-on-space) is owned by the input
 // controller; the widget only renders the overlay.
-func (i *Input) ShowPicker(opts ui.ShowPickerMsg) {
+func (i *Input) ShowPicker(opts ui.PickerOptions) {
 	i.picker.SetItems(opts.Items)
 	i.overlay = overlayPickerModal
 

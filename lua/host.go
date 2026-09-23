@@ -32,8 +32,8 @@ type Host interface {
 	PaneWrite(name, text string)
 	PaneReplace(name, text string)
 	PaneClear(name string)
-	ShowPicker(opts ui.ShowPickerMsg)
-	ShowSearch(opts ui.ShowSearchMsg)
+	ShowPicker(opts ui.PickerOptions)
+	ShowSearch(opts ui.SearchOptions)
 	ClipboardSet(text string)
 	GetInput() string
 	SetInput(text string)

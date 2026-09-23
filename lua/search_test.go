@@ -10,7 +10,7 @@ func TestSearchEntryPoints(t *testing.T) {
 	cases := []struct {
 		name  string
 		run   func(e *Engine) error
-		query string // expected ShowSearchMsg.Query
+		query string // expected SearchOptions.Query
 	}{
 		{
 			name:  "rune.ui.search with query",

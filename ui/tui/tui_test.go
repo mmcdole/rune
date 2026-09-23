@@ -38,7 +38,7 @@ func TestUpdateConfigQueuesKeypadModeOnlyWhenItChanges(t *testing.T) {
 	b := NewBubbleTeaUI()
 
 	b.UpdateConfig(ui.Config{Numpad: false})
-	if msg := <-b.msgQueue; msg != (ui.UpdateConfigMsg{Numpad: false}) {
+	if msg := <-b.msgQueue; msg != (updateConfigMsg{Numpad: false}) {
 		t.Fatalf("first queued message = %#v, want disabled config", msg)
 	}
 	if msg := <-b.msgQueue; msg != (tea.RawMsg{Msg: ansi.KeypadNumericMode}) {
@@ -46,7 +46,7 @@ func TestUpdateConfigQueuesKeypadModeOnlyWhenItChanges(t *testing.T) {
 	}
 
 	b.UpdateConfig(ui.Config{KeepInput: true, Numpad: false})
-	if msg := <-b.msgQueue; msg != (ui.UpdateConfigMsg{KeepInput: true, Numpad: false}) {
+	if msg := <-b.msgQueue; msg != (updateConfigMsg{KeepInput: true, Numpad: false}) {
 		t.Fatalf("unchanged keypad config message = %#v", msg)
 	}
 	if got := len(b.msgQueue); got != 0 {
@@ -54,7 +54,7 @@ func TestUpdateConfigQueuesKeypadModeOnlyWhenItChanges(t *testing.T) {
 	}
 
 	b.UpdateConfig(ui.Config{KeepInput: true, Numpad: true})
-	if msg := <-b.msgQueue; msg != (ui.UpdateConfigMsg{KeepInput: true, Numpad: true}) {
+	if msg := <-b.msgQueue; msg != (updateConfigMsg{KeepInput: true, Numpad: true}) {
 		t.Fatalf("enabled keypad config message = %#v", msg)
 	}
 	if msg := <-b.msgQueue; msg != (tea.RawMsg{Msg: ansi.KeypadApplicationMode}) {
@@ -108,7 +108,7 @@ func TestNormalizeEditorTextPreservesWhitespace(t *testing.T) {
 func TestReplacePaneQueuesOneMessage(t *testing.T) {
 	b := NewBubbleTeaUI()
 	b.ReplacePane("status", "HP 10\nMP 5")
-	if msg := <-b.msgQueue; msg != (ui.PaneReplaceMsg{Name: "status", Text: "HP 10\nMP 5"}) {
+	if msg := <-b.msgQueue; msg != (paneReplaceMsg{Name: "status", Text: "HP 10\nMP 5"}) {
 		t.Fatalf("queued %#v, want one PaneReplaceMsg", msg)
 	}
 	if got := len(b.msgQueue); got != 0 {

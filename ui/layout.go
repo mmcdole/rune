@@ -1,10 +1,7 @@
 package ui
 
 import (
-	"errors"
 	"fmt"
-	"slices"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -49,7 +46,7 @@ type LayoutSizeKind uint8
 
 const (
 	// LayoutSizeDefault marks an omitted declaration size. Normalization chooses
-	// the axis-aware default; the standalone allocator treats it as Fraction(1).
+	// the axis-aware default; the allocator treats it as Fraction(1).
 	LayoutSizeDefault LayoutSizeKind = iota
 	LayoutSizeCells
 	LayoutSizeFraction
@@ -311,19 +308,6 @@ func (t LayoutTree) WithPaneVisibility(name string, visible bool) (updated Layou
 	return t.withVisibility(paneMatch(name), visible)
 }
 
-// AxisTrack is the measured, main-axis input to AllocateAxis. Min is zero
-// when omitted, Max is zero when unbounded, and Auto is the measured preferred
-// size used only by LayoutSizeAuto.
-type AxisTrack struct {
-	Size LayoutSize
-	Min  int
-	Max  int
-	Auto int
-}
-
-// ErrLayoutTooSmall reports that an axis cannot honor its tracks' minima.
-var ErrLayoutTooSmall = errors.New("layout extent is smaller than its minimum sizes")
-
 // ValidateLayoutTree validates structural shape and constraints. Widget
 // registration and application-level requirements, such as the mandatory input
 // input widget, belong to the loader.
@@ -515,7 +499,7 @@ func subtreeContainsInput(node LayoutNode) bool {
 }
 
 func validateNodeSize(node LayoutNode, path string) error {
-	if err := validateLayoutSize(node.Size); err != nil {
+	if err := ValidateLayoutSize(node.Size); err != nil {
 		return fmt.Errorf("%s: %w", path, err)
 	}
 	if node.MinSize != nil && (*node.MinSize < 0 || *node.MinSize > MaxLayoutCells) {
@@ -538,7 +522,8 @@ func validateNodeSize(node LayoutNode, path string) error {
 	return nil
 }
 
-func validateLayoutSize(size LayoutSize) error {
+// ValidateLayoutSize validates a single layout sizing rule.
+func ValidateLayoutSize(size LayoutSize) error {
 	switch size.Kind {
 	case LayoutSizeDefault, LayoutSizeAuto:
 		if size.Value != 0 {
@@ -556,226 +541,4 @@ func validateLayoutSize(size LayoutSize) error {
 		return fmt.Errorf("unknown layout size kind %d", size.Kind)
 	}
 	return nil
-}
-
-// AllocateAxis resolves measured tracks into child sizes for one container
-// axis. Extent includes the gaps between children; the returned sizes do not.
-// Uncapped fractional tracks consume all remaining cells. If there are no
-// such tracks, unused cells are intentionally left at the end of the axis.
-//
-// Fixed, percentage, and auto sizes are preferred sizes. Fractional tracks
-// divide the remainder. If preferred sizes overcommit the axis, tracks shrink
-// toward Min in this order: fractional, percentage, then fixed and auto.
-// Max caps every track. An impossible minimum returns ErrLayoutTooSmall.
-func AllocateAxis(extent, gap int, tracks []AxisTrack) ([]int, error) {
-	if extent < 0 {
-		return nil, fmt.Errorf("layout extent must not be negative")
-	}
-	if gap < 0 || gap > MaxLayoutCells {
-		return nil, fmt.Errorf("layout gap must be between 0 and %d", MaxLayoutCells)
-	}
-	if len(tracks) > MaxLayoutNodes {
-		return nil, fmt.Errorf("layout axis exceeds the limit of %d tracks", MaxLayoutNodes)
-	}
-	if len(tracks) == 0 {
-		return []int{}, nil
-	}
-
-	gapCount := len(tracks) - 1
-	if gapCount > 0 && gap > extent/gapCount {
-		return nil, fmt.Errorf("%w: gaps need %d cells, have %d", ErrLayoutTooSmall, gap*gapCount, extent)
-	}
-	available := extent - gap*gapCount
-
-	normalized := make([]AxisTrack, len(tracks))
-	minimum := 0
-	for i, track := range tracks {
-		if track.Size.Kind == LayoutSizeDefault {
-			track.Size = Fraction(1)
-		}
-		if err := validateLayoutSize(track.Size); err != nil {
-			return nil, fmt.Errorf("track %d: %w", i+1, err)
-		}
-		if track.Min < 0 || track.Min > MaxLayoutCells {
-			return nil, fmt.Errorf("track %d: min must be between 0 and %d", i+1, MaxLayoutCells)
-		}
-		if track.Max < 0 || track.Max > MaxLayoutCells {
-			return nil, fmt.Errorf("track %d: max must be between 0 and %d", i+1, MaxLayoutCells)
-		}
-		if track.Max > 0 && track.Min > track.Max {
-			return nil, fmt.Errorf("track %d: min must not exceed max", i+1)
-		}
-		if track.Size.Kind == LayoutSizeAuto && (track.Auto < 0 || track.Auto > MaxLayoutCells) {
-			return nil, fmt.Errorf("track %d: auto size must be between 0 and %d", i+1, MaxLayoutCells)
-		}
-		normalized[i] = track
-		minimum += track.Min
-	}
-	if minimum > available {
-		return nil, fmt.Errorf("%w: tracks need at least %d cells plus %d gaps, have %d",
-			ErrLayoutTooSmall, minimum, gap*gapCount, extent)
-	}
-
-	sizes := make([]int, len(normalized))
-	flexIndices := make([]int, 0, len(normalized))
-	flexWeights := make([]int, 0, len(normalized))
-	nonFlexTotal := 0
-	for i, track := range normalized {
-		var target int
-		switch track.Size.Kind {
-		case LayoutSizeCells:
-			target = track.Size.Value
-		case LayoutSizePercent:
-			target = roundedPercent(available, track.Size.Value)
-		case LayoutSizeAuto:
-			target = track.Auto
-		case LayoutSizeFraction:
-			flexIndices = append(flexIndices, i)
-			flexWeights = append(flexWeights, track.Size.Value)
-			continue
-		}
-		sizes[i] = clampTrack(target, track)
-		nonFlexTotal += sizes[i]
-	}
-
-	if remainder := available - nonFlexTotal; remainder > 0 && len(flexIndices) > 0 {
-		shares := proportional(remainder, flexWeights)
-		for j, index := range flexIndices {
-			sizes[index] = clampTrack(shares[j], normalized[index])
-		}
-	} else {
-		for _, index := range flexIndices {
-			sizes[index] = normalized[index].Min
-		}
-	}
-
-	total := sumInts(sizes)
-	if total > available {
-		over := total - available
-		over = shrinkTracks(sizes, normalized, over, LayoutSizeFraction)
-		over = shrinkTracks(sizes, normalized, over, LayoutSizePercent)
-		over = shrinkTracks(sizes, normalized, over, LayoutSizeCells, LayoutSizeAuto)
-		if over > 0 {
-			return nil, fmt.Errorf("%w: tracks need %d cells plus %d gaps, have %d",
-				ErrLayoutTooSmall, available+over, gap*gapCount, extent)
-		}
-	}
-
-	if remaining := available - sumInts(sizes); remaining > 0 {
-		growFractions(sizes, normalized, remaining)
-	}
-	return sizes, nil
-}
-
-func roundedPercent(total, percent int) int {
-	whole := (total / 100) * percent
-	remainder := (total % 100) * percent
-	return whole + (remainder+50)/100
-}
-
-func clampTrack(size int, track AxisTrack) int {
-	size = max(size, track.Min)
-	if track.Max > 0 {
-		size = min(size, track.Max)
-	}
-	return size
-}
-
-// proportional divides total by positive weights using largest-remainder
-// rounding. Equal remainders favor the earlier track.
-func proportional(total int, weights []int) []int {
-	shares := make([]int, len(weights))
-	if total <= 0 || len(weights) == 0 {
-		return shares
-	}
-	weightTotal := sumInts(weights)
-	type residue struct {
-		index int
-		value int64
-	}
-	residues := make([]residue, len(weights))
-	allocated := 0
-	whole := total / weightTotal
-	remainder := total % weightTotal
-	for i, weight := range weights {
-		product := int64(remainder) * int64(weight)
-		shares[i] = whole*weight + int(product/int64(weightTotal))
-		allocated += shares[i]
-		residues[i] = residue{index: i, value: product % int64(weightTotal)}
-	}
-	sort.SliceStable(residues, func(i, j int) bool {
-		return residues[i].value > residues[j].value
-	})
-	for i := 0; i < total-allocated; i++ {
-		shares[residues[i].index]++
-	}
-	return shares
-}
-
-func shrinkTracks(sizes []int, tracks []AxisTrack, amount int, kinds ...LayoutSizeKind) int {
-	if amount <= 0 {
-		return 0
-	}
-	indices := make([]int, 0, len(tracks))
-	capacities := make([]int, 0, len(tracks))
-	totalCapacity := 0
-	for i, track := range tracks {
-		if !slices.Contains(kinds, track.Size.Kind) || sizes[i] <= track.Min {
-			continue
-		}
-		capacity := sizes[i] - track.Min
-		indices = append(indices, i)
-		capacities = append(capacities, capacity)
-		totalCapacity += capacity
-	}
-	if totalCapacity == 0 {
-		return amount
-	}
-	take := min(amount, totalCapacity)
-	reductions := proportional(take, capacities)
-	for i, index := range indices {
-		sizes[index] -= reductions[i]
-	}
-	return amount - take
-}
-
-func growFractions(sizes []int, tracks []AxisTrack, amount int) int {
-	for amount > 0 {
-		indices := make([]int, 0, len(tracks))
-		weights := make([]int, 0, len(tracks))
-		for i, track := range tracks {
-			if track.Size.Kind != LayoutSizeFraction || (track.Max > 0 && sizes[i] >= track.Max) {
-				continue
-			}
-			indices = append(indices, i)
-			weights = append(weights, track.Size.Value)
-		}
-		if len(indices) == 0 {
-			return amount
-		}
-
-		grants := proportional(amount, weights)
-		consumed := 0
-		for i, index := range indices {
-			grant := grants[i]
-			if maxSize := tracks[index].Max; maxSize > 0 {
-				grant = min(grant, maxSize-sizes[index])
-			}
-			sizes[index] += grant
-			consumed += grant
-		}
-		if consumed == 0 {
-			return amount
-		}
-		amount -= consumed
-	}
-	return 0
-}
-
-func sumInts(values []int) int {
-	total := 0
-	for _, value := range values {
-		total += value
-	}
-	return total
 }

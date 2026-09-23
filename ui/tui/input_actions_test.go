@@ -34,7 +34,7 @@ func TestInputBindingsChangeRoutingAndHints(t *testing.T) {
 		"ctrl+j":      {Action: "input.newline", Enabled: true, Order: 2},
 		"ctrl+t":      {Action: "input.toggle_mode", Enabled: true},
 	}
-	m.Update(ui.UpdateBindsMsg(keys))
+	m.Update(updateBindsMsg(keys))
 	m.inputCtl.HandlePaste("first\nsecond")
 	m.input.SetSize(120, 5)
 	var labels string
@@ -75,7 +75,7 @@ func TestInputActionsRespectModalPicker(t *testing.T) {
 		"f3": {Action: "input.toggle_mode", Enabled: true},
 	})
 	h.ctl.SetText("draft")
-	h.ctl.ShowPicker(ui.ShowPickerMsg{Items: pickerTestItems, CallbackID: "modal"})
+	h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: "modal"})
 	for _, code := range []rune{tea.KeyF1, tea.KeyF2, tea.KeyF3} {
 		h.ctl.HandleKey(keyPress(code))
 	}
@@ -87,12 +87,12 @@ func TestInputActionsRespectModalPicker(t *testing.T) {
 func TestInlinePickerEnterSelectsWithoutReboundSubmit(t *testing.T) {
 	h := newControllerHarness()
 	h.ctl.input.SetBindings(input.Bindings{"ctrl+s": {Action: "input.submit", Enabled: true}})
-	h.ctl.ShowPicker(ui.ShowPickerMsg{Items: pickerTestItems, CallbackID: "inline", Inline: true})
+	h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: "inline", Inline: true})
 	h.ctl.HandleKey(keyPress(tea.KeyEnter))
 	if h.ctl.input.PickerActive() || len(h.submitted) != 0 {
 		t.Fatal("Enter must only settle the inline picker when submit is rebound")
 	}
-	h.ctl.ShowPicker(ui.ShowPickerMsg{Items: pickerTestItems, CallbackID: "inline2", Inline: true})
+	h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: "inline2", Inline: true})
 	h.ctl.HandleKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	if h.ctl.input.PickerActive() || len(h.submitted) != 1 {
 		t.Fatal("configured submit must select and submit")
@@ -103,7 +103,7 @@ func TestBindingReplacementRemovalAndDisabledHints(t *testing.T) {
 	m := newBareModel(t)
 	bindings := input.DefaultBindings()
 	bindings["enter"] = input.Binding{Enabled: true} // Lua callback
-	m.Update(ui.UpdateBindsMsg(bindings))
+	m.Update(updateBindsMsg(bindings))
 	m.inputCtl.SetText("draft")
 	m.inputCtl.HandleKey(keyPress(tea.KeyEnter))
 	if m.input.Value() != "draft" || m.input.Bindings().Hint("submit") != "" {
@@ -113,12 +113,12 @@ func TestBindingReplacementRemovalAndDisabledHints(t *testing.T) {
 	binding := bindings["ctrl+j"]
 	binding.Enabled = false
 	bindings["ctrl+j"] = binding
-	m.Update(ui.UpdateBindsMsg(bindings))
+	m.Update(updateBindsMsg(bindings))
 	m.inputCtl.HandleKey(tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl})
 	if m.input.Value() != "draft" || m.input.Bindings().Hint("newline") != "Shift+Enter" {
 		t.Fatal("disabled binding acted or remained the hint")
 	}
-	m.Update(ui.UpdateBindsMsg{})
+	m.Update(updateBindsMsg{})
 	m.inputCtl.HandleKey(keyPress(tea.KeyEnter))
 	if m.input.Value() != "draft" || m.input.Bindings().Hint("submit") != "" {
 		t.Fatal("empty snapshot resurrected defaults")
@@ -155,9 +155,9 @@ func TestReboundCancelAcrossInputContexts(t *testing.T) {
 			case "draft_editor":
 				h.ctl.SetText("first\nsecond")
 			case "inline", "modal":
-				h.ctl.ShowPicker(ui.ShowPickerMsg{Items: pickerTestItems, CallbackID: "test", Inline: context == "inline"})
+				h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: "test", Inline: context == "inline"})
 			case "search":
-				h.ctl.ShowSearch(ui.ShowSearchMsg{})
+				h.ctl.ShowSearch(ui.SearchOptions{})
 			}
 			mode, draft := h.ctl.mode(), h.ctl.input.Value()
 			h.ctl.HandleKey(keyPress(tea.KeyEsc))
@@ -201,7 +201,7 @@ func TestExternalEditorAndCancelHintsFollowActions(t *testing.T) {
 	delete(bindings, "ctrl+e")
 	bindings["ctrl+g"] = input.Binding{Action: "input.cancel", Enabled: true}
 	bindings["f2"] = input.Binding{Action: "input.open_editor", Enabled: true}
-	m.Update(ui.UpdateBindsMsg(bindings))
+	m.Update(updateBindsMsg(bindings))
 	m.inputCtl.HandlePaste("first\nsecond")
 	m.input.SetSize(140, 5)
 	labels := func() string {
@@ -226,7 +226,7 @@ func TestExternalEditorAndCancelHintsFollowActions(t *testing.T) {
 	}
 	bindings["ctrl+g"] = input.Binding{Action: "input.cancel", Enabled: false}
 	bindings["f2"] = input.Binding{Enabled: true} // replacement callback
-	m.Update(ui.UpdateBindsMsg(bindings))
+	m.Update(updateBindsMsg(bindings))
 	if s := labels(); strings.Contains(s, "discard") || strings.Contains(s, "editor") {
 		t.Fatalf("inactive hints: %s", s)
 	}
@@ -249,9 +249,9 @@ func TestReboundExternalEditorUsesDraftAndRespectsOverlays(t *testing.T) {
 			case "draft_editor":
 				h.ctl.SetText("first\nsecond")
 			case "inline", "modal":
-				h.ctl.ShowPicker(ui.ShowPickerMsg{Items: pickerTestItems, CallbackID: "test", Inline: context == "inline"})
+				h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: "test", Inline: context == "inline"})
 			case "search":
-				h.ctl.ShowSearch(ui.ShowSearchMsg{})
+				h.ctl.ShowSearch(ui.SearchOptions{})
 			}
 			h.events = nil
 			h.ctl.HandleKey(ctrlPress('e'))
@@ -279,13 +279,13 @@ func TestReboundExternalEditorUsesDraftAndRespectsOverlays(t *testing.T) {
 func TestSearchCancelHintUsesBindingSnapshot(t *testing.T) {
 	m := newBareModel(t)
 	m.input.SetSize(100, 0)
-	m.Update(ui.UpdateBindsMsg{"ctrl+g": {Action: "input.cancel", Enabled: true}})
-	m.inputCtl.ShowSearch(ui.ShowSearchMsg{})
+	m.Update(updateBindsMsg{"ctrl+g": {Action: "input.cancel", Enabled: true}})
+	m.inputCtl.ShowSearch(ui.SearchOptions{})
 	m.input.SetSize(100, 8)
 	if view := m.input.View(); !strings.Contains(view, "Ctrl+G cancel") || strings.Contains(view, "Esc cancel") {
 		t.Fatalf("search hint: %s", view)
 	}
-	m.Update(ui.UpdateBindsMsg{})
+	m.Update(updateBindsMsg{})
 	m.input.SetSize(100, 8)
 	if view := m.input.View(); strings.Contains(view, "cancel") {
 		t.Fatalf("unbound search hint: %s", view)

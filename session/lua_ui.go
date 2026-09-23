@@ -40,12 +40,12 @@ func (s *Session) ClipboardSet(text string) {
 }
 
 // ShowPicker implements lua.Host.
-func (s *Session) ShowPicker(opts ui.ShowPickerMsg) {
+func (s *Session) ShowPicker(opts ui.PickerOptions) {
 	s.ui.ShowPicker(opts)
 }
 
 // ShowSearch implements lua.Host.
-func (s *Session) ShowSearch(opts ui.ShowSearchMsg) {
+func (s *Session) ShowSearch(opts ui.SearchOptions) {
 	s.ui.ShowSearch(opts)
 }
 

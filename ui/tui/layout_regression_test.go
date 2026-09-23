@@ -72,7 +72,7 @@ func TestContainedPickerBordersUseColumnBoundary(t *testing.T) {
 			t.Run(fmt.Sprintf("inline=%t/gap=%d", inline, gap), func(t *testing.T) {
 				m := resizeModel(t, NewModel(make(chan ui.UIEvent, 100)), 80, 24)
 				setLayout(m, containedInputLayout(ui.PaneBorderFull, ui.AutoSize(), gap))
-				m.Update(ui.ShowPickerMsg{Title: "Aliases", Inline: inline, Items: []ui.PickerItem{{Text: "north"}, {Text: "south"}}})
+				m.Update(showPickerMsg{options: ui.PickerOptions{Title: "Aliases", Inline: inline, Items: []ui.PickerItem{{Text: "north"}, {Text: "south"}}}})
 				input := findLeaf(t, m.layoutPlan, "", ui.LayoutTypeInput)
 				rows := strings.Split(ansi.Strip(m.View().Content), "\n")
 				// Results share one separator with the query field below them.
@@ -118,9 +118,9 @@ func TestInputResultsWithoutLeftNeighborHaveNoLeftWall(t *testing.T) {
 			{Type: ui.LayoutTypePane, Name: "sidebar"},
 		}})
 		if mode == "search" {
-			m.Update(ui.ShowSearchMsg{Query: "north"})
+			m.Update(showSearchMsg{options: ui.SearchOptions{Query: "north"}})
 		} else {
-			m.Update(ui.ShowPickerMsg{Title: "History", Inline: mode == "inline", Items: []ui.PickerItem{{Text: "north"}, {Text: "south"}}})
+			m.Update(showPickerMsg{options: ui.PickerOptions{Title: "History", Inline: mode == "inline", Items: []ui.PickerItem{{Text: "north"}, {Text: "south"}}}})
 		}
 		input := findLeaf(t, m.layoutPlan, "", ui.LayoutTypeInput)
 		rows := strings.Split(ansi.Strip(m.View().Content), "\n")
@@ -151,13 +151,13 @@ func TestContainedInputModesPreserveLabelsAndCursor(t *testing.T) {
 				setLayout(m, containedInputLayout(ui.PaneBorderFull, ui.AutoSize(), 0))
 				switch mode {
 				case "normal":
-					m.Update(ui.SetInputMsg("north"))
+					m.Update(setInputMsg("north"))
 				case "draft_editor":
-					m.Update(ui.SetInputMsg("first\nsecond"))
+					m.Update(setInputMsg("first\nsecond"))
 				case "picker":
-					m.Update(ui.ShowPickerMsg{Title: "Aliases", Items: []ui.PickerItem{{Text: "north"}, {Text: "south"}}})
+					m.Update(showPickerMsg{options: ui.PickerOptions{Title: "Aliases", Items: []ui.PickerItem{{Text: "north"}, {Text: "south"}}}})
 				case "search":
-					m.Update(ui.ShowSearchMsg{Query: "query"})
+					m.Update(showSearchMsg{options: ui.SearchOptions{Query: "query"}})
 				}
 				input := findLeaf(t, m.layoutPlan, "", ui.LayoutTypeInput)
 				if input.content.Empty() {
@@ -211,10 +211,10 @@ func TestUpdateAppliesGeometryOnce(t *testing.T) {
 	}})
 	for _, msg := range []tea.Msg{
 		tea.WindowSizeMsg{Width: 90, Height: 30},
-		ui.UpdateBarsMsg{"status": {Left: "changed status"}},
-		ui.ShowSearchMsg{Query: "test"},
+		updateBarsMsg{"status": {Left: "changed status"}},
+		showSearchMsg{options: ui.SearchOptions{Query: "test"}},
 		tea.KeyPressMsg{Code: tea.KeyEsc},
-		ui.SetInputMsg("first\nsecond"),
+		setInputMsg("first\nsecond"),
 	} {
 		probe.applications = 0
 		m.Update(msg)
@@ -235,7 +235,7 @@ func TestNestedConstrainedInputDoesNotShareItsEditableRow(t *testing.T) {
 			}},
 			{Type: ui.LayoutTypePane, Name: "below", Size: ui.Cells(3)},
 		}})
-		m.Update(ui.SetInputMsg("EDIT"))
+		m.Update(setInputMsg("EDIT"))
 		if !strings.Contains(ansi.Strip(m.View().Content), "EDIT") {
 			t.Fatalf("height %d: neighboring border erased input:\n%s", height, ansi.Strip(m.View().Content))
 		}
@@ -283,7 +283,7 @@ func TestStaggeredBandsAndInputJoinDividers(t *testing.T) {
 
 func TestResolveAndViewDoNotResizeWidgets(t *testing.T) {
 	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 100)), 80, 24)
-	m.Update(ui.SetInputMsg(strings.Repeat("a\nb\n", 12)))
+	m.Update(setInputMsg(strings.Repeat("a\nb\n", 12)))
 	before := m.layoutPlan
 	mode, count := m.output.Mode(), m.output.NewLineCount()
 	for range 3 {
@@ -405,8 +405,8 @@ func BenchmarkLayoutFrame(b *testing.B) {
 
 func TestSearchToDraftEditorUsesFinalGeometry(t *testing.T) {
 	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 100)), 80, 30)
-	m.Update(ui.ShowSearchMsg{Query: "missing"})
-	m.Update(ui.SetInputMsg("one\ntwo\nthree\nfour\nfive"))
+	m.Update(showSearchMsg{options: ui.SearchOptions{Query: "missing"}})
+	m.Update(setInputMsg("one\ntwo\nthree\nfour\nfive"))
 	leaf := findLeaf(t, m.layoutPlan, "", ui.LayoutTypeInput)
 	if got, want := leaf.content.Dy(), m.input.MeasureHeight(leaf.content.Dx(), ui.MaxLayoutCells); got != want {
 		t.Fatalf("search -> draft editor allocated height %d, preferred %d", got, want)
@@ -463,7 +463,7 @@ func TestOversizedAutoPreferenceUsesAvailableSpace(t *testing.T) {
 	if _, err := ui.NormalizeLayoutTree(layout); err != nil {
 		t.Fatalf("fixture must be a valid layout: %v", err)
 	}
-	m.Update(ui.UpdateLayoutMsg(layout))
+	m.Update(updateLayoutMsg(layout))
 	input := findLeaf(t, m.layoutPlan, "", ui.LayoutTypeInput)
 	if input.outer.Max.Y != 24 || input.content.Empty() || m.layoutPlan.output.Empty() {
 		t.Fatalf("oversized preference left usable space unallocated: input=%v output=%v", input.outer, m.layoutPlan.output)
@@ -478,11 +478,11 @@ func TestNestedInputSurvivesConstrainedGeometryInEveryMode(t *testing.T) {
 				setLayout(m, staggeredLayout())
 				switch mode {
 				case "normal":
-					m.Update(ui.SetInputMsg("edit"))
+					m.Update(setInputMsg("edit"))
 				case "draft_editor":
-					m.Update(ui.SetInputMsg("one\ntwo\nthree\nfour\nfive"))
+					m.Update(setInputMsg("one\ntwo\nthree\nfour\nfive"))
 				case "search":
-					m.Update(ui.ShowSearchMsg{Query: "query"})
+					m.Update(showSearchMsg{options: ui.SearchOptions{Query: "query"}})
 				}
 				input := findLeaf(t, m.layoutPlan, "", ui.LayoutTypeInput)
 				if input.content.Empty() || !input.content.In(image.Rect(0, 0, width, height)) {

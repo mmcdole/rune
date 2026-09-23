@@ -42,7 +42,7 @@ func BenchmarkRenderAutoLayoutOutput(b *testing.B) {
 				m := autoLayoutFixture(kind, draft)
 				b.ReportAllocs()
 				for b.Loop() {
-					m.Update(ui.PrintLineMsg("incoming"))
+					m.Update(printLineMsg("incoming"))
 					m.View()
 				}
 			})

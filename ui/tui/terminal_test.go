@@ -30,7 +30,7 @@ func TestTerminalStateIsDeclaredOnInitialView(t *testing.T) {
 func TestMouseModeFollowsRuntimeConfig(t *testing.T) {
 	m := NewModel(make(chan ui.UIEvent, 1))
 
-	next, _ := m.Update(ui.UpdateConfigMsg{Mouse: true})
+	next, _ := m.Update(updateConfigMsg{Mouse: true})
 	m = next.(*Model)
 	view := m.View()
 	if !view.AltScreen {
@@ -40,7 +40,7 @@ func TestMouseModeFollowsRuntimeConfig(t *testing.T) {
 		t.Fatalf("enabled mouse mode = %v, want cell motion", view.MouseMode)
 	}
 
-	next, _ = m.Update(ui.UpdateConfigMsg{Mouse: false})
+	next, _ = m.Update(updateConfigMsg{Mouse: false})
 	m = next.(*Model)
 	view = m.View()
 	if !view.AltScreen {
@@ -60,14 +60,14 @@ func TestKeyboardEnhancementsFollowNumpadConfig(t *testing.T) {
 		t.Fatal("numpad-off view enables enhanced key mode")
 	}
 
-	next, _ := m.Update(ui.UpdateConfigMsg{Numpad: true})
+	next, _ := m.Update(updateConfigMsg{Numpad: true})
 	m = next.(*Model)
 	ke := m.View().KeyboardEnhancements
 	if !ke.ReportAllKeysAsEscapeCodes || !ke.ReportAssociatedText {
 		t.Fatalf("numpad-on view enhancements = %+v, want all keys as escape codes with associated text", ke)
 	}
 
-	next, _ = m.Update(ui.UpdateConfigMsg{Numpad: false})
+	next, _ = m.Update(updateConfigMsg{Numpad: false})
 	m = next.(*Model)
 	if ke := m.View().KeyboardEnhancements; ke.ReportAllKeysAsEscapeCodes || ke.ReportAssociatedText {
 		t.Fatal("numpad-off view still enables enhanced key mode")
@@ -78,7 +78,7 @@ func TestKeyboardEnhancementsFollowNumpadConfig(t *testing.T) {
 // output window - the reason the terminal mouse is captured at all.
 func TestMouseWheelScrollsOutputWindow(t *testing.T) {
 	m := newTestModel(t)
-	next, _ := m.Update(ui.UpdateConfigMsg{Mouse: true})
+	next, _ := m.Update(updateConfigMsg{Mouse: true})
 	m = next.(*Model)
 
 	if m.output.Mode() != widget.ModeLive {
@@ -111,7 +111,7 @@ func TestMouseWheelScrollsOutputWindow(t *testing.T) {
 // disturb the output window.
 func TestMouseNonWheelEventsIgnored(t *testing.T) {
 	m := newTestModel(t)
-	next, _ := m.Update(ui.UpdateConfigMsg{Mouse: true})
+	next, _ := m.Update(updateConfigMsg{Mouse: true})
 	m = next.(*Model)
 
 	click := tea.MouseClickMsg{Button: tea.MouseLeft}

@@ -43,7 +43,7 @@ func (e *Engine) registerPickerFuncs() {
 			}
 			callbackID := e.RegisterPickerCallback(onSelect)
 
-			e.host.ShowPicker(ui.ShowPickerMsg{
+			e.host.ShowPicker(ui.PickerOptions{
 				Title:          title,
 				Items:          parsePickerItems(items, matchDesc),
 				CallbackID:     callbackID,

@@ -107,7 +107,7 @@ func BenchmarkRenderUpdate(b *testing.B) {
 			m.renderInterval, m.throttled = defaultRenderInterval, true
 			b.ReportAllocs()
 			for b.Loop() {
-				m.Update(ui.PrintLineMsg("a line of MUD output"))
+				m.Update(printLineMsg("a line of MUD output"))
 				m.View()
 			}
 		})
@@ -123,11 +123,11 @@ func BenchmarkRenderFlood(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		for line := range 100 {
-			m.Update(ui.PrintLineMsg(fmt.Sprintf("\x1b[32mIncoming %d\x1b[0m: a line of MUD output", n)))
+			m.Update(printLineMsg(fmt.Sprintf("\x1b[32mIncoming %d\x1b[0m: a line of MUD output", n)))
 			n++
 			m.View()
 			if line%10 == 9 {
-				m.Update(ui.SetPromptMsg("HP:100 >"))
+				m.Update(setPromptMsg("HP:100 >"))
 				m.View()
 			}
 		}
@@ -172,9 +172,9 @@ func BenchmarkRenderPipeline(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
 				if change == "prompt" {
-					m.Update(ui.SetPromptMsg(fmt.Sprintf("HP:%d >", 100-n%2)))
+					m.Update(setPromptMsg(fmt.Sprintf("HP:%d >", 100-n%2)))
 				} else {
-					m.Update(ui.PrintLineMsg(fmt.Sprintf("\x1b[32mIncoming %d\x1b[0m: new output", n)))
+					m.Update(printLineMsg(fmt.Sprintf("\x1b[32mIncoming %d\x1b[0m: new output", n)))
 				}
 				flush()
 				n++
@@ -190,7 +190,7 @@ func BenchmarkRenderUnchanged(b *testing.B) {
 	m.renderInterval = defaultRenderInterval
 	b.ReportAllocs()
 	for b.Loop() {
-		m.Update(ui.SetPromptMsg("HP:100 >"))
+		m.Update(setPromptMsg("HP:100 >"))
 		m.View()
 		m.Update(renderTick{})
 		m.View()

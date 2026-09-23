@@ -61,7 +61,7 @@ func TestKeptSubmissionCarriesPostSubmitDraftInOneAcceptedEvent(t *testing.T) {
 	events := make(chan ui.UIEvent, 1)
 	m := NewModel(events)
 
-	next, _ := m.Update(ui.UpdateConfigMsg{KeepInput: true})
+	next, _ := m.Update(updateConfigMsg{KeepInput: true})
 	m = next.(*Model)
 	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyExtended, Text: "north"})
 	m = next.(*Model)
@@ -138,7 +138,7 @@ func TestFullUIEventQueueReportsDroppedOrdinaryEvent(t *testing.T) {
 
 func TestSetInputSubmissionMessageForcesVerbatimMode(t *testing.T) {
 	m := newBareModel(t)
-	next, _ := m.Update(ui.SetInputSubmissionMsg(input.Verbatim("one line;still data")))
+	next, _ := m.Update(setInputSubmissionMsg(input.Verbatim("one line;still data")))
 	m = next.(*Model)
 
 	if m.inputCtl.mode() != modeDraftEditor || !m.input.DraftEditorActive() {
@@ -153,8 +153,8 @@ func TestPushedDraftAcknowledgesStateWithoutReportingUserEdit(t *testing.T) {
 	m := newBareModel(t)
 	events := make(chan ui.UIEvent, 10)
 	m.events = events
-	m.Update(ui.SetInputMsg("script edit"))
-	m.Update(ui.InputSetCursorMsg(3))
+	m.Update(setInputMsg("script edit"))
+	m.Update(inputSetCursorMsg(3))
 	for _, cursor := range []int{11, 3} {
 		select {
 		case event := <-events:
