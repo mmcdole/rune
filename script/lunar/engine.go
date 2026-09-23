@@ -495,7 +495,7 @@ func (e *Engine) toLua(v any) (lua.Value, error) {
 	case script.Value:
 		return e.valueToLua(value), nil
 	default:
-		panic(fmt.Sprintf("script: unsupported argument type %T", v))
+		return lua.Value{}, fmt.Errorf("script: unsupported argument type %T", v)
 	}
 }
 

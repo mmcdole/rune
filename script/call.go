@@ -119,6 +119,8 @@ func (c *Call) PinValue(v Value) (FuncRef, bool) {
 
 // Return sets the call's results. See script.go for accepted types.
 // Calling it again replaces previous results.
+// An unsupported result type, including a nested Tree value, raises a
+// script error when the host function returns.
 func (c *Call) Return(vals ...any) { c.B.SetReturn(vals) }
 
 // Errorf returns a script error carrying the script caller's position,
