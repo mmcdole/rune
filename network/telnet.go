@@ -10,6 +10,8 @@ const (
 	CmdDO   byte = 253 // Do use option
 	CmdDONT byte = 254 // Don't use option
 	CmdNOP  byte = 241 // No operation
+	CmdDM   byte = 242 // Data mark
+	CmdAYT  byte = 246 // Are you there
 	CmdSB   byte = 250 // Subnegotiation begin
 	CmdSE   byte = 240 // Subnegotiation end
 	CmdIS   byte = 0   // Subnegotiation IS
@@ -331,14 +333,14 @@ func (p *Parser) extract() []parsedSlice {
 				res = append(res, parsedSlice{kind: evNone, buf: buf[cmdBegin:i]})
 				state = stateNormal
 				cmdBegin = i + 1
-			case CmdGA, CmdEOR, CmdNOP:
+			case CmdSB:
+				state = stateSub
+			case CmdWILL, CmdWONT, CmdDO, CmdDONT:
+				state = stateNeg
+			default:
 				res = append(res, parsedSlice{kind: evIAC, buf: buf[cmdBegin : i+1]})
 				state = stateNormal
 				cmdBegin = i + 1
-			case CmdSB:
-				state = stateSub
-			default:
-				state = stateNeg
 			}
 
 		case stateNeg:
