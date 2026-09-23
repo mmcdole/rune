@@ -145,3 +145,35 @@ func TestRaisedErrorsCarrySinglePosition(t *testing.T) {
 		t.Errorf("want exactly one position prefix, got %d in %q", got, first)
 	}
 }
+
+func TestDoFileTildePaths(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("home", home)
+	t.Chdir(t.TempDir())
+	engine, _, cleanup := setupTest(t)
+	defer cleanup()
+	for _, tc := range []struct{ path, file string }{
+		{"~/script.lua", filepath.Join(home, "script.lua")},
+		{"~user/script.lua", filepath.Join("~user", "script.lua")},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			if err := os.MkdirAll(filepath.Dir(tc.file), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(tc.file, []byte(`loaded_tilde_path = true`), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := engine.DoString("reset", `loaded_tilde_path = false`); err != nil {
+				t.Fatal(err)
+			}
+			if err := engine.DoFile(tc.path); err != nil {
+				t.Fatal(err)
+			}
+			if err := engine.DoString("check", `assert(loaded_tilde_path)`); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
