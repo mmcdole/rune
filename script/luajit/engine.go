@@ -18,12 +18,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"runtime/cgo"
 	"strings"
 	"unsafe"
 
+	"github.com/mmcdole/rune/internal/pathutil"
 	"github.com/mmcdole/rune/script"
 )
 
@@ -216,7 +216,7 @@ func (e *Engine) DoString(name, code string) error {
 }
 
 func (e *Engine) DoFile(path string) error {
-	path = expandTilde(path)
+	path = pathutil.ExpandHome(path)
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return err
@@ -611,13 +611,4 @@ func materialize(v script.Value) script.Result {
 	default:
 		return script.Result{Kind: v.Kind()}
 	}
-}
-
-func expandTilde(path string) string {
-	if len(path) > 0 && path[0] == '~' {
-		if home, err := os.UserHomeDir(); err == nil {
-			return filepath.Join(home, path[1:])
-		}
-	}
-	return path
 }

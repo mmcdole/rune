@@ -103,3 +103,36 @@ func TestLogSurvivesReload(t *testing.T) {
 		t.Errorf("line after reload missing from log:\n%s", data)
 	}
 }
+
+func TestLogStartTildePaths(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("home", home)
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	s, _, _ := newTestSession(t)
+	for _, tc := range []struct{ path, want string }{
+		{"~/session.log", filepath.Join(home, "session.log")},
+		{"~user/session.log", filepath.Join(cwd, "~user", "session.log")},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			got, err := s.LogStart(tc.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.LogStop()
+			if got != tc.want {
+				t.Fatalf("LogStart(%q) = %q, want %q", tc.path, got, tc.want)
+			}
+			s.LogWrite("test line")
+			content, err := os.ReadFile(tc.want)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(content) != "test line\n" {
+				t.Fatalf("log content = %q", content)
+			}
+		})
+	}
+}

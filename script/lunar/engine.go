@@ -5,12 +5,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"unsafe"
 
 	lua "github.com/mmcdole/lunar"
+	"github.com/mmcdole/rune/internal/pathutil"
 	"github.com/mmcdole/rune/script"
 )
 
@@ -259,7 +259,7 @@ func (e *Engine) DoString(name, code string) error {
 }
 
 func (e *Engine) DoFile(path string) error {
-	path = expandTilde(path)
+	path = pathutil.ExpandHome(path)
 	absolute, err := filepath.Abs(path)
 	if err != nil {
 		return err
@@ -730,13 +730,4 @@ func (t *tableView) Each(fn func(k, v script.Value) bool) {
 // object, so the address is a stable identity for cycle detection.
 func (t *tableView) Id() uintptr {
 	return uintptr(unsafe.Pointer(t.table))
-}
-
-func expandTilde(path string) string {
-	if len(path) > 0 && path[0] == '~' {
-		if home, err := os.UserHomeDir(); err == nil {
-			return filepath.Join(home, path[1:])
-		}
-	}
-	return path
 }
