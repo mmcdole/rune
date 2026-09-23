@@ -26,10 +26,12 @@ type jsonPolicy struct {
 // The new rune.json API rejects invalid Unicode, duplicate object keys, and
 // integers Lua cannot represent safely. It also limits input size and depth.
 // Storage and GMCP keep their previous behavior so existing scripts continue
-// to work. GMCP separately repairs raw control characters sent by some servers
-// and checks nesting before passing the decoded data to Lua.
+// to work. GMCP separately repairs raw control characters sent by some servers.
+// Its nesting is server-controlled, so it is bounded during decoding rather
+// than after the recursive decoder has already walked it.
 var scriptJSON = jsonPolicy{strict: true, maxDepth: jsonMaxDepth, maxBytes: jsonMaxBytes, maxNodes: jsonMaxNodes}
 var compatibleJSON = jsonPolicy{}
+var gmcpJSON = jsonPolicy{maxDepth: jsonMaxDepth}
 
 // jsonWriter writes Go values as JSON, using encoding/json to escape strings
 // and format numbers. It checks the output size as it goes, so a large input
