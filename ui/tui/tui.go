@@ -17,9 +17,9 @@ import (
 
 // BubbleTeaUI implements ui.UI with Bubble Tea.
 type BubbleTeaUI struct {
-	programMu sync.RWMutex
-	program   *tea.Program
-	output    io.Writer
+	program      *tea.Program // Published by closing programReady; never changed afterward.
+	programReady chan struct{}
+	output       io.Writer
 
 	// Message queue - buffered channel drained by a single goroutine.
 	// This decouples callers from tea.Program.Send() which can block.
@@ -41,10 +41,11 @@ type BubbleTeaUI struct {
 // NewBubbleTeaUI creates a new Bubble Tea-based UI.
 func NewBubbleTeaUI() *BubbleTeaUI {
 	return &BubbleTeaUI{
-		msgQueue: make(chan tea.Msg, 4096),
-		events:   make(chan ui.UIEvent, 2048),
-		done:     make(chan struct{}),
-		output:   os.Stdout,
+		msgQueue:     make(chan tea.Msg, 4096),
+		events:       make(chan ui.UIEvent, 2048),
+		programReady: make(chan struct{}),
+		done:         make(chan struct{}),
+		output:       os.Stdout,
 	}
 }
 
@@ -109,22 +110,17 @@ func (b *BubbleTeaUI) CommitPrompt(text string) {
 
 // Run starts the TUI and blocks until exit.
 func (b *BubbleTeaUI) Run() (err error) {
+	select {
+	case <-b.done:
+		return nil // Quit during boot; do not open the TUI.
+	default:
+	}
+
 	model := NewModel(b.events)
 	model.renderInterval = defaultRenderInterval
 	program := tea.NewProgram(model, tea.WithOutput(b.output))
-
-	// Quit can run during boot, before Run starts. Check its signal and
-	// publish the program under the same lock used by Quit so a request
-	// cannot be lost between those two steps.
-	b.programMu.Lock()
-	select {
-	case <-b.done:
-		b.programMu.Unlock()
-		return nil
-	default:
-	}
 	b.program = program
-	b.programMu.Unlock()
+	close(b.programReady)
 
 	defer func() {
 		if resetErr := b.writeKeypadMode(false); err == nil {
@@ -137,12 +133,20 @@ func (b *BubbleTeaUI) Run() (err error) {
 		})
 	}()
 
-	// Single goroutine drains message queue to Bubble Tea.
-	// This can block on Send() without affecting producers.
+	// One goroutine owns delivery to Bubble Tea, including shutdown. Send
+	// waits for Run to start, so a Quit during setup is delivered then.
 	go func() {
 		for {
+			// Prefer shutdown even when the queue is full.
 			select {
 			case <-b.done:
+				program.Quit()
+				return
+			default:
+			}
+			select {
+			case <-b.done:
+				program.Quit()
 				return
 			case msg := <-b.msgQueue:
 				program.Send(msg)
@@ -157,15 +161,9 @@ func (b *BubbleTeaUI) Run() (err error) {
 
 // Quit signals the TUI to exit.
 func (b *BubbleTeaUI) Quit() {
-	b.programMu.Lock()
 	b.doneOnce.Do(func() {
 		close(b.done)
 	})
-	program := b.program
-	b.programMu.Unlock()
-	if program != nil {
-		program.Quit()
-	}
 }
 
 // CreatePane creates a new named pane.
@@ -250,12 +248,12 @@ func (b *BubbleTeaUI) InputSetCursor(pos int) {
 // Returns the edited content and whether the edit was successful.
 func (b *BubbleTeaUI) OpenEditor(initial string) (string, bool) {
 	// This is synchronous - we need to suspend the TUI
-	b.programMu.RLock()
-	program := b.program
-	b.programMu.RUnlock()
-	if program == nil {
+	select {
+	case <-b.programReady:
+	default:
 		return "", false
 	}
+	program := b.program
 
 	// Create temp file
 	f, err := os.CreateTemp("", "rune-input-*.txt")
