@@ -1,19 +1,19 @@
 package lua
 
-// Tests for the single-identity rule (20_registry.lua): a registry entry
-// with a natural key (a bind's key, a bar's layout name, a command's name,
-// an exact alias's phrase) is registered under that key as its name, so
-// the whole management suite addresses it by the string the user typed.
-// Anything that registers under two identities is the bug these cover.
+// Tests for registry addresses (20_registry.lua): an entry is reachable
+// by its natural key (a bind's key, an exact alias's phrase, a bar's or
+// command's name) and by its explicit name, and each address identifies
+// at most one entry. Two entries answering to one string, or one string
+// silently changing which entry it means, is the bug these cover.
 
 import (
 	"strings"
 	"testing"
 )
 
-// Registrations made without opts still answer to the management suite,
-// which is what the two-identity split used to prevent.
-func TestNaturalKeyIsTheName(t *testing.T) {
+// Registrations made without opts answer to their key, and report it
+// as their name since they were given no other.
+func TestKeyAddressesAnUnnamedEntry(t *testing.T) {
 	engine, _, cleanup := setupTest(t)
 	defer cleanup()
 
@@ -90,10 +90,10 @@ func TestCoreRegistrationsAreAddressable(t *testing.T) {
 	`)
 }
 
-// One entry, one identity: a legacy name is dropped with a notice. It
-// must not raise, because raising would abort the rest of the script
+// Bars and commands take no explicit name: one is dropped with a notice.
+// It must not raise, because raising would abort the rest of the script
 // that carried it, costing every registration below the stale line.
-func TestKeyedRegistriesDeprecateAnExplicitName(t *testing.T) {
+func TestBarsAndCommandsDropAnExplicitName(t *testing.T) {
 	cases := []struct {
 		name    string
 		code    string
@@ -101,22 +101,10 @@ func TestKeyedRegistriesDeprecateAnExplicitName(t *testing.T) {
 		present string // a management call proving the entry registered
 	}{
 		{
-			name:    "bind",
-			code:    `rune.bind("f1", function() end, { name = "other" })`,
-			key:     "f1",
-			present: `assert(rune.binds.get("f1"), "the bind must still register")`,
-		},
-		{
 			name:    "bar",
 			code:    `rune.ui.bar("clock", function() return "" end, { name = "other" })`,
 			key:     "clock",
 			present: `assert(rune.bars.get("clock"), "the bar must still register")`,
-		},
-		{
-			name:    "exact alias",
-			code:    `rune.alias.exact("gc", "get corpse", { name = "other" })`,
-			key:     "gc",
-			present: `assert(rune.alias.get("gc"), "the alias must still register")`,
 		},
 		{
 			name:    "command",
@@ -169,24 +157,173 @@ func TestNoNoticeWithoutALegacyName(t *testing.T) {
 	}
 }
 
-// The whole point of not raising: everything after the stale line loads.
-func TestALegacyNameDoesNotAbortTheScript(t *testing.T) {
+// A name is a second address for the same entry. Adding one changes
+// nothing about addressing the entry by its key.
+func TestANameIsASecondAddress(t *testing.T) {
 	engine, _, cleanup := setupTest(t)
 	defer cleanup()
 
-	if err := engine.DoString("init.lua", `
-		rune.alias.exact("before", "loaded first")
-		rune.bind("f5", function() end, { name = "legacy-name" })
-		rune.alias.exact("after", "loaded after the stale option")
-	`); err != nil {
-		t.Fatalf("the script must survive a legacy name: %v", err)
-	}
+	assertLua(t, engine, `
+		local heal = rune.bind("f1", function() end, { name = "combat.heal" })
+		assert(rune.binds.get("f1") == heal, "the key must address the named bind")
+		assert(rune.binds.get("combat.heal") == heal, "the name must address the bind")
+		assert(heal:name() == "combat.heal", "the handle must report the explicit name")
+		assert(rune.binds.disable("f1"), "disable by key")
+		assert(rune.binds.enable("combat.heal"), "enable by name")
+		assert(rune.unbind("combat.heal"), "unbind by name")
+		assert(rune.binds.get("f1") == nil, "unbinding by name must release the key")
+
+		local loot = rune.alias.exact("get   corpse", "get all from corpse", { name = "loot.corpse" })
+		assert(rune.alias.get("get corpse") == loot, "the normalized phrase must address the alias")
+		assert(rune.alias.get("loot.corpse") == loot, "the name must address the alias")
+		assert(rune.alias.list()[1].name == "loot.corpse", "listings must carry the name")
+	`)
+}
+
+// Replacing through one address releases the entry's other address.
+func TestReplacementReleasesTheOtherAddress(t *testing.T) {
+	engine, _, cleanup := setupTest(t)
+	defer cleanup()
 
 	assertLua(t, engine, `
-		assert(rune.alias.get("before"), "registrations before the stale line must survive")
-		assert(rune.alias.get("after"), "registrations after the stale line must survive")
-		assert(rune.binds.get("f5"), "the bind itself must register under its key")
+		rune.bind("f1", function() end, { name = "combat.heal" })
+		local moved = rune.bind("f2", function() end, { name = "combat.heal" })
+		assert(rune.binds.get("f1") == nil, "moving a named bind must release its old key")
+		assert(rune.binds.get("f2") == moved and rune.binds.get("combat.heal") == moved)
+
+		local rebound = rune.bind("f2", function() end)
+		assert(rune.binds.get("combat.heal") == nil, "rebinding a key must release the old name")
+		assert(rune.binds.get("f2") == rebound and rebound:name() == "f2")
+
+		-- Across kinds, a name replaces like any other name.
+		rune.alias.exact("gc", "get corpse", { name = "loot" })
+		rune.alias.regex("^lc$", "look corpse", { name = "loot" })
+		assert(rune.alias.get("gc") == nil, "the exact alias must be gone")
+		assert(rune.alias.get("loot"):action() == "look corpse")
 	`)
+	if err := engine.DoString("dispatch", `rune.send("gc")`); err != nil {
+		t.Fatal(err)
+	}
+	assertLua(t, engine, `assert(rune.alias.count() == 1, "the replaced phrase must not linger in dispatch")`)
+}
+
+// A registration that would take an address across the key/name line, or
+// replace two entries at once, is refused before anything changes.
+func TestConflictingRegistrationsAreRefused(t *testing.T) {
+	cases := []struct {
+		name  string
+		setup string
+		code  string
+		want  string // fragment of the error
+	}{
+		{
+			name:  "name spells another entry's phrase",
+			setup: `rune.alias.exact("heal", "drink potion")`,
+			code:  `rune.alias.exact("h", "cast heal", { name = "heal" })`,
+			want:  `name 'heal' is the key of alias "heal"`,
+		},
+		{
+			name:  "phrase spells another entry's name",
+			setup: `rune.alias.exact("h", "cast heal", { name = "heal" })`,
+			code:  `rune.alias.exact("heal", "drink potion")`,
+			want:  `key 'heal' is the name of alias "heal" on "h"`,
+		},
+		{
+			name:  "regex alias named after a phrase",
+			setup: `rune.alias.exact("gc", "get corpse")`,
+			code:  `rune.alias.regex("^gc$", "get corpse", { name = "gc" })`,
+			want:  `name 'gc' is the key of alias "gc"`,
+		},
+		{
+			name:  "key spells another bind's name",
+			setup: `rune.bind("f1", function() end, { name = "f2" })`,
+			code:  `rune.bind("f2", function() end)`,
+			want:  `key 'f2' is the name of bind "f2" on "f1"`,
+		},
+		{
+			name: "one registration would replace two binds",
+			setup: `
+				rune.bind("f1", function() end, { name = "combat.heal" })
+				rune.bind("f2", function() end, { name = "combat.flee" })
+			`,
+			code: `rune.bind("f2", function() end, { name = "combat.heal" })`,
+			want: `would replace both bind "combat.flee" on "f2"`,
+		},
+		{
+			name:  "a later array element conflicts",
+			setup: `rune.bind("f1", function() end, { name = "f8" })`,
+			code:  `rune.bind({"f7", "f8"}, function() end)`,
+			want:  `key 'f8' is the name of`,
+		},
+		{
+			name: "a name on an array of keys",
+			code: `rune.bind({"f7", "f8"}, function() end, { name = "x" })`,
+			want: `a name addresses one bind`,
+		},
+		{
+			name: "an empty name",
+			code: `rune.alias.exact("gc", "get corpse", { name = "" })`,
+			want: `name must be a non-empty string`,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			engine, _, cleanup := setupTest(t)
+			defer cleanup()
+
+			if err := engine.DoString("setup", `
+				`+c.setup+`
+				before = { binds = rune.binds.list(), aliases = rune.alias.list() }
+			`); err != nil {
+				t.Fatal(err)
+			}
+
+			err := engine.DoString("conflict", c.code)
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("error = %v, want %q", err, c.want)
+			}
+			if !strings.Contains(err.Error(), `"conflict"]:1:`) {
+				t.Fatalf("the error must point at the registration, got %v", err)
+			}
+
+			assertLua(t, engine, `
+				local function same(a, b)
+					assert(#a == #b, "a refused registration must not change the registry")
+					for i, item in ipairs(a) do
+						assert(item.key == b[i].key and item.match == b[i].match and
+							item.name == b[i].name and item.enabled == b[i].enabled)
+					end
+				end
+				same(before.binds, rune.binds.list())
+				same(before.aliases, rune.alias.list())
+			`)
+		})
+	}
+}
+
+// Callbacks and listings see the effective name.
+func TestAliasContextReportsTheName(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	assertLua(t, engine, `
+		rune.alias.exact("h", function(args, ctx) rune.send_raw(ctx.name) end, { name = "heal" })
+		rune.alias.exact("gc", function(args, ctx) rune.send_raw(ctx.name) end)
+	`)
+	dispatchTestCommand(engine, "h")
+	dispatchTestCommand(engine, "gc")
+	if sent := host.DrainNetworkCalls(); len(sent) != 2 || sent[0] != "heal" || sent[1] != "gc" {
+		t.Fatalf("ctx.name = %v, want the name then the phrase", sent)
+	}
+
+	host.DrainPrintCalls()
+	assertLua(t, engine, `rune.bind("f1", function() end, { name = "combat.heal" })`)
+	dispatchTestCommand(engine, "/binds")
+	printed := strings.Join(host.DrainPrintCalls(), "\n")
+	if !strings.Contains(printed, "combat.heal") {
+		t.Fatalf("/binds must show a name that differs from the key, got: %q", printed)
+	}
 }
 
 // Re-registering a natural key replaces rather than accumulates, and the

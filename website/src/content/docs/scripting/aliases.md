@@ -101,11 +101,11 @@ Aliases take the [common options](/scripting/model/#options): `group`,
 `priority` (order among regex aliases), and `once`. No alias-specific
 extras.
 
-The two constructors are [named](/scripting/model/#names) differently.
-An exact alias is named for its phrase, so `rune.alias.disable("gc")`
-works without you naming anything, and a `name` in `opts` is ignored with
-a notice. A regex alias is a matcher rather than a phrase, and several can
-match one line, so it takes `name` like a trigger does.
+The two constructors are [addressed](/scripting/model/#names) differently.
+An exact alias is addressed by its phrase, so `rune.alias.disable("gc")`
+works without you naming anything, and by its `name` when you give one. A
+regex alias is a matcher rather than a phrase, and several can match one
+line, so it is addressed by `name` like a trigger is.
 
 `rune.alias.exact` and [`rune.trigger.exact`](/scripting/triggers/)
 do not mean the same thing here. An alias phrase is something you type, so

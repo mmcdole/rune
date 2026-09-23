@@ -18,36 +18,36 @@ A registry name identifies one registration. It is what you pass to `get`,
 `enable`, `disable` and `remove`, what a re-registration replaces, and what
 `/triggers`, `/binds` and the other listings show.
 
-Some creation functions assign this name automatically. For the others, set
-`opts.name` when you want to look up, manage or replace the registration by
-name.
+Registrations that own something unique are addressed by it as well, with
+or without a name:
 
-| Creation function | Name | Because |
+| Creation function | Addressed by | Because |
 |---|---|---|
-| `rune.bind` | the key, `"ctrl+g"` | Only one binding can use a key |
+| `rune.bind` | the key, `"ctrl+g"`, plus `opts.name` | Only one binding can use a key |
+| `rune.alias.exact` | the normalized phrase, `"chat off"`, plus `opts.name` | Only one expansion can use a typed phrase |
 | `rune.ui.bar` | the bar name, `"status"` | Only one renderer can use a bar name |
 | `rune.command.add` | the command, `"greet"` | Only one handler can use a command name |
-| `rune.alias.exact` | the normalized phrase, `"chat off"` | Only one expansion can use a typed phrase |
 | `rune.trigger.*` | `opts.name` | Several triggers may match the same text |
 | `rune.alias.regex` | `opts.name` | Several regex aliases may use the same pattern |
 | `rune.timer.*` | `opts.name` | Several timers may use the same delay or interval |
 | `rune.hooks.on` | `opts.name` | Several handlers may listen to the same event |
 | `rune.gmcp.on` | `opts.name` | Several handlers may listen to the same package |
 
-When only one registration can use a value, that value is already its name.
-A binding is named by its key, a bar by its bar name, a command by its
-command name, and an exact alias by its phrase. When several registrations
-can share the same value, give each one its own name with `opts.name`.
-
-Either way you manage it the same way:
+A name is useful when the key might change, or when another script needs
+to reach the registration without knowing which key it is on:
 
 ```lua
 rune.trigger.contains("food", "eat bread", { name = "feeder" })
-rune.bind("ctrl+g", toggle_map)
+rune.bind("ctrl+g", toggle_map, { name = "map" })
 
 rune.trigger.disable("feeder")
-rune.binds.disable("ctrl+g")
+rune.binds.disable("map")      -- or rune.binds.disable("ctrl+g")
 ```
+
+Each address identifies one registration. Registering on a taken key or
+name replaces it and releases its other address. A name that spells
+another registration's key, or a key that spells another's name, is an
+error and nothing changes.
 
 A registration without a name can still be managed through the handle
 returned when it was created:
@@ -61,10 +61,9 @@ Registering the same name again replaces the old entry rather than adding a
 second one. That is what keeps `/reload` from stacking a duplicate trigger
 each time you edit a script, so name anything you expect to re-register.
 
-Passing `opts.name` to one of the four automatically named functions is
-ignored, with a notice telling you the name to manage it by. Automatic naming
-also lets you reach the core's own binds, bars and commands, which are
-registered without options at all.
+Bars and commands take no `opts.name`; one is ignored with a notice.
+Addressing by key is also how you reach the core's own binds, bars and
+commands, which are registered without options at all.
 
 ## Options
 
@@ -108,7 +107,7 @@ Function actions receive a context table as their last argument:
 
 | Field | Description |
 |---|---|
-| `ctx.name` | The item's name, if set |
+| `ctx.name` | The item's name, if set (an unnamed exact alias reports its phrase) |
 | `ctx.group` | The item's group, if set |
 | `ctx.type` | `"alias"`, `"trigger"`, `"timer"`, or `"hook"` |
 | `ctx.line` | The original line (a [line object](/reference/api/state-lines/) for triggers) |

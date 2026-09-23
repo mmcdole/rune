@@ -19,18 +19,21 @@
 --   id       -- insertion order (tiebreak for equal priorities)
 --   enabled  -- individual switch (see reg:active)
 --   priority -- opts.priority or 50, lower runs first
---   name     -- opts.name, unique: adding a duplicate replaces the old
+--   key      -- the module's natural key, if it has one (see below)
+--   name     -- opts.name, the explicit name, if given
 --   group    -- opts.group, master-switch membership (rune.group)
 --   once     -- opts.once, module removes the item after first fire
 --   _handle  -- back-reference to the handle
 --
--- Name is the ONLY identity. Registries whose entries have a natural
--- key (a bind's key, a bar's layout name, a command's name, an exact
--- alias's phrase) pass that key as the name via rune.registry.keyed_opts,
--- so `reg:get(key)` and the management suite address the same thing the
--- user typed. Those registries must not also upsert by their own index:
--- the name upsert below already replaces the old entry, firing on_remove
--- for it before on_add for the new one.
+-- An entry is addressed by its key (a bind's key, an exact alias's
+-- phrase; the module sets it in `data`) and by its name. Each address
+-- identifies at most one entry per registry. Registering on a taken
+-- address replaces that entry, firing on_remove for it before on_add
+-- for the new one, so modules must not upsert through their own
+-- indexes. `resolve` decides what a registration replaces or refuses.
+--
+-- Bars and commands take no explicit name: rune.registry.keyed_opts
+-- makes their key the name.
 --
 -- Handle API: :enable() :disable() :remove() :name() :group() :action()
 
@@ -56,8 +59,9 @@ function Handle:remove()
     return self
 end
 
+-- The explicit name, or the key when none was given.
 function Handle:name()
-    return self._data.name
+    return self._data.name or self._data.key
 end
 
 function Handle:group()
@@ -75,14 +79,10 @@ end
 local Registry = {}
 Registry.__index = Registry
 
--- Build the opts table for a registry whose entries have a natural key,
--- making that key the name.
---
--- A name used to be a second identity for the same entry, which is the
--- bug this avoids. It is now dropped with a notice rather than raised:
--- raising aborts the rest of the user's script, so one stale option in
--- an old init.lua would cost every registration below it. The notice
--- names the key to use instead.
+-- Build the opts table for a registry that takes no explicit name,
+-- making the natural key the name. A differing name is dropped with a
+-- notice rather than raised, since raising would abort the rest of the
+-- user's script over one stale option.
 function rune.registry.keyed_opts(key, opts, label)
     if opts ~= nil and type(opts) ~= "table" then
         error(label .. ": opts must be a table", 3)
@@ -110,9 +110,9 @@ function rune.registry.new(opts)
         action_field = opts.action_field or "action",
         on_add = opts.on_add,
         on_remove = opts.on_remove,
-        list = {},     -- all items, sorted by (priority, id)
-        by_name = {},  -- name -> handle
-        by_group = {}, -- group -> {handle -> true}
+        list = {},        -- all items, sorted by (priority, id)
+        by_address = {},  -- key or name -> handle
+        by_group = {},    -- group -> {handle -> true}
         next_id = 1,
     }, Registry)
 end
@@ -126,17 +126,64 @@ local function sort_list(list)
     end)
 end
 
--- Register an item. opts: name, group, priority, once.
--- The caller sets module-specific fields (including `source`, since
--- only the caller knows its stack depth for rune.caller_source).
+-- An entry as an error message names it: kind, addresses, and source.
+local function describe(handle)
+    local data = handle._data
+    local text = handle._registry.kind .. ' "' .. tostring(data.name or data.key) .. '"'
+    if data.name and data.key then
+        text = text .. ' on "' .. data.key .. '"'
+    end
+    if data.source then
+        text = text .. " @" .. data.source
+    end
+    return text
+end
+
+-- The entry a registration on `key` with explicit `name` replaces, or
+-- nil when both addresses are free; nil and a message when it is
+-- refused. A key only replaces an entry through its key and a name
+-- only through its name, so a name that spells another entry's key is
+-- a naming accident rather than a replacement. Replacing two entries
+-- at once is refused as well. Nothing is mutated here, so callers can
+-- check arrays of registrations before applying any.
+function Registry:resolve(key, name)
+    if name ~= nil and (type(name) ~= "string" or name == "") then
+        return nil, "name must be a non-empty string"
+    end
+    local by_key = key and self.by_address[key] or nil
+    local by_name = name and self.by_address[name] or nil
+    if by_key and by_key._data.key ~= key then
+        return nil, "key '" .. key .. "' is the name of " .. describe(by_key)
+    end
+    if by_name and by_name._data.name ~= name then
+        return nil, "name '" .. name .. "' is the key of " .. describe(by_name)
+    end
+    if by_key and by_name and by_key ~= by_name then
+        return nil, "would replace both " .. describe(by_key) .. " and " .. describe(by_name)
+    end
+    return by_key or by_name
+end
+
+-- Register an item. opts: name, group, priority, once. The caller sets
+-- module-specific fields, including `key` and `source` (only the caller
+-- knows its stack depth for rune.caller_source). Returns the handle, or
+-- nil and a message when `resolve` refuses; nothing changes in that case.
 function Registry:add(data, opts)
     opts = opts or {}
+    local name = opts.name
+    if name == data.key then
+        name = nil -- a name that repeats the key adds no address
+    end
+    local replaced, err = self:resolve(data.key, name)
+    if err then
+        return nil, err
+    end
 
     data.id = self.next_id
     self.next_id = self.next_id + 1
     data.enabled = true
     data.priority = opts.priority or 50
-    data.name = opts.name
+    data.name = name
     data.group = opts.group
     data.once = opts.once or false
 
@@ -146,16 +193,18 @@ function Registry:add(data, opts)
     }, Handle)
     data._handle = handle
 
-    -- Upsert: a new item with an existing name replaces the old one
-    if data.name and self.by_name[data.name] then
-        self.by_name[data.name]:remove()
+    if replaced then
+        replaced:remove()
     end
 
     table.insert(self.list, data)
     sort_list(self.list)
 
+    if data.key then
+        self.by_address[data.key] = handle
+    end
     if data.name then
-        self.by_name[data.name] = handle
+        self.by_address[data.name] = handle
     end
     if data.group then
         local grp = self.by_group[data.group]
@@ -181,8 +230,11 @@ function Registry:_remove_data(data)
             break
         end
     end
-    if data.name and self.by_name[data.name] == data._handle then
-        self.by_name[data.name] = nil
+    if self.by_address[data.key] == data._handle then
+        self.by_address[data.key] = nil
+    end
+    if self.by_address[data.name] == data._handle then
+        self.by_address[data.name] = nil
     end
     if data.group and self.by_group[data.group] then
         self.by_group[data.group][data._handle] = nil
@@ -192,12 +244,12 @@ function Registry:_remove_data(data)
     end
 end
 
-function Registry:get(name)
-    return self.by_name[name]
+function Registry:get(address)
+    return self.by_address[address]
 end
 
-function Registry:enable(name)
-    local handle = self.by_name[name]
+function Registry:enable(address)
+    local handle = self.by_address[address]
     if handle then
         handle:enable()
         return true
@@ -205,8 +257,8 @@ function Registry:enable(name)
     return false
 end
 
-function Registry:disable(name)
-    local handle = self.by_name[name]
+function Registry:disable(address)
+    local handle = self.by_address[address]
     if handle then
         handle:disable()
         return true
@@ -214,8 +266,8 @@ function Registry:disable(name)
     return false
 end
 
-function Registry:toggle(name)
-    local handle = self.by_name[name]
+function Registry:toggle(address)
+    local handle = self.by_address[address]
     if handle then
         handle._data.enabled = not handle._data.enabled
         return true
@@ -223,8 +275,8 @@ function Registry:toggle(name)
     return false
 end
 
-function Registry:remove(name)
-    local handle = self.by_name[name]
+function Registry:remove(address)
+    local handle = self.by_address[address]
     if handle then
         handle:remove()
         return true

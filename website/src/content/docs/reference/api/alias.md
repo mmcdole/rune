@@ -12,16 +12,16 @@ the server. For a task-oriented introduction, see
 ```lua
 rune.alias.exact(phrase, action, opts?)   -- leading command phrase matches literally
 rune.alias.regex(pattern, action, opts?)  -- Go regexp on the full input line
-rune.alias.get(name)                      -- the alias's handle, or nil
+rune.alias.get(address)                   -- the alias's handle, or nil
 ```
 
 Both constructors return a [handle](/reference/api/#handles) and accept
 the [common options](/reference/api/#options). They differ in how they
-are [named](/reference/api/#names): an exact alias is named for its
-normalized phrase, so `rune.alias.disable("chat off")` addresses it and a
-`name` in `opts` is ignored with a notice. A regex alias is a matcher
-rather than a phrase, and several can match one line, so it takes `name`
-as usual.
+are [addressed](/reference/api/#names): an exact alias is addressed by
+its normalized phrase, so `rune.alias.disable("chat off")` works without
+naming it, and by its `name` when you give one. A regex alias is a
+matcher rather than a phrase, and several can match one line, so it is
+addressed by `name` only.
 
 ## Matching
 
@@ -94,8 +94,8 @@ result of an alias, does not go through history expansion again.
 
 ## Managing
 
-Standard registry management applies:
-`rune.alias.get/enable/disable/remove(name)`, `.list()`, `.count()`,
+Standard registry management applies, addressed by name or exact phrase:
+`rune.alias.get/enable/disable/remove(address)`, `.list()`, `.count()`,
 `.clear()`, `.remove_group(group)`. See
 [Registries](/reference/api/#managing). `/aliases` lists everything.
 

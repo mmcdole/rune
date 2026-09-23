@@ -95,6 +95,7 @@ func TestBindingArraysValidateBeforeMutation(t *testing.T) {
 		`rune.bind({}, "input.newline")`,
 		`rune.bind("enter", "input.unknown")`,
 		`rune.bind({"enter", "f1"}, "input.newline", false)`,
+		`rune.bind({"enter", "f1"}, "input.newline", {name = "shared"})`,
 	} {
 		if err := engine.DoString("invalid bind", code); err == nil {
 			t.Fatalf("accepted %s", code)

@@ -10,18 +10,20 @@ introduction, see [Keybindings](/scripting/keybindings/).
 
 ```lua
 rune.bind(key, action, opts?)   -- bind a key; rebinding replaces (upsert by key)
-rune.unbind(key)                  -- remove a binding; true if one existed
-rune.binds.get(key)               -- the binding's handle, or nil
+rune.unbind(address)              -- remove a binding by key or name; true if one existed
+rune.binds.get(address)           -- the binding's handle, or nil
 ```
 
 `rune.bind` returns a [handle](/reference/api/#handles) and accepts the
-[common option](/reference/api/#options) `group`. The key is the bind's
-[name](/reference/api/#names), so a `name` in `opts` is ignored with a
-notice. When a bind would otherwise run, disabling it (or its group) consumes
+[common options](/reference/api/#options) `name` and `group`. A bind is
+addressed by its key and, when you give one, by its name; see
+[Names](/reference/api/#names). Rebinding a key replaces whatever was on
+it. When a bind would otherwise run, disabling it (or its group) consumes
 the key without calling the callback.
 
 ```lua
-rune.bind("f1", function() rune.send("north") end, {group = "combat"})
+rune.bind("f1", function() rune.send("north") end, {name = "go-north", group = "combat"})
+rune.binds.disable("go-north") -- the same bind as rune.binds.disable("f1")
 ```
 
 The [input action table](/reference/api/input/#input-bindings) lists the five
@@ -70,8 +72,8 @@ input, inline and modal pickers, scrollback search, and the composer.
 
 ## Managing
 
-Standard registry management applies, addressed by key:
-`rune.binds.get/enable/disable/remove(key)`, `.list()`, `.count()`,
+Standard registry management applies, addressed by key or name:
+`rune.binds.get/enable/disable/remove(address)`, `.list()`, `.count()`,
 `.clear()`, `.remove_group(group)`. See
 [Registries](/reference/api/#managing). `/binds` lists everything.
 

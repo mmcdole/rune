@@ -63,45 +63,40 @@ for capturing an existing action and wrapping it, not for dispatch.
 
 ## Names
 
-A registration's name identifies it in
+A registration's name addresses it in
 [`get`, `enable`, `disable` and `remove`](#managing), replacement registrations,
-and listing commands. Unnamed registrations are managed through their handles.
+and listing commands. Registrations with a natural key are addressed by
+that key as well:
 
-Most registries take the name from you. Four take it from what you passed
-first:
-
-| Creation function | Name | Because |
+| Creation function | Addressed by | Because |
 |---|---|---|
 | `rune.trigger.*` | the `name` you give it | several triggers can match one line |
 | `rune.alias.regex` | the `name` you give it | several can match one line |
 | `rune.timer.*` | the `name` you give it | nothing about a timer is unique |
 | `rune.hooks.on` | the `name` you give it | several handlers per event |
 | `rune.gmcp.on` | the `name` you give it | several handlers per package |
-| `rune.bind` | the key, `"ctrl+g"` | one bind per key |
+| `rune.bind` | the key, `"ctrl+g"`, and any `name` you give it | one bind per key |
+| `rune.alias.exact` | the phrase, `"chat off"`, and any `name` you give it | one expansion per typed phrase |
 | `rune.ui.bar` | the bar name, `"status"` | one renderer per named bar |
 | `rune.command.add` | the command, `"greet"` | one handler per `/command` |
-| `rune.alias.exact` | the phrase, `"chat off"` | one expansion per typed phrase |
 
-Use `opts.name` to distinguish registrations that can share the same first
-argument. Functions with one registration per key, bar, command, or phrase
-use that argument as the name.
-
-Either way the management calls look the same:
+Within a registry, each address identifies one registration. Registering on
+a taken key or name replaces that registration and releases its other
+address. A name that spells another registration's key, or a key that
+spells another's name, is an error and nothing changes.
 
 ```lua
 rune.trigger.contains("food", "eat bread", { name = "feeder" })
-rune.bind("ctrl+g", toggle_map)
+rune.bind("ctrl+g", toggle_map, { name = "map" })
 
 rune.trigger.disable("feeder")
-rune.binds.disable("ctrl+g")
+rune.binds.disable("map")     -- the same bind as rune.binds.disable("ctrl+g")
+rune.bars.get("status")       -- the core's own bar, registered without options
 ```
 
-That is also why `rune.binds.disable("ctrl+g")` and
-`rune.bars.get("status")` reach the core's own binds and bars, which are
-registered without options at all.
-
-For the four automatically named functions, `opts.name` is ignored with a
-notice stating the registration's name.
+A bind or exact alias registered without a name reports its key from
+`h:name()` and in listings. Bars and commands take no `name`; one is
+ignored with a notice.
 
 ## Options
 
@@ -113,7 +108,7 @@ Common `opts` fields accepted by every creation function:
 | `priority` | number | 50 | Regex aliases, triggers, hooks. Lower runs first |
 | `once` | bool | false | Aliases, triggers. Remove after first match |
 
-`name` sets the name where the registry does not set its own; see
+`name` names the registration, except for bars and commands; see
 [Names](#names). Page-specific extras (e.g. trigger `gag`/`raw`) are
 listed on each page.
 

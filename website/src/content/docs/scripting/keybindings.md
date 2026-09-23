@@ -164,10 +164,16 @@ this draft. Modal pickers and scrollback search append paste to their query.
 
 ## Options
 
-Binds take the [common option](/scripting/model/#options) `group`. The
-key is the bind's name, so rebinding a key always replaces whatever was
-on it, and `rune.binds.disable("ctrl+g")` addresses it by the same
-string you bound.
+Binds take the [common options](/scripting/model/#options) `name` and
+`group`. Rebinding a key always replaces whatever was on it, and
+`rune.binds.disable("ctrl+g")` addresses a bind by the same string you
+bound. A `name` adds a second address that survives moving the bind to
+another key:
+
+```lua
+rune.bind("f1", function() rune.send("cast heal") end, { name = "heal" })
+rune.binds.disable("heal")  -- the same bind as rune.binds.disable("f1")
+```
 
 To extend a default instead of discarding it, capture its action first.
 `rune.binds.get(key)` returns the handle; `:action()` is the raw

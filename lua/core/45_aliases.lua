@@ -11,7 +11,8 @@
 -- Returns a handle with :disable(), :enable(), :remove(), :name(), :group()
 --
 -- Options:
---   name     = "string"   -- Unique ID for upsert/management
+--   name     = "string"   -- Management name; an exact alias is also
+--                            addressed by its phrase (see 20_registry.lua)
 --   group    = "string"   -- Group membership for bulk operations
 --   once     = true       -- Auto-remove after first match
 --   priority = 50         -- Execution order for regex aliases (lower = first)
@@ -23,16 +24,14 @@
 --
 -- Context object:
 --   ctx.line  = full input line
---   ctx.name  = alias name (if set)
+--   ctx.name  = alias name (the phrase for an unnamed exact alias)
 --   ctx.group = alias group (if set)
 --   ctx.type  = "alias"
 --   ctx.args  = text after matched phrase (exact only)
 --   ctx.matches = captures array (regex only)
 
--- Exact-command indexes. The phrase map supports upsert/listing; the word
--- trie lets dispatch follow only registered prefixes and stop at the first
--- impossible continuation.
-local exact = {}
+-- Exact-command index: a word trie lets dispatch follow only registered
+-- prefixes and stop at the first impossible continuation.
 local exact_root = { children = {} }
 
 local function index_exact(data)
@@ -87,30 +86,35 @@ local registry = rune.registry.new{
     action_field = "action",
     on_add = function(data)
         if data.is_exact then
-            -- An exact alias is named for its normalized phrase, so any
-            -- previous alias on that phrase is already gone by now.
-            exact[data.pattern] = data
+            -- The phrase is the alias's key, so any previous alias on
+            -- it is already gone by now.
             index_exact(data)
         end
     end,
     on_remove = function(data)
         if data.is_exact then
-            if exact[data.pattern] == data then
-                exact[data.pattern] = nil
-            end
             unindex_exact(data)
         end
     end,
 }
 
--- Create an alias (internal)
-local function create_alias(pattern, action, opts, is_exact)
-    return registry:add({
+-- Create an alias (internal). Raises in the caller's caller on a
+-- refused registration.
+local function create_alias(label, pattern, action, opts, is_exact)
+    if opts ~= nil and type(opts) ~= "table" then
+        error(label .. ": opts must be a table", 3)
+    end
+    local handle, err = registry:add({
+        key = is_exact and pattern or nil,
         pattern = pattern,
         action = action,
         is_exact = is_exact,
         source = rune.caller_source(2),
     }, opts)
+    if not handle then
+        error(label .. ": " .. err, 3)
+    end
+    return handle
 end
 
 -- Public API
@@ -118,7 +122,7 @@ rune.alias = {}
 
 -- Match a literal command phrase. Whitespace separates words rather
 -- than being part of the phrase, matching the input parser's behavior.
--- The normalized phrase is the alias's name, so rune.alias.get("gc")
+-- The normalized phrase is the alias's key, so rune.alias.get("gc")
 -- and rune.alias.disable("gc") address it by what you typed to make it.
 function rune.alias.exact(phrase, action, opts)
     if type(phrase) ~= "string" then
@@ -129,8 +133,7 @@ function rune.alias.exact(phrase, action, opts)
     if normalized == "" then
         error("rune.alias.exact: phrase must contain at least one word", 2)
     end
-    return create_alias(normalized, action,
-        rune.registry.keyed_opts(normalized, opts, "rune.alias.exact"), true)
+    return create_alias("rune.alias.exact", normalized, action, opts, true)
 end
 
 -- Go regexp match on full input line
@@ -141,35 +144,35 @@ function rune.alias.regex(pattern, action, opts)
     if not ok then
         error("invalid alias pattern '" .. tostring(pattern) .. "': " .. tostring(err), 2)
     end
-    return create_alias(pattern, action, opts, false)
+    return create_alias("rune.alias.regex", pattern, action, opts, false)
 end
 
--- Management by name (an exact alias is named for its phrase)
-function rune.alias.get(name)
-    return registry:get(name)
+-- Management by name or exact phrase
+function rune.alias.get(address)
+    return registry:get(address)
 end
 
-function rune.alias.disable(name)
-    return registry:disable(name)
+function rune.alias.disable(address)
+    return registry:disable(address)
 end
 
-function rune.alias.enable(name)
-    return registry:enable(name)
+function rune.alias.enable(address)
+    return registry:enable(address)
 end
 
-function rune.alias.remove(name)
-    return registry:remove(name)
+function rune.alias.remove(address)
+    return registry:remove(address)
 end
 
 -- List all aliases - returns array of {match, mode, name, value, enabled, ...}
--- Exact aliases first (sorted by key), then regex aliases in priority order.
+-- Exact aliases first (sorted by phrase), then regex aliases in priority order.
 function rune.alias.list()
     local function describe(data)
         return {
             match = data.pattern,
             value = type(data.action) == "function" and "(function)" or tostring(data.action),
             mode = data.is_exact and "exact" or "regex",
-            name = data.name,
+            name = data._handle:name(),
             enabled = data.enabled,
             group = data.group,
             once = data.once,
@@ -177,24 +180,16 @@ function rune.alias.list()
         }
     end
 
-    local result = {}
-
-    local exact_keys = {}
-    for k in pairs(exact) do
-        exact_keys[#exact_keys + 1] = k
-    end
-    table.sort(exact_keys)
-    for _, key in ipairs(exact_keys) do
-        table.insert(result, describe(exact[key]))
-    end
-
+    local exacts, regexes = {}, {}
     for _, data in ipairs(registry:items()) do
-        if not data.is_exact then
-            table.insert(result, describe(data))
-        end
+        local bucket = data.is_exact and exacts or regexes
+        bucket[#bucket + 1] = describe(data)
     end
-
-    return result
+    table.sort(exacts, function(a, b) return a.match < b.match end)
+    for _, item in ipairs(regexes) do
+        exacts[#exacts + 1] = item
+    end
+    return exacts
 end
 
 -- Clear all aliases
@@ -236,7 +231,7 @@ function rune.alias.process(input)
                 if type(data.action) == "function" then
                     local ctx = {
                         line = input,
-                        name = data.name,
+                        name = data._handle:name(),
                         group = data.group,
                         type = "alias",
                         matches = matches,
@@ -283,7 +278,7 @@ function rune.alias.process(input)
         if type(winner.action) == "function" then
             local ctx = {
                 line = input,
-                name = winner.name,
+                name = winner._handle:name(),
                 group = winner.group,
                 type = "alias",
                 args = args,

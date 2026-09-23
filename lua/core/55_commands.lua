@@ -338,13 +338,14 @@ rune.command.add("binds", function(args)
         rune.echo("  " .. dim("(none)"))
         return
     end
-    -- The key is the name, so there is no separate name column to print.
     for _, b in ipairs(binds) do
         local status = b.enabled and green("[on] ") or red("[off]")
+        -- An unnamed bind is named for its key, already in the key column.
+        local name_str = b.name ~= b.key and (" " .. dim("name:") .. b.name) or ""
         local group_str = b.group and ("  " .. cyan("<" .. b.group .. ">")) or ""
         local src_str = b.source and ("  " .. dim("@" .. b.source)) or ""
-        rune.echo(string.format("  %s %-16s%s%s",
-            status, yellow(b.key), group_str, src_str))
+        rune.echo(string.format("  %s %-16s%s%s%s",
+            status, yellow(b.key), name_str, group_str, src_str))
     end
 end, "List all key bindings")
 
