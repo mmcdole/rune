@@ -23,10 +23,10 @@ func TestGrowingOutputOutputWindowPublishesLiveState(t *testing.T) {
 		},
 	})
 	for i := 1; i <= 10; i++ {
-		next, _ := m.Update(ui.EchoLineMsg(fmt.Sprintf("line %d", i)))
+		next, _ := m.Update(echoLineMsg(fmt.Sprintf("line %d", i)))
 		m = next.(*Model)
 	}
-	next, _ := m.Update(ui.PaneScrollToTopMsg{Name: ui.OutputPaneName})
+	next, _ := m.Update(paneScrollToTopMsg{Name: ui.OutputPaneName})
 	m = next.(*Model)
 	if m.output.Mode() != widget.ModeScrolled {
 		t.Fatal("test setup did not scroll the constrained output pane")
@@ -70,16 +70,16 @@ func TestClosingTallSearchPublishesGeometryInducedLiveState(t *testing.T) {
 		},
 	})
 	for i := 1; i <= 5; i++ {
-		next, _ := m.Update(ui.EchoLineMsg(fmt.Sprintf("line %d", i)))
+		next, _ := m.Update(echoLineMsg(fmt.Sprintf("line %d", i)))
 		m = next.(*Model)
 	}
-	next, _ := m.Update(ui.ShowSearchMsg{Query: "line"})
+	next, _ := m.Update(showSearchMsg{options: ui.SearchOptions{Query: "line"}})
 	m = next.(*Model)
 	if !m.input.SearchActive() || m.layoutPlan.output.Dy() != 1 {
 		t.Fatalf("search setup = active %v output height %d, want true and 1 (shared border)",
 			m.input.SearchActive(), m.layoutPlan.output.Dy())
 	}
-	next, _ = m.Update(ui.PaneScrollToTopMsg{Name: ui.OutputPaneName})
+	next, _ = m.Update(paneScrollToTopMsg{Name: ui.OutputPaneName})
 	m = next.(*Model)
 	if m.output.Mode() != widget.ModeScrolled {
 		t.Fatal("test setup did not scroll the search-constrained output")
@@ -122,24 +122,24 @@ func TestSearchFocusUsesFinalLayoutGeometry(t *testing.T) {
 
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	m = next.(*Model)
-	next, _ = m.Update(ui.UpdateBarsMsg{"status": {Left: "status"}})
+	next, _ = m.Update(updateBarsMsg{"status": {Left: "status"}})
 	m = next.(*Model)
 
 	for i := 0; i < 9; i++ {
-		next, _ = m.Update(ui.EchoLineMsg(fmt.Sprintf("match %d thief", i)))
+		next, _ = m.Update(echoLineMsg(fmt.Sprintf("match %d thief", i)))
 		m = next.(*Model)
 	}
-	next, _ = m.Update(ui.EchoLineMsg("SELECTED thief"))
+	next, _ = m.Update(echoLineMsg("SELECTED thief"))
 	m = next.(*Model)
 	for i := 0; i < 20; i++ {
-		next, _ = m.Update(ui.EchoLineMsg(fmt.Sprintf("quiet %d", i)))
+		next, _ = m.Update(echoLineMsg(fmt.Sprintf("quiet %d", i)))
 		m = next.(*Model)
 	}
 
 	// Establish the normal layout, then the shorter no-match navigator. Typing
 	// the query expands it to its five-result maximum in one update.
 	m.View()
-	next, _ = m.Update(ui.ShowSearchMsg{})
+	next, _ = m.Update(showSearchMsg{options: ui.SearchOptions{}})
 	m = next.(*Model)
 	m.View()
 	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyExtended, Text: "thief"})
@@ -162,7 +162,7 @@ func TestSearchFocusUsesFinalLayoutGeometry(t *testing.T) {
 
 	// A replacement search may preview another row, but cancelling it restores
 	// the previously committed focus from the grouped search lifecycle state.
-	next, _ = m.Update(ui.ShowSearchMsg{})
+	next, _ = m.Update(showSearchMsg{options: ui.SearchOptions{}})
 	m = next.(*Model)
 	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	m = next.(*Model)
@@ -177,7 +177,7 @@ func TestSearchFocusUsesFinalLayoutGeometry(t *testing.T) {
 	assertOutputWindowRowHighlighted(t, m.output.View(), "SELECTED thief")
 
 	// Deliberate output window navigation retires the accepted marker.
-	next, _ = m.Update(ui.UpdateConfigMsg{Mouse: true})
+	next, _ = m.Update(updateConfigMsg{Mouse: true})
 	m = next.(*Model)
 	next, _ = m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
 	m = next.(*Model)
@@ -193,7 +193,7 @@ func TestSearchReportsInteractionStateSeparatelyFromScrollState(t *testing.T) {
 	m.width = 80
 	m.height = 24
 
-	next, _ := m.Update(ui.ShowSearchMsg{})
+	next, _ := m.Update(showSearchMsg{options: ui.SearchOptions{}})
 	m = next.(*Model)
 	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	_ = next.(*Model)
@@ -226,7 +226,7 @@ func TestManualOutputWindowEntryPointsClearCommittedSearchFocus(t *testing.T) {
 		},
 		{
 			name: "Lua output-pane navigation",
-			msg:  ui.PaneScrollUpMsg{Name: ui.OutputPaneName, Lines: 1},
+			msg:  paneScrollUpMsg{Name: ui.OutputPaneName, Lines: 1},
 		},
 	}
 
@@ -234,7 +234,7 @@ func TestManualOutputWindowEntryPointsClearCommittedSearchFocus(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			m := newTestModel(t)
 			if tt.mouse {
-				next, _ := m.Update(ui.UpdateConfigMsg{Mouse: true})
+				next, _ := m.Update(updateConfigMsg{Mouse: true})
 				m = next.(*Model)
 			}
 			focus := widget.SearchMatch{Seq: m.output.Scrollback().Seq(50)}
@@ -252,13 +252,13 @@ func TestManualOutputWindowEntryPointsClearCommittedSearchFocus(t *testing.T) {
 
 func TestMouseWheelNavigatesActiveSearchMatches(t *testing.T) {
 	m := newBareModel(t)
-	next, _ := m.Update(ui.UpdateConfigMsg{Mouse: true})
+	next, _ := m.Update(updateConfigMsg{Mouse: true})
 	m = next.(*Model)
 	for _, line := range []string{"thief oldest", "quiet", "thief middle", "quiet", "thief newest"} {
 		m.output.Write(line)
 	}
 
-	m.inputCtl.ShowSearch(ui.ShowSearchMsg{Query: "thief"})
+	m.inputCtl.ShowSearch(ui.SearchOptions{Query: "thief"})
 	newest, ok := m.input.Search().Selected()
 	if !ok || newest.Stripped != "thief newest" {
 		t.Fatalf("initial selection = (%q, %v), want newest match", newest.Stripped, ok)

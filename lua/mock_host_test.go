@@ -26,8 +26,8 @@ type MockHost struct {
 	DisconnectCalls     int
 	ReloadCalls         int
 	PaneCalls           []struct{ Op, Name, Data string }
-	PickerCalls         []ui.ShowPickerMsg
-	SearchCalls         []ui.ShowSearchMsg
+	PickerCalls         []ui.PickerOptions
+	SearchCalls         []ui.SearchOptions
 	ClipboardCalls      []string
 	ConfigChanges       []Config
 	PresentationChanges int
@@ -199,13 +199,13 @@ func (m *MockHost) DrainPresentationChanges() int {
 	return changes
 }
 
-func (m *MockHost) ShowPicker(opts ui.ShowPickerMsg) {
+func (m *MockHost) ShowPicker(opts ui.PickerOptions) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.PickerCalls = append(m.PickerCalls, opts)
 }
 
-func (m *MockHost) ShowSearch(opts ui.ShowSearchMsg) {
+func (m *MockHost) ShowSearch(opts ui.SearchOptions) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.SearchCalls = append(m.SearchCalls, opts)

@@ -10,8 +10,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/colorprofile"
-
-	"github.com/mmcdole/rune/ui"
 )
 
 // Stamp the SAME View as the rendered screen. A terminal title marker is
@@ -26,7 +24,7 @@ type outputProbe struct {
 }
 
 func (m *outputProbe) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if _, ok := msg.(ui.PrintLineMsg); ok {
+	if _, ok := msg.(printLineMsg); ok {
 		m.lines++
 	}
 	_, cmd := m.Model.Update(msg)
@@ -223,11 +221,11 @@ func BenchmarkOutputLatency(b *testing.B) {
 
 func TestOutputProbeWaitsForRender(t *testing.T) {
 	m := &outputProbe{Model: newThrottledModel(t)}
-	m.Update(ui.PrintLineMsg("visible"))
+	m.Update(printLineMsg("visible"))
 	if got := m.View().WindowTitle; got != "rune-render-1" {
 		t.Fatal(got)
 	}
-	m.Update(ui.PrintLineMsg("waiting for next frame"))
+	m.Update(printLineMsg("waiting for next frame"))
 	if got := m.View().WindowTitle; got != "rune-render-1" {
 		t.Fatalf("acknowledged an unrendered line: %s", got)
 	}

@@ -36,3 +36,37 @@ func (p PickerItem) GetValue() string { return p.Value }
 
 // MatchesDescription returns true if description should be included in matching.
 func (p PickerItem) MatchesDescription() bool { return p.MatchDesc }
+
+// Config carries the UI-facing subset of Rune's typed configuration.
+type Config struct {
+	// KeepInput keeps a submitted command selected in the input line, so Enter
+	// resends it and typing replaces it.
+	KeepInput bool
+	// Numpad enables terminal modes that preserve physical numpad keys. Rune
+	// still accepts an already-distinct numpad event when this is false.
+	Numpad bool
+	// Mouse captures terminal mouse events so the wheel can scroll Rune's
+	// viewport. When disabled, the terminal retains native text selection.
+	Mouse bool
+}
+
+// PickerOptions configures a picker overlay opened by UI.ShowPicker.
+type PickerOptions struct {
+	Title      string       // Optional title/header for the picker (modal mode only)
+	Items      []PickerItem // Items to display
+	CallbackID string       // Opaque ID to track which Lua callback to run
+	// Inline mode: picker filters based on input content, doesn't trap keys.
+	// Modal mode (default): picker captures keyboard and has its own search field.
+	Inline bool
+	// DismissOnSpace closes an inline picker as soon as the input contains
+	// a space - for pickers over single-token items (slash commands) where
+	// a space means the user has committed and is typing arguments.
+	DismissOnSpace bool
+}
+
+// SearchOptions configures the scrollback-search overlay opened by UI.ShowSearch.
+// Search is self-contained in the UI; interaction and viewport changes are
+// reported through UIEvent.
+type SearchOptions struct {
+	Query string // initial query; empty keeps the previous search's query
+}

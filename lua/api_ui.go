@@ -40,7 +40,7 @@ func (e *Engine) registerUIInternalFuncs() {
 			if c.NArgs() >= 1 && c.Arg(1).Kind() == script.KindTable {
 				query = c.Arg(1).Table().Field("query").Str()
 			}
-			e.host.ShowSearch(ui.ShowSearchMsg{Query: query})
+			e.host.ShowSearch(ui.SearchOptions{Query: query})
 			return nil
 		},
 	}, nil)

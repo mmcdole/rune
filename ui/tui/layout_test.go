@@ -118,15 +118,15 @@ func TestInactiveBarSubtreesReleaseTheirFixedTracks(t *testing.T) {
 	}})
 	for _, step := range []struct {
 		name   string
-		bars   ui.UpdateBarsMsg
+		bars   updateBarsMsg
 		height int
 	}{
-		{"visible", ui.UpdateBarsMsg{"status": {Left: "STATUS"}}, 6},
-		{"empty", ui.UpdateBarsMsg{"status": {}}, 9},
-		{"restored", ui.UpdateBarsMsg{"status": {Left: "STATUS"}}, 6},
-		{"style_only", ui.UpdateBarsMsg{"status": {Left: "\x1b[31m\x1b[0m"}}, 9},
-		{"restored_again", ui.UpdateBarsMsg{"status": {Left: "STATUS"}}, 6},
-		{"removed", ui.UpdateBarsMsg{}, 9},
+		{"visible", updateBarsMsg{"status": {Left: "STATUS"}}, 6},
+		{"empty", updateBarsMsg{"status": {}}, 9},
+		{"restored", updateBarsMsg{"status": {Left: "STATUS"}}, 6},
+		{"style_only", updateBarsMsg{"status": {Left: "\x1b[31m\x1b[0m"}}, 9},
+		{"restored_again", updateBarsMsg{"status": {Left: "STATUS"}}, 6},
+		{"removed", updateBarsMsg{}, 9},
 	} {
 		t.Run(step.name, func(t *testing.T) {
 			m.Update(step.bars)
@@ -362,7 +362,7 @@ func TestOutputPaneWrapsAtItsResolvedWidth(t *testing.T) {
 		},
 	})
 
-	next, _ := m.Update(ui.EchoLineMsg("abcdefghijklmn"))
+	next, _ := m.Update(echoLineMsg("abcdefghijklmn"))
 	m = next.(*Model)
 	if got := m.output.Scrollback().Count(); got != 2 {
 		t.Fatalf("scrollback row count = %d, want 2", got)
@@ -386,7 +386,7 @@ func TestResizeReallocatesTreeWithoutReflowingExistingOutputRows(t *testing.T) {
 		},
 	})
 
-	next, _ := m.Update(ui.EchoLineMsg(strings.Repeat("a", 35)))
+	next, _ := m.Update(echoLineMsg(strings.Repeat("a", 35)))
 	m = next.(*Model)
 	if got := m.output.Scrollback().Count(); got != 2 {
 		t.Fatalf("rows appended at thirty-cell output width = %d, want 2", got)
@@ -399,7 +399,7 @@ func TestResizeReallocatesTreeWithoutReflowingExistingOutputRows(t *testing.T) {
 	if got := m.output.Scrollback().Count(); got != 2 {
 		t.Fatalf("resize reflowed existing rows: count = %d, want 2", got)
 	}
-	next, _ = m.Update(ui.EchoLineMsg(strings.Repeat("b", 50)))
+	next, _ = m.Update(echoLineMsg(strings.Repeat("b", 50)))
 	m = next.(*Model)
 	if got := m.output.Scrollback().Count(); got != 3 {
 		t.Fatalf("new fifty-cell line at resized width added count = %d, want 3", got)
@@ -456,7 +456,7 @@ func TestHiddenPaneIsPrunedAndOutputReclaimsItsTrack(t *testing.T) {
 	if !found || !changed {
 		t.Fatalf("WithPaneVisibility(map, false) = found %v changed %v", found, changed)
 	}
-	next, _ := m.Update(ui.UpdateLayoutMsg(hidden))
+	next, _ := m.Update(updateLayoutMsg(hidden))
 	m = next.(*Model)
 	if got := m.layoutPlan.output.Dx(); got != 40 {
 		t.Fatalf("output width without map = %d, want 40", got)
@@ -764,7 +764,7 @@ func TestSearchUsesTheSameResolvedOutputRectangleAsView(t *testing.T) {
 		t.Fatalf("normal output height = %d, want 13", got)
 	}
 
-	next, _ := m.Update(ui.ShowSearchMsg{})
+	next, _ := m.Update(showSearchMsg{options: ui.SearchOptions{}})
 	m = next.(*Model)
 	plan := m.layoutPlan
 	if got := plan.output.Dy(); got != 10 {
@@ -1033,7 +1033,7 @@ func TestBarNameDoesNotReplaceBuiltinWidget(t *testing.T) {
 	m := newTestModel(t)
 	inputWidget := m.input
 
-	next, _ := m.Update(ui.UpdateBarsMsg{"input": {Left: "hijack"}})
+	next, _ := m.Update(updateBarsMsg{"input": {Left: "hijack"}})
 	m = next.(*Model)
 
 	if m.input != inputWidget {
@@ -1043,7 +1043,7 @@ func TestBarNameDoesNotReplaceBuiltinWidget(t *testing.T) {
 		t.Fatal("bar named \"input\" was not retained in its own namespace")
 	}
 
-	next, _ = m.Update(ui.UpdateBarsMsg{})
+	next, _ = m.Update(updateBarsMsg{})
 	m = next.(*Model)
 
 	if m.input != inputWidget {
@@ -1058,7 +1058,7 @@ func TestSeparatorLeavesKeepCharactersAndShareBorderStyle(t *testing.T) {
 
 	// Exercise a custom rule, a standalone default rule inside a row, and
 	// a default rule owned by the border grid. No input rules can mask them.
-	next, _ := m.Update(ui.UpdateLayoutMsg(ui.LayoutTree{Root: ui.LayoutNode{
+	next, _ := m.Update(updateLayoutMsg(ui.LayoutTree{Root: ui.LayoutNode{
 		Type: ui.LayoutTypeColumn,
 		Children: []ui.LayoutNode{
 			{Type: ui.LayoutTypeSeparator, SeparatorChar: "═", Size: ui.AutoSize()},

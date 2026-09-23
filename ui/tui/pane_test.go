@@ -21,14 +21,14 @@ func TestOutputPaneImplementsPaneLifecycle(t *testing.T) {
 		t.Fatal("output registry entry does not preserve controller identity")
 	}
 
-	next, _ := m.Update(ui.PaneCreateMsg{Name: ui.OutputPaneName})
+	next, _ := m.Update(paneCreateMsg{Name: ui.OutputPaneName})
 	m = next.(*Model)
 	recreated := m.panes[ui.OutputPaneName]
 	if recreated != output {
 		t.Fatal("creating output replaced the reserved pane")
 	}
 
-	next, _ = m.Update(ui.PaneWriteMsg{Name: ui.OutputPaneName, Text: "visible"})
+	next, _ = m.Update(paneWriteMsg{Name: ui.OutputPaneName, Text: "visible"})
 	m = next.(*Model)
 	wantScrollback(t, m, "visible")
 
@@ -38,17 +38,17 @@ func TestOutputPaneImplementsPaneLifecycle(t *testing.T) {
 	if !found || !changed {
 		t.Fatalf("WithPaneVisibility(output, false) = found %v changed %v", found, changed)
 	}
-	next, _ = m.Update(ui.UpdateLayoutMsg(hidden))
+	next, _ = m.Update(updateLayoutMsg(hidden))
 	m = next.(*Model)
 	if !m.layoutPlan.output.Empty() {
 		t.Fatalf("hidden output remains placed: rect=%v", m.layoutPlan.output)
 	}
-	next, _ = m.Update(ui.PaneWriteMsg{Name: ui.OutputPaneName, Text: "hidden"})
+	next, _ = m.Update(paneWriteMsg{Name: ui.OutputPaneName, Text: "hidden"})
 	m = next.(*Model)
 	wantScrollback(t, m, "visible", "hidden")
 
 	shown, _, _ := m.layout.WithPaneVisibility(ui.OutputPaneName, true)
-	next, _ = m.Update(ui.UpdateLayoutMsg(shown))
+	next, _ = m.Update(updateLayoutMsg(shown))
 	m = next.(*Model)
 	if m.layoutPlan.output.Empty() {
 		t.Fatal("shown output is unplaced")
@@ -58,14 +58,14 @@ func TestOutputPaneImplementsPaneLifecycle(t *testing.T) {
 	for i := 0; i < 40; i++ {
 		rows = append(rows, fmt.Sprintf("row %02d", i))
 	}
-	next, _ = m.Update(ui.PaneWriteMsg{Name: ui.OutputPaneName, Text: strings.Join(rows, "\n")})
+	next, _ = m.Update(paneWriteMsg{Name: ui.OutputPaneName, Text: strings.Join(rows, "\n")})
 	m = next.(*Model)
-	next, _ = m.Update(ui.PaneScrollToTopMsg{Name: ui.OutputPaneName})
+	next, _ = m.Update(paneScrollToTopMsg{Name: ui.OutputPaneName})
 	m = next.(*Model)
 	if m.output.Mode() != widget.ModeScrolled {
 		t.Fatal("output pane did not honor pane scroll-to-top")
 	}
-	next, _ = m.Update(ui.PaneScrollToBottomMsg{Name: ui.OutputPaneName})
+	next, _ = m.Update(paneScrollToBottomMsg{Name: ui.OutputPaneName})
 	m = next.(*Model)
 	if m.output.Mode() != widget.ModeLive {
 		t.Fatal("output pane did not honor pane scroll-to-bottom")
@@ -76,7 +76,7 @@ func TestOutputBeforeFirstWindowSizeUsesBoundedStartupWidth(t *testing.T) {
 	m := NewModel(make(chan ui.UIEvent, 16))
 	line := strings.Repeat("x", 80+7)
 
-	next, _ := m.Update(ui.PrintLineMsg(line))
+	next, _ := m.Update(printLineMsg(line))
 	m = next.(*Model)
 	if got := m.output.Scrollback().Count(); got != 2 {
 		t.Fatalf("pre-size output rows = %d, want 2 at startup width", got)
@@ -97,9 +97,9 @@ func TestOutputBeforeFirstWindowSizeUsesBoundedStartupWidth(t *testing.T) {
 func TestOutputPaneBuffersWhileHiddenOrUnplacedAtRetainedWidth(t *testing.T) {
 	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 64)), 20, 8)
 
-	next, _ := m.Update(ui.PaneCreateMsg{Name: "side"})
+	next, _ := m.Update(paneCreateMsg{Name: "side"})
 	m = next.(*Model)
-	next, _ = m.Update(ui.UpdateLayoutMsg(ui.LayoutTree{Root: ui.LayoutNode{
+	next, _ = m.Update(updateLayoutMsg(ui.LayoutTree{Root: ui.LayoutNode{
 		Type: ui.LayoutTypeRow,
 		Children: []ui.LayoutNode{
 			{Type: ui.LayoutTypePane, Name: ui.OutputPaneName, Size: ui.Cells(12), Border: ui.PaneBorderNone},
@@ -114,19 +114,19 @@ func TestOutputPaneBuffersWhileHiddenOrUnplacedAtRetainedWidth(t *testing.T) {
 		t.Fatalf("append width after placement = %d, want 12", got)
 	}
 
-	next, _ = m.Update(ui.PaneClearMsg{Name: ui.OutputPaneName})
+	next, _ = m.Update(paneClearMsg{Name: ui.OutputPaneName})
 	m = next.(*Model)
 	hiddenOutput, _, _ := m.layout.WithPaneVisibility(ui.OutputPaneName, false)
-	next, _ = m.Update(ui.UpdateLayoutMsg(hiddenOutput))
+	next, _ = m.Update(updateLayoutMsg(hiddenOutput))
 	m = next.(*Model)
-	next, _ = m.Update(ui.PaneWriteMsg{Name: ui.OutputPaneName, Text: strings.Repeat("a", 14)})
+	next, _ = m.Update(paneWriteMsg{Name: ui.OutputPaneName, Text: strings.Repeat("a", 14)})
 	m = next.(*Model)
 	if got := m.output.Width(); got != 12 {
 		t.Fatalf("hidden output changed retained width to %d", got)
 	}
 	wantScrollback(t, m, strings.Repeat("a", 12), "aa")
 
-	next, _ = m.Update(ui.UpdateLayoutMsg(ui.LayoutTree{Root: ui.LayoutNode{
+	next, _ = m.Update(updateLayoutMsg(ui.LayoutTree{Root: ui.LayoutNode{
 		Type: ui.LayoutTypeColumn,
 		Children: []ui.LayoutNode{
 			{Type: ui.LayoutTypeInput, Size: ui.AutoSize()},
@@ -136,21 +136,21 @@ func TestOutputPaneBuffersWhileHiddenOrUnplacedAtRetainedWidth(t *testing.T) {
 	if !m.layoutPlan.output.Empty() {
 		t.Fatalf("layout without output placed it at %v", m.layoutPlan.output)
 	}
-	next, _ = m.Update(ui.PaneWriteMsg{Name: ui.OutputPaneName, Text: strings.Repeat("b", 14)})
+	next, _ = m.Update(paneWriteMsg{Name: ui.OutputPaneName, Text: strings.Repeat("b", 14)})
 	m = next.(*Model)
 	if got := m.output.Width(); got != 12 {
 		t.Fatalf("unplaced output changed retained width to %d", got)
 	}
 	wantScrollback(t, m, strings.Repeat("a", 12), "aa", strings.Repeat("b", 12), "bb")
 
-	next, _ = m.Update(ui.UpdateLayoutMsg(ui.LayoutTree{Root: ui.LayoutNode{
+	next, _ = m.Update(updateLayoutMsg(ui.LayoutTree{Root: ui.LayoutNode{
 		Type: ui.LayoutTypePane, Name: ui.OutputPaneName, Border: ui.PaneBorderNone,
 	}}))
 	m = next.(*Model)
 	if got := m.output.Width(); got != 20 {
 		t.Fatalf("new output placement retained dirty width %d, want 20", got)
 	}
-	next, _ = m.Update(ui.PaneWriteMsg{Name: ui.OutputPaneName, Text: strings.Repeat("c", 18)})
+	next, _ = m.Update(paneWriteMsg{Name: ui.OutputPaneName, Text: strings.Repeat("c", 18)})
 	m = next.(*Model)
 	wantScrollback(t, m,
 		strings.Repeat("a", 12), "aa", strings.Repeat("b", 12), "bb", strings.Repeat("c", 18))
@@ -160,21 +160,21 @@ func TestClearOutputPaneResetsSearchAndScrollingButPreservesPrompt(t *testing.T)
 	m := newBareModel(t)
 	normalOutput := m.layoutPlan.output
 
-	next, _ := m.Update(ui.SetPromptMsg("HP> "))
+	next, _ := m.Update(setPromptMsg("HP> "))
 	m = next.(*Model)
 	var rows []string
 	for i := 0; i < 40; i++ {
 		rows = append(rows, fmt.Sprintf("row %02d", i))
 	}
 	rows[8] = "hidden thief"
-	next, _ = m.Update(ui.PaneWriteMsg{Name: ui.OutputPaneName, Text: strings.Join(rows, "\n")})
+	next, _ = m.Update(paneWriteMsg{Name: ui.OutputPaneName, Text: strings.Join(rows, "\n")})
 	m = next.(*Model)
-	next, _ = m.Update(ui.PaneScrollToTopMsg{Name: ui.OutputPaneName})
+	next, _ = m.Update(paneScrollToTopMsg{Name: ui.OutputPaneName})
 	m = next.(*Model)
 	if m.output.Mode() != widget.ModeScrolled {
 		t.Fatal("test setup did not scroll output")
 	}
-	next, _ = m.Update(ui.ShowSearchMsg{Query: "thief"})
+	next, _ = m.Update(showSearchMsg{options: ui.SearchOptions{Query: "thief"}})
 	m = next.(*Model)
 	if !m.input.SearchActive() || m.searchView.focus == nil {
 		t.Fatal("test setup did not establish an active output search")
@@ -183,7 +183,7 @@ func TestClearOutputPaneResetsSearchAndScrollingButPreservesPrompt(t *testing.T)
 		t.Fatal("test setup did not resize output for search")
 	}
 
-	next, _ = m.Update(ui.PaneClearMsg{Name: ui.OutputPaneName})
+	next, _ = m.Update(paneClearMsg{Name: ui.OutputPaneName})
 	m = next.(*Model)
 	if got := m.output.Scrollback().Count(); got != 0 {
 		t.Fatalf("clear left %d scrollback rows", got)
@@ -210,7 +210,7 @@ func TestClearOutputPaneResetsSearchAndScrollingButPreservesPrompt(t *testing.T)
 
 func TestOrdinaryPaneLifecycle(t *testing.T) {
 	m := newBareModel(t)
-	next, _ := m.Update(ui.UpdateLayoutMsg(ui.LayoutTree{Root: ui.LayoutNode{
+	next, _ := m.Update(updateLayoutMsg(ui.LayoutTree{Root: ui.LayoutNode{
 		Type: ui.LayoutTypeRow,
 		Children: []ui.LayoutNode{
 			{Type: ui.LayoutTypePane, Name: ui.OutputPaneName, Border: ui.PaneBorderNone},
@@ -219,7 +219,7 @@ func TestOrdinaryPaneLifecycle(t *testing.T) {
 	}}))
 	m = next.(*Model)
 
-	next, _ = m.Update(ui.PaneCreateMsg{Name: "chat"})
+	next, _ = m.Update(paneCreateMsg{Name: "chat"})
 	m = next.(*Model)
 	chat, ok := m.panes["chat"]
 	if !ok {
@@ -233,9 +233,9 @@ func TestOrdinaryPaneLifecycle(t *testing.T) {
 	if !found {
 		t.Fatal("chat placement was not found in the installed tree")
 	}
-	next, _ = m.Update(ui.UpdateLayoutMsg(hiddenChat))
+	next, _ = m.Update(updateLayoutMsg(hiddenChat))
 	m = next.(*Model)
-	next, _ = m.Update(ui.PaneWriteMsg{Name: "chat", Text: "oldest\nmiddle\nnewest"})
+	next, _ = m.Update(paneWriteMsg{Name: "chat", Text: "oldest\nmiddle\nnewest"})
 	m = next.(*Model)
 	chat.SetSize(20, 3)
 	if got := chat.View(); got != "oldest\nmiddle\nnewest" {
@@ -248,21 +248,21 @@ func TestOrdinaryPaneLifecycle(t *testing.T) {
 	}
 
 	shownChat, _, _ := m.layout.WithPaneVisibility("chat", true)
-	next, _ = m.Update(ui.UpdateLayoutMsg(shownChat))
+	next, _ = m.Update(updateLayoutMsg(shownChat))
 	m = next.(*Model)
 	findLeaf(t, m.layoutPlan, ui.LayoutTypePane, "chat")
-	next, _ = m.Update(ui.PaneScrollToTopMsg{Name: "chat"})
+	next, _ = m.Update(paneScrollToTopMsg{Name: "chat"})
 	m = next.(*Model)
 	if !strings.Contains(chat.Title(), "scroll") {
 		t.Fatalf("ordinary pane title does not expose scrolled state: %q", chat.Title())
 	}
-	next, _ = m.Update(ui.PaneScrollToBottomMsg{Name: "chat"})
+	next, _ = m.Update(paneScrollToBottomMsg{Name: "chat"})
 	m = next.(*Model)
 	if got := chat.Title(); got != "chat" {
 		t.Fatalf("ordinary pane did not return to live state: %q", got)
 	}
 
-	_, _ = m.Update(ui.PaneClearMsg{Name: "chat"})
+	_, _ = m.Update(paneClearMsg{Name: "chat"})
 	chat.SetSize(20, 1)
 	if got := chat.View(); got != "" {
 		t.Fatalf("ordinary pane clear left content %q", got)
@@ -276,18 +276,18 @@ func TestReplaceOutputPaneIsOneClearAndWrite(t *testing.T) {
 	m := newBareModel(t)
 	normalOutput := m.layoutPlan.output
 
-	next, _ := m.Update(ui.SetPromptMsg("HP> "))
+	next, _ := m.Update(setPromptMsg("HP> "))
 	m = next.(*Model)
 	var rows []string
 	for i := 0; i < 40; i++ {
 		rows = append(rows, fmt.Sprintf("row %02d", i))
 	}
 	rows[8] = "hidden thief"
-	next, _ = m.Update(ui.PaneWriteMsg{Name: ui.OutputPaneName, Text: strings.Join(rows, "\n")})
+	next, _ = m.Update(paneWriteMsg{Name: ui.OutputPaneName, Text: strings.Join(rows, "\n")})
 	m = next.(*Model)
-	next, _ = m.Update(ui.PaneScrollToTopMsg{Name: ui.OutputPaneName})
+	next, _ = m.Update(paneScrollToTopMsg{Name: ui.OutputPaneName})
 	m = next.(*Model)
-	next, _ = m.Update(ui.ShowSearchMsg{Query: "thief"})
+	next, _ = m.Update(showSearchMsg{options: ui.SearchOptions{Query: "thief"}})
 	m = next.(*Model)
 	if !m.input.SearchActive() || m.output.Mode() != widget.ModeScrolled {
 		t.Fatal("test setup did not scroll and search output")
@@ -295,7 +295,7 @@ func TestReplaceOutputPaneIsOneClearAndWrite(t *testing.T) {
 	if m.layoutPlan.output == normalOutput {
 		t.Fatal("test setup did not resize output for search")
 	}
-	next, _ = m.Update(ui.PaneReplaceMsg{Name: ui.OutputPaneName, Text: "first\nsecond"})
+	next, _ = m.Update(paneReplaceMsg{Name: ui.OutputPaneName, Text: "first\nsecond"})
 	m = next.(*Model)
 	if got := m.output.Scrollback().Count(); got != 2 {
 		t.Fatalf("replace left %d scrollback rows, want the two new rows", got)
@@ -322,7 +322,7 @@ func TestReplaceOutputPaneIsOneClearAndWrite(t *testing.T) {
 // scrolled pane to live tailing with only the new content.
 func TestReplaceOrdinaryPaneCreatesAndSnapsToLive(t *testing.T) {
 	m := newBareModel(t)
-	next, _ := m.Update(ui.PaneReplaceMsg{Name: "status", Text: "HP 10"})
+	next, _ := m.Update(paneReplaceMsg{Name: "status", Text: "HP 10"})
 	m = next.(*Model)
 	status, ok := m.panes["status"]
 	if !ok {
@@ -333,14 +333,14 @@ func TestReplaceOrdinaryPaneCreatesAndSnapsToLive(t *testing.T) {
 		t.Fatalf("created pane content = %q", got)
 	}
 
-	next, _ = m.Update(ui.PaneWriteMsg{Name: "status", Text: "a\nb\nc"})
+	next, _ = m.Update(paneWriteMsg{Name: "status", Text: "a\nb\nc"})
 	m = next.(*Model)
-	next, _ = m.Update(ui.PaneScrollToTopMsg{Name: "status"})
+	next, _ = m.Update(paneScrollToTopMsg{Name: "status"})
 	m = next.(*Model)
 	if !strings.Contains(status.Title(), "scroll") {
 		t.Fatal("test setup did not scroll the pane")
 	}
-	m.Update(ui.PaneReplaceMsg{Name: "status", Text: "HP 11\nMP 5"})
+	m.Update(paneReplaceMsg{Name: "status", Text: "HP 11\nMP 5"})
 	if got := status.Title(); got != "status" {
 		t.Fatalf("replace left the pane scrolled: %q", got)
 	}

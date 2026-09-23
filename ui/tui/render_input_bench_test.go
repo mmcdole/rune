@@ -14,7 +14,7 @@ func BenchmarkRenderBarUpdate(b *testing.B) {
 			m.layout.Root.Children = append([]ui.LayoutNode{
 				{Type: ui.LayoutTypeBar, Name: "status", Size: ui.AutoSize()},
 			}, m.layout.Root.Children...)
-			updates := []ui.UpdateBarsMsg{{"status": {Left: "HP:100"}}, {"status": {Left: "HP:99"}}}
+			updates := []updateBarsMsg{{"status": {Left: "HP:100"}}, {"status": {Left: "HP:99"}}}
 			m.Update(updates[0])
 			m.applyLayout()
 			n := 0

@@ -10,7 +10,7 @@ import (
 
 // ShowPicker enters the requested picker mode and records the callback
 // to settle when the picker closes.
-func (c *inputController) ShowPicker(opts ui.ShowPickerMsg) {
+func (c *inputController) ShowPicker(opts ui.PickerOptions) {
 	// Completion/history pickers are single-line concepts. If a script
 	// asks for one while a structured draft is active, settle its callback
 	// immediately instead of layering conflicting input modes.

@@ -21,7 +21,7 @@ func newTestModel(t *testing.T) *Model {
 	m = next.(*Model)
 
 	for i := 0; i < 100; i++ {
-		next, _ = m.Update(ui.EchoLineMsg(fmt.Sprintf("line %d", i)))
+		next, _ = m.Update(echoLineMsg(fmt.Sprintf("line %d", i)))
 		m = next.(*Model)
 	}
 	return m

@@ -285,7 +285,7 @@ func fallbackAllocation(
 	children []*resolvedNode,
 	extent int,
 	axis splitAxis,
-	tracks []ui.AxisTrack,
+	tracks []axisTrack,
 ) childAllocation {
 	count := len(children)
 	result := childAllocation{
@@ -300,7 +300,7 @@ func fallbackAllocation(
 
 	// Retry without gaps or ordinary minima, preserving the original sizing
 	// rules and hard maxima. Keep the input reachable on either axis.
-	relaxed := append([]ui.AxisTrack(nil), tracks...)
+	relaxed := append([]axisTrack(nil), tracks...)
 	for i := range relaxed {
 		relaxed[i].Min = 0
 	}
@@ -325,7 +325,7 @@ func fallbackAllocation(
 		}
 	}
 
-	if sizes, err := ui.AllocateAxis(extent, 0, relaxed); err == nil {
+	if sizes, err := allocateAxis(extent, relaxed); err == nil {
 		result.sizes = sizes
 		return result
 	}
@@ -386,9 +386,9 @@ func (m *Model) allocateChildren(node *resolvedNode, extent int, axis splitAxis,
 	boundaries := node.boundaries
 	space := boundarySpace(boundaries)
 	effectiveExtent := max(0, extent) - space
-	tracks := make([]ui.AxisTrack, len(node.children))
+	tracks := make([]axisTrack, len(node.children))
 	for i, child := range node.children {
-		track := ui.AxisTrack{
+		track := axisTrack{
 			Size: child.node.Size,
 			Min:  m.minimum(child, axis),
 			Max:  nodeMaximum(child.node),
@@ -398,7 +398,7 @@ func (m *Model) allocateChildren(node *resolvedNode, extent int, axis splitAxis,
 		}
 		tracks[i] = track
 	}
-	sizes, err := ui.AllocateAxis(effectiveExtent, 0, tracks)
+	sizes, err := allocateAxis(effectiveExtent, tracks)
 	if err != nil {
 		return fallbackAllocation(node.children, extent, axis, tracks)
 	}

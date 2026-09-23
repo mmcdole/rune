@@ -23,8 +23,8 @@ type UI interface {
 	UpdateConfig(cfg Config)
 
 	// Components
-	ShowPicker(opts ShowPickerMsg)
-	ShowSearch(opts ShowSearchMsg)
+	ShowPicker(opts PickerOptions)
+	ShowSearch(opts SearchOptions)
 	SetClipboard(text string)
 	CreatePane(name string)
 	WritePane(name, text string)

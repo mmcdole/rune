@@ -22,18 +22,18 @@ func TestRenderSnapshots(t *testing.T) {
 	for _, scene := range []string{"normal", "draft_editor", "picker", "search", "scrolled"} {
 		t.Run(scene, func(t *testing.T) {
 			m := renderFixture(80, 24, true)
-			m.Update(ui.PrintLineMsg("\x1b[35mUnicode:\x1b[0m 界 e\u0301 👩‍💻 1️⃣\tend"))
-			m.Update(ui.SetInputMsg("look north"))
+			m.Update(printLineMsg("\x1b[35mUnicode:\x1b[0m 界 e\u0301 👩‍💻 1️⃣\tend"))
+			m.Update(setInputMsg("look north"))
 			switch scene {
 			case "draft_editor":
-				m.Update(ui.SetInputMsg("say hello\n\t界 e\u0301 👩‍💻\nlook"))
+				m.Update(setInputMsg("say hello\n\t界 e\u0301 👩‍💻\nlook"))
 			case "picker":
-				m.Update(ui.ShowPickerMsg{Title: "History", Items: []ui.PickerItem{{Text: "look north"}, {Text: "say hello"}}})
+				m.Update(showPickerMsg{options: ui.PickerOptions{Title: "History", Items: []ui.PickerItem{{Text: "look north"}, {Text: "say hello"}}}})
 			case "search":
-				m.Update(ui.ShowSearchMsg{Query: "dragon"})
+				m.Update(showSearchMsg{options: ui.SearchOptions{Query: "dragon"}})
 			case "scrolled":
-				m.Update(ui.PaneScrollUpMsg{Name: ui.OutputPaneName, Lines: 10})
-				m.Update(ui.PrintLineMsg("new output while reading history"))
+				m.Update(paneScrollUpMsg{Name: ui.OutputPaneName, Lines: 10})
+				m.Update(printLineMsg("new output while reading history"))
 			}
 			view := m.View().Content
 			assertExactBlock(t, view, 80, 24)

@@ -89,23 +89,23 @@ func (b *BubbleTeaUI) send(msg tea.Msg) {
 
 // Print appends server lines and Lua output to scrollback.
 func (b *BubbleTeaUI) Print(text string) {
-	b.send(ui.PrintLineMsg(text))
+	b.send(printLineMsg(text))
 }
 
 // Echo appends an already-styled local echo to scrollback. Styling is Lua
 // policy (the "echo" hook); this adapter only delivers it for presentation.
 func (b *BubbleTeaUI) Echo(line string) {
-	b.send(ui.EchoLineMsg(line))
+	b.send(echoLineMsg(line))
 }
 
 // SetPrompt replaces the prompt overlay.
 func (b *BubbleTeaUI) SetPrompt(text string) {
-	b.send(ui.SetPromptMsg(text))
+	b.send(setPromptMsg(text))
 }
 
 // CommitPrompt moves the prompt overlay to scrollback in one update.
 func (b *BubbleTeaUI) CommitPrompt(text string) {
-	b.send(ui.CommitPromptMsg(text))
+	b.send(commitPromptMsg(text))
 }
 
 // Run starts the TUI and blocks until exit.
@@ -168,80 +168,80 @@ func (b *BubbleTeaUI) Quit() {
 
 // CreatePane creates a new named pane.
 func (b *BubbleTeaUI) CreatePane(name string) {
-	b.send(ui.PaneCreateMsg{Name: name})
+	b.send(paneCreateMsg{Name: name})
 }
 
 // WritePane writes a line to a named pane.
 func (b *BubbleTeaUI) WritePane(name, text string) {
-	b.send(ui.PaneWriteMsg{Name: name, Text: text})
+	b.send(paneWriteMsg{Name: name, Text: text})
 }
 
 // ReplacePane empties a named pane and writes text as one update.
 func (b *BubbleTeaUI) ReplacePane(name, text string) {
-	b.send(ui.PaneReplaceMsg{Name: name, Text: text})
+	b.send(paneReplaceMsg{Name: name, Text: text})
 }
 
 // ClearPane clears the contents of a named pane.
 func (b *BubbleTeaUI) ClearPane(name string) {
-	b.send(ui.PaneClearMsg{Name: name})
+	b.send(paneClearMsg{Name: name})
 }
 
 // --- Push-based messages from Session to UI ---
 
 // UpdateBars sends rendered bar content from Session to UI.
 func (b *BubbleTeaUI) UpdateBars(content map[string]ui.BarContent) {
-	b.send(ui.UpdateBarsMsg(content))
+	b.send(updateBarsMsg(content))
 }
 
 // UpdateBinds sends the current set of bound keys from Session to UI.
 func (b *BubbleTeaUI) UpdateBinds(keys input.Bindings) {
-	b.send(ui.UpdateBindsMsg(keys))
+	b.send(updateBindsMsg(keys))
 }
 
 // UpdateLayout sends the canonical layout tree from Session to UI.
 func (b *BubbleTeaUI) UpdateLayout(layout ui.LayoutTree) {
-	b.send(ui.UpdateLayoutMsg(layout))
+	b.send(updateLayoutMsg(layout))
 }
 
 // UpdateConfig sends UI-facing configuration from Session to UI.
 func (b *BubbleTeaUI) UpdateConfig(cfg ui.Config) {
 	keypadChanged := b.updateKeypadMode(cfg.Numpad)
-	b.send(ui.UpdateConfigMsg(cfg))
+	b.send(updateConfigMsg(cfg))
 	if keypadChanged {
 		b.send(tea.RawMsg{Msg: keypadModeSequence(cfg.Numpad)})
 	}
 }
 
 // ShowPicker displays a picker overlay with items.
-func (b *BubbleTeaUI) ShowPicker(opts ui.ShowPickerMsg) {
-	b.send(opts)
+func (b *BubbleTeaUI) ShowPicker(opts ui.PickerOptions) {
+	b.send(showPickerMsg{options: opts})
 }
 
 // ShowSearch opens the scrollback-search overlay.
-func (b *BubbleTeaUI) ShowSearch(opts ui.ShowSearchMsg) {
-	b.send(opts)
+func (b *BubbleTeaUI) ShowSearch(opts ui.SearchOptions) {
+	b.send(showSearchMsg{options: opts})
 }
 
 // SetClipboard asks the terminal to set the system clipboard.
 func (b *BubbleTeaUI) SetClipboard(text string) {
-	b.send(ui.SetClipboardMsg(text))
+	b.send(setClipboardMsg(text))
 }
 
 // SetInput sets the input line content.
 func (b *BubbleTeaUI) SetInput(text string) {
-	b.send(ui.SetInputMsg(text))
+	b.send(setInputMsg(text))
 }
 
 // SetInputSubmission restores input text with an explicit interpretation.
 func (b *BubbleTeaUI) SetInputSubmission(submission input.Submission) {
-	b.send(ui.SetInputSubmissionMsg(submission))
+	b.send(setInputSubmissionMsg(submission))
 }
 
 // --- Input Primitives for Lua ---
 
 // InputSetCursor sets the widget cursor to a zero-based rune offset.
 func (b *BubbleTeaUI) InputSetCursor(pos int) {
-	b.send(ui.InputSetCursorMsg(pos))
+	b.send(inputSetCursorMsg(pos))
 }
 
 // OpenEditor opens $EDITOR with the given initial text.
@@ -321,22 +321,22 @@ func normalizeEditorText(content string) string {
 
 // PaneScrollUp scrolls a pane up by N lines.
 func (b *BubbleTeaUI) PaneScrollUp(name string, lines int) {
-	b.send(ui.PaneScrollUpMsg{Name: name, Lines: lines})
+	b.send(paneScrollUpMsg{Name: name, Lines: lines})
 }
 
 // PaneScrollDown scrolls a pane down by N lines.
 func (b *BubbleTeaUI) PaneScrollDown(name string, lines int) {
-	b.send(ui.PaneScrollDownMsg{Name: name, Lines: lines})
+	b.send(paneScrollDownMsg{Name: name, Lines: lines})
 }
 
 // PaneScrollToTop scrolls a pane to the top.
 func (b *BubbleTeaUI) PaneScrollToTop(name string) {
-	b.send(ui.PaneScrollToTopMsg{Name: name})
+	b.send(paneScrollToTopMsg{Name: name})
 }
 
 // PaneScrollToBottom scrolls a pane to the bottom.
 func (b *BubbleTeaUI) PaneScrollToBottom(name string) {
-	b.send(ui.PaneScrollToBottomMsg{Name: name})
+	b.send(paneScrollToBottomMsg{Name: name})
 }
 
 // Events returns the ordered stream of user actions and UI state changes.

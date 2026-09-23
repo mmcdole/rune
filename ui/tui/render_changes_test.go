@@ -19,22 +19,22 @@ func TestAppearanceChangesReuseLayout(t *testing.T) {
 		{Type: ui.LayoutTypePane, Name: ui.OutputPaneName},
 		{Type: ui.LayoutTypeInput, Size: ui.AutoSize()},
 	}})
-	m.Update(ui.SetInputMsg("unchanged\nmultiline draft"))
+	m.Update(setInputMsg("unchanged\nmultiline draft"))
 	for _, msg := range []tea.Msg{
-		ui.PrintLineMsg("server text"), ui.EchoLineMsg("local echo"),
-		ui.SetPromptMsg("HP>"), ui.CommitPromptMsg("HP>"),
-		ui.PaneWriteMsg{Name: "chat", Text: "chat message"},
-		ui.PaneReplaceMsg{Name: "chat", Text: "replacement"},
-		ui.PaneClearMsg{Name: "chat"},
-		ui.PrintLineMsg(strings.Repeat("history\n", 40)),
-		ui.PaneScrollUpMsg{Name: ui.OutputPaneName, Lines: 5},
-		ui.PaneScrollDownMsg{Name: ui.OutputPaneName, Lines: 2},
-		ui.PaneScrollToTopMsg{Name: ui.OutputPaneName},
-		ui.PaneScrollToBottomMsg{Name: ui.OutputPaneName},
+		printLineMsg("server text"), echoLineMsg("local echo"),
+		setPromptMsg("HP>"), commitPromptMsg("HP>"),
+		paneWriteMsg{Name: "chat", Text: "chat message"},
+		paneReplaceMsg{Name: "chat", Text: "replacement"},
+		paneClearMsg{Name: "chat"},
+		printLineMsg(strings.Repeat("history\n", 40)),
+		paneScrollUpMsg{Name: ui.OutputPaneName, Lines: 5},
+		paneScrollDownMsg{Name: ui.OutputPaneName, Lines: 2},
+		paneScrollToTopMsg{Name: ui.OutputPaneName},
+		paneScrollToBottomMsg{Name: ui.OutputPaneName},
 		tea.MouseWheelMsg{Button: tea.MouseWheelUp},
 		tea.MouseWheelMsg{Button: tea.MouseWheelDown},
-		ui.UpdateBindsMsg{},
-		ui.UpdateConfigMsg{Mouse: true, Numpad: true},
+		updateBindsMsg{},
+		updateConfigMsg{Mouse: true, Numpad: true},
 		renderTick{},
 	} {
 		probe.applications = 0
@@ -50,7 +50,7 @@ func TestAppearanceChangesReuseLayout(t *testing.T) {
 		if view.Content != m.screen {
 			t.Fatalf("%T reused layout produced a stale or misplaced view", msg)
 		}
-		if _, ok := msg.(ui.UpdateConfigMsg); ok && (view.MouseMode != tea.MouseModeCellMotion || !view.KeyboardEnhancements.ReportAllKeysAsEscapeCodes) {
+		if _, ok := msg.(updateConfigMsg); ok && (view.MouseMode != tea.MouseModeCellMotion || !view.KeyboardEnhancements.ReportAllKeysAsEscapeCodes) {
 			t.Fatal("config update did not apply terminal options")
 		}
 	}
@@ -71,17 +71,17 @@ func TestContentSizedPaneGrowsAndShrinks(t *testing.T) {
 				{Type: ui.LayoutTypeInput, Size: ui.AutoSize()},
 			}})
 			before := findLeaf(t, m.layoutPlan, ui.LayoutTypePane, "chat").outer.Dy()
-			m.Update(ui.PaneWriteMsg{Name: "chat", Text: "one\ntwo\nthree"})
+			m.Update(paneWriteMsg{Name: "chat", Text: "one\ntwo\nthree"})
 			after := findLeaf(t, m.layoutPlan, ui.LayoutTypePane, "chat").outer.Dy()
 			if after <= before {
 				t.Fatalf("auto-sized content did not grow: before=%d after=%d", before, after)
 			}
-			m.Update(ui.PaneReplaceMsg{Name: "chat", Text: "replacement"})
+			m.Update(paneReplaceMsg{Name: "chat", Text: "replacement"})
 			replaced := findLeaf(t, m.layoutPlan, ui.LayoutTypePane, "chat").outer.Dy()
 			if replaced >= after || !strings.Contains(m.View().Content, "replacement") {
 				t.Fatalf("replacement did not shrink and repaint the pane: height=%d, previous=%d", replaced, after)
 			}
-			m.Update(ui.PaneClearMsg{Name: "chat"})
+			m.Update(paneClearMsg{Name: "chat"})
 			cleared := findLeaf(t, m.layoutPlan, ui.LayoutTypePane, "chat").outer.Dy()
 			if cleared != before || strings.Contains(m.View().Content, "replacement") {
 				t.Fatalf("clear did not restore the empty pane: height=%d, want=%d", cleared, before)
@@ -92,13 +92,13 @@ func TestContentSizedPaneGrowsAndShrinks(t *testing.T) {
 
 func TestUnchangedMessagesDoNotScheduleRender(t *testing.T) {
 	m := newThrottledModel(t)
-	m.Update(ui.SetPromptMsg("HP>"))
-	m.Update(ui.UpdateBarsMsg{"status": {Left: "ready"}})
+	m.Update(setPromptMsg("HP>"))
+	m.Update(updateBarsMsg{"status": {Left: "ready"}})
 	m.Update(renderTick{})
 	m.Update(renderTick{})
 	before := m.renders
 	for _, msg := range []tea.Msg{
-		ui.SetPromptMsg("HP>"), ui.UpdateBarsMsg{"status": {Left: "ready"}},
+		setPromptMsg("HP>"), updateBarsMsg{"status": {Left: "ready"}},
 		tea.MouseClickMsg{Button: tea.MouseLeft}, renderTick{},
 	} {
 		if _, cmd := m.Update(msg); cmd != nil {
@@ -113,11 +113,11 @@ func TestUnchangedMessagesDoNotScheduleRender(t *testing.T) {
 
 func TestLayoutChangeErasesRemovedPane(t *testing.T) {
 	m := renderFixture(80, 24, true)
-	m.Update(ui.PaneReplaceMsg{Name: "chat", Text: "REMOVED-PANE"})
+	m.Update(paneReplaceMsg{Name: "chat", Text: "REMOVED-PANE"})
 	if !strings.Contains(m.View().Content, "REMOVED-PANE") {
 		t.Fatal("setup did not render the pane")
 	}
-	m.Update(ui.UpdateLayoutMsg(ui.DefaultLayoutTree()))
+	m.Update(updateLayoutMsg(ui.DefaultLayoutTree()))
 	if strings.Contains(m.View().Content, "REMOVED-PANE") {
 		t.Fatal("removed pane left pixels on the reused canvas")
 	}
@@ -130,16 +130,16 @@ func TestOnlyAutoPaneContentRequestsLayout(t *testing.T) {
 			msg  tea.Msg
 			want bool
 		}{
-			{"output", ui.PrintLineMsg("server text"), false},
-			{"echo", ui.EchoLineMsg("local echo"), false},
-			{"prompt", ui.SetPromptMsg("HP>"), false},
-			{"commit", ui.CommitPromptMsg("HP>"), false},
-			{"auto", ui.PaneWriteMsg{Name: "chat", Text: "one\ntwo\nthree"}, true},
-			{"replace_auto", ui.PaneReplaceMsg{Name: "chat", Text: "replacement"}, true},
-			{"clear_auto", ui.PaneClearMsg{Name: "chat"}, true},
-			{"hidden", ui.PaneWriteMsg{Name: "hidden", Text: "one\ntwo"}, false},
-			{"replace_hidden", ui.PaneReplaceMsg{Name: "hidden", Text: "replacement"}, false},
-			{"clear_hidden", ui.PaneClearMsg{Name: "hidden"}, false},
+			{"output", printLineMsg("server text"), false},
+			{"echo", echoLineMsg("local echo"), false},
+			{"prompt", setPromptMsg("HP>"), false},
+			{"commit", commitPromptMsg("HP>"), false},
+			{"auto", paneWriteMsg{Name: "chat", Text: "one\ntwo\nthree"}, true},
+			{"replace_auto", paneReplaceMsg{Name: "chat", Text: "replacement"}, true},
+			{"clear_auto", paneClearMsg{Name: "chat"}, true},
+			{"hidden", paneWriteMsg{Name: "hidden", Text: "one\ntwo"}, false},
+			{"replace_hidden", paneReplaceMsg{Name: "hidden", Text: "replacement"}, false},
+			{"clear_hidden", paneClearMsg{Name: "hidden"}, false},
 		} {
 			t.Run(fmt.Sprintf("%s/nested=%t", tc.name, nested), func(t *testing.T) {
 				m := resizeModel(t, NewModel(make(chan ui.UIEvent, 100)), 80, 24)
@@ -177,16 +177,16 @@ func TestInputNavigationReusesLayout(t *testing.T) {
 				{Type: ui.LayoutTypePane, Name: ui.OutputPaneName},
 				{Type: ui.LayoutTypeInput, Size: ui.AutoSize()},
 			}})
-			m.Update(ui.PrintLineMsg("north one\nnorth two\nnorth three"))
+			m.Update(printLineMsg("north one\nnorth two\nnorth three"))
 			switch mode {
 			case "normal":
-				m.Update(ui.SetInputMsg("look north"))
+				m.Update(setInputMsg("look north"))
 			case "draft":
-				m.Update(ui.SetInputMsg(strings.Repeat("one two three\n", 20)))
+				m.Update(setInputMsg(strings.Repeat("one two three\n", 20)))
 			case "picker":
-				m.Update(ui.ShowPickerMsg{Items: pickerTestItems})
+				m.Update(showPickerMsg{options: ui.PickerOptions{Items: pickerTestItems}})
 			case "search":
-				m.Update(ui.ShowSearchMsg{Query: "north"})
+				m.Update(showSearchMsg{options: ui.SearchOptions{Query: "north"}})
 			}
 			for _, key := range []rune{tea.KeyLeft, tea.KeyRight, tea.KeyUp, tea.KeyDown, tea.KeyF12} {
 				probe.applications = 0
@@ -213,17 +213,17 @@ func TestInputTransitionsMatchFreshLayout(t *testing.T) {
 			// The second model reapplies layout after every message, including
 			// cursor movement, to preserve the old navigation and scroll behavior.
 			messages := []tea.Msg{
-				ui.PrintLineMsg("north one\nsouth two\nnorth three"),
-				ui.SetInputMsg("look"), textPress("!"), tea.PasteMsg{Content: " north"},
+				printLineMsg("north one\nsouth two\nnorth three"),
+				setInputMsg("look"), textPress("!"), tea.PasteMsg{Content: " north"},
 				ctrlPress('j'), textPress("界"),
-				ui.SetInputMsg(strings.Repeat("numbered draft line\n", 20)),
+				setInputMsg(strings.Repeat("numbered draft line\n", 20)),
 				ctrlPress(tea.KeyHome), keyPress(tea.KeyDown), keyPress(tea.KeyDown),
 				ctrlPress(tea.KeyEnd), keyPress(tea.KeyUp), keyPress(tea.KeyUp),
-				ui.InputSetCursorMsg(0), keyPress(tea.KeyDown), keyPress(tea.KeyUp),
+				inputSetCursorMsg(0), keyPress(tea.KeyDown), keyPress(tea.KeyUp),
 				keyPress(tea.KeyBackspace), keyPress(tea.KeyEsc), keyPress(tea.KeyEsc),
-				ui.ShowPickerMsg{Items: pickerTestItems}, textPress("disconnect"),
+				showPickerMsg{options: ui.PickerOptions{Items: pickerTestItems}}, textPress("disconnect"),
 				keyPress(tea.KeyBackspace), keyPress(tea.KeyEsc),
-				ui.ShowSearchMsg{Query: "north"}, keyPress(tea.KeyUp),
+				showSearchMsg{options: ui.SearchOptions{Query: "north"}}, keyPress(tea.KeyUp),
 				textPress(" missing"), keyPress(tea.KeyEsc),
 			}
 			for _, msg := range messages {
@@ -251,17 +251,17 @@ func TestBarTextReusesLayoutAndVisibilityResizes(t *testing.T) {
 		{Type: ui.LayoutTypeInput, Size: ui.AutoSize()},
 	}})
 	for _, tc := range []struct {
-		content ui.UpdateBarsMsg
+		content updateBarsMsg
 		layout  bool
 	}{
-		{ui.UpdateBarsMsg{"status": {Left: "ready"}}, true},
-		{ui.UpdateBarsMsg{"status": {Center: "busy"}}, false},
-		{ui.UpdateBarsMsg{"status": {Right: "界"}}, false},
-		{ui.UpdateBarsMsg{"status": {Left: "\x1b[31m"}}, true},
-		{ui.UpdateBarsMsg{"status": {}}, false},
-		{ui.UpdateBarsMsg{}, false},
-		{ui.UpdateBarsMsg{"status": {Left: "back"}}, true},
-		{ui.UpdateBarsMsg{}, true},
+		{updateBarsMsg{"status": {Left: "ready"}}, true},
+		{updateBarsMsg{"status": {Center: "busy"}}, false},
+		{updateBarsMsg{"status": {Right: "界"}}, false},
+		{updateBarsMsg{"status": {Left: "\x1b[31m"}}, true},
+		{updateBarsMsg{"status": {}}, false},
+		{updateBarsMsg{}, false},
+		{updateBarsMsg{"status": {Left: "back"}}, true},
+		{updateBarsMsg{}, true},
 	} {
 		probe.applications = 0
 		m.Update(tc.content)

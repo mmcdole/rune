@@ -31,7 +31,7 @@ func TestFirstChangeRendersImmediately(t *testing.T) {
 	m := newThrottledModel(t)
 	before := m.renders
 
-	_, cmd := m.Update(ui.PrintLineMsg("hello"))
+	_, cmd := m.Update(printLineMsg("hello"))
 	if m.renders != before+1 || !strings.Contains(m.View().Content, "hello") {
 		t.Fatal("first line was not rendered immediately")
 	}
@@ -44,18 +44,18 @@ func TestFirstChangeRendersImmediately(t *testing.T) {
 // by the same rule: state applies at once, the screen waits for the tick.
 func TestThrottledChangesRenderOnce(t *testing.T) {
 	m := newThrottledModel(t)
-	m.Update(ui.PrintLineMsg("first-visible"))
+	m.Update(printLineMsg("first-visible"))
 	first := m.View().Content
 	rendered := m.renders
 
 	for _, msg := range []tea.Msg{
-		ui.PrintLineMsg("server-line"),
-		ui.EchoLineMsg("echo-line"),
-		ui.SetPromptMsg("prompt-text"),
-		ui.CommitPromptMsg("committed-prompt"),
-		ui.SetInputMsg("typed-draft"),
-		ui.PaneWriteMsg{Name: "unplaced", Text: "pane-row"},
-		ui.UpdateBarsMsg{},
+		printLineMsg("server-line"),
+		echoLineMsg("echo-line"),
+		setPromptMsg("prompt-text"),
+		commitPromptMsg("committed-prompt"),
+		setInputMsg("typed-draft"),
+		paneWriteMsg{Name: "unplaced", Text: "pane-row"},
+		updateBarsMsg{},
 	} {
 		if _, cmd := m.Update(msg); cmd != nil {
 			t.Fatalf("%T scheduled a second tick while throttled", msg)
@@ -89,8 +89,8 @@ func TestThrottledChangesRenderOnce(t *testing.T) {
 // chain. An idle client must have no standing timer.
 func TestTickChainStopsWhenIdle(t *testing.T) {
 	m := newThrottledModel(t)
-	m.Update(ui.PrintLineMsg("line 1"))
-	m.Update(ui.PrintLineMsg("line 2"))
+	m.Update(printLineMsg("line 1"))
+	m.Update(printLineMsg("line 2"))
 
 	if _, cmd := m.Update(renderTick{}); cmd == nil {
 		t.Fatal("tick with pending changes did not re-arm")
@@ -109,13 +109,13 @@ func TestTickChainStopsWhenIdle(t *testing.T) {
 // and a clear.
 func TestThrottleNeverShowsStaleGeometry(t *testing.T) {
 	m := newThrottledModel(t)
-	m.Update(ui.PrintLineMsg("first-visible"))
+	m.Update(printLineMsg("first-visible"))
 	m.Update(tea.WindowSizeMsg{Width: 40, Height: 12})
-	m.Update(ui.PrintLineMsg("after-resize"))
+	m.Update(printLineMsg("after-resize"))
 	m.Update(renderTick{})
 	assertExactBlock(t, m.View().Content, 40, 12)
 
-	m.Update(ui.PaneClearMsg{Name: ui.OutputPaneName})
+	m.Update(paneClearMsg{Name: ui.OutputPaneName})
 	m.Update(renderTick{})
 	if strings.Contains(m.View().Content, "first-visible") {
 		t.Fatal("clear left dirty rows on screen")
@@ -145,7 +145,7 @@ func TestScrollStateReportsOnlyChangesOncePerInterval(t *testing.T) {
 	m.renderInterval = defaultRenderInterval
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	for range 100 {
-		m.Update(ui.PrintLineMsg("history"))
+		m.Update(printLineMsg("history"))
 	}
 	m.Update(renderTick{})
 	m.Update(renderTick{})
@@ -153,12 +153,12 @@ func TestScrollStateReportsOnlyChangesOncePerInterval(t *testing.T) {
 		t.Fatalf("live output posted unchanged scroll state: %v", got)
 	}
 
-	m.Update(ui.PaneScrollUpMsg{Name: ui.OutputPaneName, Lines: 5})
+	m.Update(paneScrollUpMsg{Name: ui.OutputPaneName, Lines: 5})
 	if got := drainScrollReports(events); len(got) != 1 || got[0].Mode != "scrolled" {
 		t.Fatalf("scrolling from idle reported %v, want one scrolled report", got)
 	}
 	for range 50 {
-		m.Update(ui.PrintLineMsg("flood"))
+		m.Update(printLineMsg("flood"))
 	}
 	if got := drainScrollReports(events); len(got) != 0 {
 		t.Fatalf("lines posted %d scroll reports while throttled, want 0", len(got))
@@ -177,12 +177,12 @@ func TestScrollStateRetriesAfterFullQueue(t *testing.T) {
 	m.renderInterval = defaultRenderInterval
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24}) // fills the queue
 	for range 100 {
-		m.Update(ui.PrintLineMsg("history"))
+		m.Update(printLineMsg("history"))
 	}
 	m.Update(renderTick{})
 	m.Update(renderTick{})
 
-	m.Update(ui.PaneScrollUpMsg{Name: ui.OutputPaneName, Lines: 5})
+	m.Update(paneScrollUpMsg{Name: ui.OutputPaneName, Lines: 5})
 	rendered := m.renders
 	for range 3 {
 		if _, cmd := m.Update(renderTick{}); cmd == nil {
@@ -206,15 +206,15 @@ func TestScrollStateRetriesAfterFullQueue(t *testing.T) {
 
 func TestScrollReportRetryWaitsForPendingFrame(t *testing.T) {
 	m := newThrottledModel(t)
-	m.Update(ui.PrintLineMsg(strings.Repeat("history\n", 100)))
+	m.Update(printLineMsg(strings.Repeat("history\n", 100)))
 	m.Update(renderTick{})
 	m.Update(renderTick{})
 	events := make(chan ui.UIEvent, 1)
 	events <- ui.WindowSizeChangedMsg{Width: 80, Height: 24}
 	m.events = events
-	m.Update(ui.PaneScrollUpMsg{Name: ui.OutputPaneName, Lines: 5})
+	m.Update(paneScrollUpMsg{Name: ui.OutputPaneName, Lines: 5})
 	rendered, screen := m.renders, m.screen
-	m.Update(ui.PrintLineMsg("arrived while report was rejected"))
+	m.Update(printLineMsg("arrived while report was rejected"))
 	<-events
 	m.Update(struct{}{})
 	if len(events) != 0 || m.renders != rendered || m.View().Content != screen {
@@ -232,10 +232,10 @@ func TestScrollReportRetryWaitsForPendingFrame(t *testing.T) {
 func TestZeroIntervalRendersDuringUpdate(t *testing.T) {
 	m := newBareModel(t)
 	rendered := m.renders
-	if _, cmd := m.Update(ui.PrintLineMsg("one")); cmd != nil {
+	if _, cmd := m.Update(printLineMsg("one")); cmd != nil {
 		t.Fatal("zero render interval scheduled a tick")
 	}
-	m.Update(ui.PrintLineMsg("two"))
+	m.Update(printLineMsg("two"))
 	if m.renders != rendered+2 || m.dirty || !strings.Contains(m.screen, "one") || !strings.Contains(m.screen, "two") {
 		t.Fatal("zero interval did not render changes during Update")
 	}
@@ -250,7 +250,7 @@ func TestViewOnlyReturnsPreparedScreen(t *testing.T) {
 				m.renderInterval = defaultRenderInterval
 			}
 			m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-			m.Update(ui.PrintLineMsg("one"))
+			m.Update(printLineMsg("one"))
 			rendered, screen, dirty, queued := m.renders, m.screen, m.dirty, len(events)
 			for range 3 {
 				if got := m.View().Content; got != screen {
@@ -268,8 +268,8 @@ func TestZeroIntervalRetriesScrollReportOnNextUpdate(t *testing.T) {
 	events := make(chan ui.UIEvent, 1)
 	m := NewModel(events)
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24}) // fills the queue
-	m.Update(ui.PrintLineMsg(strings.Repeat("history\n", 100)))
-	if _, cmd := m.Update(ui.PaneScrollUpMsg{Name: ui.OutputPaneName, Lines: 5}); cmd != nil || m.throttled || m.dirty {
+	m.Update(printLineMsg(strings.Repeat("history\n", 100)))
+	if _, cmd := m.Update(paneScrollUpMsg{Name: ui.OutputPaneName, Lines: 5}); cmd != nil || m.throttled || m.dirty {
 		t.Fatal("rejected report scheduled a timer or dirtied the screen")
 	}
 	rendered := m.renders
@@ -295,10 +295,10 @@ func BenchmarkOutputFlood(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := range b.N {
-		m.Update(ui.PrintLineMsg("a line of MUD output"))
+		m.Update(printLineMsg("a line of MUD output"))
 		m.View()
 		if i%10 == 9 {
-			m.Update(ui.SetPromptMsg("HP:100 >"))
+			m.Update(setPromptMsg("HP:100 >"))
 			m.View()
 		}
 		if i%100 == 99 {
@@ -317,7 +317,7 @@ func BenchmarkIdleMessage(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		m.Update(ui.PrintLineMsg("a line of MUD output"))
+		m.Update(printLineMsg("a line of MUD output"))
 		m.View()
 		m.Update(renderTick{})
 	}
@@ -328,7 +328,7 @@ func BenchmarkIdleMessage(b *testing.B) {
 func BenchmarkScreen(b *testing.B) {
 	m := NewModel(make(chan ui.UIEvent, 4096))
 	m.Update(tea.WindowSizeMsg{Width: 270, Height: 66})
-	m.Update(ui.UpdateLayoutMsg{Root: ui.LayoutNode{Type: ui.LayoutTypeColumn, Children: []ui.LayoutNode{
+	m.Update(updateLayoutMsg{Root: ui.LayoutNode{Type: ui.LayoutTypeColumn, Children: []ui.LayoutNode{
 		{Type: ui.LayoutTypeRow, Dividers: true, Children: []ui.LayoutNode{
 			{Type: ui.LayoutTypePane, Name: ui.OutputPaneName, Border: ui.PaneBorderNone},
 			{Type: ui.LayoutTypePane, Name: "chat", Size: ui.Cells(60)},
@@ -337,10 +337,10 @@ func BenchmarkScreen(b *testing.B) {
 	}}})
 	for i := range 200 {
 		line := fmt.Sprintf("\x1b[32mline %d\x1b[0m some \x1b[1;31mcolored\x1b[0m output that is long enough to be realistic", i)
-		m.Update(ui.PrintLineMsg(line))
-		m.Update(ui.PaneWriteMsg{Name: "chat", Text: line})
+		m.Update(printLineMsg(line))
+		m.Update(paneWriteMsg{Name: "chat", Text: line})
 	}
-	m.Update(ui.SetPromptMsg("HP:100 >"))
+	m.Update(setPromptMsg("HP:100 >"))
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {

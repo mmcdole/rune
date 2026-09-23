@@ -23,7 +23,7 @@ func newTestInput(width int) *Input {
 func TestModalPickerShowsResultsAboveItsQueryField(t *testing.T) {
 	in := newTestInput(40)
 	in.SetValue("unfinished command")
-	in.ShowPicker(ui.ShowPickerMsg{Title: "Aliases", Items: []ui.PickerItem{{Text: "north"}, {Text: "south"}}})
+	in.ShowPicker(ui.PickerOptions{Title: "Aliases", Items: []ui.PickerItem{{Text: "north"}, {Text: "south"}}})
 	in.SetSize(40, in.MeasureHeight(in.width, 1<<14)+2)
 	plan := in.layout(40, in.height)
 	rows := strings.Split(text.StripANSI(in.View()), "\n")
@@ -64,7 +64,7 @@ func TestInputRenderingHonorsAllocation(t *testing.T) {
 			}
 			switch mode {
 			case "inline", "modal":
-				in.ShowPicker(ui.ShowPickerMsg{Inline: mode == "inline", Items: []ui.PickerItem{{Text: "世界"}}})
+				in.ShowPicker(ui.PickerOptions{Inline: mode == "inline", Items: []ui.PickerItem{{Text: "世界"}}})
 			case "search":
 				in.ShowSearch("世界", SearchScope{})
 			}
@@ -272,7 +272,7 @@ func TestInputPickerOverlayGrowsView(t *testing.T) {
 		{Text: "arctic", Value: "arctic"},
 	}
 
-	in.ShowPicker(ui.ShowPickerMsg{Title: "Worlds", Items: items})
+	in.ShowPicker(ui.PickerOptions{Title: "Worlds", Items: items})
 	in.SetSize(in.width, in.MeasureHeight(in.width, ui.MaxLayoutCells))
 	if in.MeasureHeight(in.width, 1<<14) <= 3 {
 		t.Error("active picker must add to the preferred height")
@@ -298,7 +298,7 @@ func TestInputPickerOverlayGrowsView(t *testing.T) {
 func TestConstrainedPickerKeepsEditableInputVisible(t *testing.T) {
 	in := newTestInput(20)
 	in.SetValue("nor")
-	in.ShowPicker(ui.ShowPickerMsg{
+	in.ShowPicker(ui.PickerOptions{
 		Inline: true,
 		Items:  []ui.PickerItem{{Text: "north", Value: "north"}},
 	})
@@ -325,7 +325,7 @@ func TestConstrainedModalPickerPreservesFocus(t *testing.T) {
 		for n := range items {
 			items[n].Text = strings.Repeat("x", n+1)
 		}
-		in.ShowPicker(ui.ShowPickerMsg{Title: title, Items: items})
+		in.ShowPicker(ui.PickerOptions{Title: title, Items: items})
 		in.Picker().SelectUp() // wrap to the last result, outside the initial window
 		for _, height := range []int{1, 2, 3, 5, 8} {
 			in.SetSize(30, height)
@@ -376,7 +376,7 @@ func TestInputInlinePickerSeedsFilterFromInput(t *testing.T) {
 	}
 
 	in.SetValue("rel")
-	in.ShowPicker(ui.ShowPickerMsg{Items: items, Inline: true})
+	in.ShowPicker(ui.PickerOptions{Items: items, Inline: true})
 	in.SetSize(in.width, in.MeasureHeight(in.width, ui.MaxLayoutCells))
 
 	if got := in.Picker().Query(); got != "rel" {

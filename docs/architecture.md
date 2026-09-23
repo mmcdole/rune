@@ -140,8 +140,8 @@ handler publishes its final snapshots on return. Layout, bars, and binds remain
 separate messages; the TUI never calls Lua during measurement or rendering.
 
 The TUI prunes inactive nodes, measures widgets without resizing them, and uses
-`ui.AllocateAxis` to assign rectangles. It retains that layout until geometry
-can change: terminal size, layout declarations, draft edits, overlay geometry, bar
+its private axis allocator to assign rectangles. It retains that layout until
+geometry can change: terminal size, layout declarations, draft edits, overlay geometry, bar
 visibility, or text in a pane whose size, or ancestor size, is auto. The layout records those
 pane names; writes to other panes reuse the geometry. Geometry changes are applied
 before subsequent messages wrap output or move the search selection. Cursor
@@ -221,7 +221,7 @@ The renderer joins Input's separators to surrounding layout dividers.
 **Flow:**
 
 1. Lua calls `rune.ui.picker.show({ items=..., mode="inline" })`.
-2. Session generates a callback ID and pushes a `ShowPickerMsg` to the UI.
+2. Session passes `ui.PickerOptions`, including a callback ID, to `UI.ShowPicker`. The TUI wraps those options in a private message for its model.
 3. UI renders the picker.
 4. User selects an item.
 5. UI sends `PickerSelectMsg` (with the ID) back to Session.
