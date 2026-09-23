@@ -110,7 +110,6 @@ func startOutputProbe(b *testing.B, draftLines int, layout string) (*BubbleTeaUI
 		tea.WithWindowSize(270, 66), tea.WithColorProfile(colorprofile.TrueColor),
 		tea.WithEnvironment([]string{"TERM=xterm-256color"}),
 	)
-	adapter.program = program
 	done := make(chan error, 1)
 	bridgeDone := make(chan struct{})
 	// Same FIFO delivery as BubbleTeaUI.Run; Print uses its production queue.
@@ -119,6 +118,7 @@ func startOutputProbe(b *testing.B, draftLines int, layout string) (*BubbleTeaUI
 		for {
 			select {
 			case <-adapter.done:
+				program.Quit()
 				return
 			case msg := <-adapter.msgQueue:
 				program.Send(msg)

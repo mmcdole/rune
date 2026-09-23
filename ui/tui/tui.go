@@ -17,8 +17,9 @@ import (
 
 // BubbleTeaUI implements ui.UI with Bubble Tea.
 type BubbleTeaUI struct {
-	program *tea.Program
-	output  io.Writer
+	program      *tea.Program // Published by closing programReady; never changed afterward.
+	programReady chan struct{}
+	output       io.Writer
 
 	// Message queue - buffered channel drained by a single goroutine.
 	// This decouples callers from tea.Program.Send() which can block.
@@ -40,10 +41,11 @@ type BubbleTeaUI struct {
 // NewBubbleTeaUI creates a new Bubble Tea-based UI.
 func NewBubbleTeaUI() *BubbleTeaUI {
 	return &BubbleTeaUI{
-		msgQueue: make(chan tea.Msg, 4096),
-		events:   make(chan ui.UIEvent, 2048),
-		done:     make(chan struct{}),
-		output:   os.Stdout,
+		msgQueue:     make(chan tea.Msg, 4096),
+		events:       make(chan ui.UIEvent, 2048),
+		programReady: make(chan struct{}),
+		done:         make(chan struct{}),
+		output:       os.Stdout,
 	}
 }
 
@@ -108,9 +110,17 @@ func (b *BubbleTeaUI) CommitPrompt(text string) {
 
 // Run starts the TUI and blocks until exit.
 func (b *BubbleTeaUI) Run() (err error) {
+	select {
+	case <-b.done:
+		return nil // Quit during boot; do not open the TUI.
+	default:
+	}
+
 	model := NewModel(b.events)
 	model.renderInterval = defaultRenderInterval
-	b.program = tea.NewProgram(model, tea.WithOutput(b.output))
+	program := tea.NewProgram(model, tea.WithOutput(b.output))
+	b.program = program
+	close(b.programReady)
 
 	defer func() {
 		if resetErr := b.writeKeypadMode(false); err == nil {
@@ -123,29 +133,34 @@ func (b *BubbleTeaUI) Run() (err error) {
 		})
 	}()
 
-	// Single goroutine drains message queue to Bubble Tea.
-	// This can block on Send() without affecting producers.
+	// One goroutine owns delivery to Bubble Tea, including shutdown. Send
+	// waits for Run to start, so a Quit during setup is delivered then.
 	go func() {
 		for {
+			// Prefer shutdown even when the queue is full.
 			select {
 			case <-b.done:
+				program.Quit()
+				return
+			default:
+			}
+			select {
+			case <-b.done:
+				program.Quit()
 				return
 			case msg := <-b.msgQueue:
-				b.program.Send(msg)
+				program.Send(msg)
 			}
 		}
 	}()
 
 	// Run blocks until quit
-	_, err = b.program.Run()
+	_, err = program.Run()
 	return err
 }
 
 // Quit signals the TUI to exit.
 func (b *BubbleTeaUI) Quit() {
-	if b.program != nil {
-		b.program.Quit()
-	}
 	b.doneOnce.Do(func() {
 		close(b.done)
 	})
@@ -233,9 +248,12 @@ func (b *BubbleTeaUI) InputSetCursor(pos int) {
 // Returns the edited content and whether the edit was successful.
 func (b *BubbleTeaUI) OpenEditor(initial string) (string, bool) {
 	// This is synchronous - we need to suspend the TUI
-	if b.program == nil {
+	select {
+	case <-b.programReady:
+	default:
 		return "", false
 	}
+	program := b.program
 
 	// Create temp file
 	f, err := os.CreateTemp("", "rune-input-*.txt")
@@ -253,7 +271,7 @@ func (b *BubbleTeaUI) OpenEditor(initial string) (string, bool) {
 	}
 
 	// Suspend TUI
-	if err := b.program.ReleaseTerminal(); err != nil {
+	if err := program.ReleaseTerminal(); err != nil {
 		_ = b.writeKeypadMode(false)
 		return "", false
 	}
@@ -274,7 +292,7 @@ func (b *BubbleTeaUI) OpenEditor(initial string) (string, bool) {
 	err = cmd.Run()
 
 	// Resume TUI
-	restoreErr := b.program.RestoreTerminal()
+	restoreErr := program.RestoreTerminal()
 	if restoreErr == nil {
 		_ = b.writeKeypadMode(b.keypadMode())
 	}
