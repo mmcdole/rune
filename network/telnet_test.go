@@ -2,6 +2,7 @@ package network
 
 import (
 	"bytes"
+	"reflect"
 	"testing"
 )
 
@@ -467,5 +468,48 @@ func TestNOPCommand(t *testing.T) {
 	}
 	if events[0].Command != CmdNOP {
 		t.Errorf("Expected NOP command, got %d", events[0].Command)
+	}
+}
+
+func TestStandaloneIACCommandsPreserveFollowingData(t *testing.T) {
+	tests := []struct {
+		name    string
+		command byte
+		want    []TelnetEvent
+	}{
+		{"DM", CmdDM, []TelnetEvent{{Kind: TelnetEventIAC, Command: CmdDM}}},
+		{"AYT", CmdAYT, []TelnetEvent{{Kind: TelnetEventIAC, Command: CmdAYT}}},
+		{"stray SE", CmdSE, nil},
+	}
+
+	for _, tt := range tests {
+		for _, split := range []bool{false, true} {
+			name := tt.name + "/same chunk"
+			if split {
+				name = tt.name + "/split chunks"
+			}
+			t.Run(name, func(t *testing.T) {
+				parser := NewParser()
+				first := []byte{CmdIAC, tt.command}
+				if !split {
+					first = append(first, 'X')
+				}
+				got := parser.Receive(first)
+				want := tt.want
+				if !split {
+					want = append(append([]TelnetEvent(nil), want...), TelnetEvent{Kind: TelnetEventDataReceive, Data: []byte{'X'}})
+				}
+				if !reflect.DeepEqual(got, want) {
+					t.Fatalf("first Receive() = %+v, want %+v", got, want)
+				}
+				if split {
+					got = parser.Receive([]byte{'X'})
+					want = []TelnetEvent{{Kind: TelnetEventDataReceive, Data: []byte{'X'}}}
+					if !reflect.DeepEqual(got, want) {
+						t.Fatalf("second Receive() = %+v, want %+v", got, want)
+					}
+				}
+			})
+		}
 	}
 }
