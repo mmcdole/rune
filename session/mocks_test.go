@@ -153,6 +153,8 @@ func newMockUI() *mockUI {
 func cleanupTestSession(t testing.TB, s *Session) {
 	t.Cleanup(func() {
 		s.cancelBackgroundWork()
+		s.net.Disconnect()
+		s.backgroundWork.Wait()
 		s.engine.Close()
 		s.timer.Stop()
 		s.LogStop()

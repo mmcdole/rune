@@ -28,6 +28,7 @@ type TCPClient struct {
 	// bumps it past that ID to invalidate pending dials. Session bumps its
 	// own counter on disconnect too, keeping the two in lockstep.
 	desiredConnectionID uint64
+	cancelDial          context.CancelFunc // protected by mu; safe to call after completion
 }
 
 // connection owns the state and workers for one TCP connection.
@@ -108,6 +109,21 @@ func dialOverride(hostport string) string {
 
 // Connect dials address and installs it unless connectionID was superseded.
 func (c *TCPClient) Connect(ctx context.Context, address string, connectionID uint64) error {
+	c.mu.Lock()
+	if c.desiredConnectionID != connectionID {
+		c.mu.Unlock()
+		return context.Canceled
+	}
+	// Register cancellation before dialing, under the same lock used by
+	// BeginConnect and Disconnect, so neither can miss an in-flight dial.
+	ctx, cancel := context.WithCancel(ctx)
+	if c.cancelDial != nil {
+		c.cancelDial()
+	}
+	c.cancelDial = cancel
+	c.mu.Unlock()
+	defer cancel()
+
 	hostport, useTLS, insecure, err := splitAddress(address)
 	if err != nil {
 		return err
@@ -152,7 +168,7 @@ func (c *TCPClient) Connect(ctx context.Context, address string, connectionID ui
 
 	// Ignore a dial superseded by BeginConnect or Disconnect.
 	c.mu.Lock()
-	if c.desiredConnectionID != connectionID {
+	if c.desiredConnectionID != connectionID || ctx.Err() != nil {
 		c.mu.Unlock()
 		conn.Close()
 		return context.Canceled
@@ -170,10 +186,14 @@ func (c *TCPClient) Connect(ctx context.Context, address string, connectionID ui
 }
 
 // BeginConnect records the next connection ID before its asynchronous dial,
-// so older dials cannot replace it.
+// cancelling older dials so they cannot replace it.
 func (c *TCPClient) BeginConnect(connectionID uint64) {
 	c.mu.Lock()
 	c.desiredConnectionID = connectionID
+	if c.cancelDial != nil {
+		c.cancelDial()
+		c.cancelDial = nil
+	}
 	old := c.current
 	c.current = nil
 	c.mu.Unlock()
@@ -182,10 +202,14 @@ func (c *TCPClient) BeginConnect(connectionID uint64) {
 	}
 }
 
-// Disconnect rejects pending dials and closes the active connection.
+// Disconnect cancels pending dials and closes the active connection.
 func (c *TCPClient) Disconnect() {
 	c.mu.Lock()
 	c.desiredConnectionID++ // invalidate pending dials
+	if c.cancelDial != nil {
+		c.cancelDial()
+		c.cancelDial = nil
+	}
 	old := c.current
 	c.current = nil
 	c.mu.Unlock()
