@@ -472,7 +472,7 @@ func TestMCCP2ReadChunkingPreservesDataAndPlainTrailer(t *testing.T) {
 			// Complete WILL/DO before activation, as an MCCP server must.
 			parser := NewParser()
 			negotiation := parser.Receive([]byte{CmdIAC, CmdWILL, OptMCCP2})
-			if len(negotiation) != 2 || negotiation[0].Kind != TelnetEventDataSend ||
+			if len(negotiation) != 2 || negotiation[0].Kind != TelnetEventSendFrame ||
 				!bytes.Equal(negotiation[0].Data, []byte{CmdIAC, CmdDO, OptMCCP2}) {
 				t.Fatalf("MCCP negotiation = %+v, want DO MCCP2", negotiation)
 			}
@@ -500,7 +500,7 @@ func TestMCCP2ReadChunkingPreservesDataAndPlainTrailer(t *testing.T) {
 					t.Fatalf("expected a nonempty data batch: %+v", inbound)
 				}
 				for _, event := range inbound.Batch.Events {
-					if event.Kind != TelnetEventDataReceive {
+					if event.Kind != TelnetEventData {
 						t.Fatalf("transport-local compression event escaped: %+v", event)
 					}
 					got.Write(event.Data)
@@ -658,7 +658,7 @@ func TestPromptBoundariesStayInTheirEventBatch(t *testing.T) {
 			if len(got.Batch.Events) != 2 {
 				t.Fatalf("events = %+v, want data and mark in one batch", got.Batch.Events)
 			}
-			if event := got.Batch.Events[0]; event.Kind != TelnetEventDataReceive || string(event.Data) != "the sun rises\r\nHP:100> " {
+			if event := got.Batch.Events[0]; event.Kind != TelnetEventData || string(event.Data) != "the sun rises\r\nHP:100> " {
 				t.Fatalf("first event = %+v, want prompt data", event)
 			}
 			if event := got.Batch.Events[1]; event.Kind != TelnetEventIAC || event.Command != tt.command {
@@ -746,7 +746,7 @@ func TestDataReadsRemainIncrementalAfterGA(t *testing.T) {
 	if got := string(nextEffect(t, c, EffectServerData, "data before GA").Data); got != "HP:100> " {
 		t.Fatalf("data before GA = %q", got)
 	}
-	nextEffect(t, c, EffectGA, "GA mark")
+	nextEffect(t, c, EffectPromptBoundary, "GA mark")
 	advance <- struct{}{}
 	if got := string(nextEffect(t, c, EffectServerData, "first data fragment").Data); got != "User" {
 		t.Fatalf("first fragment = %q, want User", got)
@@ -787,7 +787,7 @@ func TestBlockedLineWriteDoesNotStopIncomingParsing(t *testing.T) {
 	select {
 	case inbound := <-c.inboundChan:
 		if inbound.Kind != InboundBatch || len(inbound.Batch.Events) != 1 ||
-			inbound.Batch.Events[0].Kind != TelnetEventDataReceive ||
+			inbound.Batch.Events[0].Kind != TelnetEventData ||
 			string(inbound.Batch.Events[0].Data) != "write-block-marker\r\n" {
 			t.Fatalf("incoming batch during blocked write = %+v", inbound)
 		}

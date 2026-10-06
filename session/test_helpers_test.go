@@ -35,7 +35,7 @@ func userInput(s *Session, text string) {
 }
 
 func serverData(s *Session, data string) {
-	serverBatch(s, network.TelnetEvent{Kind: network.TelnetEventDataReceive, Data: []byte(data)})
+	serverBatch(s, network.TelnetEvent{Kind: network.TelnetEventData, Data: []byte(data)})
 }
 
 func completeLine(s *Session, line string) {

@@ -16,7 +16,7 @@ func TestPartialLineBufferExtractsLinesAndPromptBoundaryTail(t *testing.T) {
 		t.Fatalf("partial = %q, want line3", got)
 	}
 
-	if text := partialLine.consumeAtPromptBoundary(); text != "line3" {
+	if text := partialLine.take(); text != "line3" {
 		t.Fatalf("prompt boundary = %q, want line3", text)
 	}
 	if got := partialLine.peek(); got != "" {
@@ -68,7 +68,7 @@ func TestPartialLinePromptBoundaryAfterCRHasNoPrompt(t *testing.T) {
 	if lines := partialLine.appendData([]byte("complete line\r")); len(lines) != 1 || lines[0] != "complete line" {
 		t.Fatalf("lines before boundary = %q, want [complete line]", lines)
 	}
-	if got := partialLine.consumeAtPromptBoundary(); got != "" {
+	if got := partialLine.take(); got != "" {
 		t.Fatalf("boundary = %q, want empty", got)
 	}
 	if lines := partialLine.appendData([]byte("\nnext line\r\n")); len(lines) != 1 || lines[0] != "next line" {

@@ -1,6 +1,9 @@
 package network
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // EffectKind identifies one ordered consequence of a Telnet event.
 type EffectKind uint8
@@ -11,10 +14,8 @@ const (
 	EffectSendFrame EffectKind = iota
 	// EffectServerData is received application text.
 	EffectServerData
-	// EffectGA and EffectEOR are the two Telnet prompt boundaries; Session
-	// treats them identically.
-	EffectGA
-	EffectEOR
+	// EffectPromptBoundary is a Telnet GA or EOR, which ends a prompt.
+	EffectPromptBoundary
 	// EffectGMCPEnabled fires once when negotiation first activates GMCP.
 	EffectGMCPEnabled
 	// EffectGMCPMessage is one received GMCP package with its JSON payload.
@@ -62,27 +63,21 @@ func (p *Protocol) Process(batch EventBatch, emit func(Effect) bool) bool {
 
 	for _, event := range batch.Events {
 		switch event.Kind {
-		case TelnetEventDataSend:
+		case TelnetEventSendFrame:
 			if !emit(Effect{Kind: EffectSendFrame, Data: event.Data}) {
 				return false
 			}
 
-		case TelnetEventDataReceive:
+		case TelnetEventData:
 			if !emit(Effect{Kind: EffectServerData, Data: event.Data}) {
 				return false
 			}
 
 		case TelnetEventIAC:
-			var kind EffectKind
-			switch event.Command {
-			case CmdGA:
-				kind = EffectGA
-			case CmdEOR:
-				kind = EffectEOR
-			default:
+			if event.Command != CmdGA && event.Command != CmdEOR {
 				continue
 			}
-			if !emit(Effect{Kind: kind}) {
+			if !emit(Effect{Kind: EffectPromptBoundary}) {
 				return false
 			}
 
@@ -108,9 +103,6 @@ func (p *Protocol) Process(batch EventBatch, emit func(Effect) bool) bool {
 				if pkg != "" && !emit(Effect{Kind: EffectGMCPMessage, Package: pkg, Payload: payload}) {
 					return false
 				}
-				continue
-			}
-			if event.Option == OptMCCP2 {
 				continue
 			}
 			for _, frame := range p.handshake.onSubnegotiation(event.Option, event.Data) {
@@ -175,4 +167,17 @@ func (p *Protocol) applyNegotiation(command, option byte) (gmcpJustEnabled bool)
 		}
 	}
 	return option == OptGMCP && !wasGMCPActive && p.GMCPActive()
+}
+
+// splitGMCP separates "Package.SubPackage <json>" into the package
+// name and the raw JSON payload (which may be empty).
+func splitGMCP(data []byte) (pkg, payload string) {
+	msg := strings.TrimSpace(string(data))
+	if msg == "" {
+		return "", ""
+	}
+	if i := strings.IndexByte(msg, ' '); i >= 0 {
+		return msg[:i], strings.TrimSpace(msg[i+1:])
+	}
+	return msg, ""
 }

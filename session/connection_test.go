@@ -73,10 +73,10 @@ func TestConnectionChangeLaterInBatchCancelsDeferredSendFinish(t *testing.T) {
 			uiMock.drainDisplayEvents()
 
 			serverBatch(s,
-				network.TelnetEvent{Kind: network.TelnetEventDataReceive, Data: []byte("Old prompt>")},
+				network.TelnetEvent{Kind: network.TelnetEventData, Data: []byte("Old prompt>")},
 				network.TelnetEvent{Kind: network.TelnetEventIAC, Command: network.CmdGA},
 				network.TelnetEvent{Kind: network.TelnetEventSubnegotiation, Option: network.OptGMCP, Data: []byte("Core.Switch {}")},
-				network.TelnetEvent{Kind: network.TelnetEventDataReceive, Data: []byte("stale data\r\n")},
+				network.TelnetEvent{Kind: network.TelnetEventData, Data: []byte("stale data\r\n")},
 			)
 			if tt.finishConnect {
 				awaitInternalEvent(t, s)
@@ -146,7 +146,7 @@ func TestStaleInboundBatchCannotChangeCurrentConnection(t *testing.T) {
 	uiMock.drainPrompts()
 
 	s.handleInbound(network.Inbound{Kind: network.InboundBatch, ConnectionID: oldConnection, Batch: network.EventBatch{Events: []network.TelnetEvent{
-		{Kind: network.TelnetEventDataReceive, Data: []byte("old")},
+		{Kind: network.TelnetEventData, Data: []byte("old")},
 		{Kind: network.TelnetEventIAC, Command: network.CmdGA},
 	}}})
 	if got := s.partialLine.peek(); got != "new Username:" {
@@ -167,8 +167,8 @@ func TestRequiredProtocolReplyFailureDisconnectsAndStopsBatch(t *testing.T) {
 		Kind:         network.InboundBatch,
 		ConnectionID: connectionID,
 		Batch: network.EventBatch{Events: []network.TelnetEvent{
-			{Kind: network.TelnetEventDataSend, Data: []byte{network.CmdIAC, network.CmdDO, network.OptEcho}},
-			{Kind: network.TelnetEventDataReceive, Data: []byte("must not print\r\n")},
+			{Kind: network.TelnetEventSendFrame, Data: []byte{network.CmdIAC, network.CmdDO, network.OptEcho}},
+			{Kind: network.TelnetEventData, Data: []byte("must not print\r\n")},
 		}},
 	})
 

@@ -70,18 +70,11 @@ func (b *partialLineBuffer) appendData(data []byte) []string {
 
 // peek returns the partial line without consuming it.
 func (b *partialLineBuffer) peek() string {
-	if b.buffer.Len() == 0 {
-		return ""
-	}
 	return b.buffer.String()
 }
 
-// consumeAtPromptBoundary clears and returns the text a GA/EOR prompt
-// boundary terminated.
-func (b *partialLineBuffer) consumeAtPromptBoundary() string {
-	if b.buffer.Len() == 0 {
-		return ""
-	}
+// take clears and returns the partial line.
+func (b *partialLineBuffer) take() string {
 	text := b.buffer.String()
 	b.buffer.Reset()
 	return text
@@ -94,6 +87,8 @@ func (b *partialLineBuffer) discard() {
 	b.buffer.Reset()
 }
 
+// reset drops the partial line and any pending delimiter partner, for a new
+// connection.
 func (b *partialLineBuffer) reset() {
 	b.buffer.Reset()
 	b.pendingPartner = 0

@@ -285,7 +285,7 @@ func (s *Session) applyProtocolEffect(state *eventBatchState, effect network.Eff
 	case network.EffectServerData:
 		state.serverDataSincePromptBoundary = true
 		s.handleServerData(effect.Data, state.connectionID)
-	case network.EffectGA, network.EffectEOR:
+	case network.EffectPromptBoundary:
 		state.serverDataSincePromptBoundary = false
 		s.handlePromptBoundary()
 	case network.EffectGMCPEnabled:
@@ -311,7 +311,7 @@ func (s *Session) handleServerData(payload []byte, connectionID uint64) {
 // handlePromptBoundary interprets a Telnet GA/EOR prompt boundary by
 // confirming and consuming the partial line.
 func (s *Session) handlePromptBoundary() {
-	payload := s.partialLine.consumeAtPromptBoundary()
+	payload := s.partialLine.take()
 	if payload != "" {
 		s.handlePromptObservation(payload, true)
 	}

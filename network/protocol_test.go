@@ -135,9 +135,9 @@ func TestProtocolUsesBatchSecurityForIdentityReplies(t *testing.T) {
 func TestProtocolStopsWhenEmitterRejectsAnEffect(t *testing.T) {
 	p := NewProtocol(80, 24)
 	batch := EventBatch{Events: []TelnetEvent{
-		{Kind: TelnetEventDataReceive, Data: []byte("first")},
+		{Kind: TelnetEventData, Data: []byte("first")},
 		{Kind: TelnetEventIAC, Command: CmdGA},
-		{Kind: TelnetEventDataReceive, Data: []byte("second")},
+		{Kind: TelnetEventData, Data: []byte("second")},
 	}}
 
 	var got []Effect
@@ -157,17 +157,16 @@ func TestProtocolRecordMarksDoNotDependOnReadSplits(t *testing.T) {
 	tests := []struct {
 		name    string
 		command byte
-		effect  EffectKind
 	}{
-		{name: "GA", command: CmdGA, effect: EffectGA},
-		{name: "EOR", command: CmdEOR, effect: EffectEOR},
+		{name: "GA", command: CmdGA},
+		{name: "EOR", command: CmdEOR},
 	}
 
 	for _, tt := range tests {
 		wire := append([]byte("Username:"), CmdIAC, tt.command)
 		for _, partition := range readPartitions(wire) {
 			t.Run(tt.name+"/"+partition.name, func(t *testing.T) {
-				parser := newParser(newCompatibilityTable())
+				parser := newParser(compatibilityTable{})
 				protocol := NewProtocol(80, 24)
 				var text bytes.Buffer
 				boundaries := 0
@@ -180,13 +179,11 @@ func TestProtocolRecordMarksDoNotDependOnReadSplits(t *testing.T) {
 								t.Fatalf("server data %q arrived after prompt boundary", effect.Data)
 							}
 							text.Write(effect.Data)
-						case tt.effect:
+						case EffectPromptBoundary:
 							boundaries++
 							if got := text.String(); got != "Username:" {
 								t.Fatalf("text before mark = %q, want Username:", got)
 							}
-						case EffectGA, EffectEOR:
-							t.Fatalf("wrong prompt-boundary effect %v", effect.Kind)
 						default:
 							t.Fatalf("unexpected effect %+v", effect)
 						}

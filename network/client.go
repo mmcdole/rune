@@ -25,8 +25,7 @@ type TCPClient struct {
 	current *connection
 	// desiredConnectionID gates dials and sends: only work carrying this ID
 	// is accepted. BeginConnect sets it to the ID Session issued; Disconnect
-	// bumps it past that ID to invalidate pending dials. Session bumps its
-	// own counter on disconnect too, keeping the two in lockstep.
+	// bumps it so no pending dial can match.
 	desiredConnectionID uint64
 	cancelDial          context.CancelFunc // protected by mu; safe to call after completion
 }
@@ -190,12 +189,7 @@ func (c *TCPClient) Connect(ctx context.Context, address string, connectionID ui
 func (c *TCPClient) BeginConnect(connectionID uint64) {
 	c.mu.Lock()
 	c.desiredConnectionID = connectionID
-	if c.cancelDial != nil {
-		c.cancelDial()
-		c.cancelDial = nil
-	}
-	old := c.current
-	c.current = nil
+	old := c.detachLocked()
 	c.mu.Unlock()
 	if old != nil {
 		old.close()
@@ -205,17 +199,24 @@ func (c *TCPClient) BeginConnect(connectionID uint64) {
 // Disconnect cancels pending dials and closes the active connection.
 func (c *TCPClient) Disconnect() {
 	c.mu.Lock()
-	c.desiredConnectionID++ // invalidate pending dials
+	c.desiredConnectionID++
+	old := c.detachLocked()
+	c.mu.Unlock()
+	if old != nil {
+		old.close()
+	}
+}
+
+// detachLocked cancels any pending dial and detaches the active connection
+// for the caller to close after unlocking. c.mu must be held.
+func (c *TCPClient) detachLocked() *connection {
 	if c.cancelDial != nil {
 		c.cancelDial()
 		c.cancelDial = nil
 	}
 	old := c.current
 	c.current = nil
-	c.mu.Unlock()
-	if old != nil {
-		old.close()
-	}
+	return old
 }
 
 // SendLine queues one game line for the identified connection. Line data is
@@ -329,13 +330,10 @@ func (c *TCPClient) processIncoming(cx *connection, data []byte) bool {
 	startMCCP := false
 	var mccpRest []byte
 	for _, event := range events {
-		switch {
-		case event.Kind == TelnetEventSubnegotiation && event.Option == OptMCCP2:
-			startMCCP = true
-		case event.Kind == TelnetEventDecompressImmediate:
+		if event.Kind == TelnetEventCompressStart {
 			startMCCP = true
 			mccpRest = event.Data
-		default:
+		} else {
 			forwarded = append(forwarded, event)
 		}
 	}
@@ -386,19 +384,6 @@ func (cx *connection) startDecompression(remaining []byte) error {
 	cx.reader = zr
 	cx.compressed = true
 	return nil
-}
-
-// splitGMCP separates "Package.SubPackage <json>" into the package
-// name and the raw JSON payload (which may be empty).
-func splitGMCP(data []byte) (pkg, payload string) {
-	msg := strings.TrimSpace(string(data))
-	if msg == "" {
-		return "", ""
-	}
-	if i := strings.IndexByte(msg, ' '); i >= 0 {
-		return msg[:i], strings.TrimSpace(msg[i+1:])
-	}
-	return msg, ""
 }
 
 // writeLoop handles outgoing data for a specific connection.

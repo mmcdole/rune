@@ -209,7 +209,7 @@ func TestPromptBoundaryInDataBatchOnlyEmitsConfirmedPrompt(t *testing.T) {
 			}
 
 			serverBatch(s,
-				network.TelnetEvent{Kind: network.TelnetEventDataReceive, Data: []byte("HP:100>")},
+				network.TelnetEvent{Kind: network.TelnetEventData, Data: []byte("HP:100>")},
 				network.TelnetEvent{Kind: network.TelnetEventIAC, Command: boundary.command},
 			)
 
@@ -234,9 +234,9 @@ func TestPromptBoundariesPreservePromptAndTailOrderWithinBatch(t *testing.T) {
 		{
 			name: "data GA data",
 			events: []network.TelnetEvent{
-				{Kind: network.TelnetEventDataReceive, Data: []byte("First>")},
+				{Kind: network.TelnetEventData, Data: []byte("First>")},
 				{Kind: network.TelnetEventIAC, Command: network.CmdGA},
-				{Kind: network.TelnetEventDataReceive, Data: []byte("Second>")},
+				{Kind: network.TelnetEventData, Data: []byte("Second>")},
 			},
 			wantFlags:      "true, false",
 			wantPrompt:     "Second>",
@@ -245,9 +245,9 @@ func TestPromptBoundariesPreservePromptAndTailOrderWithinBatch(t *testing.T) {
 		{
 			name: "data GA data GA",
 			events: []network.TelnetEvent{
-				{Kind: network.TelnetEventDataReceive, Data: []byte("First>")},
+				{Kind: network.TelnetEventData, Data: []byte("First>")},
 				{Kind: network.TelnetEventIAC, Command: network.CmdGA},
-				{Kind: network.TelnetEventDataReceive, Data: []byte("Second>")},
+				{Kind: network.TelnetEventData, Data: []byte("Second>")},
 				{Kind: network.TelnetEventIAC, Command: network.CmdGA},
 			},
 			wantFlags:  "true, true",
@@ -302,7 +302,7 @@ func TestOncePromptTriggerUsesFirstMatchingObservation(t *testing.T) {
 			name: "same batch is confirmed",
 			deliver: func(s *Session) {
 				serverBatch(s,
-					network.TelnetEvent{Kind: network.TelnetEventDataReceive, Data: []byte("Username:")},
+					network.TelnetEvent{Kind: network.TelnetEventData, Data: []byte("Username:")},
 					network.TelnetEvent{Kind: network.TelnetEventIAC, Command: network.CmdGA},
 				)
 			},
@@ -394,7 +394,7 @@ func TestConfirmedPromptBatchFinishesAfterRewriteOrGag(t *testing.T) {
 			uiMock.drainDisplayEvents()
 
 			serverBatch(s,
-				network.TelnetEvent{Kind: network.TelnetEventDataReceive, Data: []byte(tt.prompt)},
+				network.TelnetEvent{Kind: network.TelnetEventData, Data: []byte(tt.prompt)},
 				network.TelnetEvent{Kind: network.TelnetEventIAC, Command: network.CmdGA},
 			)
 
@@ -432,8 +432,8 @@ func TestTrailingBareCRIsImmediateOutputNotPrompt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	serverBatch(s, network.TelnetEvent{Kind: network.TelnetEventDataReceive, Data: []byte("complete\r")})
-	serverBatch(s, network.TelnetEvent{Kind: network.TelnetEventDataReceive, Data: []byte("\nnext\r")})
+	serverBatch(s, network.TelnetEvent{Kind: network.TelnetEventData, Data: []byte("complete\r")})
+	serverBatch(s, network.TelnetEvent{Kind: network.TelnetEventData, Data: []byte("\nnext\r")})
 
 	assertSessionLua(t, s.engine, `
 		assert(prompts == 0, "prompt callbacks: " .. prompts)
@@ -463,8 +463,8 @@ func TestBareCRLinePrecedesLaterProtocolEffectsInBatch(t *testing.T) {
 	}
 
 	serverBatch(s,
-		network.TelnetEvent{Kind: network.TelnetEventDataReceive, Data: []byte("complete\r")},
-		network.TelnetEvent{Kind: network.TelnetEventDataSend, Data: []byte{network.CmdIAC, network.CmdDO, network.OptGMCP}},
+		network.TelnetEvent{Kind: network.TelnetEventData, Data: []byte("complete\r")},
+		network.TelnetEvent{Kind: network.TelnetEventSendFrame, Data: []byte{network.CmdIAC, network.CmdDO, network.OptGMCP}},
 		network.TelnetEvent{Kind: network.TelnetEventNegotiation, Command: network.CmdWILL, Option: network.OptGMCP},
 	)
 
@@ -496,7 +496,7 @@ func TestCRBeforePromptBoundaryIsAlwaysAnOrdinaryLine(t *testing.T) {
 			name: "same batch",
 			deliver: func(s *Session) {
 				serverBatch(s,
-					network.TelnetEvent{Kind: network.TelnetEventDataReceive, Data: []byte("complete\r")},
+					network.TelnetEvent{Kind: network.TelnetEventData, Data: []byte("complete\r")},
 					network.TelnetEvent{Kind: network.TelnetEventIAC, Command: network.CmdGA},
 				)
 			},

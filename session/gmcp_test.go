@@ -55,10 +55,10 @@ func TestGMCPBatchEffectsStayInWireOrderAcrossLuaCallbacks(t *testing.T) {
 	doGMCP := []byte{network.CmdIAC, network.CmdDO, network.OptGMCP}
 	dontGMCP := []byte{network.CmdIAC, network.CmdDONT, network.OptGMCP}
 	serverBatch(s,
-		network.TelnetEvent{Kind: network.TelnetEventDataSend, Data: doGMCP},
+		network.TelnetEvent{Kind: network.TelnetEventSendFrame, Data: doGMCP},
 		network.TelnetEvent{Kind: network.TelnetEventNegotiation, Command: network.CmdWILL, Option: network.OptGMCP},
 		network.TelnetEvent{Kind: network.TelnetEventSubnegotiation, Option: network.OptGMCP, Data: []byte(`Char.Vitals {"hp":10}`)},
-		network.TelnetEvent{Kind: network.TelnetEventDataSend, Data: dontGMCP},
+		network.TelnetEvent{Kind: network.TelnetEventSendFrame, Data: dontGMCP},
 		network.TelnetEvent{Kind: network.TelnetEventNegotiation, Command: network.CmdWONT, Option: network.OptGMCP},
 	)
 

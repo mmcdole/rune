@@ -137,7 +137,7 @@ func TestConfirmedPromptSpanConnectionChangeStopsPromptDispatch(t *testing.T) {
 
 	completeLine(s, "Story: unfinished")
 	serverBatch(s,
-		network.TelnetEvent{Kind: network.TelnetEventDataReceive, Data: []byte("HP>")},
+		network.TelnetEvent{Kind: network.TelnetEventData, Data: []byte("HP>")},
 		network.TelnetEvent{Kind: network.TelnetEventIAC, Command: network.CmdGA},
 	)
 
