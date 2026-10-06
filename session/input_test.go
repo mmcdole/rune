@@ -53,14 +53,13 @@ func TestInputCursorConvertsAtUIBoundary(t *testing.T) {
 
 func TestSearchStateIsIndependentFromScrollState(t *testing.T) {
 	s, _, _ := newTestSession(t)
-	s.clientState.ScrollMode = "live"
 
 	s.handleUIEvent(ui.SearchStateChangedMsg(true))
 	if !s.clientState.SearchActive {
 		t.Fatal("search-active UI event did not update client state")
 	}
-	if s.clientState.ScrollMode != "live" {
-		t.Fatalf("search changed scroll mode to %q", s.clientState.ScrollMode)
+	if s.clientState.Scrolled {
+		t.Fatal("search marked output as scrolled")
 	}
 
 	s.handleUIEvent(ui.SearchStateChangedMsg(false))

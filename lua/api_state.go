@@ -4,11 +4,11 @@ package lua
 type ClientState struct {
 	Connected    bool
 	Address      string
-	ScrollMode   string // "live" or "scrolled"
-	ScrollLines  int    // Lines behind live (when scrolled)
-	SearchActive bool   // scrollback-search navigator is trapping input
-	Width        int    // Terminal width
-	Height       int    // Terminal height
+	Scrolled     bool // output is scrolled back from live tailing
+	ScrollLines  int  // Lines behind live (when scrolled)
+	SearchActive bool // scrollback-search navigator is trapping input
+	Width        int  // Terminal width
+	Height       int  // Terminal height
 }
 
 // registerStateFuncs creates the rune._state table that Go pushes
@@ -32,7 +32,11 @@ func (e *Engine) registerStateFuncs() {
 func (e *Engine) UpdateState(state ClientState) {
 	e.vm.SetModuleField("rune._state", "connected", state.Connected)
 	e.vm.SetModuleField("rune._state", "address", state.Address)
-	e.vm.SetModuleField("rune._state", "scroll_mode", state.ScrollMode)
+	scrollMode := "live"
+	if state.Scrolled {
+		scrollMode = "scrolled"
+	}
+	e.vm.SetModuleField("rune._state", "scroll_mode", scrollMode)
 	e.vm.SetModuleField("rune._state", "scroll_lines", state.ScrollLines)
 	e.vm.SetModuleField("rune._state", "search_active", state.SearchActive)
 	e.vm.SetModuleField("rune._state", "width", state.Width)

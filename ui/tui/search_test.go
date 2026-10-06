@@ -50,7 +50,7 @@ func TestGrowingOutputOutputWindowPublishesLiveState(t *testing.T) {
 
 	foundLive := false
 	for len(events) > 0 {
-		if state, ok := (<-events).(ui.ScrollStateChangedMsg); ok && state.Mode == "live" && state.NewLines == 0 {
+		if state, ok := (<-events).(ui.ScrollStateChangedMsg); ok && !state.Scrolled && state.NewLines == 0 {
 			foundLive = true
 		}
 	}
@@ -103,7 +103,7 @@ func TestClosingTallSearchPublishesGeometryInducedLiveState(t *testing.T) {
 
 	foundLive := false
 	for len(events) > 0 {
-		if state, ok := (<-events).(ui.ScrollStateChangedMsg); ok && state.Mode == "live" && state.NewLines == 0 {
+		if state, ok := (<-events).(ui.ScrollStateChangedMsg); ok && !state.Scrolled && state.NewLines == 0 {
 			foundLive = true
 		}
 	}

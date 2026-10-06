@@ -44,16 +44,16 @@ func (WindowSizeChangedMsg) uiEvent() {}
 // Session uses this to update rune.state.scroll_mode/scroll_lines. It is
 // state, not an event: the UI posts it only when the value changed.
 type ScrollStateChangedMsg struct {
-	Mode     string // "live" or "scrolled"
-	NewLines int    // Lines behind live (when scrolled)
+	Scrolled bool // output is scrolled back from live tailing
+	NewLines int  // Lines behind live (when scrolled)
 }
 
 func (ScrollStateChangedMsg) uiEvent() {}
 
 // SearchStateChangedMsg reports whether the modal scrollback-search
 // navigator is active. Search interaction and viewport scroll position are
-// independent state dimensions, so this is deliberately not another
-// ScrollStateChangedMsg.Mode value.
+// independent state dimensions, so this is deliberately separate from
+// ScrollStateChangedMsg.
 type SearchStateChangedMsg bool
 
 func (SearchStateChangedMsg) uiEvent() {}

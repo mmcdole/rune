@@ -53,6 +53,8 @@ type Model struct {
 	borderCells map[string]*uv.Cell
 
 	// Last scroll state the Session queue accepted; see reportScrollState.
+	// The zero value is live, which is also Session's starting state, so an
+	// untouched output window reports nothing.
 	reportedScroll ui.ScrollStateChangedMsg
 
 	// State
@@ -80,9 +82,6 @@ func NewModel(events chan<- ui.UIEvent) *Model {
 		borderCells: make(map[string]*uv.Cell),
 		styles:      styles,
 		layout:      ui.DefaultLayoutTree(),
-		// Session starts from the same value, so an untouched output window
-		// reports nothing.
-		reportedScroll: ui.ScrollStateChangedMsg{Mode: "live"},
 	}
 	m.inputCtl = &inputController{input: input, host: m}
 
@@ -350,9 +349,9 @@ func (m *Model) showWarning(message string) {
 // nothing else posts it. A full queue is not a dropped event - the value is
 // simply still unreported - so it reports false and the caller retries.
 func (m *Model) reportScrollState() bool {
-	state := ui.ScrollStateChangedMsg{Mode: "live", NewLines: m.output.NewLineCount()}
-	if m.output.Mode() != widget.ModeLive {
-		state.Mode = "scrolled"
+	state := ui.ScrollStateChangedMsg{
+		Scrolled: m.output.Mode() != widget.ModeLive,
+		NewLines: m.output.NewLineCount(),
 	}
 	if state == m.reportedScroll {
 		return true

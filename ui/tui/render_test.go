@@ -154,7 +154,7 @@ func TestScrollStateReportsOnlyChangesOncePerInterval(t *testing.T) {
 	}
 
 	m.Update(paneScrollUpMsg{Name: ui.OutputPaneName, Lines: 5})
-	if got := drainScrollReports(events); len(got) != 1 || got[0].Mode != "scrolled" {
+	if got := drainScrollReports(events); len(got) != 1 || !got[0].Scrolled {
 		t.Fatalf("scrolling from idle reported %v, want one scrolled report", got)
 	}
 	for range 50 {
@@ -196,7 +196,7 @@ func TestScrollStateRetriesAfterFullQueue(t *testing.T) {
 	if _, cmd := m.Update(renderTick{}); cmd != nil || m.throttled {
 		t.Fatal("accepted retry did not stop the tick chain")
 	}
-	if got := drainScrollReports(events); len(got) != 1 || got[0].Mode != "scrolled" {
+	if got := drainScrollReports(events); len(got) != 1 || !got[0].Scrolled {
 		t.Fatalf("retry reported %v, want one scrolled report", got)
 	}
 	if m.renders != rendered {
@@ -224,7 +224,7 @@ func TestScrollReportRetryWaitsForPendingFrame(t *testing.T) {
 	if m.renders != rendered+1 || m.dirty {
 		t.Fatal("pending changes were not rendered at the tick")
 	}
-	if got := drainScrollReports(events); len(got) != 1 || got[0].Mode != "scrolled" || got[0].NewLines != 1 {
+	if got := drainScrollReports(events); len(got) != 1 || !got[0].Scrolled || got[0].NewLines != 1 {
 		t.Fatalf("frame reported %v, want the updated scroll state", got)
 	}
 }
@@ -281,7 +281,7 @@ func TestZeroIntervalRetriesScrollReportOnNextUpdate(t *testing.T) {
 	if _, cmd := m.Update(struct{}{}); cmd != nil || m.renders != rendered {
 		t.Fatal("report retry scheduled a timer or redrew the screen")
 	}
-	if got := drainScrollReports(events); len(got) != 1 || got[0].Mode != "scrolled" {
+	if got := drainScrollReports(events); len(got) != 1 || !got[0].Scrolled {
 		t.Fatalf("next Update reported %v, want one scrolled report", got)
 	}
 }

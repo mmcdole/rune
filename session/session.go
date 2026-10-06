@@ -133,7 +133,6 @@ func New(net Network, uiInstance ui.UI, cfg Config) *Session {
 	s.protocol = network.NewProtocol(0, 0)
 
 	s.engine = lua.NewEngine(s)
-	s.clientState.ScrollMode = "live"
 	s.connectTarget = cfg.ConnectTarget
 	s.loadStore()
 
@@ -401,7 +400,7 @@ func (s *Session) handleUIEvent(event ui.UIEvent) {
 		s.publishClientState()
 		s.engine.NotifyWindowSizeChanged(event.Width, event.Height)
 	case ui.ScrollStateChangedMsg:
-		s.clientState.ScrollMode = event.Mode
+		s.clientState.Scrolled = event.Scrolled
 		s.clientState.ScrollLines = event.NewLines
 		s.publishClientState()
 	case ui.SearchStateChangedMsg:
