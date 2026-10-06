@@ -202,7 +202,7 @@ func TestHistoryPickerRestoresVerbatimMode(t *testing.T) {
 	if newest.Text != verbatim || newest.Description != "verbatim" {
 		t.Fatalf("newest picker item = %+v, want labelled verbatim entry", newest)
 	}
-	engine.ExecutePickerCallback(picker.CallbackID, newest.Value)
+	engine.OnPickerResult(picker.CallbackID, newest.Value, true)
 	assertInput(t, host, verbatim)
 	assertInputMode(t, host, input.ModeVerbatim)
 

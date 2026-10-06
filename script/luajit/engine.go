@@ -5,7 +5,7 @@
 // The seam's scoped-value contract is what keeps this backend simple:
 // values live in call scopes that own their registry references and
 // release them deterministically when the scope ends — no finalizers,
-// no GC coupling. Only explicit pins outlive a scope.
+// no GC coupling.
 package luajit
 
 /*
@@ -52,8 +52,6 @@ type Engine struct {
 
 	funcs   []script.GoFunc    // trampoline targets, addressed by upvalue
 	ownMeta map[uintptr]string // lua_topointer of our type metatables -> type name
-	pins    map[int64]C.int    // pinned functions -> registry ref
-	pinNext int64
 
 	ctx       context.Context
 	watchStop chan struct{}
@@ -87,7 +85,6 @@ func (e *Engine) Init() error {
 	e.l = l
 	e.funcs = nil
 	e.ownMeta = map[uintptr]string{}
-	e.pins = map[int64]C.int{}
 	engines[l] = e
 	for _, t := range e.types {
 		e.installType(t)
@@ -113,7 +110,6 @@ func (e *Engine) closeState() {
 	C.lua_close(e.l) // __gc releases Obj payload handles during close
 	delete(engines, e.l)
 	e.l = nil
-	e.pins = map[int64]C.int{}
 }
 
 func (e *Engine) RegisterModule(path string, fns map[string]script.GoFunc, fields map[string]any) {
@@ -304,40 +300,6 @@ func (e *Engine) CallModuleScoped(module, fn string, nret int, args []any, consu
 	return true, consume(vals)
 }
 
-func (e *Engine) Call(fn script.FuncRef, nret int, args ...any) ([]script.Result, error) {
-	ref, ok := e.pins[fn.PinID()]
-	if !ok {
-		return nil, errors.New("script function is no longer available")
-	}
-	base := int(C.lua_gettop(e.l))
-	defer C.lua_settop(e.l, C.int(base))
-	C.lua_rawgeti(e.l, C.LUA_REGISTRYINDEX, ref)
-	for _, a := range args {
-		if err := e.pushAny(a); err != nil {
-			return nil, err
-		}
-	}
-	if err := e.pcall(len(args), nret); err != nil {
-		return nil, err
-	}
-	results := make([]script.Result, nret)
-	scope := &callScope{e: e}
-	for i := 0; i < nret; i++ {
-		results[i] = materialize(scope.wrap(base + 1 + i))
-	}
-	scope.release()
-	return results, nil
-}
-
-func (e *Engine) ReleasePin(id int64) {
-	if ref, ok := e.pins[id]; ok {
-		delete(e.pins, id)
-		if e.l != nil {
-			C.luaL_unref(e.l, C.LUA_REGISTRYINDEX, ref)
-		}
-	}
-}
-
 // pcall runs fn+args at the top of the stack with debug.traceback as
 // the message handler, matching Lunar's traceback-bearing errors.
 func (e *Engine) pcall(nargs, nret int) error {
@@ -512,12 +474,6 @@ func (e *Engine) pushAny(v any) error {
 		C.lua_getfield(e.l, C.LUA_REGISTRYINDEX, cn)
 		C.free(unsafe.Pointer(cn))
 		C.lua_setmetatable(e.l, -2)
-	case script.FuncRef:
-		if ref, ok := e.pins[val.PinID()]; ok {
-			C.lua_rawgeti(e.l, C.LUA_REGISTRYINDEX, ref)
-		} else {
-			C.lua_pushnil(e.l)
-		}
 	case script.Value:
 		e.pushValue(val)
 	default:

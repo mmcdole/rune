@@ -63,57 +63,42 @@ func TestScriptEngineRejectsUnsupportedReturns(t *testing.T) {
 }
 
 func TestScriptEngineRejectsUnsupportedArguments(t *testing.T) {
-	for _, method := range []string{"module", "pinned"} {
-		t.Run(method, func(t *testing.T) {
-			vm := newScriptEngine()
-			var target script.FuncRef
-			vm.RegisterModule("probe", map[string]script.GoFunc{
-				"pin": func(c *script.Call) error {
-					target = c.PinFunc(1)
-					return nil
-				},
-			}, nil)
-			initializeScriptEngine(t, vm)
-			if err := vm.DoString("argument conversion setup", `
-				calls = 0
-				function probe.target(first, second, last)
-					calls = calls + 1
-					return first, second, last
-				end
-				probe.pin(probe.target)
-			`); err != nil {
-				t.Fatal(err)
-			}
-			defer target.Release()
-			invoke := func(args ...any) ([]script.Result, error) {
-				if method == "pinned" {
-					return vm.Call(target, 3, args...)
-				}
-				results, found, err := vm.CallModule("probe", "target", 3, args...)
-				if !found {
-					t.Fatal("target function missing")
-				}
-				return results, err
-			}
-			bad := make(chan int)
-			for _, value := range []any{bad, script.Tree{V: []any{"valid", bad}}} {
-				if _, err := invoke("first", value, "last"); err == nil ||
-					!strings.Contains(err.Error(), "chan int") {
-					t.Fatalf("argument conversion error = %v", err)
-				}
-			}
-			if err := vm.DoString("after argument errors", `assert(calls == 0)`); err != nil {
-				t.Fatalf("invalid arguments reached target: %v", err)
-			}
-			results, err := invoke("first", "second", "last")
-			if err != nil || len(results) != 3 {
-				t.Fatalf("call after argument errors: results %v, error %v", results, err)
-			}
-			for i, want := range []string{"first", "second", "last"} {
-				if results[i].String() != want {
-					t.Errorf("result %d = %q, want %q", i, results[i].String(), want)
-				}
-			}
-		})
+	vm := newScriptEngine()
+	vm.RegisterModule("probe", nil, nil)
+	initializeScriptEngine(t, vm)
+	if err := vm.DoString("argument conversion setup", `
+		calls = 0
+		function probe.target(first, second, last)
+			calls = calls + 1
+			return first, second, last
+		end
+	`); err != nil {
+		t.Fatal(err)
+	}
+	invoke := func(args ...any) ([]script.Result, error) {
+		results, found, err := vm.CallModule("probe", "target", 3, args...)
+		if !found {
+			t.Fatal("target function missing")
+		}
+		return results, err
+	}
+	bad := make(chan int)
+	for _, value := range []any{bad, script.Tree{V: []any{"valid", bad}}} {
+		if _, err := invoke("first", value, "last"); err == nil ||
+			!strings.Contains(err.Error(), "chan int") {
+			t.Fatalf("argument conversion error = %v", err)
+		}
+	}
+	if err := vm.DoString("after argument errors", `assert(calls == 0)`); err != nil {
+		t.Fatalf("invalid arguments reached target: %v", err)
+	}
+	results, err := invoke("first", "second", "last")
+	if err != nil || len(results) != 3 {
+		t.Fatalf("call after argument errors: results %v, error %v", results, err)
+	}
+	for i, want := range []string{"first", "second", "last"} {
+		if results[i].String() != want {
+			t.Errorf("result %d = %q, want %q", i, results[i].String(), want)
+		}
 	}
 }

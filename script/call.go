@@ -17,8 +17,6 @@ type CallBackend interface {
 	ArgKind(i int) Kind
 	Payload(i int) (any, bool) // typed-object payload at position i
 	SetReturn(vals []any)
-	Pin(i int) FuncRef
-	PinValue(v Value) (FuncRef, bool)
 	Raise(msg string) // unwinds the call; never returns
 	Where() string    // "file:line: " of the script caller, or ""
 }
@@ -97,24 +95,6 @@ func (c *Call) Payload(i int) any {
 		c.typeError(i, "object", c.B.ArgKind(i))
 	}
 	return p
-}
-
-// PinFunc pins the function at position i for use beyond this call.
-func (c *Call) PinFunc(i int) FuncRef {
-	if c.B.ArgKind(i) != KindFunction {
-		c.typeError(i, "function", c.B.ArgKind(i))
-	}
-	return c.B.Pin(i)
-}
-
-// PinValue pins an in-scope function value (e.g. read from a table
-// field) for use beyond this call. Returns ok=false if v is not a
-// function.
-func (c *Call) PinValue(v Value) (FuncRef, bool) {
-	if v.Kind() != KindFunction {
-		return FuncRef{}, false
-	}
-	return c.B.PinValue(v)
 }
 
 // Return sets the call's results. See script.go for accepted types.

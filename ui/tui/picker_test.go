@@ -25,7 +25,7 @@ func newInlinePickerModel(t *testing.T, dismissOnSpace bool, initial string) (*M
 			{Text: "/connect", Value: "/connect"},
 			{Text: "/disconnect", Value: "/disconnect"},
 		},
-		CallbackID:     "cb1",
+		CallbackID:     1,
 		Inline:         true,
 		DismissOnSpace: dismissOnSpace,
 	}})
@@ -69,7 +69,7 @@ func TestInlinePickerDismissesOnSpace(t *testing.T) {
 		t.Fatalf("expected picker to dismiss on space, mode = %v", m.inputCtl.mode())
 	}
 	cancels := drainPickerCancels(events)
-	if len(cancels) != 1 || cancels[0].CallbackID != "cb1" {
+	if len(cancels) != 1 || cancels[0].CallbackID != 1 {
 		t.Fatalf("expected one cancel for cb1, got %v", cancels)
 	}
 	if got := m.input.Value(); got != "/connect " {
@@ -124,7 +124,7 @@ func TestInlinePickerClosesCleanlyOnEmptiedInput(t *testing.T) {
 		t.Fatalf("expected mode reset after input emptied, mode = %v", m.inputCtl.mode())
 	}
 	cancels := drainPickerCancels(events)
-	if len(cancels) != 1 || cancels[0].CallbackID != "cb1" {
+	if len(cancels) != 1 || cancels[0].CallbackID != 1 {
 		t.Fatalf("expected one cancel for cb1, got %v", cancels)
 	}
 }
@@ -141,7 +141,7 @@ func TestInlinePickerDismissesOnLuaEditWithSpace(t *testing.T) {
 		t.Fatalf("expected picker to dismiss, mode = %v", m.inputCtl.mode())
 	}
 	cancels := drainPickerCancels(events)
-	if len(cancels) != 1 || cancels[0].CallbackID != "cb1" {
+	if len(cancels) != 1 || cancels[0].CallbackID != 1 {
 		t.Fatalf("expected one cancel for cb1, got %v", cancels)
 	}
 }

@@ -114,14 +114,14 @@ func TestModeShortcutsRespectOverlayCaptureAndAltGr(t *testing.T) {
 	if h.ctl.input.Value() != "lookv" || h.ctl.input.SubmissionMode() != input.ModeCommand {
 		t.Fatal("AltGr text was treated as toggle")
 	}
-	h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: "modal"})
+	h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: 1})
 	h.ctl.HandleKey(tea.KeyPressMsg{Code: 'v', Mod: tea.ModAlt})
 	h.ctl.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt})
 	if len(h.submitted) != 0 || h.ctl.input.SubmissionMode() != input.ModeCommand {
 		t.Fatal("modal keys affected underlying draft")
 	}
 	h.ctl.HandleKey(keyPress(tea.KeyEsc))
-	h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: "inline", Inline: true})
+	h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: 2, Inline: true})
 	h.ctl.HandleKey(tea.KeyPressMsg{Code: 'v', Mod: tea.ModAlt})
 	if h.ctl.input.PickerActive() || h.ctl.input.SubmissionMode() != input.ModeVerbatim {
 		t.Fatal("inline toggle did not settle picker and change mode")

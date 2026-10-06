@@ -55,12 +55,6 @@ type Engine struct {
 	// rebuilt with the State on every Init.
 	classes map[string]*lua.UserDataType[any]
 
-	// A pinned function is an owning *lua.Function, which is itself a
-	// collection root. The map exists only because script.FuncRef
-	// identifies a pin by int64.
-	pins    map[int64]*lua.Function
-	pinNext int64
-
 	// Lunar installs a context on the State rather than handing one back,
 	// so the engine remembers what it installed for Context().
 	ctx context.Context
@@ -70,7 +64,6 @@ type Engine struct {
 func New() *Engine {
 	return &Engine{
 		classes: map[string]*lua.UserDataType[any]{},
-		pins:    map[int64]*lua.Function{},
 	}
 }
 
@@ -96,7 +89,6 @@ func (e *Engine) Init() error {
 	}
 	e.state = state
 	e.classes = map[string]*lua.UserDataType[any]{}
-	e.pins = map[int64]*lua.Function{}
 	e.ctx = nil
 
 	for _, t := range e.types {
@@ -123,7 +115,6 @@ func (e *Engine) Close() {
 		e.state = nil
 	}
 	e.classes = map[string]*lua.UserDataType[any]{}
-	e.pins = map[int64]*lua.Function{}
 	e.ctx = nil
 }
 
@@ -323,18 +314,6 @@ func (e *Engine) CallModuleScoped(
 	return true, consume(scoped)
 }
 
-func (e *Engine) Call(
-	fn script.FuncRef,
-	nret int,
-	args ...any,
-) ([]script.Result, error) {
-	target, ok := e.pins[fn.PinID()]
-	if !ok {
-		return nil, fmt.Errorf("script function is no longer available")
-	}
-	return e.call(e.executionCaller(), target.Value(), nret, args)
-}
-
 func (e *Engine) executionCaller() luaCaller {
 	if e.activeFrame != nil {
 		return e.activeFrame
@@ -419,8 +398,6 @@ func (e *Engine) call(
 	return results, nil
 }
 
-func (e *Engine) ReleasePin(id int64) { delete(e.pins, id) }
-
 func (e *Engine) SetContext(ctx context.Context) {
 	if e.state == nil || ctx == nil {
 		return
@@ -487,11 +464,6 @@ func (e *Engine) toLua(v any) (lua.Value, error) {
 			return lua.Value{}, err
 		}
 		return data.Value(), nil
-	case script.FuncRef:
-		if fn, ok := e.pins[value.PinID()]; ok {
-			return fn.Value(), nil
-		}
-		return lua.Nil(), nil
 	case script.Value:
 		return e.valueToLua(value), nil
 	default:
@@ -661,28 +633,6 @@ func (s *callScope) Payload(i int) (any, bool) {
 }
 
 func (s *callScope) SetReturn(vals []any) { s.rets = vals }
-
-func (s *callScope) Pin(i int) script.FuncRef {
-	fn, ok := s.frame.Function(i - 1)
-	if !ok {
-		s.frame.ThrowArgTypeError(i-1, lua.FunctionKind)
-	}
-	return s.engine.pin(fn)
-}
-
-func (s *callScope) PinValue(v script.Value) (script.FuncRef, bool) {
-	fn, ok := v.FuncToken().(*lua.Function)
-	if !ok {
-		return script.FuncRef{}, false
-	}
-	return s.engine.pin(fn), true
-}
-
-func (e *Engine) pin(fn *lua.Function) script.FuncRef {
-	e.pinNext++
-	e.pins[e.pinNext] = fn
-	return script.NewFuncRef(e, e.pinNext)
-}
 
 // Raise unwinds the callback. Lunar's Throw is the same mechanism the seam
 // contract describes: it never returns and must not be recovered by host code

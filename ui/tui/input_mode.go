@@ -43,10 +43,10 @@ type inputController struct {
 	input *widget.Input
 
 	// Picker callbacks belong to the Session contract, not the widget.
-	pickerCB      string // Lua callback ID to settle on close
-	pickerDismiss bool   // close inline picker once input contains a space
-	historyRecall bool   // unmodified draft restored from history
-	keepOnSubmit  bool   // keep_input: keep the sent command selected
+	pickerCB      int  // Lua callback ID to settle on close
+	pickerDismiss bool // close inline picker once input contains a space
+	historyRecall bool // unmodified draft restored from history
+	keepOnSubmit  bool // keep_input: keep the sent command selected
 
 	host inputHost
 }

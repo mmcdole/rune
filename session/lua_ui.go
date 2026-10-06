@@ -109,12 +109,3 @@ func (s *Session) PaneScrollToTop(name string) {
 func (s *Session) PaneScrollToBottom(name string) {
 	s.ui.PaneScrollToBottom(name)
 }
-
-// handlePickerResult delegates to Engine for callback execution or cancellation.
-func (s *Session) handlePickerResult(id string, value string, accepted bool) {
-	if accepted {
-		s.engine.ExecutePickerCallback(id, value)
-	} else {
-		s.engine.CancelPickerCallback(id)
-	}
-}

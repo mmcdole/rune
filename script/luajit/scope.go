@@ -152,29 +152,6 @@ func (s *callScope) Payload(i int) (any, bool) {
 
 func (s *callScope) SetReturn(vals []any) { s.rets = vals }
 
-func (s *callScope) Pin(i int) script.FuncRef {
-	e := s.e
-	C.lua_pushvalue(e.l, C.int(i))
-	ref := C.luaL_ref(e.l, C.LUA_REGISTRYINDEX)
-	e.pinNext++
-	e.pins[e.pinNext] = ref
-	return script.NewFuncRef(e, e.pinNext)
-}
-
-func (s *callScope) PinValue(v script.Value) (script.FuncRef, bool) {
-	scopeRef, ok := v.FuncToken().(C.int)
-	if !ok {
-		return script.FuncRef{}, false
-	}
-	e := s.e
-	// Re-ref into a pin the scope's release cannot touch.
-	C.lua_rawgeti(e.l, C.LUA_REGISTRYINDEX, scopeRef)
-	ref := C.luaL_ref(e.l, C.LUA_REGISTRYINDEX)
-	e.pinNext++
-	e.pins[e.pinNext] = ref
-	return script.NewFuncRef(e, e.pinNext), true
-}
-
 func (s *callScope) Raise(msg string) {
 	panic(&raiseSentinel{msg: msg})
 }

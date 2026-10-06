@@ -45,14 +45,15 @@ x64's +-2GB branch range makes allocation failure unlikely there.
 ## Engine interface
 
 `script.Engine` is the whole contract: module/type registration, code
-loading, module calls, pinned callbacks, and the watchdog context.
+loading, module calls, and the watchdog context.
 Host functions receive a `script.Call` scope. Both backends follow these rules:
 
 - Values and table views obtained in a call scope die with the scope.
   Backends release their resources deterministically (the LuaJIT
   backend needs no finalizers because of this).
-- Retaining a script function requires an explicit pin (`PinFunc` /
-  `PinValue`), released by the holder; pins die with `Init`/`Close`.
+- Host code never retains a script function. Lua keeps callbacks in its
+  own tables (timers, HTTP, pickers) and Go refers to them by id, so they
+  die with the VM on `Init`/`Close`.
 - Composite data crosses the boundary as Go trees (`script.Tree`) in
   one pass per direction; `script.DecodeTree` implements the shared
   table-to-tree policy (arrays vs objects, cycle and depth limits)

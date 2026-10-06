@@ -87,7 +87,7 @@ func (CursorMovedMsg) uiEvent() {}
 
 // PickerSelectMsg is sent from UI back to Session when user interacts with picker.
 type PickerSelectMsg struct {
-	CallbackID string // The callback ID from PickerOptions
+	CallbackID int    // The callback ID from PickerOptions
 	Value      string // The PickerItem.Value of the selection
 	Accepted   bool   // True if user pressed Enter, false if Esc/cancel
 }

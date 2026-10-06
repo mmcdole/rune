@@ -276,6 +276,11 @@ end
 
 rune.ui.picker = {}
 
+-- Picker id -> on_select. Pending callbacks die with the VM on /reload.
+-- Go allocates ids that never repeat, so a result for a picker shown
+-- before the reload is dropped.
+local pending_pickers = {}
+
 -- Show a picker overlay.
 -- opts = {
 --   title = "History",              -- optional (modal mode only)
@@ -285,7 +290,25 @@ rune.ui.picker = {}
 --   match_description = true,       -- optional: fuzzy-match descriptions too
 -- }
 function rune.ui.picker.show(opts)
-    rune._ui.picker_show(opts)
+    if type(opts) ~= "table" then
+        error("rune.ui.picker.show: opts must be a table", 2)
+    end
+    if type(opts.on_select) ~= "function" then
+        error("rune.ui.picker.show: on_select must be a function", 2)
+    end
+    local id = rune._ui.picker_show(opts)
+    pending_pickers[id] = opts.on_select
+end
+
+-- INTERNAL: called by Go when a picker closes. on_select runs only for an
+-- accepted selection; a throwing callback propagates to the engine's
+-- error report.
+function rune.ui.picker._settle(id, accepted, value)
+    local on_select = pending_pickers[id]
+    pending_pickers[id] = nil
+    if on_select and accepted then
+        on_select(value)
+    end
 end
 
 -- Open the scrollback-search overlay (also bound to Ctrl+F and /find).

@@ -26,9 +26,9 @@ type Engine struct {
 	vm   script.Engine
 	host Host
 
-	// Cleared on reload to prevent stale script references
-	pickerCallbacks map[string]script.FuncRef
-	pickerNextID    int
+	// pickerNextID survives Init, so a picker left open across /reload can
+	// never settle a callback registered by the rebuilt VM.
+	pickerNextID int
 
 	// Layout tree, normalized to the canonical representation by
 	// rune._ui.layout before it is published to the UI.
@@ -61,13 +61,12 @@ type Engine struct {
 // backend re-installs them.
 func NewEngine(host Host) *Engine {
 	e := &Engine{
-		host:            host,
-		vm:              newScriptEngine(),
-		pickerCallbacks: make(map[string]script.FuncRef),
-		layout:          ui.DefaultLayoutTree(),
-		config:          defaultConfig(),
-		configStaging:   true,
-		CallTimeout:     DefaultCallTimeout,
+		host:          host,
+		vm:            newScriptEngine(),
+		layout:        ui.DefaultLayoutTree(),
+		config:        defaultConfig(),
+		configStaging: true,
+		CallTimeout:   DefaultCallTimeout,
 	}
 	e.registerAPIs()
 	return e
@@ -155,9 +154,6 @@ func (e *Engine) Init() error {
 
 	e.host.TimerCancelAll()
 
-	e.pickerCallbacks = make(map[string]script.FuncRef)
-	e.pickerNextID = 0
-
 	e.layout = ui.DefaultLayoutTree()
 	e.config = defaultConfig()
 	e.configStaging = true
@@ -184,40 +180,6 @@ func (e *Engine) OnTimer(id int) {
 		return err
 	}); err != nil {
 		e.reportError("timer callback", err)
-	}
-}
-
-// RegisterPickerCallback stores a pinned script function for later
-// execution when the picker selection is made. Returns a callback ID.
-func (e *Engine) RegisterPickerCallback(fn script.FuncRef) string {
-	e.pickerNextID++
-	id := fmt.Sprintf("p%d", e.pickerNextID)
-	e.pickerCallbacks[id] = fn
-	return id
-}
-
-// ExecutePickerCallback runs the script callback for a picker selection.
-// Safe to call after reload - stale callbacks are silently ignored.
-func (e *Engine) ExecutePickerCallback(id string, value string) {
-	fn, ok := e.pickerCallbacks[id]
-	if !ok {
-		return
-	}
-	delete(e.pickerCallbacks, id)
-	defer fn.Release()
-	if err := e.guard(func() error {
-		_, err := e.vm.Call(fn, 0, value)
-		return err
-	}); err != nil {
-		e.reportError("picker callback", err)
-	}
-}
-
-// CancelPickerCallback removes a picker callback without executing it.
-func (e *Engine) CancelPickerCallback(id string) {
-	if fn, ok := e.pickerCallbacks[id]; ok {
-		fn.Release()
-		delete(e.pickerCallbacks, id)
 	}
 }
 

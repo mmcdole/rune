@@ -75,7 +75,7 @@ func TestInputActionsRespectModalPicker(t *testing.T) {
 		"f3": {Action: "input.toggle_mode", Enabled: true},
 	})
 	h.ctl.SetText("draft")
-	h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: "modal"})
+	h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: 1})
 	for _, code := range []rune{tea.KeyF1, tea.KeyF2, tea.KeyF3} {
 		h.ctl.HandleKey(keyPress(code))
 	}
@@ -87,12 +87,12 @@ func TestInputActionsRespectModalPicker(t *testing.T) {
 func TestInlinePickerEnterSelectsWithoutReboundSubmit(t *testing.T) {
 	h := newControllerHarness()
 	h.ctl.input.SetBindings(input.Bindings{"ctrl+s": {Action: "input.submit", Enabled: true}})
-	h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: "inline", Inline: true})
+	h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: 2, Inline: true})
 	h.ctl.HandleKey(keyPress(tea.KeyEnter))
 	if h.ctl.input.PickerActive() || len(h.submitted) != 0 {
 		t.Fatal("Enter must only settle the inline picker when submit is rebound")
 	}
-	h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: "inline2", Inline: true})
+	h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: 3, Inline: true})
 	h.ctl.HandleKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	if h.ctl.input.PickerActive() || len(h.submitted) != 1 {
 		t.Fatal("configured submit must select and submit")
@@ -155,7 +155,7 @@ func TestReboundCancelAcrossInputContexts(t *testing.T) {
 			case "draft_editor":
 				h.ctl.SetText("first\nsecond")
 			case "inline", "modal":
-				h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: "test", Inline: context == "inline"})
+				h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: 1, Inline: context == "inline"})
 			case "search":
 				h.ctl.ShowSearch(ui.SearchOptions{})
 			}
@@ -249,7 +249,7 @@ func TestReboundExternalEditorUsesDraftAndRespectsOverlays(t *testing.T) {
 			case "draft_editor":
 				h.ctl.SetText("first\nsecond")
 			case "inline", "modal":
-				h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: "test", Inline: context == "inline"})
+				h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: 1, Inline: context == "inline"})
 			case "search":
 				h.ctl.ShowSearch(ui.SearchOptions{})
 			}

@@ -408,7 +408,7 @@ func (s *Session) handleUIEvent(event ui.UIEvent) {
 		s.clientState.SearchActive = bool(event)
 		s.publishClientState()
 	case ui.PickerSelectMsg:
-		s.handlePickerResult(event.CallbackID, event.Value, event.Accepted)
+		s.engine.OnPickerResult(event.CallbackID, event.Value, event.Accepted)
 	case ui.InputChangedMsg:
 		s.currentInput = event.Text
 		s.currentCursor = input.RuneCursorToByte(event.Text, event.Cursor)

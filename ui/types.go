@@ -54,7 +54,7 @@ type Config struct {
 type PickerOptions struct {
 	Title      string       // Optional title/header for the picker (modal mode only)
 	Items      []PickerItem // Items to display
-	CallbackID string       // Opaque ID to track which Lua callback to run
+	CallbackID int          // Opaque ID to track which Lua callback to run
 	// Inline mode: picker filters based on input content, doesn't trap keys.
 	// Modal mode (default): picker captures keyboard and has its own search field.
 	Inline bool

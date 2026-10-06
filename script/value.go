@@ -14,7 +14,7 @@ type Value struct {
 	n  float64
 	s  string
 	t  TableView
-	fn any // backend function token, for PinValue
+	fn any // backend function token, for passing the value back in
 }
 
 // Constructors for backend implementations.

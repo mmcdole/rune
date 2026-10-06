@@ -39,7 +39,7 @@ func (c *inputController) ShowPicker(opts ui.PickerOptions) {
 func (c *inputController) closePicker(accepted bool, value string) {
 	c.input.HidePicker()
 	c.host.notifySession(ui.PickerSelectMsg{CallbackID: c.pickerCB, Value: value, Accepted: accepted})
-	c.pickerCB = ""
+	c.pickerCB = 0
 	c.pickerDismiss = false
 }
 

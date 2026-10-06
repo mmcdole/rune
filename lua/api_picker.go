@@ -6,16 +6,17 @@ import (
 )
 
 // registerPickerFuncs registers the rune._ui.picker_show primitive.
-// The public rune.ui.picker.show API is defined in Lua (00_init.lua);
-// opts parsing stays here because it marshals Lua tables into Go
-// types for the UI.
+// The public rune.ui.picker.show API is defined in Lua (00_init.lua),
+// which keeps each on_select callback in a pending table under the id
+// returned here. Opts parsing stays in Go because it marshals Lua
+// tables into Go types for the UI.
 func (e *Engine) registerPickerFuncs() {
 	e.vm.RegisterModule("rune._ui", map[string]script.GoFunc{
-		// rune._ui.picker_show(opts) - Show a picker overlay
+		// rune._ui.picker_show(opts) -> id - Show a picker overlay; its
+		// result settles the callback stored under the returned id.
 		// opts = {
 		//   title = "History",                  -- optional title (modal mode only)
 		//   items = {"item1", "item2"} or {{text="...", value="...", desc="..."}},
-		//   on_select = function(value) end     -- called with selected value
 		//   mode = "inline"                     -- optional: "inline" or "modal" (default)
 		//   match_description = true            -- optional: include description in fuzzy matching
 		//   dismiss_on_space = true             -- optional (inline): close once input contains a space
@@ -35,14 +36,8 @@ func (e *Engine) registerPickerFuncs() {
 				return c.Errorf("picker: items must be a table")
 			}
 
-			// Pin on_select for execution when the selection lands.
-			// Cleared on reload to prevent stale references.
-			onSelect, ok := c.PinValue(opts.Field("on_select"))
-			if !ok {
-				return c.Errorf("picker: on_select must be a function")
-			}
-			callbackID := e.RegisterPickerCallback(onSelect)
-
+			e.pickerNextID++
+			callbackID := e.pickerNextID
 			e.host.ShowPicker(ui.PickerOptions{
 				Title:          title,
 				Items:          parsePickerItems(items, matchDesc),
@@ -50,9 +45,23 @@ func (e *Engine) registerPickerFuncs() {
 				Inline:         inline,
 				DismissOnSpace: dismissOnSpace,
 			})
+			c.Return(callbackID)
 			return nil
 		},
 	}, nil)
+}
+
+// OnPickerResult settles the Lua callback for a closed picker: on_select
+// runs with value when accepted, and the callback is dropped otherwise.
+func (e *Engine) OnPickerResult(id int, value string, accepted bool) {
+	if err := e.guard(func() error {
+		// found=false means the picker module is unavailable (core failed
+		// to load); the result is dropped.
+		_, _, err := e.vm.CallModule("rune.ui.picker", "_settle", 0, id, accepted, value)
+		return err
+	}); err != nil {
+		e.reportError("picker callback", err)
+	}
 }
 
 // parsePickerItems parses a script table into []ui.PickerItem.

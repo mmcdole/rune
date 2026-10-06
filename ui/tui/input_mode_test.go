@@ -67,11 +67,11 @@ func (h *controllerHarness) handleScrollKey(tea.KeyPressMsg) bool { return false
 func TestReplacingPickerSettlesBothCallbacks(t *testing.T) {
 	for _, inline := range []bool{false, true} {
 		h := newControllerHarness()
-		h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: "first", Inline: inline})
-		h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: "second"})
+		h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: 1, Inline: inline})
+		h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: 2})
 		h.ctl.HandleKey(keyPress(tea.KeyEsc))
 		got := h.pickerSelects()
-		if len(got) != 2 || got[0].CallbackID != "first" || got[1].CallbackID != "second" || got[0].Accepted || got[1].Accepted {
+		if len(got) != 2 || got[0].CallbackID != 1 || got[1].CallbackID != 2 || got[0].Accepted || got[1].Accepted {
 			t.Fatalf("replacement must settle both callbacks exactly once: %+v", got)
 		}
 	}
@@ -220,7 +220,7 @@ func TestPickerCallbackSettledOnEveryExit(t *testing.T) {
 			h := newControllerHarness()
 			h.ctl.ShowPicker(ui.PickerOptions{
 				Items:      pickerTestItems,
-				CallbackID: "cb",
+				CallbackID: 1,
 				Inline:     tc.inline,
 			})
 			if tc.setup != nil {
@@ -234,8 +234,8 @@ func TestPickerCallbackSettledOnEveryExit(t *testing.T) {
 				t.Fatalf("expected exactly one PickerSelectMsg, got %d: %v", len(selects), selects)
 			}
 			sel := selects[0]
-			if sel.CallbackID != "cb" || sel.Accepted != tc.accepted || sel.Value != tc.value {
-				t.Fatalf("got %+v, want {CallbackID: cb, Accepted: %v, Value: %q}",
+			if sel.CallbackID != 1 || sel.Accepted != tc.accepted || sel.Value != tc.value {
+				t.Fatalf("got %+v, want {CallbackID: 1, Accepted: %v, Value: %q}",
 					sel, tc.accepted, tc.value)
 			}
 			if h.ctl.mode() != modeNormal {
@@ -501,7 +501,7 @@ func TestPickerKpNavigationFollowsModePolicy(t *testing.T) {
 		h := newControllerHarness()
 		h.ctl.input.Bindings()["numpad2"] = input.Binding{Enabled: true}
 		h.ctl.input.Bindings()["down"] = input.Binding{Enabled: true}
-		h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: "cb", Inline: true})
+		h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: 1, Inline: true})
 		h.events = nil
 
 		h.ctl.HandleKey(keyPress(tea.KeyKpDown))
@@ -518,7 +518,7 @@ func TestPickerKpNavigationFollowsModePolicy(t *testing.T) {
 	t.Run("inline unbound key navigates locally", func(t *testing.T) {
 		h := newControllerHarness()
 		h.ctl.input.Bindings()["down"] = input.Binding{Enabled: true}
-		h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: "cb", Inline: true})
+		h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: 1, Inline: true})
 		h.events = nil
 
 		h.ctl.HandleKey(keyPress(tea.KeyKpDown))
@@ -536,7 +536,7 @@ func TestPickerKpNavigationFollowsModePolicy(t *testing.T) {
 		h := newControllerHarness()
 		h.ctl.input.Bindings()["numpad2"] = input.Binding{Enabled: true}
 		h.ctl.input.Bindings()["down"] = input.Binding{Enabled: true}
-		h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: "cb"})
+		h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: 1})
 		h.events = nil
 
 		h.ctl.HandleKey(keyPress(tea.KeyKpDown))
@@ -716,7 +716,7 @@ func TestPasteMsgFiltersModalPickerWithoutChangingDraft(t *testing.T) {
 	h := newControllerHarness()
 	h.ctl.ShowPicker(ui.PickerOptions{
 		Items:      pickerTestItems,
-		CallbackID: "cb",
+		CallbackID: 1,
 	})
 
 	h.ctl.HandlePaste("dis")
@@ -777,7 +777,7 @@ func TestAltGrTextIsTypedInEveryInputMode(t *testing.T) {
 
 	t.Run("inline picker", func(t *testing.T) {
 		h := newControllerHarness()
-		h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: "cb", Inline: true})
+		h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: 1, Inline: true})
 		h.ctl.SetText("/")
 		h.events = nil
 
@@ -790,7 +790,7 @@ func TestAltGrTextIsTypedInEveryInputMode(t *testing.T) {
 
 	t.Run("modal picker", func(t *testing.T) {
 		h := newControllerHarness()
-		h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: "cb"})
+		h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: 1})
 
 		h.ctl.HandleKey(msg)
 
@@ -889,7 +889,7 @@ func TestCtrlJLeavesInlinePickerForDraftEditor(t *testing.T) {
 	h := newControllerHarness()
 	h.ctl.ShowPicker(ui.PickerOptions{
 		Items:      pickerTestItems,
-		CallbackID: "cb",
+		CallbackID: 1,
 		Inline:     true,
 	})
 	h.ctl.SetText("/con")
@@ -904,7 +904,7 @@ func TestCtrlJLeavesInlinePickerForDraftEditor(t *testing.T) {
 		t.Fatalf("Ctrl+J left mode %v, draft editor active %v", h.ctl.mode(), h.ctl.input.DraftEditorActive())
 	}
 	selects := h.pickerSelects()
-	if len(selects) != 1 || selects[0].CallbackID != "cb" || selects[0].Accepted {
+	if len(selects) != 1 || selects[0].CallbackID != 1 || selects[0].Accepted {
 		t.Fatalf("picker cancellation = %+v, want one cancelled cb", selects)
 	}
 	if len(h.events) < 2 {
@@ -1034,14 +1034,14 @@ func TestModifiedEscapeDoesNotCancelInternalModes(t *testing.T) {
 		{
 			name: "modal picker",
 			setup: func(h *controllerHarness) {
-				h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: "cb"})
+				h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: 1})
 			},
 			mode: modePickerModal,
 		},
 		{
 			name: "inline picker",
 			setup: func(h *controllerHarness) {
-				h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: "cb", Inline: true})
+				h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: 1, Inline: true})
 			},
 			mode: modePickerInline,
 		},
@@ -1194,7 +1194,7 @@ func TestInlineTabReportsCompletedInput(t *testing.T) {
 	h := newControllerHarness()
 	h.ctl.ShowPicker(ui.PickerOptions{
 		Items:      pickerTestItems,
-		CallbackID: "cb",
+		CallbackID: 1,
 		Inline:     true,
 	})
 	h.ctl.SetText("/con")
@@ -1288,7 +1288,7 @@ func TestSearchSettledOnEveryExit(t *testing.T) {
 		{
 			name: "opening a picker cancels the search",
 			exit: func(h *controllerHarness) {
-				h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: "cb"})
+				h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: 1})
 			},
 			cancels: 1,
 		},
@@ -1395,7 +1395,7 @@ func TestSearchIgnoredWhileDraftEditorActive(t *testing.T) {
 func TestSearchOverPickerSettlesPickerFirst(t *testing.T) {
 	h := newControllerHarness()
 	h.buf.Append("a thief passes")
-	h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: "cb"})
+	h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: 1})
 
 	h.ctl.ShowSearch(ui.SearchOptions{Query: "thief"})
 

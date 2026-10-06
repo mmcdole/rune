@@ -2,18 +2,18 @@
 //
 // Unlike a Lua-implementation facade, this API is designed around how
 // an embedded VM wants to be driven: values obtained during a call are
-// scoped to that call, retention is explicit (Pin), composite data
-// crosses the boundary as Go trees in single-pass conversions, and
-// host functions return errors instead of manipulating a stack.
+// scoped to that call, composite data crosses the boundary as Go trees
+// in single-pass conversions, and host functions return errors instead
+// of manipulating a stack.
 //
 // Contract rules every backend must honor and every caller must obey:
 //
 //   - A Value or TableView is valid only until its Call returns (or,
 //     for values returned by Engine methods, only scalars survive).
-//   - Retaining a script function requires Pin; releasing the ref is
-//     the caller's job. Refs die silently with Engine.Close or Init.
-//   - All Engine and ref methods must be called from the session
-//     goroutine. Host functions run on it too.
+//     Host code never retains a script function; scripts keep callbacks
+//     in their own tables and the host refers to them by id.
+//   - All Engine methods must be called from the session goroutine.
+//     Host functions run on it too.
 //   - Engine execution methods called synchronously by a host function
 //     continue the innermost script callback. Once that callback returns,
 //     they start a new outer execution as usual.
@@ -38,8 +38,7 @@ type GoFunc func(c *Call) error
 // Engine is a scripting runtime hosting Rune's Lua environment.
 type Engine interface {
 	// Init creates (or recreates) the VM and re-registers everything
-	// previously registered via RegisterModule/RegisterType. Pins from
-	// an earlier generation are dead after Init.
+	// previously registered via RegisterModule/RegisterType.
 	Init() error
 	Close()
 
@@ -69,9 +68,6 @@ type Engine interface {
 	// materialized (scalars only — composite results become Foreign).
 	CallModule(module, fn string, nret int, args ...any) (results []Result, found bool, err error)
 
-	// Call invokes a pinned function.
-	Call(fn FuncRef, nret int, args ...any) ([]Result, error)
-
 	// CallModuleScoped invokes <module>.<fn> and passes the raw results
 	// to consume within a live call scope, so composite results (tables)
 	// can be read through Values/TableViews. The values die when consume
@@ -85,13 +81,12 @@ type Engine interface {
 	Context() context.Context
 }
 
-// Argument values accepted by Call/CallModule/Return/module fields:
+// Argument values accepted by CallModule/Return/module fields:
 //
 //	nil, bool, int, float64, string  — scalars
 //	Tree{...}                        — Go tree converted to a table
 //	Obj{...}                         — typed object (RegisterType)
 //	Value                            — an in-scope value passed through
-//	FuncRef                          — a pinned function
 //	time.Duration                    — seconds (number)
 
 // Tree marks a Go value tree (nil, bool, float64/int, string,
@@ -103,35 +98,6 @@ type Obj struct {
 	Type    string
 	Payload any
 }
-
-// FuncRef is a pinned script function usable beyond its original call
-// scope. The zero value is invalid.
-type FuncRef struct {
-	e  Engine
-	id int64
-}
-
-// Valid reports whether the ref points at a live pin.
-func (f FuncRef) Valid() bool { return f.e != nil }
-
-// Release frees the pin. Safe to call more than once; safe (no-op)
-// after Init/Close invalidated the generation.
-func (f FuncRef) Release() {
-	if r, ok := f.e.(PinReleaser); ok {
-		r.ReleasePin(f.id)
-	}
-}
-
-// PinReleaser is implemented by backends that hold pinned functions.
-type PinReleaser interface {
-	ReleasePin(id int64)
-}
-
-// NewFuncRef is used by backend implementations only.
-func NewFuncRef(e Engine, id int64) FuncRef { return FuncRef{e: e, id: id} }
-
-// PinID is used by backend implementations only.
-func (f FuncRef) PinID() int64 { return f.id }
 
 // Kind classifies a Value.
 type Kind uint8
