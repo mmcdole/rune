@@ -362,7 +362,7 @@ func TestOutputPaneWrapsAtItsResolvedWidth(t *testing.T) {
 		},
 	})
 
-	next, _ := m.Update(echoLineMsg("abcdefghijklmn"))
+	next, _ := m.Update(printLineMsg("abcdefghijklmn"))
 	m = next.(*Model)
 	if got := m.output.Scrollback().Count(); got != 2 {
 		t.Fatalf("scrollback row count = %d, want 2", got)
@@ -386,7 +386,7 @@ func TestResizeReallocatesTreeWithoutReflowingExistingOutputRows(t *testing.T) {
 		},
 	})
 
-	next, _ := m.Update(echoLineMsg(strings.Repeat("a", 35)))
+	next, _ := m.Update(printLineMsg(strings.Repeat("a", 35)))
 	m = next.(*Model)
 	if got := m.output.Scrollback().Count(); got != 2 {
 		t.Fatalf("rows appended at thirty-cell output width = %d, want 2", got)
@@ -399,7 +399,7 @@ func TestResizeReallocatesTreeWithoutReflowingExistingOutputRows(t *testing.T) {
 	if got := m.output.Scrollback().Count(); got != 2 {
 		t.Fatalf("resize reflowed existing rows: count = %d, want 2", got)
 	}
-	next, _ = m.Update(echoLineMsg(strings.Repeat("b", 50)))
+	next, _ = m.Update(printLineMsg(strings.Repeat("b", 50)))
 	m = next.(*Model)
 	if got := m.output.Scrollback().Count(); got != 3 {
 		t.Fatalf("new fifty-cell line at resized width added count = %d, want 3", got)

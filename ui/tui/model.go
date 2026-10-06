@@ -155,12 +155,8 @@ func (m *Model) dispatch(msg tea.Msg) (render, layout bool) {
 		m.numpadMode = msg.Numpad
 		return true, false
 
-	// Scrollback appends and the prompt overlay. Server lines and local
-	// echoes differ only in where Session sends them from.
+	// Scrollback appends and the prompt overlay.
 	case printLineMsg:
-		m.output.Write(string(msg))
-		return true, m.layoutPlan.autoPanes[ui.OutputPaneName]
-	case echoLineMsg:
 		m.output.Write(string(msg))
 		return true, m.layoutPlan.autoPanes[ui.OutputPaneName]
 	case setPromptMsg:

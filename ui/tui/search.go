@@ -21,9 +21,9 @@ type searchViewState struct {
 // output window. They never report scroll state themselves: renderIfDue
 // reports whatever position the update settles on.
 
-// OpenSearch snapshots the output window and committed highlight for cancel, then
+// openSearch snapshots the output window and committed highlight for cancel, then
 // returns the temporal origin the Search widget should scan around.
-func (m *Model) OpenSearch() widget.SearchScope {
+func (m *Model) openSearch() widget.SearchScope {
 	m.searchView.snapshot = m.output.SaveScroll()
 	m.searchView.priorFocus = m.searchView.focus
 	m.notifySession(ui.SearchStateChangedMsg(true))
@@ -55,9 +55,9 @@ func (m *Model) applySearchPosition(geometryChanged bool) {
 	state.positionPending, state.restore = false, nil
 }
 
-// PreviewSearch centers and highlights the selected match; with no
+// previewSearch centers and highlights the selected match; with no
 // match it returns the output window to the pre-search position.
-func (m *Model) PreviewSearch(match widget.SearchMatch, ok bool) {
+func (m *Model) previewSearch(match widget.SearchMatch, ok bool) {
 	m.searchView.positionPending = true
 	m.searchView.restore = nil
 	if ok {
@@ -71,9 +71,9 @@ func (m *Model) PreviewSearch(match widget.SearchMatch, ok bool) {
 	}
 }
 
-// CommitSearch keeps the accepted match centered and highlighted after the
+// commitSearch keeps the accepted match centered and highlighted after the
 // navigator closes. Manual output window navigation clears the marker.
-func (m *Model) CommitSearch() {
+func (m *Model) commitSearch() {
 	m.searchView.positionPending = true
 	if m.searchView.focus != nil {
 		m.output.SetHighlight(m.searchView.focus.Seq, m.searchView.focus.Ranges)
@@ -84,9 +84,9 @@ func (m *Model) CommitSearch() {
 	m.notifySession(ui.SearchStateChangedMsg(false))
 }
 
-// CancelSearch restores both the position and any committed highlight that
+// cancelSearch restores both the position and any committed highlight that
 // existed when the navigator opened.
-func (m *Model) CancelSearch() {
+func (m *Model) cancelSearch() {
 	m.searchView.positionPending = true
 	snapshot := m.searchView.snapshot
 	m.searchView.restore = &snapshot

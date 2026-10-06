@@ -21,7 +21,7 @@ func TestAppearanceChangesReuseLayout(t *testing.T) {
 	}})
 	m.Update(setInputMsg("unchanged\nmultiline draft"))
 	for _, msg := range []tea.Msg{
-		printLineMsg("server text"), echoLineMsg("local echo"),
+		printLineMsg("server text"), printLineMsg("local echo"),
 		setPromptMsg("HP>"), commitPromptMsg("HP>"),
 		paneWriteMsg{Name: "chat", Text: "chat message"},
 		paneReplaceMsg{Name: "chat", Text: "replacement"},
@@ -131,7 +131,7 @@ func TestOnlyAutoPaneContentRequestsLayout(t *testing.T) {
 			want bool
 		}{
 			{"output", printLineMsg("server text"), false},
-			{"echo", echoLineMsg("local echo"), false},
+			{"echo", printLineMsg("local echo"), false},
 			{"prompt", setPromptMsg("HP>"), false},
 			{"commit", commitPromptMsg("HP>"), false},
 			{"auto", paneWriteMsg{Name: "chat", Text: "one\ntwo\nthree"}, true},

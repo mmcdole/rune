@@ -50,7 +50,7 @@ func TestThrottledChangesRenderOnce(t *testing.T) {
 
 	for _, msg := range []tea.Msg{
 		printLineMsg("server-line"),
-		echoLineMsg("echo-line"),
+		printLineMsg("echo-line"),
 		setPromptMsg("prompt-text"),
 		commitPromptMsg("committed-prompt"),
 		setInputMsg("typed-draft"),

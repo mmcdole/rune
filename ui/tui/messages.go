@@ -5,14 +5,10 @@ import (
 	"github.com/mmcdole/rune/ui"
 )
 
-// printLineMsg carries text to append to scrollback. It may contain newlines;
-// the TUI splits and wraps it into rows.
+// printLineMsg carries text to append to scrollback: server lines, Lua
+// output, and local echoes alike. It may contain newlines; the TUI splits
+// and wraps it into rows.
 type printLineMsg string
-
-// echoLineMsg carries a local echo (submitted input, already styled by the
-// Lua "echo" hook) to append to scrollback. Like printLineMsg, the
-// text may contain newlines.
-type echoLineMsg string
 
 // setPromptMsg replaces the prompt overlay with a partial line or confirmed prompt.
 type setPromptMsg string

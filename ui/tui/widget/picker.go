@@ -60,6 +60,14 @@ func (p *Picker) Query() string {
 	return p.query
 }
 
+// filterValue returns the string an item is fuzzy-matched against.
+func filterValue(item ui.PickerItem) string {
+	if item.MatchDesc && item.Description != "" {
+		return item.Text + " " + item.Description
+	}
+	return item.Text
+}
+
 // Filter updates the filtered list based on query.
 func (p *Picker) Filter(query string) {
 	p.query = query
@@ -75,7 +83,7 @@ func (p *Picker) Filter(query string) {
 
 	searchStrings := make([]string, len(p.items))
 	for i, item := range p.items {
-		searchStrings[i] = item.FilterValue()
+		searchStrings[i] = filterValue(item)
 	}
 
 	rawMatches := util.FuzzyFilter(query, searchStrings)
@@ -189,7 +197,7 @@ func (p *Picker) renderItem(item ui.PickerItem, width int, selected bool, matche
 	}
 
 	// Match positions from the fuzzy scorer are rune indices into
-	// FilterValue() (text, or "text description"); index by rune, not
+	// filterValue (text, or "text description"); index by rune, not
 	// byte, or highlights misalign on multi-byte input.
 	matchSet := make(map[int]bool, len(matches))
 	for _, pos := range matches {
@@ -198,9 +206,9 @@ func (p *Picker) renderItem(item ui.PickerItem, width int, selected bool, matche
 
 	var result strings.Builder
 
-	itemText := text.VisualizeTerminalControls(item.GetText(), false)
-	desc := text.VisualizeTerminalControls(item.GetDescription(), false)
-	matchDesc := item.MatchesDescription()
+	itemText := text.VisualizeTerminalControls(item.Text, false)
+	desc := text.VisualizeTerminalControls(item.Description, false)
+	matchDesc := item.MatchDesc
 	textRunes := []rune(itemText)
 
 	for idx, r := range textRunes {

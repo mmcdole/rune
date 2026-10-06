@@ -27,10 +27,10 @@ type inputHost interface {
 	notifySession(ui.UIEvent)
 	submit(ui.InputSubmittedMsg) bool
 	handleScrollKey(tea.KeyPressMsg) bool
-	OpenSearch() widget.SearchScope
-	PreviewSearch(widget.SearchMatch, bool)
-	CommitSearch()
-	CancelSearch()
+	openSearch() widget.SearchScope
+	previewSearch(widget.SearchMatch, bool)
+	commitSearch()
+	cancelSearch()
 }
 
 // inputController owns input transitions and Session effects:

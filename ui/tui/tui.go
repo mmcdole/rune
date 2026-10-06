@@ -95,7 +95,7 @@ func (b *BubbleTeaUI) Print(text string) {
 // Echo appends an already-styled local echo to scrollback. Styling is Lua
 // policy (the "echo" hook); this adapter only delivers it for presentation.
 func (b *BubbleTeaUI) Echo(line string) {
-	b.send(echoLineMsg(line))
+	b.send(printLineMsg(line))
 }
 
 // SetPrompt replaces the prompt overlay.

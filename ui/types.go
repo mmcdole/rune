@@ -17,26 +17,6 @@ type PickerItem struct {
 	MatchDesc   bool   // If true, include Description in fuzzy matching
 }
 
-// FilterValue returns the string used for fuzzy matching.
-func (p PickerItem) FilterValue() string {
-	if p.MatchDesc && p.Description != "" {
-		return p.Text + " " + p.Description
-	}
-	return p.Text
-}
-
-// GetText returns the item's display text.
-func (p PickerItem) GetText() string { return p.Text }
-
-// GetDescription returns the item's description.
-func (p PickerItem) GetDescription() string { return p.Description }
-
-// GetValue returns the item's value (returned on selection).
-func (p PickerItem) GetValue() string { return p.Value }
-
-// MatchesDescription returns true if description should be included in matching.
-func (p PickerItem) MatchesDescription() bool { return p.MatchDesc }
-
 // Config carries the UI-facing subset of Rune's typed configuration.
 type Config struct {
 	// KeepInput keeps a submitted command selected in the input line, so Enter

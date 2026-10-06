@@ -18,20 +18,20 @@ import (
 type recordingSearchEffects struct {
 	opens    int
 	scope    widget.SearchScope
-	previews []bool // ok flag of each PreviewSearch call
+	previews []bool // ok flag of each previewSearch call
 	commits  int
 	cancels  int
 }
 
-func (r *recordingSearchEffects) OpenSearch() widget.SearchScope {
+func (r *recordingSearchEffects) openSearch() widget.SearchScope {
 	r.opens++
 	return r.scope
 }
-func (r *recordingSearchEffects) PreviewSearch(_ widget.SearchMatch, ok bool) {
+func (r *recordingSearchEffects) previewSearch(_ widget.SearchMatch, ok bool) {
 	r.previews = append(r.previews, ok)
 }
-func (r *recordingSearchEffects) CommitSearch() { r.commits++ }
-func (r *recordingSearchEffects) CancelSearch() { r.cancels++ }
+func (r *recordingSearchEffects) commitSearch() { r.commits++ }
+func (r *recordingSearchEffects) cancelSearch() { r.cancels++ }
 
 // controllerHarness drives an inputController directly, recording UI events
 // and submitted lines.
@@ -1252,7 +1252,7 @@ func TestReboundHomeOverridesInputCursor(t *testing.T) {
 
 // TestSearchSettledOnEveryExit mirrors the picker invariant for search:
 // every path out of modeSearch resets the mode and settles the
-// output window exactly once - one CommitSearch or one CancelSearch.
+// output window exactly once - one commitSearch or one cancelSearch.
 func TestSearchSettledOnEveryExit(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -1303,7 +1303,7 @@ func TestSearchSettledOnEveryExit(t *testing.T) {
 				t.Fatalf("expected modeSearch after ShowSearch, got %v", h.ctl.mode())
 			}
 			if h.opens != 1 {
-				t.Fatalf("expected one OpenSearch, got %d", h.opens)
+				t.Fatalf("expected one openSearch, got %d", h.opens)
 			}
 
 			tc.exit(h)

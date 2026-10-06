@@ -12,7 +12,7 @@ func TestOrderedPromptCommitThenLocalSubmissionOutput(t *testing.T) {
 	m = next.(*Model)
 	next, _ = m.Update(commitPromptMsg("HP>"))
 	m = next.(*Model)
-	next, _ = m.Update(echoLineMsg("> /help"))
+	next, _ = m.Update(printLineMsg("> /help"))
 	m = next.(*Model)
 	next, _ = m.Update(printLineMsg("local help"))
 	m = next.(*Model)
@@ -76,7 +76,7 @@ func TestOverlongPrintWordWrapsToWidth(t *testing.T) {
 func TestOverlongUnbreakableWordHardWraps(t *testing.T) {
 	m := newBareModel(t)
 
-	next, _ := m.Update(echoLineMsg(strings.Repeat("z", 100)))
+	next, _ := m.Update(printLineMsg(strings.Repeat("z", 100)))
 	m = next.(*Model)
 
 	wantScrollback(t, m, strings.Repeat("z", 80), strings.Repeat("z", 20))
@@ -88,7 +88,7 @@ func TestOverlongUnbreakableWordHardWraps(t *testing.T) {
 func TestMultiLineEchoSplitsIntoRows(t *testing.T) {
 	m := newBareModel(t)
 
-	next, _ := m.Update(echoLineMsg("> dump\na\tb"))
+	next, _ := m.Update(printLineMsg("> dump\na\tb"))
 	m = next.(*Model)
 
 	wantScrollback(t, m, "> dump", "a       b")
@@ -97,7 +97,7 @@ func TestMultiLineEchoSplitsIntoRows(t *testing.T) {
 func TestEchoExpandsPreservedTabsBeforeScrollback(t *testing.T) {
 	m := newBareModel(t)
 
-	next, _ := m.Update(echoLineMsg("> a\tb"))
+	next, _ := m.Update(printLineMsg("> a\tb"))
 	m = next.(*Model)
 
 	got := m.output.Scrollback().At(0)

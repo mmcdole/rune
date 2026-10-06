@@ -23,7 +23,7 @@ func TestGrowingOutputOutputWindowPublishesLiveState(t *testing.T) {
 		},
 	})
 	for i := 1; i <= 10; i++ {
-		next, _ := m.Update(echoLineMsg(fmt.Sprintf("line %d", i)))
+		next, _ := m.Update(printLineMsg(fmt.Sprintf("line %d", i)))
 		m = next.(*Model)
 	}
 	next, _ := m.Update(paneScrollToTopMsg{Name: ui.OutputPaneName})
@@ -70,7 +70,7 @@ func TestClosingTallSearchPublishesGeometryInducedLiveState(t *testing.T) {
 		},
 	})
 	for i := 1; i <= 5; i++ {
-		next, _ := m.Update(echoLineMsg(fmt.Sprintf("line %d", i)))
+		next, _ := m.Update(printLineMsg(fmt.Sprintf("line %d", i)))
 		m = next.(*Model)
 	}
 	next, _ := m.Update(showSearchMsg{options: ui.SearchOptions{Query: "line"}})
@@ -126,13 +126,13 @@ func TestSearchFocusUsesFinalLayoutGeometry(t *testing.T) {
 	m = next.(*Model)
 
 	for i := 0; i < 9; i++ {
-		next, _ = m.Update(echoLineMsg(fmt.Sprintf("match %d thief", i)))
+		next, _ = m.Update(printLineMsg(fmt.Sprintf("match %d thief", i)))
 		m = next.(*Model)
 	}
-	next, _ = m.Update(echoLineMsg("SELECTED thief"))
+	next, _ = m.Update(printLineMsg("SELECTED thief"))
 	m = next.(*Model)
 	for i := 0; i < 20; i++ {
-		next, _ = m.Update(echoLineMsg(fmt.Sprintf("quiet %d", i)))
+		next, _ = m.Update(printLineMsg(fmt.Sprintf("quiet %d", i)))
 		m = next.(*Model)
 	}
 

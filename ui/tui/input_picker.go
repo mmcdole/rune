@@ -62,7 +62,7 @@ func (c *inputController) handleInlineKey(msg tea.KeyPressMsg, action string) {
 	}
 	if action == "input.submit" {
 		if item, ok := c.input.Picker().Selected(); ok {
-			c.closePicker(true, item.GetValue())
+			c.closePicker(true, item.Value)
 		} else {
 			c.closePicker(false, "")
 		}
@@ -96,12 +96,12 @@ func (c *inputController) handleInlineKey(msg tea.KeyPressMsg, action string) {
 
 	case matchesKey(msg, tea.KeyTab, 0):
 		if item, ok := c.input.Picker().Selected(); ok {
-			c.input.SetValue(item.GetValue() + " ")
+			c.input.SetValue(item.Value + " ")
 			c.input.CursorEnd()
 			// Report the completed text before the selection fires so
 			// the session's input state is fresh inside the callback.
 			c.host.notifySession(ui.InputChangedMsg{Text: c.input.Value(), Cursor: c.input.Position()})
-			c.closePicker(true, item.GetValue())
+			c.closePicker(true, item.Value)
 		} else {
 			c.closePicker(false, "")
 		}
@@ -109,7 +109,7 @@ func (c *inputController) handleInlineKey(msg tea.KeyPressMsg, action string) {
 
 	case matchesEnterKey(msg, 0):
 		if item, ok := c.input.Picker().Selected(); ok {
-			c.closePicker(true, item.GetValue())
+			c.closePicker(true, item.Value)
 		} else {
 			c.closePicker(false, "")
 		}
@@ -138,7 +138,7 @@ func (c *inputController) handleModalKey(msg tea.KeyPressMsg) {
 
 	case matchesEnterKey(msg, 0), matchesKey(msg, tea.KeyTab, 0):
 		if item, ok := c.input.Picker().Selected(); ok {
-			c.closePicker(true, item.GetValue())
+			c.closePicker(true, item.Value)
 		} else {
 			c.closePicker(false, "")
 		}
