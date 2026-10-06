@@ -486,16 +486,3 @@ end
 
 rune.bind("tab", function() cycle(1) end)
 rune.bind("shift+tab", function() cycle(-1) end)
-
--- Public API
-function rune.completion.reset()
-    completion_reset()
-end
-
-function rune.completion.clear_cache()
-    cache = {}
-    ring = {}
-    ring_pos = 0
-    prefix_idx = {}
-    order_counter = 0
-end

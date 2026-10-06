@@ -67,8 +67,6 @@ func New() *Engine {
 	}
 }
 
-func (e *Engine) Backend() string { return "lunar" }
-
 func (e *Engine) Init() error {
 	if e.borrowDepth != 0 {
 		return errors.New("script: Init called before the active script call returned")
@@ -366,7 +364,7 @@ func (e *Engine) callValues(
 	count, callErr := caller.CallInto(target, arguments, results)
 	if callErr != nil {
 		var overflow *lua.ResultCapacityError
-		if !asResultCapacityError(callErr, &overflow) {
+		if !errors.As(callErr, &overflow) {
 			return nil, callErr
 		}
 		copy(results, overflow.Results()[:nret])

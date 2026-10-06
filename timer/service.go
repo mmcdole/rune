@@ -7,8 +7,7 @@ import (
 
 // Event is sent when a timer fires.
 type Event struct {
-	ID        int
-	Repeating bool
+	ID int
 }
 
 // Service manages timed wake-ups with full lifecycle ownership.
@@ -116,7 +115,7 @@ func (s *Service) fire(id int) {
 	}
 	s.mu.Unlock()
 
-	ev := Event{ID: id, Repeating: repeating}
+	ev := Event{ID: id}
 	if repeating {
 		// A repeating tick may be dropped when the consumer is
 		// saturated - the next tick carries the same information.

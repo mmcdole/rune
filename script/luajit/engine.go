@@ -69,8 +69,6 @@ func New() *Engine {
 	return &Engine{}
 }
 
-func (e *Engine) Backend() string { return "luajit" }
-
 func (e *Engine) Init() error {
 	if e.borrowDepth != 0 {
 		return errors.New("script: Init called before the active script call returned")

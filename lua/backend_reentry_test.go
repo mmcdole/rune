@@ -256,7 +256,7 @@ func TestScriptEngineReentrySharesWatchdog(t *testing.T) {
 	initializeScriptEngine(t, vm)
 
 	loop := "while true do end"
-	if vm.Backend() == "luajit" {
+	if Backend() == "luajit" {
 		loop = "while true do probe.tick() end"
 	}
 	if err := vm.DoString("watchdog setup", `
@@ -312,7 +312,7 @@ func TestScriptEngineReentrySharesWatchdogFromCoroutine(t *testing.T) {
 	initializeScriptEngine(t, vm)
 
 	loop := "while true do end"
-	if vm.Backend() == "luajit" {
+	if Backend() == "luajit" {
 		loop = "while true do probe.tick() end"
 	}
 	if err := vm.DoString("coroutine watchdog setup", `

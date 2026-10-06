@@ -72,10 +72,6 @@ func NewEngine(host Host) *Engine {
 	return e
 }
 
-// EngineBackend reports which scripting engine this binary was built
-// with: "lunar" (default) or "luajit" (-tags luajit).
-func (e *Engine) EngineBackend() string { return e.vm.Backend() }
-
 // BeginExecution shares one watchdog deadline across a caller-owned sequence of
 // Lua calls. Call the returned function exactly once (normally in a defer) to
 // report deadline exhaustion and release the scope. Nested scopes reuse the
@@ -408,7 +404,7 @@ func (e *Engine) registerAPIs() {
 	// the scripting engine this binary was built with.
 	e.vm.RegisterModule("rune", nil, map[string]any{
 		"version": version.Number,
-		"engine":  e.vm.Backend(),
+		"engine":  Backend(),
 	})
 
 	registerLineType(e.vm)

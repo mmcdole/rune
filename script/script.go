@@ -26,10 +26,7 @@
 //     contract.
 package script
 
-import (
-	"context"
-	"time"
-)
+import "context"
 
 // GoFunc is a host function callable from scripts. Returning a non-nil
 // error raises it as a script error in the calling script.
@@ -41,9 +38,6 @@ type Engine interface {
 	// previously registered via RegisterModule/RegisterType.
 	Init() error
 	Close()
-
-	// Backend names the underlying engine ("lunar", "luajit").
-	Backend() string
 
 	// RegisterModule declares functions and constant data fields on a
 	// dotted module path under the global namespace (e.g. "rune._store").
@@ -156,6 +150,3 @@ func (r Result) String() string {
 		return r.Kind.String()
 	}
 }
-
-// Seconds converts a duration for script-visible time fields.
-func Seconds(d time.Duration) float64 { return d.Seconds() }

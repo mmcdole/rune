@@ -87,7 +87,7 @@ func TestExecutionScopeDoesNotEnterLuaAfterDeadline(t *testing.T) {
 // the realistic runaway class in a scripted client, and is what the
 // LuaJIT watchdog is tested against.
 func runawayLoop(engine *Engine) string {
-	if engine.EngineBackend() == "luajit" {
+	if Backend() == "luajit" {
 		return `while true do rune._strip_ansi("x") end`
 	}
 	return "while true do end"

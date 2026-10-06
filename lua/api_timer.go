@@ -39,12 +39,6 @@ func (e *Engine) registerTimerFuncs() {
 			e.host.TimerCancel(c.Int(1))
 			return nil
 		},
-
-		// rune._timer.cancel_all(): Stop all scheduled wake-ups
-		"cancel_all": func(c *script.Call) error {
-			e.host.TimerCancelAll()
-			return nil
-		},
 	}, nil)
 }
 

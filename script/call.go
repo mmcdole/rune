@@ -1,6 +1,9 @@
 package script
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 // Call is the scope of one host-function invocation. Every Value or
 // TableView obtained from it is valid only until the host function
@@ -61,14 +64,6 @@ func (c *Call) Num(i int) float64 {
 // Int returns argument i truncated to int.
 func (c *Call) Int(i int) int { return int(c.Num(i)) }
 
-// OptInt returns argument i as an int, or def when nil/absent.
-func (c *Call) OptInt(i, def int) int {
-	if c.B.ArgKind(i) == KindNil {
-		return def
-	}
-	return c.Int(i)
-}
-
 // Bool returns argument i as a boolean or raises a type error.
 func (c *Call) Bool(i int) bool {
 	v := c.B.Arg(i)
@@ -106,17 +101,9 @@ func (c *Call) Return(vals ...any) { c.B.SetReturn(vals) }
 // Errorf returns a script error carrying the script caller's position,
 // matching engine error attribution.
 func (c *Call) Errorf(format string, args ...any) error {
-	return &Error{Message: c.B.Where() + fmt.Sprintf(format, args...)}
+	return errors.New(c.B.Where() + fmt.Sprintf(format, args...))
 }
-
-// Where returns "file:line: " of the calling script frame, or "".
-func (c *Call) Where() string { return c.B.Where() }
 
 func (c *Call) typeError(i int, want string, got Kind) {
 	c.B.Raise(c.B.Where() + fmt.Sprintf("bad argument #%d (%s expected, got %s)", i, want, got))
 }
-
-// Error is a script-level error raised in the calling script.
-type Error struct{ Message string }
-
-func (e *Error) Error() string { return e.Message }

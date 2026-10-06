@@ -2,7 +2,7 @@
 
 The `script` package defines Rune's interface to its Lua engine. The default
 backend is Lunar, written in Go. Building with `-tags luajit` selects LuaJIT
-2.1 through cgo. `Engine.EngineBackend()` reports the active engine.
+2.1 through cgo. `lua.Backend()` reports the engine compiled into the binary.
 
 Compare script performance with `go test ./lua/ -run '^$' -bench EngineScriptWork`
 and the same command with `-tags luajit`.

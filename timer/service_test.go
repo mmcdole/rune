@@ -25,7 +25,7 @@ func TestAfterFiresOnce(t *testing.T) {
 
 		id := s.After(time.Millisecond)
 		ev := waitEvent(t, events)
-		if ev.ID != id || ev.Repeating {
+		if ev.ID != id {
 			t.Errorf("want one-shot event id=%d, got %+v", id, ev)
 		}
 
@@ -46,7 +46,7 @@ func TestEveryRepeats(t *testing.T) {
 		id := s.Every(time.Millisecond)
 		for i := 0; i < 3; i++ {
 			ev := waitEvent(t, events)
-			if ev.ID != id || !ev.Repeating {
+			if ev.ID != id {
 				t.Fatalf("want repeating event id=%d, got %+v", id, ev)
 			}
 		}
