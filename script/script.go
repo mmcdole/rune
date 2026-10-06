@@ -26,7 +26,7 @@
 //     contract.
 package script
 
-import "context"
+import "time"
 
 // GoFunc is a host function callable from scripts. Returning a non-nil
 // error raises it as a script error in the calling script.
@@ -68,11 +68,12 @@ type Engine interface {
 	// returns.
 	CallModuleScoped(module, fn string, nret int, args []any, consume func([]Value) error) (found bool, err error)
 
-	// Watchdog: while a context is set, script execution should be
-	// interrupted (best-effort, engine-appropriate) once it expires.
-	SetContext(ctx context.Context)
-	RemoveContext()
-	Context() context.Context
+	// SetDeadline arms the watchdog: script execution is interrupted
+	// (best-effort, engine-appropriate) once t passes, with an error that
+	// the host recognizes by its own deadline. The zero time disarms it. A
+	// new deadline replaces the previous one, including from a host
+	// function running inside a script call.
+	SetDeadline(t time.Time) error
 }
 
 // Argument values accepted by CallModule/Return/module fields:

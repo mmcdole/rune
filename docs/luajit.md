@@ -45,7 +45,7 @@ x64's +-2GB branch range makes allocation failure unlikely there.
 ## Engine interface
 
 `script.Engine` is the whole contract: module/type registration, code
-loading, module calls, and the watchdog context.
+loading, module calls, and the watchdog deadline (`SetDeadline`, modeled on `net.Conn`).
 Host functions receive a `script.Call` scope. Both backends follow these rules:
 
 - Values and table views obtained in a call scope die with the scope.

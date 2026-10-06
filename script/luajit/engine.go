@@ -15,12 +15,12 @@ package luajit
 import "C"
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
 	"runtime/cgo"
 	"strings"
+	"time"
 	"unsafe"
 
 	"github.com/mmcdole/rune/internal/pathutil"
@@ -53,7 +53,6 @@ type Engine struct {
 	funcs   []script.GoFunc    // trampoline targets, addressed by upvalue
 	ownMeta map[uintptr]string // lua_topointer of our type metatables -> type name
 
-	ctx       context.Context
 	watchStop chan struct{}
 	watchDone chan struct{}
 }
@@ -347,11 +346,14 @@ func (e *Engine) pcall(nargs, nret int) error {
 // not observe it — the standard LuaJIT embedding tradeoff.
 // ---------------------------------------------------------------------------
 
-func (e *Engine) SetContext(ctx context.Context) {
+func (e *Engine) SetDeadline(t time.Time) error {
 	e.stopWatchdog()
-	e.ctx = ctx
-	if ctx == nil {
-		return
+	if e.l == nil {
+		return nil // no VM, nothing to interrupt
+	}
+	C.rune_clearhook(e.l)
+	if t.IsZero() {
+		return nil
 	}
 	stop := make(chan struct{})
 	done := make(chan struct{})
@@ -360,10 +362,12 @@ func (e *Engine) SetContext(ctx context.Context) {
 	l := e.l
 	go func() {
 		defer close(done)
+		timer := time.NewTimer(time.Until(t))
+		defer timer.Stop()
 		select {
-		case <-ctx.Done():
-			// The context and stop can become ready together; re-check
-			// stop so a finished entry cannot poison the next one.
+		case <-timer.C:
+			// The timer and stop can become ready together; re-check stop
+			// so a finished entry cannot poison the next one.
 			select {
 			case <-stop:
 				return
@@ -373,17 +377,8 @@ func (e *Engine) SetContext(ctx context.Context) {
 		case <-stop:
 		}
 	}()
+	return nil
 }
-
-func (e *Engine) RemoveContext() {
-	e.stopWatchdog()
-	e.ctx = nil
-	if e.l != nil {
-		C.rune_clearhook(e.l)
-	}
-}
-
-func (e *Engine) Context() context.Context { return e.ctx }
 
 func (e *Engine) stopWatchdog() {
 	if e.watchStop != nil {

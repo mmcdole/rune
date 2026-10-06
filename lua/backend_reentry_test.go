@@ -1,7 +1,6 @@
 package lua
 
 import (
-	"context"
 	"strings"
 	"testing"
 	"time"
@@ -267,13 +266,15 @@ func TestScriptEngineReentrySharesWatchdog(t *testing.T) {
 		t.Fatalf("watchdog setup: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-	vm.SetContext(ctx)
+	if err := vm.SetDeadline(time.Now().Add(100 * time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
 	started := time.Now()
 	err := vm.DoString("nested watchdog", `probe.reenter_spin()`)
 	elapsed := time.Since(started)
-	vm.RemoveContext()
+	if err := vm.SetDeadline(time.Time{}); err != nil {
+		t.Fatal(err)
+	}
 
 	if nestedErr == nil || err == nil {
 		t.Fatalf("nested watchdog errors = nested %v, outer %v", nestedErr, err)
@@ -323,9 +324,9 @@ func TestScriptEngineReentrySharesWatchdogFromCoroutine(t *testing.T) {
 		t.Fatalf("coroutine watchdog setup: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-	vm.SetContext(ctx)
+	if err := vm.SetDeadline(time.Now().Add(100 * time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
 	started := time.Now()
 	err := vm.DoString("coroutine nested watchdog", `
 		local worker = coroutine.create(function()
@@ -335,7 +336,9 @@ func TestScriptEngineReentrySharesWatchdogFromCoroutine(t *testing.T) {
 		assert(ok, message)
 	`)
 	elapsed := time.Since(started)
-	vm.RemoveContext()
+	if err := vm.SetDeadline(time.Time{}); err != nil {
+		t.Fatal(err)
+	}
 
 	if nestedErr == nil || err == nil {
 		t.Fatalf("coroutine watchdog errors = nested %v, outer %v", nestedErr, err)

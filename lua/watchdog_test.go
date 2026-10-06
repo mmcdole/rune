@@ -43,15 +43,15 @@ func TestNestedExecutionScopeKeepsOuterDeadline(t *testing.T) {
 	engine, _, cleanup := setupTest(t)
 	defer cleanup()
 	outer := engine.BeginExecution()
-	ctx := engine.vm.Context()
+	deadline := engine.deadline
 	inner := engine.BeginExecution()
 	if err := inner(nil); err != nil {
 		t.Fatal(err)
 	}
-	if engine.vm.Context() != ctx {
+	if engine.deadline != deadline {
 		t.Fatal("nested scope replaced or removed outer deadline")
 	}
-	engine.guardCancel()
+	expireDeadline(t, engine)
 	if err := engine.DoString("expired outer", "error('must not execute')"); err == nil {
 		t.Fatal("nested scope lost the outer deadline")
 	}
@@ -70,11 +70,19 @@ func TestExecutionScopeDoesNotEnterLuaAfterDeadline(t *testing.T) {
 	err := func() (err error) {
 		finish := engine.BeginExecution()
 		defer func() { err = finish(err) }()
-		engine.guardCancel()
+		expireDeadline(t, engine)
 		return engine.guard(func() error { called = true; return nil })
 	}()
 	if err == nil || called {
 		t.Fatalf("expired batch entered Lua: called=%v err=%v", called, err)
+	}
+}
+
+// expireDeadline moves the active watchdog deadline into the past.
+func expireDeadline(t *testing.T, engine *Engine) {
+	t.Helper()
+	if err := engine.setDeadline(time.Now().Add(-time.Second)); err != nil {
+		t.Fatal(err)
 	}
 }
 

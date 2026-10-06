@@ -67,9 +67,11 @@ func (e *Engine) registerInputFuncs() {
 			initial := c.OptStr(1, "")
 			var result string
 			var ok bool
-			e.pauseWatchdog(func() {
+			if err := e.pauseWatchdog(func() {
 				result, ok = e.host.OpenEditor(initial)
-			})
+			}); err != nil {
+				return err
+			}
 			c.Return(result, ok)
 			return nil
 		},

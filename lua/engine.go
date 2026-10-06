@@ -43,9 +43,9 @@ type Engine struct {
 	configDir string
 
 	// Watchdog
-	CallTimeout time.Duration      // Time budget per Lua entry; see DefaultCallTimeout
-	inLua       bool               // True while inside a guarded Lua call (re-entrancy)
-	guardCancel context.CancelFunc // Cancels the active watchdog context
+	CallTimeout time.Duration // Time budget per Lua entry; see DefaultCallTimeout
+	inLua       bool          // True while inside a guarded Lua call (re-entrancy)
+	deadline    time.Time     // Active watchdog deadline; zero outside Lua
 
 	// True once the user has been warned that the core Lua pipeline is missing
 	// or violated a result contract. Reset for each VM generation.
@@ -78,32 +78,29 @@ func NewEngine(host Host) *Engine {
 // current deadline. Only the Session goroutine may use an execution scope.
 func (e *Engine) BeginExecution() func(error) error {
 	owner := !e.inLua
+	var armErr error
 	if owner {
 		e.inLua = true
-		ctx, cancel := context.WithTimeout(context.Background(), e.CallTimeout)
-		e.guardCancel = cancel
-		e.vm.SetContext(ctx)
+		armErr = e.armWatchdog()
 	}
 	return func(err error) error {
-		if owner {
-			defer func() {
-				e.vm.RemoveContext()
-				e.guardCancel()
-				e.guardCancel = nil
-				e.inLua = false
-			}()
+		// pauseWatchdog can re-arm the deadline; always inspect the active one.
+		// pcall must not hide exhaustion of the shared deadline, and callers
+		// recognize it as context.DeadlineExceeded.
+		exceeded := e.deadlineExceeded()
+		if exceeded && !errors.Is(err, context.DeadlineExceeded) {
+			err = errors.Join(err, context.DeadlineExceeded)
 		}
-		// An editor call can replace the context; always inspect the active one.
-		// pcall must not hide exhaustion of the shared deadline.
-		if ctx := e.vm.Context(); ctx != nil && ctx.Err() != nil {
-			// Preserve deadline identity for callers deciding whether to stop.
+		if !owner {
+			return err
+		}
+		e.inLua = false
+		if disarmErr := e.setDeadline(time.Time{}); armErr != nil || disarmErr != nil {
+			err = errors.Join(err, armErr, disarmErr)
+		}
+		if exceeded {
 			// Only the outer scope adds the user-facing interruption message.
-			if !errors.Is(err, ctx.Err()) {
-				err = errors.Join(err, ctx.Err())
-			}
-			if owner {
-				return fmt.Errorf("script interrupted after %v (runaway loop?): %w", e.CallTimeout, err)
-			}
+			return fmt.Errorf("script interrupted after %v (runaway loop?): %w", e.CallTimeout, err)
 		}
 		return err
 	}
@@ -113,8 +110,8 @@ func (e *Engine) BeginExecution() func(error) error {
 func (e *Engine) guard(fn func() error) (err error) {
 	finish := e.BeginExecution()
 	defer func() { err = finish(err) }()
-	if ctx := e.vm.Context(); ctx != nil && ctx.Err() != nil {
-		return ctx.Err()
+	if e.deadlineExceeded() {
+		return context.DeadlineExceeded
 	}
 	return fn()
 }
@@ -125,19 +122,34 @@ func (e *Engine) guard(fn func() error) (err error) {
 // $EDITOR): time spent there is not runaway script time, and without
 // this the expired deadline would kill the calling handler the moment
 // it resumed.
-func (e *Engine) pauseWatchdog(fn func()) {
+func (e *Engine) pauseWatchdog(fn func()) error {
 	if !e.inLua {
 		fn()
-		return
+		return nil
 	}
-	e.vm.RemoveContext()
-	e.guardCancel()
-
+	if err := e.setDeadline(time.Time{}); err != nil {
+		return err
+	}
 	fn()
+	return e.armWatchdog()
+}
 
-	ctx, cancel := context.WithTimeout(context.Background(), e.CallTimeout)
-	e.guardCancel = cancel
-	e.vm.SetContext(ctx)
+// armWatchdog gives the current Lua entry a full CallTimeout from now.
+func (e *Engine) armWatchdog() error {
+	return e.setDeadline(time.Now().Add(e.CallTimeout))
+}
+
+// setDeadline records and installs the watchdog deadline; zero disarms it.
+func (e *Engine) setDeadline(t time.Time) error {
+	e.deadline = t
+	if err := e.vm.SetDeadline(t); err != nil {
+		return fmt.Errorf("script watchdog: %w", err)
+	}
+	return nil
+}
+
+func (e *Engine) deadlineExceeded() bool {
+	return !e.deadline.IsZero() && !time.Now().Before(e.deadline)
 }
 
 // Init initializes (or re-initializes) the VM with fresh state. The

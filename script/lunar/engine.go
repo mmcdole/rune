@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 	"unsafe"
 
 	lua "github.com/mmcdole/lunar"
@@ -55,9 +56,9 @@ type Engine struct {
 	// rebuilt with the State on every Init.
 	classes map[string]*lua.UserDataType[any]
 
-	// Lunar installs a context on the State rather than handing one back,
-	// so the engine remembers what it installed for Context().
-	ctx context.Context
+	// Lunar observes a deadline through a context installed on the State;
+	// cancelDeadline releases the one SetDeadline installed.
+	cancelDeadline context.CancelFunc
 }
 
 // New creates an uninitialized engine; call Init before use.
@@ -87,7 +88,7 @@ func (e *Engine) Init() error {
 	}
 	e.state = state
 	e.classes = map[string]*lua.UserDataType[any]{}
-	e.ctx = nil
+	e.releaseDeadline()
 
 	for _, t := range e.types {
 		if err := e.installType(t); err != nil {
@@ -113,7 +114,7 @@ func (e *Engine) Close() {
 		e.state = nil
 	}
 	e.classes = map[string]*lua.UserDataType[any]{}
-	e.ctx = nil
+	e.releaseDeadline()
 }
 
 func (e *Engine) RegisterModule(
@@ -396,25 +397,29 @@ func (e *Engine) call(
 	return results, nil
 }
 
-func (e *Engine) SetContext(ctx context.Context) {
-	if e.state == nil || ctx == nil {
-		return
-	}
-	if err := e.state.SetContext(ctx); err != nil {
-		return
-	}
-	e.ctx = ctx
-}
-
-func (e *Engine) RemoveContext() {
+func (e *Engine) SetDeadline(t time.Time) error {
+	e.releaseDeadline()
 	if e.state == nil {
-		return
+		return nil // no VM, nothing to interrupt
 	}
-	_ = e.state.RemoveContext()
-	e.ctx = nil
+	if t.IsZero() {
+		return e.state.RemoveContext()
+	}
+	ctx, cancel := context.WithDeadline(context.Background(), t)
+	if err := e.state.SetContext(ctx); err != nil {
+		cancel()
+		return err
+	}
+	e.cancelDeadline = cancel
+	return nil
 }
 
-func (e *Engine) Context() context.Context { return e.ctx }
+func (e *Engine) releaseDeadline() {
+	if e.cancelDeadline != nil {
+		e.cancelDeadline()
+		e.cancelDeadline = nil
+	}
+}
 
 // ---------------------------------------------------------------------------
 // Conversion
