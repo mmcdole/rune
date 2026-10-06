@@ -9,7 +9,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/mmcdole/rune/config"
+	"github.com/mmcdole/rune/internal/paths"
 	"github.com/mmcdole/rune/lua"
 	"github.com/mmcdole/rune/network"
 	"github.com/mmcdole/rune/session"
@@ -57,7 +57,7 @@ Options:
 }
 
 func main() {
-	defaultDir := config.Dir()
+	defaultDir := paths.ConfigDir("")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	configDir := flag.String("config-dir", "", "directory for all of Rune's files")
 	flag.Usage = func() {
@@ -84,7 +84,7 @@ func main() {
 	tuiInstance := tui.NewBubbleTeaUI()
 	sess := session.New(tcpClient, tuiInstance, session.Config{
 		CoreScripts:   lua.CoreScripts,
-		ConfigDir:     config.ResolveDir(*configDir),
+		ConfigDir:     paths.ConfigDir(*configDir),
 		ConnectTarget: target,
 	})
 

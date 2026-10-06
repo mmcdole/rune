@@ -11,7 +11,6 @@ import (
 	"unsafe"
 
 	lua "github.com/mmcdole/lunar"
-	"github.com/mmcdole/rune/internal/pathutil"
 	"github.com/mmcdole/rune/script"
 )
 
@@ -249,11 +248,6 @@ func (e *Engine) DoString(name, code string) error {
 }
 
 func (e *Engine) DoFile(path string) error {
-	path = pathutil.ExpandHome(path)
-	absolute, err := filepath.Abs(path)
-	if err != nil {
-		return err
-	}
 	// Extend package.path so the file's local requires resolve. A user
 	// script may have clobbered the package global, in which case require
 	// is already broken and the file just runs.
@@ -261,7 +255,7 @@ func (e *Engine) DoFile(path string) error {
 		pkg != nil {
 		previous := pkg.RawGetString("path")
 		if text, ok := previous.AsString(); ok {
-			extended := filepath.Dir(absolute) + "/?.lua;" + text
+			extended := filepath.Dir(path) + "/?.lua;" + text
 			if setErr := pkg.RawSetString(
 				"path",
 				lua.String(extended),
@@ -270,7 +264,7 @@ func (e *Engine) DoFile(path string) error {
 			}
 		}
 	}
-	chunk, err := e.state.LoadFile(absolute)
+	chunk, err := e.state.LoadFile(path)
 	if err != nil {
 		return err
 	}

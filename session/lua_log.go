@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/mmcdole/rune/internal/pathutil"
+	"github.com/mmcdole/rune/internal/paths"
 	"github.com/mmcdole/rune/text"
 )
 
@@ -17,8 +17,7 @@ import (
 // LogStart implements lua.Host. Opens path in append mode, creating
 // parent directories. An already-open log is closed and replaced.
 func (s *Session) LogStart(path string) (string, error) {
-	path = pathutil.ExpandHome(path)
-	abs, err := filepath.Abs(path)
+	abs, err := paths.Resolve(path)
 	if err != nil {
 		return "", err
 	}

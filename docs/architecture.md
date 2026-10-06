@@ -360,7 +360,7 @@ carry the Lua generation that created their callback; a result from before
 ## 6. Directory Structure
 
 - `cmd/rune/`: Entry point
-- `config/`: Config dir resolution (XDG/APPDATA)
+- `internal/paths/`: Config dir resolution (XDG/APPDATA) and `~` expansion for user-given paths
 - `input/`: Input submission types and cursor conversions
 - `lua/`: Scripting engine, `rune._*` primitive registration, embedded Lua core (`lua/core/`)
 - `network/`: TCP and Telnet logic

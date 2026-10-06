@@ -1,5 +1,6 @@
-// Package pathutil provides shared filesystem path handling.
-package pathutil
+// Package paths resolves the filesystem paths users give Rune: the config
+// directory and script or log paths that may start with ~.
+package paths
 
 import (
 	"os"
@@ -21,4 +22,9 @@ func ExpandHome(path string) string {
 		return home
 	}
 	return filepath.Join(home, path[2:])
+}
+
+// Resolve expands a leading ~ and returns the absolute path.
+func Resolve(path string) (string, error) {
+	return filepath.Abs(ExpandHome(path))
 }

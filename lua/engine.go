@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mmcdole/rune/internal/paths"
 	"github.com/mmcdole/rune/script"
 	"github.com/mmcdole/rune/text"
 	"github.com/mmcdole/rune/ui"
@@ -208,7 +209,11 @@ func (e *Engine) DoString(name, code string) error {
 // DoFile executes a Lua file from the filesystem. The backend extends
 // the script search path so the file's local requires resolve.
 func (e *Engine) DoFile(path string) error {
-	return e.guard(func() error { return e.vm.DoFile(path) })
+	resolved, err := paths.Resolve(path)
+	if err != nil {
+		return err
+	}
+	return e.guard(func() error { return e.vm.DoFile(resolved) })
 }
 
 // callHooks dispatches through rune.hooks.call; found=false means the

@@ -1,4 +1,4 @@
-package config
+package paths
 
 import (
 	"os"
@@ -6,16 +6,10 @@ import (
 	"runtime"
 )
 
-// Dir returns the rune configuration directory. RUNE_CONFIG_DIR takes
-// precedence over the platform default.
-func Dir() string {
-	return ResolveDir("")
-}
-
-// ResolveDir applies the precedence for Rune's configuration
-// directory: a non-empty CLI value wins, followed by RUNE_CONFIG_DIR,
-// then the platform default.
-func ResolveDir(cliDir string) string {
+// ConfigDir applies the precedence for Rune's configuration directory: a
+// non-empty CLI value wins, followed by RUNE_CONFIG_DIR, then the platform
+// default.
+func ConfigDir(cliDir string) string {
 	if cliDir != "" {
 		return cliDir
 	}

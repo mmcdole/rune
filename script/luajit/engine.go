@@ -23,7 +23,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/mmcdole/rune/internal/pathutil"
 	"github.com/mmcdole/rune/script"
 )
 
@@ -209,18 +208,13 @@ func (e *Engine) DoString(name, code string) error {
 }
 
 func (e *Engine) DoFile(path string) error {
-	path = pathutil.ExpandHome(path)
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return err
-	}
 	// Extend package.path so the file's local requires resolve; if a
 	// script clobbered the package global, require is already broken
 	// and we just run the file.
-	restore := e.extendPackagePath(filepath.Dir(absPath))
+	restore := e.extendPackagePath(filepath.Dir(path))
 	defer restore()
 
-	cp := C.CString(absPath)
+	cp := C.CString(path)
 	rc := C.luaL_loadfile(e.l, cp)
 	C.free(unsafe.Pointer(cp))
 	if rc != 0 {

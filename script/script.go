@@ -53,8 +53,9 @@ type Engine interface {
 
 	// DoString compiles and runs code; name appears in stack traces.
 	DoString(name, code string) error
-	// DoFile runs a file, temporarily extending the script search path
-	// with the file's directory so local require works.
+	// DoFile runs the file at path, which the host has already resolved,
+	// temporarily extending the script search path with the file's
+	// directory so local require works.
 	DoFile(path string) error
 
 	// CallModule invokes <module>.<fn> if it exists and is a function;
