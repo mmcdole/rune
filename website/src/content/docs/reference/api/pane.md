@@ -10,7 +10,7 @@ Panes are named, scrollable text buffers. A tree layout places one with
 ## Quick reference
 
 ```lua
-rune.pane.create(name)                 -- pre-create the named buffer
+rune.pane.create(name)                 -- optional; validates the name
 rune.pane.write(name, text)            -- append text to the named buffer
 rune.pane.replace(name, text)          -- empty the buffer and write text in one update
 rune.pane.show(name)                   -- show the pane's placement in the layout
@@ -36,8 +36,9 @@ A pane's buffer and its placement are separate things. Placing
 `{ type = "pane", name = name }` in a layout creates the buffer if needed and
 shows it; an empty declared pane renders as an empty titled box. `write`
 auto-creates a missing buffer, so content written before the layout exists is
-kept. `create` pre-creates a buffer explicitly; `clear` is a no-op for an
-unknown name. Rune pre-creates the reserved `output` buffer.
+kept. No buffer needs creating first: `create` only checks that the name is
+valid. `clear` is a no-op for an unknown name. Rune pre-creates the reserved
+`output` buffer.
 
 ## Replacing contents
 

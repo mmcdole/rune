@@ -21,14 +21,11 @@ func TestOutputPaneImplementsPaneLifecycle(t *testing.T) {
 		t.Fatal("output registry entry does not preserve controller identity")
 	}
 
-	next, _ := m.Update(paneCreateMsg{Name: ui.OutputPaneName})
-	m = next.(*Model)
-	recreated := m.panes[ui.OutputPaneName]
-	if recreated != output {
-		t.Fatal("creating output replaced the reserved pane")
+	if m.pane(ui.OutputPaneName) != output {
+		t.Fatal("looking up output replaced the reserved pane")
 	}
 
-	next, _ = m.Update(paneWriteMsg{Name: ui.OutputPaneName, Text: "visible"})
+	next, _ := m.Update(paneWriteMsg{Name: ui.OutputPaneName, Text: "visible"})
 	m = next.(*Model)
 	wantScrollback(t, m, "visible")
 
@@ -97,9 +94,7 @@ func TestOutputBeforeFirstWindowSizeUsesBoundedStartupWidth(t *testing.T) {
 func TestOutputPaneBuffersWhileHiddenOrUnplacedAtRetainedWidth(t *testing.T) {
 	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 64)), 20, 8)
 
-	next, _ := m.Update(paneCreateMsg{Name: "side"})
-	m = next.(*Model)
-	next, _ = m.Update(updateLayoutMsg(ui.LayoutTree{Root: ui.LayoutNode{
+	next, _ := m.Update(updateLayoutMsg(ui.LayoutTree{Root: ui.LayoutNode{
 		Type: ui.LayoutTypeRow,
 		Children: []ui.LayoutNode{
 			{Type: ui.LayoutTypePane, Name: ui.OutputPaneName, Size: ui.Cells(12), Border: ui.PaneBorderNone},
@@ -219,11 +214,9 @@ func TestOrdinaryPaneLifecycle(t *testing.T) {
 	}}))
 	m = next.(*Model)
 
-	next, _ = m.Update(paneCreateMsg{Name: "chat"})
-	m = next.(*Model)
 	chat, ok := m.panes["chat"]
 	if !ok {
-		t.Fatal("ordinary pane was not created")
+		t.Fatal("placing an ordinary pane did not create its buffer")
 	}
 	findLeaf(t, m.layoutPlan, ui.LayoutTypePane, "chat")
 

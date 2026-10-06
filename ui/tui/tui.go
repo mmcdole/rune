@@ -166,11 +166,6 @@ func (b *BubbleTeaUI) Quit() {
 	})
 }
 
-// CreatePane creates a new named pane.
-func (b *BubbleTeaUI) CreatePane(name string) {
-	b.send(paneCreateMsg{Name: name})
-}
-
 // WritePane writes a line to a named pane.
 func (b *BubbleTeaUI) WritePane(name, text string) {
 	b.send(paneWriteMsg{Name: name, Text: text})

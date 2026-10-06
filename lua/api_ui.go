@@ -42,14 +42,11 @@ func (e *Engine) registerUIInternalFuncs() {
 // registerPaneFuncs registers internal rune._pane.* primitives (wrapped by Lua)
 func (e *Engine) registerPaneFuncs() {
 	e.vm.RegisterModule("rune._pane", map[string]script.GoFunc{
-		// rune._pane.create(name): Create a named pane
+		// rune._pane.create(name): Validate a pane name. Buffers are created
+		// on first write or layout placement, so there is nothing to create.
 		"create": func(c *script.Call) error {
-			name, err := paneName(c, "create")
-			if err != nil {
-				return err
-			}
-			e.host.PaneCreate(name)
-			return nil
+			_, err := paneName(c, "create")
+			return err
 		},
 
 		// rune._pane.write(name, text): Write to a pane

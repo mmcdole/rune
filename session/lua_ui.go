@@ -13,11 +13,6 @@ func (s *Session) Print(msg string) {
 	s.ui.Print(text.SanitizeDisplay(msg))
 }
 
-// PaneCreate implements lua.Host.
-func (s *Session) PaneCreate(name string) {
-	s.ui.CreatePane(name)
-}
-
 // PaneWrite implements lua.Host. Sanitized like Print: pane content is
 // often trigger-captured server text.
 func (s *Session) PaneWrite(name, msg string) {

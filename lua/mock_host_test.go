@@ -145,12 +145,6 @@ func (m *MockHost) Reload() {
 	m.ReloadCalls++
 }
 
-func (m *MockHost) PaneCreate(name string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.PaneCalls = append(m.PaneCalls, struct{ Op, Name, Data string }{"create", name, ""})
-}
-
 func (m *MockHost) PaneWrite(name, text string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

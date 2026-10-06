@@ -33,11 +33,6 @@ type paneReplaceMsg struct {
 	Text string
 }
 
-// paneCreateMsg creates a new named pane.
-type paneCreateMsg struct {
-	Name string
-}
-
 // paneClearMsg clears the contents of a named pane.
 type paneClearMsg struct {
 	Name string

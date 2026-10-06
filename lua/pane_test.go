@@ -99,7 +99,6 @@ func TestReservedOutputUsesTheOrdinaryPaneAPI(t *testing.T) {
 	}
 
 	want := []struct{ Op, Name, Data string }{
-		{"create", "output", ""},
 		{"write", "output", "line"},
 		{"replace", "output", "fresh"},
 		{"clear", "output", ""},

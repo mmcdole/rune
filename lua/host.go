@@ -28,7 +28,6 @@ type Host interface {
 
 	// UI
 	Print(text string)
-	PaneCreate(name string)
 	PaneWrite(name, text string)
 	PaneReplace(name, text string)
 	PaneClear(name string)

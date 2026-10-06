@@ -173,9 +173,6 @@ func (m *Model) dispatch(msg tea.Msg) (render, layout bool) {
 
 	// Pane buffer content. Placement and visibility are layout-tree state
 	// and arrive as UpdateLayoutMsg instead.
-	case paneCreateMsg:
-		m.pane(msg.Name)
-		return false, false
 	case paneWriteMsg:
 		m.pane(msg.Name).Write(msg.Text)
 		return true, m.layoutPlan.autoPanes[msg.Name]

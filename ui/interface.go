@@ -26,7 +26,6 @@ type UI interface {
 	ShowPicker(opts PickerOptions)
 	ShowSearch(opts SearchOptions)
 	SetClipboard(text string)
-	CreatePane(name string)
 	WritePane(name, text string)
 	ReplacePane(name, text string)
 	ClearPane(name string)
