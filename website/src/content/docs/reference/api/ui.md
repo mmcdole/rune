@@ -13,7 +13,7 @@ rune.ui.layout(config)               -- replace the complete layout
 rune.ui.bar(name, render_fn, opts?)  -- register a bar renderer
 rune.bars.get(name)                  -- the bar's handle, or nil
 rune.bars.toggle(name)               -- toggle a registered bar
-rune.ui.refresh_bars()               -- request an immediate bar render
+rune.ui.refresh_bars()               -- render bars without waiting for the tick
 rune.ui.regions.show(id)             -- show an identified row/column
 rune.ui.regions.hide(id)             -- hide an identified row/column
 rune.ui.regions.toggle(id)           -- toggle an identified row/column
@@ -232,8 +232,9 @@ rune.ui.bar("clock", function(width)
 end)
 ```
 
-`rune.ui.refresh_bars()` requests an immediate render instead of waiting for
-the next tick. Call it after changing state read by a renderer.
+`rune.ui.refresh_bars()` renders bars when the current callback's event
+finishes. Call it after changing state read by a renderer. Several calls
+during one event render once.
 
 ## rune.ui.search
 

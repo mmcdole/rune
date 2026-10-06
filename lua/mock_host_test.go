@@ -19,19 +19,21 @@ type MockHost struct {
 	mu sync.Mutex
 
 	// Captured calls
-	SendCalls           []string
-	PrintCalls          []string
-	QuitCalled          bool
-	ConnectCalls        []string
-	DisconnectCalls     int
-	ReloadCalls         int
-	PaneCalls           []struct{ Op, Name, Data string }
-	PickerCalls         []ui.PickerOptions
-	SearchCalls         []ui.SearchOptions
-	ClipboardCalls      []string
-	ConfigChanges       []Config
-	PresentationChanges int
-	ScheduledTimers     []struct {
+	SendCalls       []string
+	PrintCalls      []string
+	QuitCalled      bool
+	ConnectCalls    []string
+	DisconnectCalls int
+	ReloadCalls     int
+	PaneCalls       []struct{ Op, Name, Data string }
+	PickerCalls     []ui.PickerOptions
+	SearchCalls     []ui.SearchOptions
+	ClipboardCalls  []string
+	ConfigChanges   []Config
+	BindsChanges    int
+	LayoutChanges   int
+	BarsChanges     int
+	ScheduledTimers []struct {
 		ID       int
 		Duration time.Duration
 		Repeat   bool
@@ -143,10 +145,6 @@ func (m *MockHost) Reload() {
 	m.ReloadCalls++
 }
 
-func (m *MockHost) RefreshBars() {
-	// No-op for tests
-}
-
 func (m *MockHost) PaneCreate(name string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -171,10 +169,22 @@ func (m *MockHost) PaneClear(name string) {
 	m.PaneCalls = append(m.PaneCalls, struct{ Op, Name, Data string }{"clear", name, ""})
 }
 
-func (m *MockHost) OnPresentationChange() {
+func (m *MockHost) OnBindsChange() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.PresentationChanges++
+	m.BindsChanges++
+}
+
+func (m *MockHost) OnLayoutChange() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.LayoutChanges++
+}
+
+func (m *MockHost) OnBarsChange() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.BarsChanges++
 }
 
 func (m *MockHost) OnConfigChange(config Config) {
@@ -191,12 +201,19 @@ func (m *MockHost) DrainConfigChanges() []Config {
 	return changes
 }
 
-func (m *MockHost) DrainPresentationChanges() int {
+// DrainSnapshotChanges returns and resets the binds, layout, and bars
+// stale-snapshot notification counts.
+func (m *MockHost) DrainSnapshotChanges() (binds, layout, bars int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	changes := m.PresentationChanges
-	m.PresentationChanges = 0
-	return changes
+	binds, layout, bars = m.BindsChanges, m.LayoutChanges, m.BarsChanges
+	m.BindsChanges, m.LayoutChanges, m.BarsChanges = 0, 0, 0
+	return binds, layout, bars
+}
+
+func (m *MockHost) DrainLayoutChanges() int {
+	_, layout, _ := m.DrainSnapshotChanges()
+	return layout
 }
 
 func (m *MockHost) ShowPicker(opts ui.PickerOptions) {

@@ -35,8 +35,7 @@ func (s *Session) Connect(addr string) {
 	// The old socket is retired now, not when the dial resolves.
 	s.clientState.Connected = false
 	s.clientState.Address = ""
-	s.engine.UpdateState(s.clientState)
-	s.pushBarUpdates()
+	s.publishClientState()
 	backgroundCtx := s.backgroundCtx
 	s.backgroundWork.Go(func() {
 		ctx, cancel := context.WithTimeout(backgroundCtx, 10*time.Second)
@@ -58,15 +57,14 @@ func (s *Session) handleConnectFinished(event connectFinished) {
 	if event.err != nil {
 		s.clientState.Connected = false
 		s.clientState.Address = ""
-		s.engine.UpdateState(s.clientState)
+		s.publishClientState()
 		s.engine.NotifyError(event.err.Error())
 	} else {
 		s.clientState.Connected = true
 		s.clientState.Address = event.address
-		s.engine.UpdateState(s.clientState)
+		s.publishClientState()
 		s.engine.NotifyConnected(event.address)
 	}
-	s.pushBarUpdates()
 }
 
 // Disconnect implements lua.Host.
@@ -96,9 +94,8 @@ func (s *Session) finishDisconnect() {
 	s.resetConnectionState()
 	s.clientState.Connected = false
 	s.clientState.Address = ""
-	s.engine.UpdateState(s.clientState)
+	s.publishClientState()
 	s.engine.NotifyDisconnected()
-	s.pushBarUpdates()
 }
 
 // Send implements lua.Host.

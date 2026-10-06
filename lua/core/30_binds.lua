@@ -15,7 +15,7 @@
 -- disabled bind (or disabled group), it is consumed without a callback.
 --
 -- Named editor actions run in the UI. Callbacks round-trip through Session.
--- Both use the same registry and presentation snapshot.
+-- Both use the same registry and bind snapshot.
 
 local by_key = {} -- key -> data, the dispatch index
 
@@ -26,14 +26,13 @@ local registry = rune.registry.new{
         -- Rebinding a key replaces the old binding through the registry's
         -- name upsert, which has already removed it by the time we get here.
         by_key[data.key] = data
-        rune._ui.presentation_changed()
     end,
     on_remove = function(data)
         if by_key[data.key] == data then
             by_key[data.key] = nil
         end
-        rune._ui.presentation_changed()
     end,
+    on_change = rune._ui.binds_changed,
 }
 
 rune.binds = {}

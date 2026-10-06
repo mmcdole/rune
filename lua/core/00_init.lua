@@ -269,9 +269,9 @@ function rune.ui.regions.is_hidden(id)
     return rune._ui.region_is_hidden(id)
 end
 
--- Force an immediate bar refresh instead of waiting for the ticker.
+-- Render bars when the current event finishes.
 function rune.ui.refresh_bars()
-    rune._ui.refresh_bars()
+    rune._ui.bars_changed()
 end
 
 rune.ui.picker = {}

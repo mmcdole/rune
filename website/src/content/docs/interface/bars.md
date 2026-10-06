@@ -22,11 +22,12 @@ rune.ui.layout({
 })
 ```
 
-Rune calls active renderers every 250ms, or immediately after
-`rune.ui.refresh_bars()`. A bar displays only when the tree contains a leaf
-with `type = "bar"` and its registered `name`, the bar is enabled, its renderer
-produces visible content, and every ancestor region is visible. A same-named
-pane is a separate resource and never substitutes for the bar.
+Rune calls active renderers every 250ms, and again at the end of any event
+that registers, enables, or disables a bar or calls `rune.ui.refresh_bars()`.
+A bar displays only when the tree contains a leaf with `type = "bar"` and its
+registered `name`, the bar is enabled, its renderer produces visible content,
+and every ancestor region is visible. A same-named pane is a separate resource
+and never substitutes for the bar.
 
 ## Callback width
 

@@ -30,6 +30,7 @@ local registry = rune.registry.new{
             by_bar[data.bar] = nil
         end
     end,
+    on_change = rune._ui.bars_changed,
 }
 
 rune.bars = {}

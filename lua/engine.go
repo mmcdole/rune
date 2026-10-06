@@ -458,6 +458,7 @@ func (e *Engine) registerAPIs() {
 	e.registerStateFuncs()
 	e.registerConfigFuncs()
 	e.registerLayoutFuncs()
+	e.registerBindFuncs()
 	e.registerBarFuncs()
 	e.registerPickerFuncs()
 	e.registerHistoryFuncs()

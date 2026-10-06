@@ -35,9 +35,3 @@ func (s *Session) handleReloadRequested() {
 		s.engine.NotifyReloaded()
 	}
 }
-
-// RefreshBars forces an immediate bar refresh.
-// Called from Lua when bar state changes and we don't want to wait for the ticker.
-func (s *Session) RefreshBars() {
-	s.pushBarUpdates()
-}

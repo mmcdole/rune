@@ -21,7 +21,7 @@ func bootSessionInDir(t *testing.T, dir string) (*Session, *mockNetwork, *mockUI
 		CoreScripts: lua.CoreScripts,
 		ConfigDir:   dir,
 	})
-	if err := s.boot(); err != nil {
+	if err := s.startup(); err != nil {
 		t.Fatalf("boot must not fail on user-script errors: %v", err)
 	}
 	cleanupTestSession(t, s)

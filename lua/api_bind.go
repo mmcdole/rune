@@ -8,6 +8,17 @@ import (
 // Lua owns binding registration. Session pulls a snapshot for local editor
 // actions and forwards callback key presses through HandleKeyBind.
 
+// registerBindFuncs registers rune._ui.binds_changed, which the bind
+// registry calls to mark the bind snapshot stale.
+func (e *Engine) registerBindFuncs() {
+	e.vm.RegisterModule("rune._ui", map[string]script.GoFunc{
+		"binds_changed": func(c *script.Call) error {
+			e.host.OnBindsChange()
+			return nil
+		},
+	}, nil)
+}
+
 // HandleKeyBind dispatches a pressed key to the Lua bind module.
 // found=false (bind module unavailable, e.g. core failed to load) is
 // ignored silently.

@@ -132,6 +132,7 @@ type mockUI struct {
 	bars          map[string]ui.BarContent // last UpdateBars payload
 	barPushes     int                      // UpdateBars call count
 	bindsPushed   input.Bindings           // last UpdateBinds payload
+	bindPushes    int                      // UpdateBinds call count
 	layoutPushes  int                      // UpdateLayout call count
 	layout        ui.LayoutTree            // last UpdateLayout payload
 	config        ui.Config                // last UpdateConfig payload
@@ -221,6 +222,7 @@ func (m *mockUI) UpdateBinds(keys input.Bindings) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.bindsPushed = keys
+	m.bindPushes++
 }
 func (m *mockUI) UpdateLayout(layout ui.LayoutTree) {
 	m.mu.Lock()
@@ -248,6 +250,14 @@ func (m *mockUI) drainConfigPushes() []ui.Config {
 	pushes := append([]ui.Config(nil), m.configPushes...)
 	m.configPushes = nil
 	return pushes
+}
+
+func (m *mockUI) drainBindPushes() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := m.bindPushes
+	m.bindPushes = 0
+	return n
 }
 
 func (m *mockUI) drainLayoutPushes() int {

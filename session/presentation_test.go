@@ -82,7 +82,7 @@ func TestBarRefreshPublishesOnlySuccessfulSnapshots(t *testing.T) {
 	uiMock.drainBarPushes()
 
 	assertSessionLua(t, s.engine, `rune.bars.clear()`)
-	s.pushBarUpdates()
+	s.pushBars()
 
 	count, bars := uiMock.drainBarPushes()
 	if count != 1 {
@@ -98,7 +98,7 @@ func TestBarRefreshPublishesOnlySuccessfulSnapshots(t *testing.T) {
 		end
 	`)
 	uiMock.drainBarPushes()
-	s.pushBarUpdates()
+	s.pushBars()
 	if count, _ := uiMock.drainBarPushes(); count != 0 {
 		t.Fatalf("failed bar render published %d snapshots, want none", count)
 	}
@@ -212,11 +212,11 @@ rune.config.set("mouse", true)
 	`)
 }
 
-// TestPresentationChangesCoalesceIntoOnePushPerEvent: a bind that installs a
+// TestLayoutChangesCoalesceIntoOnePushPerEvent: a bind that installs a
 // layout and then flips a pane several times must reach the UI as one layout
 // snapshot carrying the final gate, never as a sequence of intermediate
-// snapshots.
-func TestPresentationChangesCoalesceIntoOnePushPerEvent(t *testing.T) {
+// snapshots. Binds and bars did not change, so neither is republished.
+func TestLayoutChangesCoalesceIntoOnePushPerEvent(t *testing.T) {
 	s, _, uiMock := newTestSession(t)
 	assertSessionLua(t, s.engine, `
 		rune.bind("f9", function()
@@ -233,6 +233,7 @@ func TestPresentationChangesCoalesceIntoOnePushPerEvent(t *testing.T) {
 	// Registering the bind outside a handler leaves the flag set. Start the
 	// tested event clean so the count below is the callback's own doing.
 	s.flushPresentation()
+	uiMock.drainBindPushes()
 	uiMock.drainLayoutPushes()
 	uiMock.drainBarPushes()
 
@@ -241,8 +242,11 @@ func TestPresentationChangesCoalesceIntoOnePushPerEvent(t *testing.T) {
 	if n := uiMock.drainLayoutPushes(); n != 1 {
 		t.Fatalf("layout pushes during one bind = %d, want exactly one", n)
 	}
-	if n, _ := uiMock.drainBarPushes(); n != 1 {
-		t.Fatalf("bar pushes during one bind = %d, want exactly one", n)
+	if n := uiMock.drainBindPushes(); n != 0 {
+		t.Fatalf("bind pushes for a layout-only change = %d, want none", n)
+	}
+	if n, _ := uiMock.drainBarPushes(); n != 0 {
+		t.Fatalf("bar pushes for a layout-only change = %d, want none", n)
 	}
 	got := uiMock.pushedLayout()
 	if len(got.Root.Children) != 3 || got.Root.Children[0].Name != "group" || !got.Root.Children[0].Hidden {
@@ -250,12 +254,18 @@ func TestPresentationChangesCoalesceIntoOnePushPerEvent(t *testing.T) {
 	}
 }
 
-// TestBootPublishesOnePresentationSnapshot locks in the boot cost: core
-// scripts register many binds, and none of them may push on its own.
-func TestBootPublishesOnePresentationSnapshot(t *testing.T) {
+// TestBootPublishesEachSnapshotOnce locks in the boot cost: core scripts
+// register many binds and bars, and none of them may push on its own.
+func TestBootPublishesEachSnapshotOnce(t *testing.T) {
 	_, _, uiMock := newTestSession(t)
+	if n := uiMock.drainBindPushes(); n != 1 {
+		t.Fatalf("bind pushes during boot = %d, want exactly one", n)
+	}
 	if n := uiMock.drainLayoutPushes(); n != 1 {
 		t.Fatalf("layout pushes during boot = %d, want exactly one", n)
+	}
+	if n, _ := uiMock.drainBarPushes(); n != 1 {
+		t.Fatalf("bar pushes during boot = %d, want exactly one", n)
 	}
 }
 
@@ -285,4 +295,29 @@ func TestTimerCallbacksFlushPresentationOnce(t *testing.T) {
 	if hidden, found := uiMock.pushedLayout().PaneHidden(ui.OutputPaneName); !found || hidden {
 		t.Fatalf("pushed layout output hidden = %v, found = %v; want false, true", hidden, found)
 	}
+}
+
+func TestRefreshBarsRendersOnceAfterTheEvent(t *testing.T) {
+	s, _, uiMock := newTestSession(t)
+	assertSessionLua(t, s.engine, `
+		renders = 0
+		rune.ui.bar("count", function()
+			renders = renders + 1
+			return "n"
+		end)
+		rune.bind("f5", function()
+			for _ = 1, 3 do rune.ui.refresh_bars() end
+			assert(renders == 0, "refresh_bars rendered inside the callback")
+		end)
+	`)
+	s.flushPresentation()
+	assertSessionLua(t, s.engine, `renders = 0`)
+	uiMock.drainBarPushes()
+
+	s.handleUIEvent(ui.ExecuteBindMsg("f5"))
+
+	if count, _ := uiMock.drainBarPushes(); count != 1 {
+		t.Fatalf("UpdateBars calls = %d, want 1", count)
+	}
+	assertSessionLua(t, s.engine, `assert(renders == 1, "renders = " .. renders)`)
 }

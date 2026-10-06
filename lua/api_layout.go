@@ -22,7 +22,7 @@ func (e *Engine) registerLayoutFuncs() {
 			// Commit only after parsing and whole-tree validation succeed. A
 			// failed replacement leaves both the active tree and the UI alone.
 			e.layout = candidate
-			e.host.OnPresentationChange()
+			e.host.OnLayoutChange()
 			return nil
 		},
 		"region_show": func(c *script.Call) error {
@@ -47,7 +47,7 @@ func (e *Engine) registerLayoutFuncs() {
 			updated, _, _ := e.layout.WithRegionVisibility(id, hidden)
 			e.layout = updated
 			c.Return(true)
-			e.host.OnPresentationChange()
+			e.host.OnLayoutChange()
 			return nil
 		},
 		"region_is_hidden": func(c *script.Call) error {
@@ -84,7 +84,7 @@ func (e *Engine) setPaneVisible(c *script.Call, operation string, visible bool) 
 		return nil
 	}
 	e.layout = updated
-	e.host.OnPresentationChange()
+	e.host.OnLayoutChange()
 	return nil
 }
 
@@ -102,7 +102,7 @@ func (e *Engine) setRegionVisible(c *script.Call, operation string, visible bool
 		return nil
 	}
 	e.layout = updated
-	e.host.OnPresentationChange()
+	e.host.OnLayoutChange()
 	return nil
 }
 

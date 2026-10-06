@@ -19,7 +19,7 @@ func bootWithTarget(t *testing.T, dir, target string) (*Session, *mockNetwork, *
 		ConfigDir:     dir,
 		ConnectTarget: target,
 	})
-	if err := s.boot(); err != nil {
+	if err := s.startup(); err != nil {
 		t.Fatalf("boot failed: %v", err)
 	}
 	cleanupTestSession(t, s)

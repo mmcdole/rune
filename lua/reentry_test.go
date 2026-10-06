@@ -7,8 +7,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-
-	"github.com/mmcdole/rune/ui"
 )
 
 // TestLoadCanReenterLuaAndReuseOuterExecution verifies the other production
@@ -54,100 +52,79 @@ func TestLoadCanReenterLuaAndReuseOuterExecution(t *testing.T) {
 	}
 }
 
-// refreshBarsReentryHost mirrors Session.RefreshBars: rune.ui.refresh_bars()
-// synchronously renders bars through the same engine before returning to the
-// script that requested the refresh.
-type refreshBarsReentryHost struct {
+// connectReentryHost mirrors Session.Connect: rune.connect() synchronously
+// runs the connecting hook through the same engine before returning to the
+// script that requested the connection.
+type connectReentryHost struct {
 	*MockHost
 	engine *Engine
-	active bool
-
-	bars map[string]ui.BarContent
 }
 
-func (h *refreshBarsReentryHost) RefreshBars() {
-	if !h.active {
-		return
-	}
-	h.bars = h.engine.RenderBars(80)
+func (h *connectReentryHost) Connect(address string) {
+	h.engine.NotifyConnecting(address)
 }
 
-// TestRefreshBarsCanReenterLuaAndResume verifies the real Session call path:
-// Lua -> Go RefreshBars -> Lua bar render -> outer Lua invocation. The nested
-// render must run, and the outer script must resume after the host callback
-// returns.
-func TestRefreshBarsCanReenterLuaAndResume(t *testing.T) {
-	engine, host := newRefreshBarsReentryEngine(t)
-
-	if err := engine.DoString("reentry setup", `
-		rune.ui.bar("reentry", function(width)
-			return "width=" .. width
-		end)
-	`); err != nil {
-		t.Fatalf("register bar: %v", err)
-	}
-	host.DrainPrintCalls()
-	host.active = true
+// TestConnectCanReenterLuaAndResume verifies the real Session call path:
+// Lua -> Go Connect -> Lua connecting hook -> outer Lua invocation. The nested
+// hook must run, and the outer script must resume after the host returns.
+func TestConnectCanReenterLuaAndResume(t *testing.T) {
+	engine, host := newConnectReentryEngine(t)
 
 	if err := engine.DoString("reentry", `
-		rune.ui.refresh_bars()
+		rune.hooks.on("connecting", function(address)
+			rune.send_raw("connecting " .. address)
+		end)
+		rune.connect("example.org:23")
 		rune.send_raw("outer resumed")
 	`); err != nil {
-		t.Fatalf("bar refresh: %v", err)
+		t.Fatalf("connect: %v", err)
 	}
 
-	if got := host.bars["reentry"].Left; got != "width=80" {
-		t.Errorf("nested bar render = %q, want %q", got, "width=80")
+	want := []string{"connecting example.org:23", "outer resumed"}
+	if got := host.DrainNetworkCalls(); !reflect.DeepEqual(got, want) {
+		t.Errorf("reentrant connect sends = %q, want %q", got, want)
 	}
-	if got := host.DrainNetworkCalls(); !reflect.DeepEqual(got, []string{"outer resumed"}) {
-		t.Errorf("outer script did not resume: sends = %q", got)
-	}
-	if got := host.DrainPrintCalls(); len(got) != 0 {
-		t.Errorf("nested calls reported errors: %q", got)
+	for _, printed := range host.DrainPrintCalls() {
+		if strings.Contains(printed, "[Error]") {
+			t.Errorf("nested calls reported errors: %q", printed)
+		}
 	}
 }
 
-// TestRefreshBarsCanReenterFromCoroutine verifies that ordinary Engine calls
+// TestConnectCanReenterFromCoroutine verifies that ordinary Engine calls
 // made by the host remain bound to the Lua thread that entered Go rather than
 // silently using the VM's main thread.
-func TestRefreshBarsCanReenterFromCoroutine(t *testing.T) {
-	engine, host := newRefreshBarsReentryEngine(t)
-	if err := engine.DoString("coroutine setup", `
-		worker = false
-		rune.ui.bar("thread", function()
-			if coroutine.running() == worker then
-				return "worker"
-			end
-			return "wrong thread"
-		end)
-	`); err != nil {
-		t.Fatalf("register coroutine-aware bar: %v", err)
-	}
-	host.active = true
+func TestConnectCanReenterFromCoroutine(t *testing.T) {
+	engine, host := newConnectReentryEngine(t)
 
 	if err := engine.DoString("coroutine reentry", `
+		worker = false
+		rune.hooks.on("connecting", function()
+			if coroutine.running() == worker then
+				rune.send_raw("worker")
+			else
+				rune.send_raw("wrong thread")
+			end
+		end)
 		worker = coroutine.create(function()
-			rune.ui.refresh_bars()
+			rune.connect("example.org:23")
 			rune.send_raw("coroutine resumed")
 		end)
 		local ok, err = coroutine.resume(worker)
 		assert(ok, err)
 		assert(coroutine.status(worker) == "dead")
 	`); err != nil {
-		t.Fatalf("bar refresh from coroutine: %v", err)
+		t.Fatalf("connect from coroutine: %v", err)
 	}
 
-	if got := host.bars["thread"].Left; got != "worker" {
-		t.Errorf("nested bar render ran on %q, want worker coroutine", got)
+	want := []string{"worker", "coroutine resumed"}
+	if got := host.DrainNetworkCalls(); !reflect.DeepEqual(got, want) {
+		t.Errorf("coroutine reentry sends = %q, want %q", got, want)
 	}
-	if got := host.DrainNetworkCalls(); !reflect.DeepEqual(
-		got,
-		[]string{"coroutine resumed"},
-	) {
-		t.Errorf("coroutine did not resume: sends = %q", got)
-	}
-	if got := host.DrainPrintCalls(); len(got) != 0 {
-		t.Errorf("coroutine reentry reported errors: %q", got)
+	for _, printed := range host.DrainPrintCalls() {
+		if strings.Contains(printed, "[Error]") {
+			t.Errorf("coroutine reentry reported errors: %q", printed)
+		}
 	}
 }
 
@@ -155,22 +132,25 @@ func TestRefreshBarsCanReenterFromCoroutine(t *testing.T) {
 // nested call reaches the error hook through the active callback frame instead
 // of trying to start a second outer execution.
 func TestReentryFailureUsesActiveFrame(t *testing.T) {
-	engine, host := newRefreshBarsReentryEngine(t)
+	engine, host := newConnectReentryEngine(t)
 	if err := engine.DoString("failure setup", `
 		rune.hooks.on("error", function(message)
 			rune.send_raw("reported:" .. message)
 		end, {priority = 1})
-		rune.bars._render_all = function()
-			error("nested render failure")
+		local call = rune.hooks.call
+		rune.hooks.call = function(event, ...)
+			if event == "connecting" then
+				error("nested hook failure")
+			end
+			return call(event, ...)
 		end
 	`); err != nil {
 		t.Fatalf("install nested failure: %v", err)
 	}
 	host.DrainPrintCalls()
-	host.active = true
 
 	if err := engine.DoString("failed reentry", `
-		rune.ui.refresh_bars()
+		rune.connect("example.org:23")
 		rune.send_raw("outer resumed")
 	`); err != nil {
 		t.Fatalf("outer execution failed: %v", err)
@@ -178,8 +158,8 @@ func TestReentryFailureUsesActiveFrame(t *testing.T) {
 
 	sent := host.DrainNetworkCalls()
 	if len(sent) < 2 ||
-		!strings.HasPrefix(sent[0], "reported:bar render:") ||
-		!strings.Contains(strings.Join(sent[:len(sent)-1], "\n"), "nested render failure") ||
+		!strings.HasPrefix(sent[0], "reported:'connecting' hook:") ||
+		!strings.Contains(strings.Join(sent[:len(sent)-1], "\n"), "nested hook failure") ||
 		sent[len(sent)-1] != "outer resumed" {
 		t.Fatalf("nested failure routing = %q", sent)
 	}
@@ -201,11 +181,11 @@ func TestReentryFailureUsesActiveFrame(t *testing.T) {
 	}
 }
 
-func newRefreshBarsReentryEngine(
+func newConnectReentryEngine(
 	t *testing.T,
-) (*Engine, *refreshBarsReentryHost) {
+) (*Engine, *connectReentryHost) {
 	t.Helper()
-	host := &refreshBarsReentryHost{MockHost: NewMockHost()}
+	host := &connectReentryHost{MockHost: NewMockHost()}
 	engine := NewEngine(host)
 	host.engine = engine
 	t.Cleanup(engine.Close)

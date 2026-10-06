@@ -99,12 +99,12 @@ func TestBindingEnableChangesReachUI(t *testing.T) {
 func TestEmptyBindingsDoNotUseDegradedCoreDefaults(t *testing.T) {
 	s, _, uiMock := newTestSession(t)
 	assertSessionLua(t, s.engine, `rune.binds.clear()`)
-	s.pushBindsAndLayout()
+	s.pushBinds()
 	if len(uiMock.pushedBinds()) != 0 {
 		t.Fatal("clearing bindings restored defaults")
 	}
 	assertSessionLua(t, s.engine, `rune.binds = nil`)
-	s.pushBindsAndLayout()
+	s.pushBinds()
 	if !uiMock.pushedBinds().Matches("submit", "enter") {
 		t.Fatal("unavailable core did not restore fallback editing")
 	}

@@ -24,7 +24,7 @@ func TestPaneVisibilityIsPlacementStateOnTheLayoutTree(t *testing.T) {
 	`); err != nil {
 		t.Fatal(err)
 	}
-	host.DrainPresentationChanges()
+	host.DrainLayoutChanges()
 	before := engine.GetLayout()
 
 	assertLua(t, engine, `
@@ -32,12 +32,12 @@ func TestPaneVisibilityIsPlacementStateOnTheLayoutTree(t *testing.T) {
 		assert(rune.pane.is_hidden("output") == false)
 		assert(rune.pane.is_hidden("missing") == nil)
 	`)
-	if got := host.DrainPresentationChanges(); got != 0 {
+	if got := host.DrainLayoutChanges(); got != 0 {
 		t.Fatalf("visibility queries published %d presentation changes", got)
 	}
 
 	assertLua(t, engine, `assert(rune.pane.show("chat") == true)`)
-	if got := host.DrainPresentationChanges(); got != 1 {
+	if got := host.DrainLayoutChanges(); got != 1 {
 		t.Fatalf("show published %d presentation changes, want 1", got)
 	}
 	if !before.Root.Children[1].Hidden {
@@ -48,7 +48,7 @@ func TestPaneVisibilityIsPlacementStateOnTheLayoutTree(t *testing.T) {
 	}
 
 	assertLua(t, engine, `assert(rune.pane.show("chat") == true)`)
-	if got := host.DrainPresentationChanges(); got != 0 {
+	if got := host.DrainLayoutChanges(); got != 0 {
 		t.Fatalf("idempotent show published %d presentation changes", got)
 	}
 	assertLua(t, engine, `
@@ -56,12 +56,12 @@ func TestPaneVisibilityIsPlacementStateOnTheLayoutTree(t *testing.T) {
 		assert(rune.pane.hide("missing") == false)
 		assert(rune.pane.toggle("missing") == false)
 	`)
-	if got := host.DrainPresentationChanges(); got != 0 {
+	if got := host.DrainLayoutChanges(); got != 0 {
 		t.Fatalf("unplaced pane operations published %d presentation changes", got)
 	}
 
 	assertLua(t, engine, `assert(rune.pane.toggle("chat") == true)`)
-	if got := host.DrainPresentationChanges(); got != 1 {
+	if got := host.DrainLayoutChanges(); got != 1 {
 		t.Fatalf("toggle published %d presentation changes, want 1", got)
 	}
 	if !engine.GetLayout().Root.Children[1].Hidden {
@@ -69,7 +69,7 @@ func TestPaneVisibilityIsPlacementStateOnTheLayoutTree(t *testing.T) {
 	}
 
 	assertLua(t, engine, `assert(rune.pane.hide("chat") == true)`)
-	if got := host.DrainPresentationChanges(); got != 0 {
+	if got := host.DrainLayoutChanges(); got != 0 {
 		t.Fatalf("idempotent hide published %d presentation changes", got)
 	}
 

@@ -9,14 +9,12 @@ import (
 // also applies the standard failure quarantine. Go's role is calling
 // rune.bars._render_all on the tick and marshaling the result.
 
-// registerBarFuncs registers rune._ui.refresh_bars. Its public wrapper is
-// defined in 00_init.lua.
+// registerBarFuncs registers rune._ui.bars_changed, which the bar registry
+// and rune.ui.refresh_bars call to mark the bar snapshot stale.
 func (e *Engine) registerBarFuncs() {
 	e.vm.RegisterModule("rune._ui", map[string]script.GoFunc{
-		// rune._ui.refresh_bars() - Force immediate bar refresh
-		// Use when bar state changes and you don't want to wait for the 250ms ticker
-		"refresh_bars": func(c *script.Call) error {
-			e.host.RefreshBars()
+		"bars_changed": func(c *script.Call) error {
+			e.host.OnBarsChange()
 			return nil
 		},
 	}, nil)

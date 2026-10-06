@@ -15,7 +15,7 @@ func TestLegacyLayoutTableIsRejectedWithoutRaising(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 	baseline := engine.GetLayout()
-	host.DrainPresentationChanges()
+	host.DrainLayoutChanges()
 	host.DrainPrintCalls()
 
 	cases := []struct{ name, body string }{
@@ -41,7 +41,7 @@ func TestLegacyLayoutTableIsRejectedWithoutRaising(t *testing.T) {
 			if got := engine.GetLayout(); !reflect.DeepEqual(got, baseline) {
 				t.Fatalf("rejected layout replaced the active tree: %#v", got)
 			}
-			if n := host.DrainPresentationChanges(); n != 0 {
+			if n := host.DrainLayoutChanges(); n != 0 {
 				t.Fatalf("rejected layout published %d presentation changes, want none", n)
 			}
 			printed := strings.Join(host.DrainPrintCalls(), "\n")
@@ -287,7 +287,7 @@ func TestLayoutValidationIsStrictAndAtomic(t *testing.T) {
 		t.Fatal(err)
 	}
 	baseline := engine.GetLayout()
-	host.DrainPresentationChanges()
+	host.DrainLayoutChanges()
 
 	tests := []struct {
 		name string
@@ -358,7 +358,7 @@ func TestLayoutValidationIsStrictAndAtomic(t *testing.T) {
 			if got := engine.GetLayout(); !reflect.DeepEqual(got, baseline) {
 				t.Fatalf("invalid replacement mutated layout:\n got  %#v\n want %#v", got, baseline)
 			}
-			if got := host.DrainPresentationChanges(); got != 0 {
+			if got := host.DrainLayoutChanges(); got != 0 {
 				t.Fatalf("invalid replacement published %d presentation changes", got)
 			}
 		})
@@ -369,7 +369,7 @@ func TestLayoutRejectsCyclicNodeTableAtomically(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 	baseline := engine.GetLayout()
-	host.DrainPresentationChanges()
+	host.DrainLayoutChanges()
 
 	err := engine.DoString("cyclic layout", `
 		local root = { type = "column" }
@@ -382,7 +382,7 @@ func TestLayoutRejectsCyclicNodeTableAtomically(t *testing.T) {
 	if got := engine.GetLayout(); !reflect.DeepEqual(got, baseline) {
 		t.Fatalf("cyclic layout mutated state: got %#v, want %#v", got, baseline)
 	}
-	if got := host.DrainPresentationChanges(); got != 0 {
+	if got := host.DrainLayoutChanges(); got != 0 {
 		t.Fatalf("cyclic layout published %d presentation changes", got)
 	}
 }
@@ -408,19 +408,19 @@ func TestRegionVisibilityPreservesPriorSnapshotsAndPublishesChanges(t *testing.T
 	`); err != nil {
 		t.Fatal(err)
 	}
-	host.DrainPresentationChanges()
+	host.DrainLayoutChanges()
 	before := engine.GetLayout()
 
 	assertLua(t, engine, `
 		assert(rune.ui.regions.is_hidden("workspace") == true)
 		assert(rune.ui.regions.is_hidden("missing") == nil)
 	`)
-	if got := host.DrainPresentationChanges(); got != 0 {
+	if got := host.DrainLayoutChanges(); got != 0 {
 		t.Fatalf("visibility queries published %d presentation changes", got)
 	}
 
 	assertLua(t, engine, `assert(rune.ui.regions.show("workspace") == true)`)
-	if got := host.DrainPresentationChanges(); got != 1 {
+	if got := host.DrainLayoutChanges(); got != 1 {
 		t.Fatalf("show published %d presentation changes, want 1", got)
 	}
 	if !before.Root.Children[0].Hidden {
@@ -431,19 +431,19 @@ func TestRegionVisibilityPreservesPriorSnapshotsAndPublishesChanges(t *testing.T
 	}
 
 	assertLua(t, engine, `assert(rune.ui.regions.show("workspace") == true)`)
-	if got := host.DrainPresentationChanges(); got != 0 {
+	if got := host.DrainLayoutChanges(); got != 0 {
 		t.Fatalf("idempotent show published %d presentation changes", got)
 	}
 	assertLua(t, engine, `
 		assert(rune.ui.regions.hide("missing") == false)
 		assert(rune.ui.regions.toggle("missing") == false)
 	`)
-	if got := host.DrainPresentationChanges(); got != 0 {
+	if got := host.DrainLayoutChanges(); got != 0 {
 		t.Fatalf("unknown region operations published %d presentation changes", got)
 	}
 
 	assertLua(t, engine, `assert(rune.ui.regions.toggle("workspace") == true)`)
-	if got := host.DrainPresentationChanges(); got != 1 {
+	if got := host.DrainLayoutChanges(); got != 1 {
 		t.Fatalf("toggle published %d presentation changes, want 1", got)
 	}
 	if got := engine.GetLayout().Root.Children[0].Hidden; !got {
@@ -451,7 +451,7 @@ func TestRegionVisibilityPreservesPriorSnapshotsAndPublishesChanges(t *testing.T
 	}
 
 	assertLua(t, engine, `assert(rune.ui.regions.hide("workspace") == true)`)
-	if got := host.DrainPresentationChanges(); got != 0 {
+	if got := host.DrainLayoutChanges(); got != 0 {
 		t.Fatalf("idempotent hide published %d presentation changes", got)
 	}
 }
@@ -483,7 +483,7 @@ func TestRegionContainingInputCanBeIdentifiedButNotHidden(t *testing.T) {
 	`); err != nil {
 		t.Fatal(err)
 	}
-	host.DrainPresentationChanges()
+	host.DrainLayoutChanges()
 	before := engine.GetLayout()
 
 	assertLua(t, engine, `
@@ -501,7 +501,7 @@ func TestRegionContainingInputCanBeIdentifiedButNotHidden(t *testing.T) {
 		assert(rune.ui.regions.is_hidden("io") == false)
 		assert(rune.ui.regions.is_hidden("workspace") == false)
 	`)
-	if got := host.DrainPresentationChanges(); got != 0 {
+	if got := host.DrainLayoutChanges(); got != 0 {
 		t.Fatalf("refused region operations published %d presentation changes", got)
 	}
 	if got := engine.GetLayout(); !reflect.DeepEqual(got, before) {

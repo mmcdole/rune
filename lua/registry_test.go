@@ -200,3 +200,47 @@ func TestRegistryAdditionDuringDispatchWaitsForNext(t *testing.T) {
 			"next dispatch order wrong: " .. table.concat(fired, ","))
 	`)
 }
+
+// TestRegistryChangesMarkOnlyTheirSnapshotStale verifies on_change routing:
+// bind and bar registries mark their own UI snapshot stale on every change to
+// their active set, dispatch-only registries mark nothing, and no-op changes
+// notify nobody.
+func TestRegistryChangesMarkOnlyTheirSnapshotStale(t *testing.T) {
+	tests := []struct {
+		name                string
+		setup, action       string
+		binds, layout, bars int
+	}{
+		{name: "trigger disable", setup: `h = rune.trigger.contains("x", "look")`, action: `h:disable()`},
+		{name: "alias disable", setup: `rune.alias.exact("n", "north")`, action: `rune.alias.disable("n")`},
+		{name: "bind add", action: `rune.bind("f5", function() end)`, binds: 1},
+		{name: "bind disable", setup: `h = rune.bind("f5", function() end)`, action: `h:disable()`, binds: 1},
+		{name: "bind disable no-op", setup: `h = rune.bind("f5", function() end); h:disable()`, action: `h:disable()`},
+		{name: "unbind", setup: `rune.bind("f5", function() end)`, action: `rune.unbind("f5")`, binds: 1},
+		{name: "bar add", action: `rune.ui.bar("x", function() return "x" end)`, bars: 1},
+		{name: "bar toggle", setup: `rune.ui.bar("x", function() return "x" end)`, action: `rune.bars.toggle("x")`, bars: 1},
+		{name: "refresh bars", action: `rune.ui.refresh_bars()`, bars: 1},
+		{name: "group with a bind", setup: `rune.bind("f6", function() end, {group = "g"})`, action: `rune.group.disable("g")`, binds: 1},
+		{name: "group with a bar", setup: `rune.ui.bar("x", function() return "x" end, {group = "g"})`, action: `rune.group.disable("g")`, bars: 1},
+		{name: "group with only a trigger", setup: `rune.trigger.contains("x", "look", {group = "g"})`, action: `rune.group.disable("g")`},
+		{name: "group enable no-op", setup: `rune.bind("f6", function() end, {group = "g"})`, action: `rune.group.enable("g")`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			engine, host, cleanup := setupTest(t)
+			defer cleanup()
+			if err := engine.DoString("setup", tt.setup); err != nil {
+				t.Fatal(err)
+			}
+			host.DrainSnapshotChanges()
+			if err := engine.DoString("action", tt.action); err != nil {
+				t.Fatal(err)
+			}
+			binds, layout, bars := host.DrainSnapshotChanges()
+			if binds != tt.binds || layout != tt.layout || bars != tt.bars {
+				t.Fatalf("stale binds/layout/bars = %d/%d/%d, want %d/%d/%d",
+					binds, layout, bars, tt.binds, tt.layout, tt.bars)
+			}
+		})
+	}
+}

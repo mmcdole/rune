@@ -21,7 +21,7 @@ func newTestSessionInDir(t *testing.T, dir string) (*Session, *mockNetwork, *moc
 		CoreScripts: lua.CoreScripts,
 		ConfigDir:   dir,
 	})
-	if err := s.boot(); err != nil {
+	if err := s.startup(); err != nil {
 		t.Fatalf("boot failed: %v", err)
 	}
 	uiMock.drainPrinted()
@@ -67,7 +67,7 @@ func TestCorruptStoreBackedUpNotDiscarded(t *testing.T) {
 	net := newMockNetwork()
 	uiMock := newMockUI()
 	s := New(net, uiMock, Config{CoreScripts: lua.CoreScripts, ConfigDir: dir})
-	if err := s.boot(); err != nil {
+	if err := s.startup(); err != nil {
 		t.Fatalf("boot failed: %v", err)
 	}
 	cleanupTestSession(t, s)

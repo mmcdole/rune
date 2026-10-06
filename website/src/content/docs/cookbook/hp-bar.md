@@ -12,7 +12,7 @@ local vitals = {}
 rune.gmcp.subscribe("Char")
 rune.gmcp.on("Char.Vitals", function(data)
     vitals = data
-    rune.ui.refresh_bars()   -- render now, don't wait for the tick
+    rune.ui.refresh_bars()   -- render when this event finishes
 end)
 
 local function blocks(cur, max, width, color)

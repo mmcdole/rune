@@ -66,9 +66,11 @@ type Session struct {
 	internalEvents chan internalEvent
 	timerEvents    chan timer.Event
 	barTicker      *time.Ticker
-	// presentationDirty records that binds, layout, or placement visibility
-	// changed during the current event; flushPresentation publishes once.
-	presentationDirty    bool
+	// One stale flag per UI snapshot, set during an event and cleared by
+	// flushPresentation when it publishes that snapshot.
+	bindsDirty           bool
+	layoutDirty          bool
+	barsDirty            bool
 	backgroundCtx        context.Context
 	cancelBackgroundWork context.CancelFunc
 	backgroundWork       sync.WaitGroup // dial and HTTP workers; only Session starts work
@@ -161,7 +163,7 @@ func (s *Session) Run(ctx context.Context) error {
 		s.ui.Quit()
 	}()
 
-	if err := s.boot(); err != nil {
+	if err := s.startup(); err != nil {
 		s.ui.Print(text.Red(fmt.Sprintf("[System] Boot Error: %v", err)))
 	}
 
@@ -208,19 +210,18 @@ func (s *Session) processEvents(ctx context.Context) {
 }
 
 // Every handler below is one presentation transaction: Lua may change binds,
-// layout, or visibility any number of times inside it, and the deferred flush
-// publishes the result once when the handler returns.
+// layout, or bars any number of times inside it, and the deferred flush
+// publishes each changed snapshot once when the handler returns.
 
 func (s *Session) handleTimer(evt timer.Event) {
 	defer s.flushPresentation()
 	s.engine.OnTimer(evt.ID)
 }
 
-// handleBarTick renders bars on the ticker. Renderers run user Lua, so they
-// too may leave presentation changes to flush.
+// handleBarTick re-renders bars, whose content may depend on time.
 func (s *Session) handleBarTick() {
 	defer s.flushPresentation()
-	s.pushBarUpdates()
+	s.barsDirty = true
 }
 
 // handleInbound rejects stale network work and routes the current connection's
@@ -394,21 +395,18 @@ func (s *Session) handleUIEvent(event ui.UIEvent) {
 		if frame := s.protocol.SetWindowSize(event.Width, event.Height); len(frame) > 0 {
 			_ = s.net.SendFrame(s.connectionID, frame)
 		}
-		s.engine.UpdateState(s.clientState)
-		// State first, then the hook, then bars: handlers observe
-		// matching rune.state values, and a layout or bar change they
-		// make lands in this same resize cycle.
+		// State first, then the hook: handlers observe matching rune.state
+		// values, and a layout or bar change they make lands in the flush
+		// that ends this resize event.
+		s.publishClientState()
 		s.engine.NotifyWindowSizeChanged(event.Width, event.Height)
-		s.pushBarUpdates()
 	case ui.ScrollStateChangedMsg:
 		s.clientState.ScrollMode = event.Mode
 		s.clientState.ScrollLines = event.NewLines
-		s.engine.UpdateState(s.clientState)
-		s.pushBarUpdates()
+		s.publishClientState()
 	case ui.SearchStateChangedMsg:
 		s.clientState.SearchActive = bool(event)
-		s.engine.UpdateState(s.clientState)
-		s.pushBarUpdates()
+		s.publishClientState()
 	case ui.PickerSelectMsg:
 		s.handlePickerResult(event.CallbackID, event.Value, event.Accepted)
 	case ui.InputChangedMsg:
@@ -450,12 +448,11 @@ func (s *Session) boot() error {
 	s.loadUserScript()
 	s.engine.NotifyReady()
 	s.engine.CommitConfig()
-	// Script loading marks presentation dirty on every bind registration.
-	// Clear that before the one explicit boot push so it is the only push,
-	// and clear it first so a change made while rendering bars survives.
-	s.presentationDirty = false
-	s.pushBindsAndLayout()
-	s.pushBarUpdates()
+	// A rebuilt VM always publishes every snapshot, even one no script
+	// changed.
+	s.bindsDirty = true
+	s.layoutDirty = true
+	s.barsDirty = true
 
 	// CLI connect target: routed through the /connect command so a
 	// world name, "host port", or address all resolve identically.
@@ -467,8 +464,15 @@ func (s *Session) boot() error {
 			s.ui.Print(text.Red("[Error] " + err.Error()))
 		}
 	}
-	s.flushPresentation()
 	return nil
+}
+
+// startup boots the first VM as one presentation transaction, like the event
+// handlers that run afterwards. A /reload boots inside handleInternalEvent,
+// which flushes the same way.
+func (s *Session) startup() error {
+	defer s.flushPresentation()
+	return s.boot()
 }
 
 // initLua initializes the Lua VM and sets up config.
@@ -526,31 +530,4 @@ func (s *Session) loadUserScript() {
 func (s *Session) reportScriptError(name string, err error) {
 	s.ui.Print(text.Red(fmt.Sprintf("[Script Error] %s: %v", name, err)))
 	s.ui.Print(text.Red("  the rest of the client loaded normally - fix the script and /reload"))
-}
-
-// pushBarUpdates renders all Lua bars and pushes to UI.
-func (s *Session) pushBarUpdates() {
-	width := s.clientState.Width
-	if width <= 0 {
-		width = 80
-	}
-
-	content := s.engine.RenderBars(width)
-	if content != nil {
-		// An empty successful snapshot is still state: it removes bars that
-		// rendered content on the previous tick and lets layout reclaim them.
-		// A failed pass is nil and preserves the last good UI snapshot.
-		s.ui.UpdateBars(content)
-	}
-}
-
-// pushBindsAndLayout pushes current bindings and layout config to UI.
-func (s *Session) pushBindsAndLayout() {
-	bindings := s.engine.GetBindings()
-	if bindings == nil {
-		bindings = input.DefaultBindings()
-	}
-	s.ui.UpdateBinds(bindings)
-
-	s.ui.UpdateLayout(s.engine.GetLayout())
 }

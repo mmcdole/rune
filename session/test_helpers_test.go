@@ -22,7 +22,7 @@ func newTestSession(t *testing.T) (*Session, *mockNetwork, *mockUI) {
 		CoreScripts: lua.CoreScripts,
 		ConfigDir:   t.TempDir(),
 	})
-	if err := s.boot(); err != nil {
+	if err := s.startup(); err != nil {
 		t.Fatalf("boot failed: %v", err)
 	}
 	uiMock.drainPrinted() // discard startup banner

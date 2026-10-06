@@ -63,7 +63,6 @@ type Host interface {
 	// Reload requests a VM reload. The host must defer teardown and Init until
 	// control returns from the enclosing Engine call to the host event loop.
 	Reload()
-	RefreshBars() // Force immediate bar refresh
 
 	// History
 	GetHistoryEntries() []input.Submission
@@ -102,13 +101,16 @@ type Host interface {
 
 	// State
 	// OnConfigChange applies one complete, validated configuration
-	// generation. It is separate from presentation invalidation so changing a
-	// setting cannot trigger Lua re-entry to rebuild binds, layout, and bars.
+	// generation. It is separate from the snapshot notifications below so
+	// changing a setting cannot trigger Lua re-entry to rebuild binds or bars.
 	OnConfigChange(Config)
-	// OnPresentationChange notes that binds, layout, or placement visibility
-	// changed. The host may defer the resulting push until the current event
-	// finishes, so several changes from one callback publish one snapshot.
-	OnPresentationChange()
+	// The remaining notifications mark one UI snapshot stale. The host
+	// republishes each stale snapshot once, after the current event, so
+	// several changes from one callback publish once and never re-enter Lua
+	// mid-callback.
+	OnBindsChange()  // a bind or its enabled state changed
+	OnLayoutChange() // the layout tree or a placement's visibility changed
+	OnBarsChange()   // a bar, or state its renderer reads, changed
 }
 
 // HTTPRequest describes one request handed to Host.HTTPRequest.

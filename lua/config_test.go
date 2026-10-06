@@ -198,7 +198,7 @@ func TestConfigRuntimeChangePublishesTypedConfigImmediately(t *testing.T) {
 	defer cleanup()
 	engine.CommitConfig()
 	host.DrainConfigChanges()
-	host.DrainPresentationChanges()
+	host.DrainSnapshotChanges()
 
 	if err := engine.DoString("runtime config", `
 		rune.config.set("keep_input", true)
@@ -211,8 +211,8 @@ func TestConfigRuntimeChangePublishesTypedConfigImmediately(t *testing.T) {
 	if got := host.DrainConfigChanges(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("runtime config publications = %+v, want %+v", got, want)
 	}
-	if got := host.DrainPresentationChanges(); got != 0 {
-		t.Fatalf("config update invalidated presentation %d times", got)
+	if binds, layout, bars := host.DrainSnapshotChanges(); binds+layout+bars != 0 {
+		t.Fatalf("config update marked snapshots stale: binds=%d layout=%d bars=%d", binds, layout, bars)
 	}
 }
 
@@ -252,13 +252,13 @@ func TestConfigMouseRuntimeChangePublishesImmediately(t *testing.T) {
 	}
 }
 
-func TestPresentationChangesDoNotRepublishConfig(t *testing.T) {
+func TestSnapshotChangesDoNotRepublishConfig(t *testing.T) {
 	engine, host, cleanup := setupTest(t)
 	defer cleanup()
 	engine.CommitConfig()
 	host.DrainConfigChanges()
 
-	if err := engine.DoString("presentation changes", `
+	if err := engine.DoString("snapshot changes", `
 		rune.bind("f2", function() end)
 		rune.ui.layout({ type = "column", children = {
 			{ type = "pane", name = "output", border = "none" },
@@ -268,7 +268,7 @@ func TestPresentationChangesDoNotRepublishConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := host.DrainConfigChanges(); len(got) != 0 {
-		t.Fatalf("presentation change republished config: %+v", got)
+		t.Fatalf("snapshot change republished config: %+v", got)
 	}
 }
 

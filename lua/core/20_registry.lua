@@ -11,6 +11,7 @@
 --       action_field = "action",        -- data field holding the callback
 --       on_add = function(data) end,    -- optional, after insertion
 --       on_remove = function(data) end, -- optional, after removal
+--       on_change = function() end,     -- optional, see below
 --   }
 --   local handle = reg:add(data, opts)
 --
@@ -32,22 +33,39 @@
 -- the name upsert below already replaces the old entry, firing on_remove
 -- for it before on_add for the new one.
 --
+-- on_change runs after anything that can change which entries are active:
+-- add, remove, enable, disable, toggle, and a group switch covering one of
+-- its entries. Registries whose state the UI renders (binds, bars) use it
+-- to mark their snapshot stale; dispatch-only registries leave it unset.
+--
 -- Handle API: :enable() :disable() :remove() :name() :group() :action()
 
 rune.registry = {}
 
+-- Every registry, for group switches that span them.
+local registries = {}
+
 local Handle = {}
 Handle.__index = Handle
 
+local function set_enabled(handle, enabled)
+    if handle._data.enabled == enabled then
+        return
+    end
+    handle._data.enabled = enabled
+    local on_change = handle._registry.on_change
+    if on_change then
+        on_change()
+    end
+end
+
 function Handle:enable()
-    self._data.enabled = true
-    rune._ui.presentation_changed()
+    set_enabled(self, true)
     return self
 end
 
 function Handle:disable()
-    self._data.enabled = false
-    rune._ui.presentation_changed()
+    set_enabled(self, false)
     return self
 end
 
@@ -105,16 +123,19 @@ end
 
 function rune.registry.new(opts)
     opts = opts or {}
-    return setmetatable({
+    local registry = setmetatable({
         kind = opts.kind or "item",
         action_field = opts.action_field or "action",
         on_add = opts.on_add,
         on_remove = opts.on_remove,
+        on_change = opts.on_change,
         list = {},     -- all items, sorted by (priority, id)
         by_name = {},  -- name -> handle
         by_group = {}, -- group -> {handle -> true}
         next_id = 1,
     }, Registry)
+    registries[#registries + 1] = registry
+    return registry
 end
 
 local function sort_list(list)
@@ -169,6 +190,9 @@ function Registry:add(data, opts)
     if self.on_add then
         self.on_add(data)
     end
+    if self.on_change then
+        self.on_change()
+    end
 
     return handle
 end
@@ -189,6 +213,9 @@ function Registry:_remove_data(data)
     end
     if self.on_remove then
         self.on_remove(data)
+    end
+    if self.on_change then
+        self.on_change()
     end
 end
 
@@ -217,7 +244,7 @@ end
 function Registry:toggle(name)
     local handle = self.by_name[name]
     if handle then
-        handle._data.enabled = not handle._data.enabled
+        set_enabled(handle, not handle._data.enabled)
         return true
     end
     return false
@@ -306,18 +333,27 @@ function rune.group.is_enabled(group_name)
     return true
 end
 
+-- Flip a group's master switch and notify the registries it covers.
+local function set_group_enabled(group_name, enabled)
+    if not group_name or rune.group.is_enabled(group_name) == enabled then
+        return
+    end
+    group_states[group_name] = enabled
+    for _, registry in ipairs(registries) do
+        if registry.on_change and next(registry.by_group[group_name] or {}) then
+            registry.on_change()
+        end
+    end
+end
+
 -- Disable a group (master switch off)
 function rune.group.disable(group_name)
-    if not group_name then return end
-    group_states[group_name] = false
-    rune._ui.presentation_changed()
+    set_group_enabled(group_name, false)
 end
 
 -- Enable a group (master switch on)
 function rune.group.enable(group_name)
-    if not group_name then return end
-    group_states[group_name] = true
-    rune._ui.presentation_changed()
+    set_group_enabled(group_name, true)
 end
 
 -- List all known groups (aggregated from every registry that honors
