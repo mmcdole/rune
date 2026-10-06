@@ -20,9 +20,9 @@ func TestAllocateAxis(t *testing.T) {
 		want   []int
 	}{
 		{
-			name:   "default fractions split an odd remainder toward the first child",
+			name:   "equal fractions split an odd remainder toward the first child",
 			extent: 9,
-			tracks: []axisTrack{{}, {}},
+			tracks: []axisTrack{{Size: ui.Fraction(1)}, {Size: ui.Fraction(1)}},
 			want:   []int{5, 4},
 		},
 		{
@@ -165,28 +165,12 @@ func TestAllocateAxisReportsImpossibleMinimums(t *testing.T) {
 	}
 }
 
-func TestAllocateAxisValidatesTracks(t *testing.T) {
+func TestAllocateAxisRejectsNegativeExtent(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name   string
-		extent int
-		tracks []axisTrack
-		want   string
-	}{
-		{name: "negative extent", extent: -1, want: "extent must not be negative"},
-		{name: "invalid size", extent: 10, tracks: []axisTrack{{Size: ui.Fraction(0)}}, want: "layout size must be between"},
-		{name: "negative minimum", extent: 10, tracks: []axisTrack{{Min: -1}}, want: "min must be between"},
-		{name: "minimum above maximum", extent: 10, tracks: []axisTrack{{Min: 2, Max: 1}}, want: "min must not exceed max"},
-		{name: "negative auto", extent: 10, tracks: []axisTrack{{Size: ui.AutoSize(), Auto: -1}}, want: "auto size must be between"},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			_, err := allocateAxis(test.extent, test.tracks)
-			if err == nil || !strings.Contains(err.Error(), test.want) {
-				t.Fatalf("allocateAxis() error = %v, want substring %q", err, test.want)
-			}
-		})
+	_, err := allocateAxis(-1, []axisTrack{{Size: ui.Fraction(1)}})
+	if err == nil || !strings.Contains(err.Error(), "extent must not be negative") {
+		t.Fatalf("allocateAxis() error = %v, want negative extent", err)
 	}
 }
 
@@ -220,7 +204,7 @@ func TestAllocateAxisDeterministicProperties(t *testing.T) {
 			}
 			switch random.Intn(5) {
 			case 0:
-				track.Size = ui.LayoutSize{}
+				track.Size = ui.Fraction(1)
 				hasUncappedFraction = hasUncappedFraction || track.Max == 0
 			case 1:
 				track.Size = ui.Cells(1 + random.Intn(100))

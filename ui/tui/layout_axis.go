@@ -8,9 +8,10 @@ import (
 	"sort"
 )
 
-// axisTrack is the measured, main-axis input to allocateAxis. Min is zero
-// when omitted, Max is zero when unbounded, and Auto is the measured preferred
-// size used only by ui.LayoutSizeAuto.
+// axisTrack is the measured, main-axis input to allocateAxis. Size comes from
+// a normalized layout tree, so it is already valid and never the default
+// kind. Min is zero when omitted, Max is zero when unbounded, and Auto is the
+// measured preferred size used only by ui.LayoutSizeAuto.
 type axisTrack struct {
 	Size ui.LayoutSize
 	Min  int
@@ -35,37 +36,13 @@ func allocateAxis(extent int, tracks []axisTrack) ([]int, error) {
 		return nil, fmt.Errorf("layout extent must not be negative")
 	}
 
-	if len(tracks) > ui.MaxLayoutNodes {
-		return nil, fmt.Errorf("layout axis exceeds the limit of %d tracks", ui.MaxLayoutNodes)
-	}
 	if len(tracks) == 0 {
 		return []int{}, nil
 	}
 
 	available := extent
-
-	normalized := make([]axisTrack, len(tracks))
 	minimum := 0
-	for i, track := range tracks {
-		if track.Size.Kind == ui.LayoutSizeDefault {
-			track.Size = ui.Fraction(1)
-		}
-		if err := ui.ValidateLayoutSize(track.Size); err != nil {
-			return nil, fmt.Errorf("track %d: %w", i+1, err)
-		}
-		if track.Min < 0 || track.Min > ui.MaxLayoutCells {
-			return nil, fmt.Errorf("track %d: min must be between 0 and %d", i+1, ui.MaxLayoutCells)
-		}
-		if track.Max < 0 || track.Max > ui.MaxLayoutCells {
-			return nil, fmt.Errorf("track %d: max must be between 0 and %d", i+1, ui.MaxLayoutCells)
-		}
-		if track.Max > 0 && track.Min > track.Max {
-			return nil, fmt.Errorf("track %d: min must not exceed max", i+1)
-		}
-		if track.Size.Kind == ui.LayoutSizeAuto && (track.Auto < 0 || track.Auto > ui.MaxLayoutCells) {
-			return nil, fmt.Errorf("track %d: auto size must be between 0 and %d", i+1, ui.MaxLayoutCells)
-		}
-		normalized[i] = track
+	for _, track := range tracks {
 		minimum += track.Min
 	}
 	if minimum > available {
@@ -73,11 +50,11 @@ func allocateAxis(extent int, tracks []axisTrack) ([]int, error) {
 			errLayoutTooSmall, minimum, extent)
 	}
 
-	sizes := make([]int, len(normalized))
-	flexIndices := make([]int, 0, len(normalized))
-	flexWeights := make([]int, 0, len(normalized))
+	sizes := make([]int, len(tracks))
+	flexIndices := make([]int, 0, len(tracks))
+	flexWeights := make([]int, 0, len(tracks))
 	nonFlexTotal := 0
-	for i, track := range normalized {
+	for i, track := range tracks {
 		var target int
 		switch track.Size.Kind {
 		case ui.LayoutSizeCells:
@@ -98,20 +75,20 @@ func allocateAxis(extent int, tracks []axisTrack) ([]int, error) {
 	if remainder := available - nonFlexTotal; remainder > 0 && len(flexIndices) > 0 {
 		shares := proportional(remainder, flexWeights)
 		for j, index := range flexIndices {
-			sizes[index] = clampTrack(shares[j], normalized[index])
+			sizes[index] = clampTrack(shares[j], tracks[index])
 		}
 	} else {
 		for _, index := range flexIndices {
-			sizes[index] = normalized[index].Min
+			sizes[index] = tracks[index].Min
 		}
 	}
 
 	total := sumInts(sizes)
 	if total > available {
 		over := total - available
-		over = shrinkTracks(sizes, normalized, over, ui.LayoutSizeFraction)
-		over = shrinkTracks(sizes, normalized, over, ui.LayoutSizePercent)
-		over = shrinkTracks(sizes, normalized, over, ui.LayoutSizeCells, ui.LayoutSizeAuto)
+		over = shrinkTracks(sizes, tracks, over, ui.LayoutSizeFraction)
+		over = shrinkTracks(sizes, tracks, over, ui.LayoutSizePercent)
+		over = shrinkTracks(sizes, tracks, over, ui.LayoutSizeCells, ui.LayoutSizeAuto)
 		if over > 0 {
 			return nil, fmt.Errorf("%w: tracks need %d cells, have %d",
 				errLayoutTooSmall, available+over, extent)
@@ -119,7 +96,7 @@ func allocateAxis(extent int, tracks []axisTrack) ([]int, error) {
 	}
 
 	if remaining := available - sumInts(sizes); remaining > 0 {
-		growFractions(sizes, normalized, remaining)
+		growFractions(sizes, tracks, remaining)
 	}
 	return sizes, nil
 }

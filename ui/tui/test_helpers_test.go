@@ -9,6 +9,21 @@ import (
 	"github.com/mmcdole/rune/ui"
 )
 
+// normalized returns tree with production's axis-aware size defaults, as
+// Session delivers it. Test fixtures are always valid, so an error panics.
+func normalized(tree ui.LayoutTree) ui.LayoutTree {
+	normal, err := ui.NormalizeLayoutTree(tree)
+	if err != nil {
+		panic(fmt.Sprintf("test layout is invalid: %v", err))
+	}
+	return normal
+}
+
+// layoutUpdate is the updateLayoutMsg Session would send for tree.
+func layoutUpdate(tree ui.LayoutTree) updateLayoutMsg {
+	return updateLayoutMsg(normalized(tree))
+}
+
 // newTestModel builds a model with a sized window and enough
 // scrollback to scroll.
 func newTestModel(t *testing.T) *Model {

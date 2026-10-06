@@ -19,6 +19,8 @@ type UI interface {
 	// Updates
 	UpdateBars(content map[string]BarContent)
 	UpdateBinds(keys input.Bindings)
+	// UpdateLayout takes a tree produced by NormalizeLayoutTree: valid, with
+	// every child's size resolved.
 	UpdateLayout(layout LayoutTree)
 	UpdateConfig(cfg Config)
 

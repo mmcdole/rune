@@ -30,7 +30,7 @@ func resizeModel(t *testing.T, m *Model, width, height int) *Model {
 }
 
 func setLayout(m *Model, root ui.LayoutNode) {
-	m.layout = ui.LayoutTree{Root: root}
+	m.layout = normalized(ui.LayoutTree{Root: root})
 	m.applyLayout()
 	m.render()
 }
@@ -95,16 +95,6 @@ func TestCoreTreeProducesOneExactTerminalBlock(t *testing.T) {
 		t.Fatalf("status rect = %v, want (0,11)-(32,12)", status.outer)
 	}
 	assertExactBlock(t, m.View().Content, 32, 12)
-}
-
-func TestArbitraryTypeIsNotARegistryLookup(t *testing.T) {
-	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 8)), 20, 4)
-	m.syncBars(map[string]ui.BarContent{"vitals": {Left: "HP"}})
-	addPane(t, m, "vitals")
-	setLayout(m, ui.LayoutNode{Type: "vitals"})
-	if got := len(m.layoutPlan.leaves); got != 0 {
-		t.Fatalf("invalid arbitrary type resolved %d leaves, want none", got)
-	}
 }
 
 func TestInactiveBarSubtreesReleaseTheirFixedTracks(t *testing.T) {
@@ -308,9 +298,10 @@ func TestAutoRowMeasuresChildrenAtAllocatedWidths(t *testing.T) {
 		preferred: func(width int) int { return (24 + width - 1) / width },
 		text:      "wrapped",
 	}
-	wrappedNode := ui.LayoutNode{Type: ui.LayoutTypeBar, Name: "wrapped"}
+	// Row children default to one fraction, as NormalizeLayoutTree assigns.
+	wrappedNode := ui.LayoutNode{Type: ui.LayoutTypeBar, Name: "wrapped", Size: ui.Fraction(1)}
 	wrappedResolved := &resolvedNode{node: wrappedNode, widget: wrapped}
-	inputNode := ui.LayoutNode{Type: ui.LayoutTypeInput}
+	inputNode := ui.LayoutNode{Type: ui.LayoutTypeInput, Size: ui.Fraction(1)}
 	inputResolved := m.resolveNode(inputNode, 20, axisHorizontal)
 	row := &resolvedNode{
 		node:     ui.LayoutNode{Type: ui.LayoutTypeRow},
@@ -456,7 +447,7 @@ func TestHiddenPaneIsPrunedAndOutputReclaimsItsTrack(t *testing.T) {
 	if !found || !changed {
 		t.Fatalf("WithPaneVisibility(map, false) = found %v changed %v", found, changed)
 	}
-	next, _ := m.Update(updateLayoutMsg(hidden))
+	next, _ := m.Update(layoutUpdate(hidden))
 	m = next.(*Model)
 	if got := m.layoutPlan.output.Dx(); got != 40 {
 		t.Fatalf("output width without map = %d, want 40", got)
@@ -1058,7 +1049,7 @@ func TestSeparatorLeavesKeepCharactersAndShareBorderStyle(t *testing.T) {
 
 	// Exercise a custom rule, a standalone default rule inside a row, and
 	// a default rule owned by the border grid. No input rules can mask them.
-	next, _ := m.Update(updateLayoutMsg(ui.LayoutTree{Root: ui.LayoutNode{
+	next, _ := m.Update(layoutUpdate(ui.LayoutTree{Root: ui.LayoutNode{
 		Type: ui.LayoutTypeColumn,
 		Children: []ui.LayoutNode{
 			{Type: ui.LayoutTypeSeparator, SeparatorChar: "═", Size: ui.AutoSize()},

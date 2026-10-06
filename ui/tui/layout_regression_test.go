@@ -389,7 +389,7 @@ func TestShortPaneTitlesPreserveRemainingTopBorder(t *testing.T) {
 func BenchmarkLayoutFrame(b *testing.B) {
 	m := NewModel(make(chan ui.UIEvent, 100))
 	m.width, m.height, m.initialized = 160, 50, true
-	m.layout = ui.LayoutTree{Root: staggeredLayout()}
+	m.layout = normalized(ui.LayoutTree{Root: staggeredLayout()})
 	m.applyLayout()
 	for _, name := range []string{"map", "chat", "targets", "stats", "group", ui.OutputPaneName} {
 		m.pane(name).Write(strings.Repeat("sample text\n", 30))
@@ -463,7 +463,7 @@ func TestOversizedAutoPreferenceUsesAvailableSpace(t *testing.T) {
 	if _, err := ui.NormalizeLayoutTree(layout); err != nil {
 		t.Fatalf("fixture must be a valid layout: %v", err)
 	}
-	m.Update(updateLayoutMsg(layout))
+	m.Update(layoutUpdate(layout))
 	input := findLeaf(t, m.layoutPlan, "", ui.LayoutTypeInput)
 	if input.outer.Max.Y != 24 || input.content.Empty() || m.layoutPlan.output.Empty() {
 		t.Fatalf("oversized preference left usable space unallocated: input=%v output=%v", input.outer, m.layoutPlan.output)

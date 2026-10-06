@@ -117,7 +117,7 @@ func TestLayoutChangeErasesRemovedPane(t *testing.T) {
 	if !strings.Contains(m.View().Content, "REMOVED-PANE") {
 		t.Fatal("setup did not render the pane")
 	}
-	m.Update(updateLayoutMsg(ui.DefaultLayoutTree()))
+	m.Update(layoutUpdate(ui.DefaultLayoutTree()))
 	if strings.Contains(m.View().Content, "REMOVED-PANE") {
 		t.Fatal("removed pane left pixels on the reused canvas")
 	}

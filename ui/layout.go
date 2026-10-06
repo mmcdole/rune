@@ -499,7 +499,7 @@ func subtreeContainsInput(node LayoutNode) bool {
 }
 
 func validateNodeSize(node LayoutNode, path string) error {
-	if err := ValidateLayoutSize(node.Size); err != nil {
+	if err := validateLayoutSize(node.Size); err != nil {
 		return fmt.Errorf("%s: %w", path, err)
 	}
 	if node.MinSize != nil && (*node.MinSize < 0 || *node.MinSize > MaxLayoutCells) {
@@ -522,8 +522,8 @@ func validateNodeSize(node LayoutNode, path string) error {
 	return nil
 }
 
-// ValidateLayoutSize validates a single layout sizing rule.
-func ValidateLayoutSize(size LayoutSize) error {
+// validateLayoutSize validates a single layout sizing rule.
+func validateLayoutSize(size LayoutSize) error {
 	switch size.Kind {
 	case LayoutSizeDefault, LayoutSizeAuto:
 		if size.Value != 0 {

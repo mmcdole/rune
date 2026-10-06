@@ -20,13 +20,13 @@ func renderFixture(width, height int, sidebar bool) *Model {
 	m := NewModel(make(chan ui.UIEvent, 4096))
 	m.width, m.height, m.initialized = width, height, true
 	if sidebar {
-		m.layout = ui.LayoutTree{Root: ui.LayoutNode{Type: ui.LayoutTypeColumn, Children: []ui.LayoutNode{
+		m.layout = normalized(ui.LayoutTree{Root: ui.LayoutNode{Type: ui.LayoutTypeColumn, Children: []ui.LayoutNode{
 			{Type: ui.LayoutTypeRow, Dividers: true, Children: []ui.LayoutNode{
 				{Type: ui.LayoutTypePane, Name: ui.OutputPaneName, Border: ui.PaneBorderNone},
 				{Type: ui.LayoutTypePane, Name: "chat", Size: ui.Cells(width / 3)},
 			}},
 			{Type: ui.LayoutTypeInput, Size: ui.AutoSize()},
-		}}}
+		}}})
 	}
 	m.applyLayout()
 	for n := range 200 {

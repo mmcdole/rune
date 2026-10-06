@@ -325,37 +325,10 @@ func fallbackAllocation(
 		}
 	}
 
+	// The relaxed minima were granted from extent, so they always fit and
+	// allocation cannot fail; on the impossible error the sizes stay zero.
 	if sizes, err := allocateAxis(extent, relaxed); err == nil {
 		result.sizes = sizes
-		return result
-	}
-
-	// A valid tree can still derive an auto preference above MaxLayoutCells.
-	// Preserve its reserved minima and fill remaining space when the relaxed
-	// allocator rejects those derived constraints. Direct invalid callers also
-	// stay bounded by the available extent and hard maxima.
-	remaining = extent
-	for i, track := range relaxed {
-		grant := min(track.Min, remaining)
-		result.sizes[i] = grant
-		remaining -= grant
-	}
-	for remaining > 0 {
-		grew := false
-		for i, track := range relaxed {
-			if remaining == 0 {
-				break
-			}
-			if track.Max > 0 && result.sizes[i] >= track.Max {
-				continue
-			}
-			result.sizes[i]++
-			remaining--
-			grew = true
-		}
-		if !grew {
-			break
-		}
 	}
 	return result
 }

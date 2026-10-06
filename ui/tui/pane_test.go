@@ -35,7 +35,7 @@ func TestOutputPaneImplementsPaneLifecycle(t *testing.T) {
 	if !found || !changed {
 		t.Fatalf("WithPaneVisibility(output, false) = found %v changed %v", found, changed)
 	}
-	next, _ = m.Update(updateLayoutMsg(hidden))
+	next, _ = m.Update(layoutUpdate(hidden))
 	m = next.(*Model)
 	if !m.layoutPlan.output.Empty() {
 		t.Fatalf("hidden output remains placed: rect=%v", m.layoutPlan.output)
@@ -45,7 +45,7 @@ func TestOutputPaneImplementsPaneLifecycle(t *testing.T) {
 	wantScrollback(t, m, "visible", "hidden")
 
 	shown, _, _ := m.layout.WithPaneVisibility(ui.OutputPaneName, true)
-	next, _ = m.Update(updateLayoutMsg(shown))
+	next, _ = m.Update(layoutUpdate(shown))
 	m = next.(*Model)
 	if m.layoutPlan.output.Empty() {
 		t.Fatal("shown output is unplaced")
@@ -94,7 +94,7 @@ func TestOutputBeforeFirstWindowSizeUsesBoundedStartupWidth(t *testing.T) {
 func TestOutputPaneBuffersWhileHiddenOrUnplacedAtRetainedWidth(t *testing.T) {
 	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 64)), 20, 8)
 
-	next, _ := m.Update(updateLayoutMsg(ui.LayoutTree{Root: ui.LayoutNode{
+	next, _ := m.Update(layoutUpdate(ui.LayoutTree{Root: ui.LayoutNode{
 		Type: ui.LayoutTypeRow,
 		Children: []ui.LayoutNode{
 			{Type: ui.LayoutTypePane, Name: ui.OutputPaneName, Size: ui.Cells(12), Border: ui.PaneBorderNone},
@@ -112,7 +112,7 @@ func TestOutputPaneBuffersWhileHiddenOrUnplacedAtRetainedWidth(t *testing.T) {
 	next, _ = m.Update(paneClearMsg{Name: ui.OutputPaneName})
 	m = next.(*Model)
 	hiddenOutput, _, _ := m.layout.WithPaneVisibility(ui.OutputPaneName, false)
-	next, _ = m.Update(updateLayoutMsg(hiddenOutput))
+	next, _ = m.Update(layoutUpdate(hiddenOutput))
 	m = next.(*Model)
 	next, _ = m.Update(paneWriteMsg{Name: ui.OutputPaneName, Text: strings.Repeat("a", 14)})
 	m = next.(*Model)
@@ -121,7 +121,7 @@ func TestOutputPaneBuffersWhileHiddenOrUnplacedAtRetainedWidth(t *testing.T) {
 	}
 	wantScrollback(t, m, strings.Repeat("a", 12), "aa")
 
-	next, _ = m.Update(updateLayoutMsg(ui.LayoutTree{Root: ui.LayoutNode{
+	next, _ = m.Update(layoutUpdate(ui.LayoutTree{Root: ui.LayoutNode{
 		Type: ui.LayoutTypeColumn,
 		Children: []ui.LayoutNode{
 			{Type: ui.LayoutTypeInput, Size: ui.AutoSize()},
@@ -138,7 +138,7 @@ func TestOutputPaneBuffersWhileHiddenOrUnplacedAtRetainedWidth(t *testing.T) {
 	}
 	wantScrollback(t, m, strings.Repeat("a", 12), "aa", strings.Repeat("b", 12), "bb")
 
-	next, _ = m.Update(updateLayoutMsg(ui.LayoutTree{Root: ui.LayoutNode{
+	next, _ = m.Update(layoutUpdate(ui.LayoutTree{Root: ui.LayoutNode{
 		Type: ui.LayoutTypePane, Name: ui.OutputPaneName, Border: ui.PaneBorderNone,
 	}}))
 	m = next.(*Model)
@@ -205,7 +205,7 @@ func TestClearOutputPaneResetsSearchAndScrollingButPreservesPrompt(t *testing.T)
 
 func TestOrdinaryPaneLifecycle(t *testing.T) {
 	m := newBareModel(t)
-	next, _ := m.Update(updateLayoutMsg(ui.LayoutTree{Root: ui.LayoutNode{
+	next, _ := m.Update(layoutUpdate(ui.LayoutTree{Root: ui.LayoutNode{
 		Type: ui.LayoutTypeRow,
 		Children: []ui.LayoutNode{
 			{Type: ui.LayoutTypePane, Name: ui.OutputPaneName, Border: ui.PaneBorderNone},
@@ -226,7 +226,7 @@ func TestOrdinaryPaneLifecycle(t *testing.T) {
 	if !found {
 		t.Fatal("chat placement was not found in the installed tree")
 	}
-	next, _ = m.Update(updateLayoutMsg(hiddenChat))
+	next, _ = m.Update(layoutUpdate(hiddenChat))
 	m = next.(*Model)
 	next, _ = m.Update(paneWriteMsg{Name: "chat", Text: "oldest\nmiddle\nnewest"})
 	m = next.(*Model)
@@ -241,7 +241,7 @@ func TestOrdinaryPaneLifecycle(t *testing.T) {
 	}
 
 	shownChat, _, _ := m.layout.WithPaneVisibility("chat", true)
-	next, _ = m.Update(updateLayoutMsg(shownChat))
+	next, _ = m.Update(layoutUpdate(shownChat))
 	m = next.(*Model)
 	findLeaf(t, m.layoutPlan, ui.LayoutTypePane, "chat")
 	next, _ = m.Update(paneScrollToTopMsg{Name: "chat"})
