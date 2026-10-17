@@ -128,6 +128,15 @@ implements by default and the LuaJIT backend implements under `-tags luajit`.
 - **Trigger matching:** The trigger module builds one `Matcher` per pass (output, prompt) from its registry snapshot, rebuilt only when the snapshot changes. Each line costs one Go call that returns the matching positions and captures; Lua then visits only those positions, plus open spans, in priority order. A rewrite re-matches the rest of the pass, so later triggers see it. Regex compilation is cached per Engine and shared with `rune.regex`.
 - **Staged config publication:** Go owns the typed config schema and defaults. Core scripts, user scripts, and ready hooks evaluate `rune.config.set` against a staged candidate during startup or reload; after they finish, Engine publishes one complete snapshot to Session. Later runtime updates publish immediately through a dedicated callback that does not re-enter Lua.
 
+## 2.4 Script Robustness
+
+- **Watchdog**: every Go→Lua entry runs under `Engine.guard` with a deadline (`Engine.CallTimeout`, default 5s). Runaway scripts are interrupted with an error; the VM stays usable. Nested entries share the outermost deadline. Host calls that legitimately block on the user (e.g. `open_editor` running `$EDITOR`) run under `Engine.pauseWatchdog`, which detaches the deadline and re-arms a fresh one.
+- **Handler isolation**: `rune.hooks.call` runs each handler under `pcall`; a throwing handler is reported and skipped, not allowed to abort the chain.
+- **Failure quarantine**: `rune.guarded_call(label, data, fn, ...)` tracks consecutive failures on a registry entry and disables it after 3 in a row, or at once when the watchdog interrupts it, since each repeat would stall the client for the full timeout. Used by hooks, triggers, aliases, timers, binds, bar renderers, and slash commands. Commands are quarantined individually (`rune.command.dispatch`), so a broken user command cannot abort the internal input dispatcher.
+- **Degraded mode**: missing hook dispatch passes authored input onward unchanged; missing input routing falls back to verbatim physical-line sends or plain command sends while preserving `/quit` and `/reload`. Output falls back to raw text. An internal dispatcher that starts and then errors is never retried through Go, because it may already have sent part of the submission.
+- **Source attribution**: registrations record the registering script's `file:line` (`rune.caller_source`); it appears in error messages and the `/hooks`, `/triggers`, `/aliases`, `/timers`, `/binds`, `/bars` listings.
+- **Engine-level failures** route through `Engine.reportError` → the Lua `"error"` event, with a re-entrancy guard that falls back to direct printing.
+
 ## 3. UI Architecture: The "Push" Model
 
 To solve thread-safety issues between the UI rendering loop and the Lua execution loop, Rune uses a strict Push/Snapshot model.
@@ -341,7 +350,11 @@ written after it. A deferred send finish then has nothing left to commit, and
 data later in the same batch is dropped. Open spans with no committed text are
 discarded without firing.
 
-### 4.2 Ordered negotiation and GMCP
+### 4.2 Supported options
+
+The default compatibility table advertises only implemented options: Echo, SGA, EOR, TTYPE/MTTS, NAWS, CHARSET, NEW-ENVIRON/MNES (identity responders in `network/negotiate.go`, pure functions with byte-exact tests), MCCP2 (zlib read path in `client.go`; the source is a byte-exact `bufio.Reader`, so a clean stream end resumes plain telnet), and GMCP (option 201; framing and JSON conversion in Go, policy in `70_gmcp.lua`). MCCP3, MSSP, ZMP, and Linemode stay refused. The parser accepts subnegotiations for options enabled on either side (server-offered GMCP/MCCP are remote; client-answered TTYPE/NAWS are local).
+
+### 4.3 Ordered negotiation and GMCP
 
 Protocol effects are handled as they are produced; Session does not prequeue
 all replies or collapse a batch to its final negotiation state. For example,
