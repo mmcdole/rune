@@ -43,8 +43,14 @@ loopback server:
 go test ./test/replay -run '^$' -bench ReplaySession -benchmem      # Session throughput, no render
 REPLAY_REPORT=1 go test ./ui/tui -run TestReplayPipelineReport -v    # latency under flood, bytes per frame
 go test ./lua -run '^$' -bench Hotpath -benchmem -count 6 | benchstat -
+go test ./lua -run '^$' -bench TriggerDispatch -benchmem -count 10 | benchstat -
 go run ./test/replay/cmd/replayserver -addr 127.0.0.1:4777           # drive the real binary
 ```
+
+`TriggerDispatch` replays the corpus against synthetic 70, 150, and 300
+trigger scripts (`lua/testdata/triggers`, regenerated with
+`-update-triggersets`); `REPLAY_EXTRA_INIT=<file.lua>` appends one of them to
+the pipeline report's user script for end-to-end numbers.
 
 Setting `RUNE_PROFILE_DIR=<dir>` on any `rune` run writes CPU, heap, alloc,
 block, and mutex profiles plus an execution trace there on exit. The parser,

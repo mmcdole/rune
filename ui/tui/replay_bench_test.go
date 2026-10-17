@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"os"
+	"path/filepath"
 	"runtime"
 	"runtime/pprof"
 	"slices"
@@ -203,9 +204,13 @@ func runPipeline(tb testing.TB, corpus []byte, repeat int, withUser, probes bool
 
 	u := &replayUI{BubbleTeaUI: NewBubbleTeaUI(), term: newTerminalRecorder(), width: 120, height: 40}
 	tcp := network.NewTCPClient()
+	configDir := replay.ConfigDir(tb, withUser)
+	if extra := os.Getenv("REPLAY_EXTRA_INIT"); extra != "" && withUser {
+		appendUserScript(tb, configDir, extra)
+	}
 	sess := session.New(tcp, u, session.Config{
 		CoreScripts:   lua.CoreScripts,
-		ConfigDir:     replay.ConfigDir(tb, withUser),
+		ConfigDir:     configDir,
 		ConnectTarget: srv.Addr(),
 	})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -370,6 +375,25 @@ func runPipeline(tb testing.TB, corpus []byte, repeat int, withUser, probes bool
 		tb.Error("session did not stop")
 	}
 	return res
+}
+
+// appendUserScript appends the Lua file at path to the user init.lua in dir,
+// so a replay can run a larger script (REPLAY_EXTRA_INIT, for example
+// lua/testdata/triggers/set150.lua).
+func appendUserScript(tb testing.TB, dir, path string) {
+	tb.Helper()
+	extra, err := os.ReadFile(path)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "init.lua"), os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	defer f.Close()
+	if _, err := f.Write(append([]byte("\n"), extra...)); err != nil {
+		tb.Fatal(err)
+	}
 }
 
 // idlePhase measures latency with nothing else in flight: one keystroke at a
