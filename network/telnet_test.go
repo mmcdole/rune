@@ -207,6 +207,50 @@ func TestSubnegotiationTreatsBareSEAsPayload(t *testing.T) {
 	}
 }
 
+// IAC IAC inside a subnegotiation is one escaped 255 byte, so an SE right
+// after it is payload; only a following IAC SE ends the frame, even when the
+// escape is split across reads.
+func TestSubnegotiationEscapedIACBeforeSE(t *testing.T) {
+	table := compatibilityTable{}
+	table[OptGMCP] = compatibilityEntry{Local: true, LocalState: true}
+	wire := []byte{CmdIAC, CmdSB, OptGMCP, 'a', CmdIAC, CmdIAC, CmdSE, 'b', CmdIAC, CmdSE, 'c'}
+
+	for split := range len(wire) + 1 {
+		parser := newParser(table)
+		events := append(parser.Receive(wire[:split]), parser.Receive(wire[split:])...)
+		if len(events) != 2 ||
+			events[0].Kind != TelnetEventSubnegotiation ||
+			!bytes.Equal(events[0].Data, []byte{'a', CmdIAC, CmdSE, 'b'}) ||
+			events[1].Kind != TelnetEventData || string(events[1].Data) != "c" {
+			t.Fatalf("split %d: events = %+v", split, events)
+		}
+	}
+}
+
+// A subnegotiation past maxSubnegotiation is skipped through its IAC SE
+// without buffering, and none of its payload becomes game text.
+func TestOversizedSubnegotiationIsDiscarded(t *testing.T) {
+	table := compatibilityTable{}
+	table[OptGMCP] = compatibilityEntry{Local: true, LocalState: true}
+	parser := newParser(table)
+
+	parser.Receive([]byte{CmdIAC, CmdSB, OptGMCP})
+	chunk := bytes.Repeat([]byte("x"), 4096)
+	for range maxSubnegotiation/len(chunk) + 2 {
+		if events := parser.Receive(chunk); len(events) != 0 {
+			t.Fatalf("oversized subnegotiation produced events %+v", events)
+		}
+	}
+	if len(parser.buffer) != 0 {
+		t.Fatalf("parser still buffers %d bytes past the cap", len(parser.buffer))
+	}
+
+	events := parser.Receive(append([]byte("tail"), append([]byte{CmdIAC, CmdSE}, "You are back.\r\n"...)...))
+	if len(events) != 1 || events[0].Kind != TelnetEventData || string(events[0].Data) != "You are back.\r\n" {
+		t.Fatalf("events after discard = %+v", events)
+	}
+}
+
 func TestIACEscaping(t *testing.T) {
 	tests := []struct {
 		name    string

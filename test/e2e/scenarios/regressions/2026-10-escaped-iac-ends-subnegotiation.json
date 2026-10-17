@@ -1,0 +1,21 @@
+{
+  "description": "Regression: inside a subnegotiation, IAC IAC is an escaped data byte 255, so a following SE byte is data and the subnegotiation continues. The parser stayed in its 'saw IAC' state after IAC IAC, so IAC IAC SE ended the subnegotiation early and the rest of the payload leaked into the game text.",
+  "scenarios": [
+    {
+      "name": "IAC IAC SE inside a subnegotiation does not end it",
+      "steps": [
+        { "connect": true },
+        {
+          "server_bytes": [255, 250, 201, 67, 111, 114, 101, 46, 80, 105, 110, 103, 32, 255, 255, 240, 88, 89, 90, 255, 240],
+          "note": "IAC SB GMCP \"Core.Ping \" IAC IAC SE \"XYZ\" IAC SE: one subnegotiation whose payload holds the bytes 255 240"
+        },
+        { "server_line": "E2E-AFTER" },
+        { "expect_printed": "E2E-AFTER" },
+        {
+          "expect_not_printed": "XYZ",
+          "note": "the tail of the subnegotiation payload must not become server text"
+        }
+      ]
+    }
+  ]
+}

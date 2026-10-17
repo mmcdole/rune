@@ -86,10 +86,37 @@ func (t *compatibilityTable) support(option byte) {
 	t.supportRemote(option)
 }
 
+// maxSubnegotiation bounds one buffered IAC SB ... IAC SE. Real payloads,
+// including large GMCP room and map messages, are far smaller. Past the cap
+// the parser stops buffering and skips to the closing IAC SE, so an oversized
+// or unterminated subnegotiation costs no memory and never leaks its payload
+// into game text.
+const maxSubnegotiation = 1 << 20
+
+// scanState is extract's position in the Telnet command grammar.
+type scanState int
+
+const (
+	stateNormal scanState = iota
+	stateIAC
+	stateNeg
+	stateSub
+	stateSubOpt
+	stateSubIAC
+)
+
 // Parser is a telnet protocol parser.
 type Parser struct {
 	options compatibilityTable
+	// buffer holds an incomplete command carried to the next Receive. The
+	// scan resumes after its first scanned bytes in state, so each byte is
+	// examined once however many reads a command spans.
 	buffer  []byte
+	scanned int
+	state   scanState
+	subOpt  byte
+	// discarding skips an oversized subnegotiation through its IAC SE.
+	discarding bool
 }
 
 // NewParser creates a parser with the default client compatibility table.
@@ -212,23 +239,14 @@ func (p *Parser) process() []TelnetEvent {
 }
 
 func (p *Parser) extract() []parsedSlice {
-	const (
-		stateNormal = iota
-		stateIAC
-		stateNeg
-		stateSub
-		stateSubOpt
-		stateSubIAC
-	)
-
 	var res []parsedSlice
-	state := stateNormal
+	state, subOpt, discarding := p.state, p.subOpt, p.discarding
 	cmdBegin := 0
-	var subOpt byte
 	buf := p.buffer
-	p.buffer = nil // Take ownership of buffer
+	start := p.scanned
+	p.buffer, p.scanned, p.state, p.discarding = nil, 0, stateNormal, false // Take ownership of buffer
 
-	for i := 0; i < len(buf); i++ {
+	for i := start; i < len(buf); i++ {
 		val := buf[i]
 		switch state {
 		case stateNormal:
@@ -279,7 +297,11 @@ func (p *Parser) extract() []parsedSlice {
 				// MCCP3 (client->server compression, always refused) never
 				// changes the read path.
 				mccp2 := p.options[OptMCCP2]
-				if subOpt == OptMCCP2 && mccp2.Remote && mccp2.RemoteState {
+				if discarding {
+					discarding = false
+					state = stateNormal
+					cmdBegin = i + 1
+				} else if subOpt == OptMCCP2 && mccp2.Remote && mccp2.RemoteState {
 					res = append(res, parsedSlice{
 						kind:      evSub,
 						buf:       buf[cmdBegin : i+1],
@@ -292,9 +314,9 @@ func (p *Parser) extract() []parsedSlice {
 					state = stateNormal
 					cmdBegin = i + 1
 				}
-			} else if val == CmdIAC {
-				// Escaped IAC within subnegotiation
 			} else {
+				// IAC IAC is an escaped data byte; anything else is
+				// payload too. Either way the subnegotiation continues.
 				state = stateSubOpt
 			}
 		}
@@ -302,11 +324,28 @@ func (p *Parser) extract() []parsedSlice {
 
 	if cmdBegin < len(buf) {
 		switch state {
-		case stateSub, stateSubOpt, stateSubIAC, stateIAC, stateNeg:
-			p.buffer = append(p.buffer, buf[cmdBegin:]...)
+		case stateSub, stateSubOpt, stateSubIAC:
+			if discarding || len(buf)-cmdBegin > maxSubnegotiation {
+				discarding = true
+				break
+			}
+			fallthrough
+		case stateIAC, stateNeg:
+			if cmdBegin == 0 {
+				// No event references buf, so keep it rather than copying
+				// a long subnegotiation again on every read.
+				p.buffer = buf
+			} else {
+				p.buffer = append(p.buffer, buf[cmdBegin:]...)
+			}
+			p.scanned = len(p.buffer)
+			p.state, p.subOpt = state, subOpt
 		default:
 			res = append(res, parsedSlice{kind: evNone, buf: buf[cmdBegin:]})
 		}
+	}
+	if discarding {
+		p.state, p.subOpt, p.discarding = state, subOpt, true
 	}
 
 	return res

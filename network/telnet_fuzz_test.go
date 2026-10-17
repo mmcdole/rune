@@ -46,7 +46,7 @@ func parserTrace(feed func(p *Parser) []TelnetEvent) string {
 		fmt.Fprintf(&out, "%d %d %d %q\n", ev.Kind, ev.Command, ev.Option, ev.Data)
 	}
 	flush()
-	fmt.Fprintf(&out, "buffered %q\n", p.buffer)
+	fmt.Fprintf(&out, "buffered %q discarding %v\n", p.buffer, p.discarding)
 	return out.String()
 }
 
@@ -98,8 +98,9 @@ func BenchmarkParserReceive(b *testing.B) {
 }
 
 // BenchmarkParserUnterminatedSubnegotiation feeds 4 KiB reads after an
-// IAC SB that never ends. The parser keeps every byte and rescans the whole
-// buffer on each read, so cost per read grows with the amount buffered.
+// IAC SB that never ends. The parser resumes its scan where the previous
+// read stopped, and past maxSubnegotiation it stops buffering, so cost
+// grows linearly and memory stays bounded.
 func BenchmarkParserUnterminatedSubnegotiation(b *testing.B) {
 	chunk := bytes.Repeat([]byte("x"), 4096)
 	for _, total := range []int{64 << 10, 256 << 10, 1 << 20} {
