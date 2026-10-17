@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -55,6 +56,10 @@ type Engine struct {
 	// True while dispatching the "error" event, so failures inside
 	// error handlers print directly instead of recursing.
 	reportingError bool
+
+	// Compiled regexes by pattern, shared by Regex objects and trigger
+	// matchers so each pattern compiles once. Survives Init.
+	regexps map[string]*regexp.Regexp
 }
 
 // NewEngine creates an Engine with a Host interface. All module and

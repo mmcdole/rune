@@ -16,6 +16,11 @@ the layout and define commands, aliases, triggers, key bindings, and bars.
 - **Go** provides a generic "Picker" UI component that can display a list and filter it.
 - **Lua** decides that `Ctrl+R` opens that picker, populates it with command history, and defines what happens when an item is selected.
 
+Trigger matching splits the same way. Go tests a line against every trigger
+pattern in one call (`rune._regex.matcher`); Lua owns which triggers exist,
+their order, enable and group state, and what a match does: actions, gags,
+rewrites, spans, and `once`.
+
 ## 2. System Overview
 
 ```mermaid
@@ -119,6 +124,7 @@ implements by default and the LuaJIT backend implements under `-tags luajit`.
 - **Single Host interface:** The Engine depends on one `lua.Host` interface (`lua/host.go`). Session implements it, with the methods grouped by service area across `session/lua_*.go` (network, ui, timers, system, history, session, store, log, state). Tests substitute a mock Host.
 - **Reactivity:** The Engine updates a global `rune.state` table whenever system state changes (connection, scroll position), allowing scripts to reactively render UI elements.
 - **Submitted lines:** Session owns `submit` in `session/submission.go`. Its loop calls `Engine.ProcessSubmittedLine`, echoes the surviving text, then calls `Engine.ExecuteInputLine`. Lua expands history and runs input hooks in the first call, and executes local commands or game sends in the second. The pause between them lets Go echo the actual text before execution produces effects. See the submission flow below.
+- **Trigger matching:** The trigger module builds one `Matcher` per pass (output, prompt) from its registry snapshot, rebuilt only when the snapshot changes. Each line costs one Go call that returns the matching positions and captures; Lua then visits only those positions, plus open spans, in priority order. A rewrite re-matches the rest of the pass, so later triggers see it. Regex compilation is cached per Engine and shared with `rune.regex`.
 - **Staged config publication:** Go owns the typed config schema and defaults. Core scripts, user scripts, and ready hooks evaluate `rune.config.set` against a staged candidate during startup or reload; after they finish, Engine publishes one complete snapshot to Session. Later runtime updates publish immediately through a dedicated callback that does not re-enter Lua.
 
 ## 3. UI Architecture: The "Push" Model

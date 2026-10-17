@@ -179,25 +179,41 @@ function rune.trigger.count()
     return registry:count()
 end
 
--- Match one trigger against a line; returns the captures array on a
--- match (empty for literal modes), or nil.
-local function match_trigger(data, match_line)
-    if data.mode == MODE_EXACT then
-        if match_line == data.pattern then
-            return {}
-        end
-    elseif data.mode == MODE_STARTS then
-        if match_line:sub(1, #data.pattern) == data.pattern then
-            return {}
-        end
-    elseif data.mode == MODE_CONTAINS then
-        if match_line:find(data.pattern, 1, true) then
-            return {}
-        end
-    elseif data.mode == MODE_REGEX then
-        return rune.regex.match(data.pattern, match_line)
+-- Matching runs in Go: each pass (output, prompt) has a Matcher that tests
+-- a line against every trigger of the pass in one call and returns the
+-- positions that match. Everything a match means (enabled, groups, spans,
+-- gags, rewrites, once) is decided here. Passes are rebuilt when the registry
+-- list changes; the registry replaces that list on every add and remove.
+local built_from
+local passes = {}
+
+local function build_pass(triggers)
+    local specs, position = {}, {}
+    for i, data in ipairs(triggers) do
+        specs[i] = { mode = data.mode, pattern = data.pattern, raw = data.raw }
+        position[data] = i
     end
-    return nil
+    return {
+        triggers = triggers,
+        position = position,
+        matcher = #triggers > 0 and rune._regex.matcher(specs) or nil,
+    }
+end
+
+-- The pass for `on` ("output" or "prompt") over the current snapshot.
+local function current_pass(on)
+    local snapshot = registry:snapshot()
+    if snapshot ~= built_from then
+        local lists = { [ON_OUTPUT] = {}, [ON_PROMPT] = {} }
+        for _, data in ipairs(snapshot) do
+            local list = lists[data.on]
+            list[#list + 1] = data
+        end
+        passes[ON_OUTPUT] = build_pass(lists[ON_OUTPUT])
+        passes[ON_PROMPT] = build_pass(lists[ON_PROMPT])
+        built_from = snapshot
+    end
+    return passes[on]
 end
 
 local function trim(s)
@@ -330,23 +346,57 @@ local function fire_trigger(data, matches, ctx, to_remove)
     return gagged, replacement
 end
 
+-- Positions in `pass` to visit at or after `from`, ascending: every match,
+-- plus every open span, which also collects the lines that do not match it.
+-- Returns the positions and a map from matching position to captures.
+local function output_visits(pass, from, positions, captures)
+    local order, matches_at = {}, {}
+    for i, pos in ipairs(positions or {}) do
+        order[i] = pos
+        matches_at[pos] = captures[i]
+    end
+    local merged = false
+    for data in pairs(open) do
+        local pos = pass.position[data]
+        if pos and pos >= from and not matches_at[pos] then
+            order[#order + 1] = pos
+            merged = true
+        end
+    end
+    if merged then
+        table.sort(order)
+    end
+    return order, matches_at
+end
+
 -- Process one complete line, including output triggers and spans.
 function rune.trigger._process_output(line)
     drop_inactive_spans()
 
-    local gagged = false
     local raw_line = line:raw()
+    -- The pass is fixed for this line: a trigger action that adds or removes
+    -- triggers must not perturb it (removals are still honored via active()).
+    local pass = current_pass(ON_OUTPUT)
+    if not pass.matcher then
+        return raw_line, true
+    end
     local clean_line = line:clean()
+    local positions, captures = pass.matcher:match(clean_line, raw_line, 1)
+    if not positions and next(open) == nil then
+        return raw_line, true
+    end
+
+    local gagged = false
     local to_remove = {}
-
-    -- Snapshot: a trigger action that adds/removes triggers must not perturb
-    -- this dispatch pass (removals are still honored via active()).
-    for _, data in ipairs(registry:snapshot()) do
-        if registry:active(data) and data.on == ON_OUTPUT then
-            local match_line = data.raw and raw_line or clean_line
-
+    local order, matches_at = output_visits(pass, 1, positions, captures)
+    local k = 1
+    while k <= #order do
+        local pos = order[k]
+        k = k + 1
+        local data = pass.triggers[pos]
+        if registry:active(data) then
+            local matches = matches_at[pos]
             if open[data] then
-                local matches = match_trigger(data, match_line)
                 local span_state
                 if matches then
                     -- New header mid-span: flush the previous message and
@@ -377,32 +427,33 @@ function rune.trigger._process_output(line)
                         open[data] = span_state
                     end
                 end
-            else
-                local matches = match_trigger(data, match_line)
-                if matches then
-                    if data.span then
-                        if data.gag then
-                            gagged = true
-                        end
-                        local span_state = new_span(data, matches, line, clean_line)
-                        if span_ends(data, span_state, raw_line, clean_line) then
-                            fire_span(data, span_state, to_remove)
-                        else
-                            open[data] = span_state
-                        end
+            elseif matches then
+                if data.span then
+                    if data.gag then
+                        gagged = true
+                    end
+                    local span_state = new_span(data, matches, line, clean_line)
+                    if span_ends(data, span_state, raw_line, clean_line) then
+                        fire_span(data, span_state, to_remove)
                     else
-                        local action_gagged, replacement = fire_trigger(
-                            data, matches, trigger_context(data, matches, line),
-                            to_remove)
-                        if action_gagged then
-                            gagged = true
-                        end
-                        if replacement ~= nil then
-                            -- Later triggers see rewrites from earlier actions.
-                            line = rune.line.new(replacement)
-                            raw_line = line:raw()
-                            clean_line = line:clean()
-                        end
+                        open[data] = span_state
+                    end
+                else
+                    local action_gagged, replacement = fire_trigger(
+                        data, matches, trigger_context(data, matches, line),
+                        to_remove)
+                    if action_gagged then
+                        gagged = true
+                    end
+                    if replacement ~= nil then
+                        -- Later triggers see rewrites from earlier actions,
+                        -- so the rest of the pass is matched again.
+                        line = rune.line.new(replacement)
+                        raw_line = line:raw()
+                        clean_line = line:clean()
+                        order, matches_at = output_visits(pass, pos + 1,
+                            pass.matcher:match(clean_line, raw_line, pos + 1))
+                        k = 1
                     end
                 end
             end
@@ -419,29 +470,40 @@ end
 -- Process one prompt overlay update without changing span state.
 function rune.trigger._process_prompt(line, confirmed)
     local raw_line = line:raw()
+    local pass = current_pass(ON_PROMPT)
+    if not pass.matcher then
+        return raw_line, true
+    end
     local clean_line = line:clean()
-    local to_remove = {}
-    local snapshot = registry:snapshot()
-    local gagged = false
+    local positions, captures = pass.matcher:match(clean_line, raw_line, 1)
+    if not positions then
+        return raw_line, true
+    end
 
-    for _, data in ipairs(snapshot) do
-        if registry:active(data) and data.on == ON_PROMPT then
-            local match_line = data.raw and raw_line or clean_line
-            local matches = match_trigger(data, match_line)
-            if matches then
-                local ctx = trigger_context(data, matches, line)
-                ctx.confirmed = confirmed
-                local action_gagged, replacement = fire_trigger(
-                    data, matches, ctx, to_remove)
-                if action_gagged then
-                    gagged = true
-                end
-                if replacement ~= nil then
-                    -- Later prompt triggers see rewrites from earlier actions.
-                    line = rune.line.new(replacement)
-                    raw_line = line:raw()
-                    clean_line = line:clean()
-                end
+    local gagged = false
+    local to_remove = {}
+    local i = 1
+    while i <= #positions do
+        local pos, matches = positions[i], captures[i]
+        i = i + 1
+        local data = pass.triggers[pos]
+        if registry:active(data) then
+            local ctx = trigger_context(data, matches, line)
+            ctx.confirmed = confirmed
+            local action_gagged, replacement = fire_trigger(
+                data, matches, ctx, to_remove)
+            if action_gagged then
+                gagged = true
+            end
+            if replacement ~= nil then
+                -- Later prompt triggers see rewrites from earlier actions,
+                -- so the rest of the pass is matched again.
+                line = rune.line.new(replacement)
+                raw_line = line:raw()
+                clean_line = line:clean()
+                positions, captures = pass.matcher:match(clean_line, raw_line, pos + 1)
+                positions = positions or {}
+                i = 1
             end
         end
     end
