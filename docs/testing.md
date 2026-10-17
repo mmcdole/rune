@@ -35,6 +35,22 @@ and does not prove actual terminal rendering or key encoding.
 before/after measurements, real renderer output latency, profiles, and visual
 snapshots, see [Rendering performance](render-performance.md).
 
+Whole-pipeline measurements replay a synthetic, VikingMUD-style byte corpus
+(`test/replay`, regenerated with `-update` on `TestCorpusUpToDate`) through a
+loopback server:
+
+```sh
+go test ./test/replay -run '^$' -bench ReplaySession -benchmem      # Session throughput, no render
+REPLAY_REPORT=1 go test ./ui/tui -run TestReplayPipelineReport -v    # latency under flood, bytes per frame
+go test ./lua -run '^$' -bench Hotpath -benchmem -count 6 | benchstat -
+go run ./test/replay/cmd/replayserver -addr 127.0.0.1:4777           # drive the real binary
+```
+
+Setting `RUNE_PROFILE_DIR=<dir>` on any `rune` run writes CPU, heap, alloc,
+block, and mutex profiles plus an execution trace there on exit. The parser,
+text, partial-line, and GMCP fuzz targets (`go test <pkg> -fuzz <Name>`) seed
+from the replay corpus and run their seeds as ordinary tests.
+
 ## Test layers
 
 Work down this list and stop at the first layer where the failure you

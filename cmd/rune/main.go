@@ -88,7 +88,14 @@ func main() {
 		ConnectTarget: target,
 	})
 
-	if err := sess.Run(ctx); err != nil {
+	stopProfiling, err := startProfiling()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "profiling:", err)
+		os.Exit(1)
+	}
+	err = sess.Run(ctx)
+	stopProfiling()
+	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
