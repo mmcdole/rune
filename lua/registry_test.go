@@ -244,3 +244,39 @@ func TestRegistryChangesMarkOnlyTheirSnapshotStale(t *testing.T) {
 		})
 	}
 }
+
+// A trigger added during dispatch at a priority that sorts after the running
+// one must not join the current pass: registries replace their item lists on
+// change, so the dispatch loop keeps iterating the list it started with.
+func TestRegistryAdditionSortedLaterWaitsForNext(t *testing.T) {
+	engine, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	if err := engine.DoString("setup", `
+		fired = {}
+		registered = false
+		rune.trigger.contains("line", function()
+			fired[#fired + 1] = "adder"
+			if not registered then
+				registered = true
+				rune.trigger.contains("line", function()
+					fired[#fired + 1] = "added"
+				end, { priority = 90 })
+			end
+		end, { priority = 10 })
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	engine.OnOutput(text.NewLine("line one"))
+	assertLua(t, engine, `
+		assert(table.concat(fired, ",") == "adder",
+			"added trigger ran in the same dispatch: " .. table.concat(fired, ","))
+	`)
+
+	engine.OnOutput(text.NewLine("line two"))
+	assertLua(t, engine, `
+		assert(table.concat(fired, ",") == "adder,adder,added",
+			"next dispatch order wrong: " .. table.concat(fired, ","))
+	`)
+}

@@ -45,17 +45,26 @@ local MAX_CONSECUTIVE_FAILURES = 3
 local active_labels = {}
 local active_entries = {}
 
+-- A label is a string or a function of the entry, so a hot dispatch path
+-- builds its label only when something fails.
+local function label_text(label, data)
+    if type(label) == "function" then
+        return label(data)
+    end
+    return label
+end
+
 local function disable_runaway(label, data)
     if data and data.enabled then
         data.enabled = false
-        rune.echo(rune.style.yellow("[" .. label .. "]") ..
+        rune.echo(rune.style.yellow("[" .. label_text(label, data) .. "]") ..
             " disabled after exceeding the script watchdog")
     end
 end
 
 -- Run a callback protected, tracking consecutive failures on `data`
 -- (any registry entry with an `enabled` field). Errors are echoed under
--- `label`; when the failure limit is reached the entry is disabled and
+-- `label`, a string or a function(data) returning one; when the failure limit is reached the entry is disabled and
 -- the user notified (re-enable with the registry's enable function).
 -- A watchdog interruption disables the entry at once: each repeat would
 -- stall the client for the full timeout. Returns ok, result from the
@@ -73,6 +82,7 @@ function rune.guarded_call(label, data, fn, ...)
     end
 
     data.failures = (data.failures or 0) + 1
+    label = label_text(label, data)
     rune.echo(rune.style.red("[" .. label .. "]") .. " error: " .. tostring(result))
     if rune._watchdog_expired() then
         disable_runaway(label, data)

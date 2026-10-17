@@ -26,6 +26,11 @@ if rune._log.status() and rune.session.get("log_raw") then
     raw_mode = true
 end
 
+-- Whether a log is open, so the output hook skips its Go calls on every
+-- line while none is. Go may still close the log after a write error;
+-- writes are then no-ops until the next start.
+local log_open = rune._log.status() ~= nil
+
 local function default_path()
     return rune.config_dir .. "/logs/" .. os.date("%Y-%m-%d_%H-%M-%S") .. ".log"
 end
@@ -48,6 +53,7 @@ function rune.log.start(path, opts)
     if not resolved then
         return nil, err
     end
+    log_open = true
     raw_mode = not not (opts and opts.raw)
     if raw_mode then
         rune.session.set("log_raw", "1")
@@ -64,6 +70,7 @@ function rune.log.stop()
         return false
     end
     stamp("stopped")
+    log_open = false
     raw_mode = false
     rune.session.delete("log_raw")
     return rune._log.stop()
@@ -82,9 +89,11 @@ end
 
 -- Priority 200: runs after the core trigger handlers (priority 100),
 -- so the log sees the final rewritten text and never sees gagged
--- lines. rune._log.write is a no-op while no log is open.
+-- lines.
 rune.hooks.on("output", function(line)
-    rune._log.write(raw_mode and line:raw() or line:clean())
+    if log_open then
+        rune._log.write(raw_mode and line:raw() or line:clean())
+    end
 end, { name = "log-output", priority = 200 })
 
 rune.hooks.on("echo", function(text)

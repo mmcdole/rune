@@ -129,7 +129,7 @@ function rune.registry.new(opts)
         on_add = opts.on_add,
         on_remove = opts.on_remove,
         on_change = opts.on_change,
-        list = {},     -- all items, sorted by (priority, id)
+        list = {},     -- all items, sorted by (priority, id); replaced, never mutated
         by_name = {},  -- name -> handle
         by_group = {}, -- group -> {handle -> true}
         next_id = 1,
@@ -145,6 +145,30 @@ local function sort_list(list)
         end
         return a.id < b.id
     end)
+end
+
+-- A copy of `list` with `data` added in (priority, id) order. Registries
+-- replace their lists rather than mutating them, so a dispatch loop already
+-- iterating the old list is unaffected and needs no copy of its own.
+function rune.registry._sorted_with(list, data)
+    local copy = {}
+    for i, item in ipairs(list) do
+        copy[i] = item
+    end
+    copy[#copy + 1] = data
+    sort_list(copy)
+    return copy
+end
+
+-- A copy of `list` without `data`.
+function rune.registry._without(list, data)
+    local copy = {}
+    for _, item in ipairs(list) do
+        if item ~= data then
+            copy[#copy + 1] = item
+        end
+    end
+    return copy
 end
 
 -- Register an item. opts: name, group, priority, once.
@@ -172,8 +196,7 @@ function Registry:add(data, opts)
         self.by_name[data.name]:remove()
     end
 
-    table.insert(self.list, data)
-    sort_list(self.list)
+    self.list = rune.registry._sorted_with(self.list, data)
 
     if data.name then
         self.by_name[data.name] = handle
@@ -199,12 +222,7 @@ end
 
 function Registry:_remove_data(data)
     data.removed = true -- tombstone: skipped by active() in snapshots
-    for i, item in ipairs(self.list) do
-        if item == data then
-            table.remove(self.list, i)
-            break
-        end
-    end
+    self.list = rune.registry._without(self.list, data)
     if data.name and self.by_name[data.name] == data._handle then
         self.by_name[data.name] = nil
     end
@@ -259,23 +277,19 @@ function Registry:remove(name)
     return false
 end
 
--- The sorted item list, for dispatch iteration. Do not mutate;
--- removal during iteration must go through handles after the loop.
+-- The sorted item list. Do not mutate it.
 function Registry:items()
     return self.list
 end
 
--- A shallow copy of the sorted item list. Dispatch loops that run
--- user callbacks iterate over this: a callback that adds or removes
--- items mutates the live list, and iterating it directly would skip
--- or double-run neighbors. Additions during dispatch take effect on
--- the next dispatch; removals are honored via the active() check.
+-- The sorted item list as of now, for dispatch loops that run user
+-- callbacks. Adding or removing an item replaces the registry's list
+-- instead of mutating it, so a callback that changes the registry
+-- cannot skip or double-run neighbors in a loop over this one, and
+-- no per-dispatch copy is needed. Additions take effect on the next
+-- dispatch; removals are honored via the active() check.
 function Registry:snapshot()
-    local copy = {}
-    for i, data in ipairs(self.list) do
-        copy[i] = data
-    end
-    return copy
+    return self.list
 end
 
 function Registry:count()

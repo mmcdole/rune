@@ -37,40 +37,21 @@
 --   "gmcp_enabled" -- GMCP negotiated; the core handler sends Core.Hello
 
 -- Per-event dispatch index, maintained alongside the registry so
--- rune.hooks.call doesn't scan unrelated events on every line.
+-- rune.hooks.call doesn't scan unrelated events on every line. Like the
+-- registry's own list, each array is replaced on change, never mutated.
 local by_event = {} -- event -> sorted array of data
-
-local function sort_handlers(handlers)
-    table.sort(handlers, function(a, b)
-        if a.priority ~= b.priority then
-            return a.priority < b.priority
-        end
-        return a.id < b.id
-    end)
-end
+local no_handlers = {}
 
 local registry = rune.registry.new{
     kind = "hook",
     action_field = "handler",
     on_add = function(data)
-        local handlers = by_event[data.event]
-        if not handlers then
-            handlers = {}
-            by_event[data.event] = handlers
-        end
-        table.insert(handlers, data)
-        sort_handlers(handlers)
+        by_event[data.event] = rune.registry._sorted_with(by_event[data.event] or no_handlers, data)
     end,
     on_remove = function(data)
         local handlers = by_event[data.event]
-        if not handlers then
-            return
-        end
-        for i, entry in ipairs(handlers) do
-            if entry == data then
-                table.remove(handlers, i)
-                break
-            end
+        if handlers then
+            by_event[data.event] = rune.registry._without(handlers, data)
         end
     end,
 }
@@ -111,11 +92,14 @@ end
 -- Errors are echoed directly (not re-dispatched through the "error"
 -- event) to avoid recursion when an error handler itself fails.
 -- Repeated failures disable the handler (see rune.guarded_call).
-local function run_handler(entry, ...)
-    local label = "Hook " .. entry.event .. " " ..
+local function hook_label(entry)
+    return "Hook " .. entry.event .. " " ..
         (entry.name and ('"' .. entry.name .. '"') or ("#" .. entry.id)) ..
         (entry.source and (" @" .. entry.source) or "")
-    local ok, result = rune.guarded_call(label, entry, entry.handler, ...)
+end
+
+local function run_handler(entry, ...)
+    local ok, result = rune.guarded_call(hook_label, entry, entry.handler, ...)
     if ok then
         return result
     end
@@ -222,14 +206,11 @@ local chains = {
     input = run_input_hooks,
 }
 
--- Snapshot membership before calling user code. Additions wait for the next
--- dispatch; removals are honored by each chain's registry:active check.
+-- Membership is fixed for the call: registrations replace by_event's array
+-- rather than mutating it. Additions wait for the next dispatch; removals
+-- are honored by each chain's registry:active check.
 function rune.hooks.call(event, ...)
-    local handlers = {}
-    for i, entry in ipairs(by_event[event] or {}) do
-        handlers[i] = entry
-    end
-    return (chains[event] or notify)(event, handlers, ...)
+    return (chains[event] or notify)(event, by_event[event] or no_handlers, ...)
 end
 
 -- List all registered handlers
