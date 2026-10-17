@@ -1,2 +1,6 @@
 # Render snapshots compare serialized rows byte-for-byte on every platform.
 ui/tui/testdata/render/*.golden text eol=lf
+
+# Generated fixtures that tests compare against their generators byte-for-byte.
+lua/testdata/triggers/*.lua text eol=lf
+test/replay/testdata/*.bin binary
