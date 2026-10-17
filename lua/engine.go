@@ -100,10 +100,32 @@ func (e *Engine) BeginExecution() func(error) error {
 			err = errors.Join(err, armErr, disarmErr)
 		}
 		if exceeded {
+			e.quarantineRunaway()
 			// Only the outer scope adds the user-facing interruption message.
 			return fmt.Errorf("script interrupted after %v (runaway loop?): %w", e.CallTimeout, err)
 		}
 		return err
+	}
+}
+
+// quarantineRunaway disables the guarded callback the watchdog interrupted.
+// The interrupted entry could not run its own failure bookkeeping, so this
+// runs it under a fresh deadline of its own.
+func (e *Engine) quarantineRunaway() {
+	e.inLua = true
+	defer func() { e.inLua = false }()
+	if err := e.armWatchdog(); err != nil {
+		e.host.Print(text.Red("[Error] " + err.Error()))
+		return
+	}
+	_, found, err := e.vm.CallModule("rune", "_quarantine_runaway", 0)
+	if disarmErr := e.setDeadline(time.Time{}); err == nil {
+		err = disarmErr
+	}
+	if err != nil {
+		e.host.Print(text.Red("[Error] quarantine runaway script: " + err.Error()))
+	} else if !found {
+		e.reportCoreBroken()
 	}
 }
 

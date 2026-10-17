@@ -194,6 +194,10 @@ A callback that throws **three times in a row** is quarantined: rune
 disables that one item and prints a notice, so a broken script can't
 flood your screen or wedge the input pipeline. Everything else keeps
 running.
+
+A callback the script watchdog interrupts (it ran past the call timeout,
+usually an endless loop) is quarantined on the **first** interruption,
+because every repeat would freeze the client for the full timeout.
 :::
 
 To recover, fix the error and re-enable the item with `h:enable()`,

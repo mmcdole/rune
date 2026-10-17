@@ -141,7 +141,8 @@ The matching slash commands — `/triggers`, `/aliases`, `/timers`,
 ## Quarantine
 
 A callback that errors 3 times consecutively is disabled individually,
-with a notice. Re-enable it (`.enable(name)`), re-register it, or
+with a notice. A callback the script watchdog interrupts is disabled on
+the first interruption. Re-enable it (`.enable(name)`), re-register it, or
 `/reload` to reset the count; one successful run also clears it. See
 [The Scripting Model](/scripting/model/#quarantine).
 

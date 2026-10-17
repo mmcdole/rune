@@ -511,15 +511,19 @@ func TestSubmissionStopsAfterInputHookDeadline(t *testing.T) {
 	printed := display.drainPrinted()
 	// LuaJIT may let pcall report the interrupted handler before the Go
 	// guard observes the deadline. Session must still report only once,
-	// rather than retrying and reporting every remaining physical line.
-	reports := 0
+	// rather than retrying and reporting every remaining physical line, and
+	// the interrupted hook is disabled once.
+	reports, disabled := 0, 0
 	for _, line := range printed {
 		if strings.Contains(line, "[Error]") && strings.Contains(line, "interrupted") {
 			reports++
 		}
+		if strings.Contains(line, "disabled after exceeding the script watchdog") {
+			disabled++
+		}
 	}
-	if reports != 1 || len(printed) > 2 {
-		t.Fatalf("expected one submission interruption, got %q", printed)
+	if reports != 1 || disabled != 1 || len(printed) > 3 {
+		t.Fatalf("expected one interruption report and one disable notice, got %q", printed)
 	}
 	s.engine.CallTimeout = time.Second
 	submitTestSubmission(s, input.Command("recovered"))

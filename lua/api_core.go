@@ -32,6 +32,13 @@ func (e *Engine) registerCoreFuncs() {
 			return nil
 		},
 
+		// rune._watchdog_expired(): true once the current Lua entry has
+		// passed its watchdog deadline.
+		"_watchdog_expired": func(c *script.Call) error {
+			c.Return(e.deadlineExceeded())
+			return nil
+		},
+
 		// rune._quit(): Exit the client
 		"_quit": func(c *script.Call) error {
 			e.host.Quit()

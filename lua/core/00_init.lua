@@ -39,13 +39,34 @@ end
 
 local MAX_CONSECUTIVE_FAILURES = 3
 
+-- Entries currently inside guarded_call, outermost first. Lunar raises on
+-- every instruction past the watchdog deadline, so an interrupted call never
+-- pops its entry; rune._quarantine_runaway reads and clears what is left.
+local active_labels = {}
+local active_entries = {}
+
+local function disable_runaway(label, data)
+    if data and data.enabled then
+        data.enabled = false
+        rune.echo(rune.style.yellow("[" .. label .. "]") ..
+            " disabled after exceeding the script watchdog")
+    end
+end
+
 -- Run a callback protected, tracking consecutive failures on `data`
 -- (any registry entry with an `enabled` field). Errors are echoed under
 -- `label`; when the failure limit is reached the entry is disabled and
 -- the user notified (re-enable with the registry's enable function).
--- Returns ok, result from the callback.
+-- A watchdog interruption disables the entry at once: each repeat would
+-- stall the client for the full timeout. Returns ok, result from the
+-- callback.
 function rune.guarded_call(label, data, fn, ...)
+    local depth = #active_entries + 1
+    active_labels[depth] = label
+    active_entries[depth] = data
     local ok, result = pcall(fn, ...)
+    active_labels[depth] = nil
+    active_entries[depth] = nil
     if ok then
         data.failures = nil
         return true, result
@@ -53,12 +74,25 @@ function rune.guarded_call(label, data, fn, ...)
 
     data.failures = (data.failures or 0) + 1
     rune.echo(rune.style.red("[" .. label .. "]") .. " error: " .. tostring(result))
-    if data.failures >= MAX_CONSECUTIVE_FAILURES and data.enabled then
+    if rune._watchdog_expired() then
+        disable_runaway(label, data)
+    elseif data.failures >= MAX_CONSECUTIVE_FAILURES and data.enabled then
         data.enabled = false
         rune.echo(rune.style.yellow("[" .. label .. "]") .. " disabled after " ..
             data.failures .. " consecutive errors")
     end
     return false, nil
+end
+
+-- Called by Go under a fresh deadline after the watchdog interrupts a Lua
+-- entry. Lunar raises on every instruction past the deadline, so the
+-- interrupted guarded_call never reached its own check; the innermost
+-- active entry is the callback that was running.
+function rune._quarantine_runaway()
+    local depth = #active_entries
+    local label, data = active_labels[depth], active_entries[depth]
+    active_labels, active_entries = {}, {}
+    disable_runaway(label, data)
 end
 
 -- Source attribution
