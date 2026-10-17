@@ -85,8 +85,9 @@ The `Session` struct runs the main application event loop.
 
 Session-owned background work publishes inert data through `internalEvents`; it
 never sends closures that hide later state mutations. Session applies those
-results on its event loop like every other event. Each lane is FIFO; ordering
-across lanes is undefined. The single UI lane also preserves order among all
+results on its event loop like every other event. Each lane is FIFO. Pending UI
+events are handled before any other lane, so keystrokes and submissions never
+wait behind a server flood; ordering among the other lanes is undefined. The single UI lane also preserves order among all
 accepted UI events: for example, a draft change cannot be observed after the
 submission made from that draft. To answer "what can this client react to?",
 read the `select`.
@@ -325,6 +326,12 @@ If the partial text was really the beginning of a fragmented ordinary line,
 submitting input or accepting a game send commits that visible prefix; later
 server text begins a new line. This is the explicit trade-off for immediate
 partial-line display without a timer or per-MUD prompt pattern.
+
+A submission's local echo is printed when Session handles the submission. Since
+UI events go first, that is after all server text already displayed and before
+any batch still queued: the echo marks what the user had seen when they acted.
+Session does not hold echoes to restore socket arrival order; like other MUD
+clients, it echoes at send time.
 
 A connection change (server close, disconnect, or connect, including one a
 callback makes mid-batch) finishes the partial line before resetting
