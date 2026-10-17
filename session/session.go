@@ -188,9 +188,19 @@ func (s *Session) Run(ctx context.Context) error {
 
 // processEvents is the complete inventory of work that may mutate Session or
 // call Lua. UI events share one FIFO lane; ordering between independent lanes
-// is intentionally unspecified.
+// is otherwise unspecified. Pending UI events are handled before any other
+// lane: during a server flood the inbound lane is always ready, and a fair
+// select would make every keystroke and submitted command wait behind output
+// batches. UI events arrive at human rate, so they cannot starve the network.
 func (s *Session) processEvents(ctx context.Context) {
 	for {
+		select {
+		case event := <-s.ui.Events():
+			s.handleUIEvent(event)
+			continue
+		default:
+		}
+
 		select {
 		case <-ctx.Done():
 			return
