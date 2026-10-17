@@ -97,6 +97,10 @@ func (m *Model) Init() tea.Cmd {
 // Update applies a message, resolves changed geometry, and renders when due.
 // Ordinary output only appends and marks pixels dirty. View returns the last
 // rendered screen and never changes session-visible scroll state.
+//
+// A key press renders at once even inside a throttle window: echo of the
+// user's own typing is where latency is felt, and keys arrive at human rate,
+// so the window still bounds rendering under a server flood.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	render, layout := m.dispatch(msg)
 
@@ -108,6 +112,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	if render {
 		m.dirty = true
+	}
+	if _, key := msg.(tea.KeyPressMsg); key && m.throttled && m.dirty {
+		m.render()
+		m.dirty = false
 	}
 	return m, m.renderIfDue()
 }

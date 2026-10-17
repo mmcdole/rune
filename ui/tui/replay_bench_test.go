@@ -147,7 +147,7 @@ func (u *replayUI) Run() error {
 	program := tea.NewProgram(probe,
 		tea.WithInput(nil), tea.WithOutput(u.term), tea.WithoutSignalHandler(),
 		tea.WithWindowSize(u.width, u.height), tea.WithColorProfile(colorprofile.TrueColor),
-		tea.WithEnvironment([]string{"TERM=xterm-256color"}),
+		tea.WithEnvironment([]string{"TERM=xterm-256color"}), tea.WithFPS(flushFPS),
 	)
 	u.BubbleTeaUI.program = program
 	close(u.programReady)

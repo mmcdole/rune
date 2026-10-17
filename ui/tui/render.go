@@ -15,6 +15,12 @@ import (
 // defaultRenderInterval bounds screen rendering to about 60 a second.
 const defaultRenderInterval = 16 * time.Millisecond
 
+// flushFPS is Bubble Tea's terminal flush rate. The flush clock runs after
+// the render throttle, so its wait adds to every change; 120 a second keeps
+// that wait short. Bubble Tea writes only when the view changed, so an idle
+// client costs nothing extra.
+const flushFPS = 120
+
 // renderTick ends a throttle window. The first change after idle renders
 // immediately; changes inside the window are drawn together at its end.
 // At most one tick is outstanding, including retries of rejected scroll

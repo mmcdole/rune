@@ -118,7 +118,7 @@ func (b *BubbleTeaUI) Run() (err error) {
 
 	model := NewModel(b.events)
 	model.renderInterval = defaultRenderInterval
-	program := tea.NewProgram(model, tea.WithOutput(b.output))
+	program := tea.NewProgram(model, tea.WithOutput(b.output), tea.WithFPS(flushFPS))
 	b.program = program
 	close(b.programReady)
 

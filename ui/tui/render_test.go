@@ -40,6 +40,35 @@ func TestFirstChangeRendersImmediately(t *testing.T) {
 	}
 }
 
+// TestKeyPressRendersInsideThrottleWindow: typing is drawn at once even while
+// a server flood keeps the throttle window open, and the window stays open,
+// so output that follows still waits for the tick.
+func TestKeyPressRendersInsideThrottleWindow(t *testing.T) {
+	m := newThrottledModel(t)
+	m.Update(printLineMsg("first-visible"))
+	m.Update(printLineMsg("server-line"))
+	rendered := m.renders
+
+	if _, cmd := m.Update(tea.KeyPressMsg{Code: 'k', Text: "k"}); cmd != nil {
+		t.Fatal("key press scheduled a second tick inside the window")
+	}
+	if m.renders != rendered+1 || m.dirty || !m.throttled {
+		t.Fatalf("key press: renders=%d dirty=%v throttled=%v", m.renders-rendered, m.dirty, m.throttled)
+	}
+	if got := m.View().Content; !strings.Contains(got, "server-line") {
+		t.Fatal("key press render did not include pending output")
+	}
+
+	m.Update(printLineMsg("after-key"))
+	if m.renders != rendered+1 || strings.Contains(m.View().Content, "after-key") {
+		t.Fatal("output after a key press bypassed the throttle")
+	}
+	m.Update(renderTick{})
+	if !strings.Contains(m.View().Content, "after-key") {
+		t.Fatal("tick did not render output that waited")
+	}
+}
+
 // TestThrottledChangesRenderOnce verifies every message type is throttled
 // by the same rule: state applies at once, the screen waits for the tick.
 func TestThrottledChangesRenderOnce(t *testing.T) {
