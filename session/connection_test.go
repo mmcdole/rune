@@ -92,10 +92,20 @@ func TestConnectionChangeLaterInBatchCancelsDeferredSendFinish(t *testing.T) {
 				t.Fatalf("old inbound state survived: batch=%+v prompt=%+v tail=%q",
 					s.activeBatch, s.prompt, s.partialLine.peek())
 			}
+			// The prompt was visible when the connection changed, so it is
+			// committed once, at the change; the deferred send finish finds
+			// nothing left to commit, and data after the change is dropped.
+			commits := 0
 			for _, event := range uiMock.drainDisplayEvents() {
-				if event == "commit:Old prompt rewritten>" || strings.Contains(event, "stale data") {
-					t.Fatalf("old batch escaped after connection change: %q", event)
+				if event == "commit:Old prompt rewritten>" {
+					commits++
 				}
+				if strings.Contains(event, "stale data") {
+					t.Fatalf("data after the connection change escaped: %q", event)
+				}
+			}
+			if commits != 1 {
+				t.Fatalf("old prompt committed %d times, want once at the connection change", commits)
 			}
 
 			serverData(s, "New prompt>")
@@ -103,8 +113,10 @@ func TestConnectionChangeLaterInBatchCancelsDeferredSendFinish(t *testing.T) {
 				t.Fatalf("new connection tail restored old state: prompt=%+v tail=%q",
 					s.prompt, s.partialLine.peek())
 			}
+			uiMock.drainPrinted()
+			completeLine(s, "New line")
 			if contains(uiMock.drainPrinted(), "Old prompt rewritten>") {
-				t.Fatal("deferred finish committed the old prompt after connection change")
+				t.Fatal("old prompt reached output after the connection change")
 			}
 		})
 	}
@@ -298,4 +310,36 @@ func TestDisconnectingHookSendsOnTheLiveConnection(t *testing.T) {
 		t.Fatalf("local disconnect did not close transport exactly once: calls=%d connected=%v", net.disconnectCalls, net.connected)
 	}
 	assertSessionLua(t, s.engine, `assert(table.concat(localHooks, ",") == "disconnecting,disconnected")`)
+}
+
+// Text the user can see when a connection ends stays in scrollback, however
+// the connection ends: the visible partial line is committed once, and the
+// next connection starts with an empty overlay.
+func TestConnectionEndCommitsVisiblePartialLine(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		end  func(s *Session)
+	}{
+		{"server close", func(s *Session) {
+			s.handleInbound(network.Inbound{Kind: network.InboundDisconnect, ConnectionID: s.connectionID})
+		}},
+		{"disconnect", func(s *Session) { s.Disconnect() }},
+		{"reconnect", func(s *Session) { s.Connect("next.example:4000") }},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			s, net, uiMock := newTestSession(t)
+			net.connected = true
+			serverData(s, "HP:100 SP:50>")
+			uiMock.drainDisplayEvents()
+
+			tt.end(s)
+
+			if events := uiMock.drainDisplayEvents(); !slices.Contains(events, "commit:HP:100 SP:50>") {
+				t.Fatalf("visible partial line not committed; display events %q", events)
+			}
+			if s.prompt.active || s.partialLine.peek() != "" {
+				t.Fatalf("old partial line survived: prompt=%+v tail=%q", s.prompt, s.partialLine.peek())
+			}
+		})
+	}
 }

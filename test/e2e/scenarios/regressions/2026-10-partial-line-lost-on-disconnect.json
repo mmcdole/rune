@@ -1,0 +1,26 @@
+{
+  "description": "Regression: server text without a trailing newline is visible in the prompt overlay, but when the server then closed the connection the overlay was discarded and the text never reached scrollback, so farewell messages and a final prompt vanished at disconnect.",
+  "scenarios": [
+    {
+      "name": "final unterminated server text survives a server close",
+      "init_lua": [
+        "rune.hooks.on('disconnected', function() rune.echo('E2E-DISCONNECTED') end)"
+      ],
+      "steps": [
+        { "connect": true },
+        { "server_line": "Saving your character..." },
+        {
+          "server_bytes": [70, 97, 114, 101, 119, 101, 108, 108, 44, 32, 97, 100, 118, 101, 110, 116, 117, 114, 101, 114, 46],
+          "note": "\"Farewell, adventurer.\" with no newline, as the last bytes before close"
+        },
+        { "expect_prompt": "Farewell, adventurer.", "note": "the user can see it before the close" },
+        { "server_close": true },
+        { "expect_printed": "E2E-DISCONNECTED" },
+        {
+          "expect_printed": "Farewell, adventurer.",
+          "note": "a connection change commits the visible partial line"
+        }
+      ]
+    }
+  ]
+}

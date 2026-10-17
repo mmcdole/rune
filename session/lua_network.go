@@ -7,10 +7,13 @@ import (
 	"github.com/mmcdole/rune/network"
 )
 
-// resetConnectionState drops everything scoped to the previous connection:
-// the partial line, batch state, Telnet state, open spans, and the prompt
-// overlay.
+// resetConnectionState ends the previous connection's output and drops
+// everything scoped to it. Visible partial-line text is committed to
+// scrollback, as on submission, so a farewell or final prompt survives the
+// close; then the partial line, batch state, Telnet state, and any open spans
+// with no committed text are dropped.
 func (s *Session) resetConnectionState() {
+	s.finishPartialLine()
 	s.partialLine.reset()
 	s.activeBatch = nil
 	s.protocol = network.NewProtocol(s.clientState.Width, s.clientState.Height)

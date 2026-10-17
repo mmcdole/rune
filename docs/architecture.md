@@ -285,6 +285,7 @@ Session turns those facts into Rune events:
 | A prompt boundary arrives in a later batch | Consume the previously observed partial line through `prompt(line, true)`. Empty boundaries do nothing. |
 | The user submits anything | Apply the atomic post-submit draft and finish the partial line; then run input hooks before local echo, history, aliases, or slash commands. |
 | A programmatic game send is accepted | Queue the write immediately. Finish the partial line after the active `network.EventBatch` has installed its final rewrite or gag. |
+| The connection ends or changes | Finish the partial line at once, then drop the rest of the batch and all connection-scoped state. |
 
 Each trigger selects one stream: text may first reach prompt triggers while
 partial and later reach output triggers if CR/LF completes it. A partial
@@ -317,8 +318,15 @@ server text.
 If the partial text was really the beginning of a fragmented ordinary line,
 submitting input or accepting a game send commits that visible prefix; later
 server text begins a new line. This is the explicit trade-off for immediate
-partial-line display without a timer or per-MUD prompt pattern. Connect and
-disconnect discard the partial line and open spans without firing them.
+partial-line display without a timer or per-MUD prompt pattern.
+
+A connection change (server close, disconnect, or connect, including one a
+callback makes mid-batch) finishes the partial line before resetting
+connection state: server text processed before the change stays in
+scrollback exactly as displayed, and nothing from the old connection is
+written after it. A deferred send finish then has nothing left to commit, and
+data later in the same batch is dropped. Open spans with no committed text are
+discarded without firing.
 
 ### 4.2 Ordered negotiation and GMCP
 
