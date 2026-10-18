@@ -151,9 +151,9 @@ func TestContainedInputModesPreserveLabelsAndCursor(t *testing.T) {
 				setLayout(m, containedInputLayout(ui.PaneBorderFull, ui.AutoSize(), 0))
 				switch mode {
 				case "normal":
-					m.Update(setInputMsg("north"))
+					m.Update(setInputMsg{text: "north"})
 				case "draft_editor":
-					m.Update(setInputMsg("first\nsecond"))
+					m.Update(setInputMsg{text: "first\nsecond"})
 				case "picker":
 					m.Update(showPickerMsg{options: ui.PickerOptions{Title: "Aliases", Items: []ui.PickerItem{{Text: "north"}, {Text: "south"}}}})
 				case "search":
@@ -214,7 +214,7 @@ func TestUpdateAppliesGeometryOnce(t *testing.T) {
 		updateBarsMsg{"status": {Left: "changed status"}},
 		showSearchMsg{options: ui.SearchOptions{Query: "test"}},
 		tea.KeyPressMsg{Code: tea.KeyEsc},
-		setInputMsg("first\nsecond"),
+		setInputMsg{text: "first\nsecond"},
 	} {
 		probe.applications = 0
 		m.Update(msg)
@@ -235,7 +235,7 @@ func TestNestedConstrainedInputDoesNotShareItsEditableRow(t *testing.T) {
 			}},
 			{Type: ui.LayoutTypePane, Name: "below", Size: ui.Cells(3)},
 		}})
-		m.Update(setInputMsg("EDIT"))
+		m.Update(setInputMsg{text: "EDIT"})
 		if !strings.Contains(ansi.Strip(m.View().Content), "EDIT") {
 			t.Fatalf("height %d: neighboring border erased input:\n%s", height, ansi.Strip(m.View().Content))
 		}
@@ -283,7 +283,7 @@ func TestStaggeredBandsAndInputJoinDividers(t *testing.T) {
 
 func TestResolveAndViewDoNotResizeWidgets(t *testing.T) {
 	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 100)), 80, 24)
-	m.Update(setInputMsg(strings.Repeat("a\nb\n", 12)))
+	m.Update(setInputMsg{text: strings.Repeat("a\nb\n", 12)})
 	before := m.layoutPlan
 	mode, count := m.output.Mode(), m.output.NewLineCount()
 	for range 3 {
@@ -406,7 +406,7 @@ func BenchmarkLayoutFrame(b *testing.B) {
 func TestSearchToDraftEditorUsesFinalGeometry(t *testing.T) {
 	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 100)), 80, 30)
 	m.Update(showSearchMsg{options: ui.SearchOptions{Query: "missing"}})
-	m.Update(setInputMsg("one\ntwo\nthree\nfour\nfive"))
+	m.Update(setInputMsg{text: "one\ntwo\nthree\nfour\nfive"})
 	leaf := findLeaf(t, m.layoutPlan, "", ui.LayoutTypeInput)
 	if got, want := leaf.content.Dy(), m.input.MeasureHeight(leaf.content.Dx(), ui.MaxLayoutCells); got != want {
 		t.Fatalf("search -> draft editor allocated height %d, preferred %d", got, want)
@@ -478,9 +478,9 @@ func TestNestedInputSurvivesConstrainedGeometryInEveryMode(t *testing.T) {
 				setLayout(m, staggeredLayout())
 				switch mode {
 				case "normal":
-					m.Update(setInputMsg("edit"))
+					m.Update(setInputMsg{text: "edit"})
 				case "draft_editor":
-					m.Update(setInputMsg("one\ntwo\nthree\nfour\nfive"))
+					m.Update(setInputMsg{text: "one\ntwo\nthree\nfour\nfive"})
 				case "search":
 					m.Update(showSearchMsg{options: ui.SearchOptions{Query: "query"}})
 				}

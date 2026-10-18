@@ -82,7 +82,7 @@ func TestThrottledChangesRenderOnce(t *testing.T) {
 		printLineMsg("echo-line"),
 		setPromptMsg("prompt-text"),
 		commitPromptMsg("committed-prompt"),
-		setInputMsg("typed-draft"),
+		setInputMsg{text: "typed-draft"},
 		paneWriteMsg{Name: "unplaced", Text: "pane-row"},
 		updateBarsMsg{},
 	} {

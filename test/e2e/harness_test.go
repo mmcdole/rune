@@ -149,6 +149,7 @@ type mockUI struct {
 	echoed   []string
 	prompts  []string // every SetPrompt call, including clears
 	inputSet []string
+	inputRev uint64 // latest Session draft edit, applied instantly
 	events   chan ui.UIEvent
 	done     chan struct{}
 }
@@ -199,16 +200,30 @@ func (m *mockUI) CommitPrompt(text string) {
 	m.prompts = append(m.prompts, "")
 }
 
-func (m *mockUI) SetInput(text string) {
+func (m *mockUI) SetInput(text string, rev uint64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.inputSet = append(m.inputSet, text)
+	m.inputRev = rev
 }
 
-func (m *mockUI) SetInputSubmission(submission input.Submission) {
+func (m *mockUI) SetInputSubmission(submission input.Submission, rev uint64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.inputSet = append(m.inputSet, submission.Text)
+	m.inputRev = rev
+}
+
+func (m *mockUI) InputSetCursor(pos int, rev uint64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.inputRev = rev
+}
+
+func (m *mockUI) appliedInputRev() uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.inputRev
 }
 
 func (m *mockUI) UpdateBars(content map[string]ui.BarContent) {}
@@ -221,7 +236,6 @@ func (m *mockUI) SetClipboard(text string)                    {}
 func (m *mockUI) WritePane(name, text string)                 {}
 func (m *mockUI) ReplacePane(name, text string)               {}
 func (m *mockUI) ClearPane(name string)                       {}
-func (m *mockUI) InputSetCursor(pos int)                      {}
 func (m *mockUI) OpenEditor(initial string) (string, bool)    { return "", false }
 func (m *mockUI) PaneScrollUp(name string, lines int)         {}
 func (m *mockUI) PaneScrollDown(name string, lines int)       {}

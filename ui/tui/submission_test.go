@@ -138,7 +138,7 @@ func TestFullUIEventQueueReportsDroppedOrdinaryEvent(t *testing.T) {
 
 func TestSetInputSubmissionMessageForcesVerbatimMode(t *testing.T) {
 	m := newBareModel(t)
-	next, _ := m.Update(setInputSubmissionMsg(input.Verbatim("one line;still data")))
+	next, _ := m.Update(setInputSubmissionMsg{submission: input.Verbatim("one line;still data")})
 	m = next.(*Model)
 
 	if m.inputCtl.mode() != modeDraftEditor || !m.input.DraftEditorActive() {
@@ -153,12 +153,12 @@ func TestPushedDraftAcknowledgesStateWithoutReportingUserEdit(t *testing.T) {
 	m := newBareModel(t)
 	events := make(chan ui.UIEvent, 10)
 	m.events = events
-	m.Update(setInputMsg("script edit"))
-	m.Update(inputSetCursorMsg(3))
-	for _, cursor := range []int{11, 3} {
+	m.Update(setInputMsg{text: "script edit", rev: 1})
+	m.Update(inputSetCursorMsg{pos: 3, rev: 2})
+	for i, cursor := range []int{11, 3} {
 		select {
 		case event := <-events:
-			if event != (ui.DraftAppliedMsg{Text: "script edit", Cursor: cursor}) {
+			if event != (ui.DraftAppliedMsg{Text: "script edit", Cursor: cursor, Rev: uint64(i + 1)}) {
 				t.Fatalf("pushed draft editor state produced %#v", event)
 			}
 		default:
@@ -167,5 +167,10 @@ func TestPushedDraftAcknowledgesStateWithoutReportingUserEdit(t *testing.T) {
 	}
 	if m.input.Value() != "script edit" || m.input.Position() != 3 {
 		t.Fatalf("draft = %q at %d", m.input.Value(), m.input.Position())
+	}
+	// Typing after the edit reports the revision it builds on.
+	m.Update(textPress("s"))
+	if event := <-events; event != (ui.InputChangedMsg{Text: "scrsipt edit", Cursor: 4, Rev: 2}) {
+		t.Fatalf("typing after the edit produced %#v", event)
 	}
 }

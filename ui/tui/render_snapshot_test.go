@@ -23,10 +23,10 @@ func TestRenderSnapshots(t *testing.T) {
 		t.Run(scene, func(t *testing.T) {
 			m := renderFixture(80, 24, true)
 			m.Update(printLineMsg("\x1b[35mUnicode:\x1b[0m 界 e\u0301 👩‍💻 1️⃣\tend"))
-			m.Update(setInputMsg("look north"))
+			m.Update(setInputMsg{text: "look north"})
 			switch scene {
 			case "draft_editor":
-				m.Update(setInputMsg("say hello\n\t界 e\u0301 👩‍💻\nlook"))
+				m.Update(setInputMsg{text: "say hello\n\t界 e\u0301 👩‍💻\nlook"})
 			case "picker":
 				m.Update(showPickerMsg{options: ui.PickerOptions{Title: "History", Items: []ui.PickerItem{{Text: "look north"}, {Text: "say hello"}}}})
 			case "search":

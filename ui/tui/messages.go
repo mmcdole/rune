@@ -53,15 +53,24 @@ type setClipboardMsg string
 
 // setInputMsg sets the input line content.
 // Sent from Session when Lua calls rune.input.set().
-type setInputMsg string
+type setInputMsg struct {
+	text string
+	rev  uint64
+}
 
 // setInputSubmissionMsg restores both draft text and interpretation.
 // History recall uses this for one-line verbatim entries that have no
 // structural character from which the UI could infer draft editor mode.
-type setInputSubmissionMsg input.Submission
+type setInputSubmissionMsg struct {
+	submission input.Submission
+	rev        uint64
+}
 
 // inputSetCursorMsg sets the widget cursor to a zero-based rune offset.
-type inputSetCursorMsg int
+type inputSetCursorMsg struct {
+	pos int
+	rev uint64
+}
 
 // paneScrollUpMsg scrolls a pane up by N lines.
 type paneScrollUpMsg struct {

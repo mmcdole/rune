@@ -13,8 +13,11 @@ type UI interface {
 	Echo(text string)
 	SetPrompt(text string)
 	CommitPrompt(text string)
-	SetInput(text string)
-	SetInputSubmission(submission input.Submission)
+	// Draft edits carry Session's revision for that edit. The UI echoes the
+	// latest revision it has applied in InputChangedMsg, DraftAppliedMsg, and
+	// CursorMovedMsg.
+	SetInput(text string, rev uint64)
+	SetInputSubmission(submission input.Submission, rev uint64)
 
 	// Updates
 	UpdateBars(content map[string]BarContent)
@@ -33,7 +36,7 @@ type UI interface {
 	ClearPane(name string)
 
 	// Input primitives. Cursor positions are zero-based rune offsets.
-	InputSetCursor(pos int)
+	InputSetCursor(pos int, rev uint64)
 	OpenEditor(initial string) (string, bool)
 
 	// Pane scrolling primitives for Lua

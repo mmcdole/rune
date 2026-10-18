@@ -59,10 +59,14 @@ type SearchStateChangedMsg bool
 func (SearchStateChangedMsg) uiEvent() {}
 
 // InputChangedMsg notifies Session of input content changes. Cursor is a
-// zero-based rune offset from the input widget.
+// zero-based rune offset from the input widget. Rev, here and in the other
+// draft reports, is the latest Session edit the UI had applied; Session
+// ignores reports made before the UI saw its newest edit, since that edit
+// replaces them.
 type InputChangedMsg struct {
 	Text   string
 	Cursor int
+	Rev    uint64
 }
 
 func (InputChangedMsg) uiEvent() {}
@@ -73,6 +77,7 @@ func (InputChangedMsg) uiEvent() {}
 type DraftAppliedMsg struct {
 	Text   string
 	Cursor int // zero-based rune offset, like InputChangedMsg
+	Rev    uint64
 }
 
 func (DraftAppliedMsg) uiEvent() {}
@@ -81,6 +86,7 @@ func (DraftAppliedMsg) uiEvent() {}
 // change. Cursor is a zero-based rune offset from the input widget.
 type CursorMovedMsg struct {
 	Cursor int
+	Rev    uint64
 }
 
 func (CursorMovedMsg) uiEvent() {}

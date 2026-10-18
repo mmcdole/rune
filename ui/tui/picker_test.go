@@ -31,7 +31,7 @@ func newInlinePickerModel(t *testing.T, dismissOnSpace bool, initial string) (*M
 	}})
 	m = next.(*Model)
 
-	next, _ = m.Update(setInputMsg(initial))
+	next, _ = m.Update(setInputMsg{text: initial})
 	m = next.(*Model)
 
 	if m.inputCtl.mode() != modePickerInline {
@@ -134,7 +134,7 @@ func TestInlinePickerClosesCleanlyOnEmptiedInput(t *testing.T) {
 func TestInlinePickerDismissesOnLuaEditWithSpace(t *testing.T) {
 	m, events := newInlinePickerModel(t, true, "/connect")
 
-	next, _ := m.Update(setInputMsg("/connect vikingmud.org 2001"))
+	next, _ := m.Update(setInputMsg{text: "/connect vikingmud.org 2001"})
 	m = next.(*Model)
 
 	if m.inputCtl.mode() != modeNormal {

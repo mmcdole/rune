@@ -48,6 +48,10 @@ type inputController struct {
 	historyRecall bool // unmodified draft restored from history
 	keepOnSubmit  bool // keep_input: keep the sent command selected
 
+	// rev is the latest Session edit applied here. Draft reports carry it so
+	// Session can discard reports that edit already replaced.
+	rev uint64
+
 	host inputHost
 }
 
@@ -168,6 +172,22 @@ func (c *inputController) applyEditAction(action string) bool {
 	return true
 }
 
+// SetCursor applies a Session-owned cursor move and acknowledges it.
+func (c *inputController) SetCursor(pos int) {
+	c.input.SetCursor(pos)
+	c.reportApplied()
+}
+
+// reportChanged reports a user edit, which runs Session's draft observers.
+func (c *inputController) reportChanged() {
+	c.host.notifySession(ui.InputChangedMsg{Text: c.input.Value(), Cursor: c.input.Position(), Rev: c.rev})
+}
+
+// reportApplied acknowledges the state left by a Session-owned edit.
+func (c *inputController) reportApplied() {
+	c.host.notifySession(ui.DraftAppliedMsg{Text: c.input.Value(), Cursor: c.input.Position(), Rev: c.rev})
+}
+
 // SetText applies a Session-owned edit and acknowledges its state. Lua editing
 // binds (ctrl+u, ctrl+w) change input while the inline picker is open;
 // keep its filter in sync, and close the picker (cancelling its
@@ -181,7 +201,7 @@ func (c *inputController) SetText(text string) {
 	wasInline := c.mode() == modePickerInline
 	c.input.SetValue(text)
 	c.input.CursorEnd()
-	c.host.notifySession(ui.DraftAppliedMsg{Text: c.input.Value(), Cursor: c.input.Position()})
+	c.reportApplied()
 
 	if c.input.DraftEditorActive() {
 		if wasPicker {
@@ -213,7 +233,7 @@ func (c *inputController) SetSubmission(submission input.Submission) {
 		c.input.CursorEnd()
 	}
 
-	c.host.notifySession(ui.DraftAppliedMsg{Text: c.input.Value(), Cursor: c.input.Position()})
+	c.reportApplied()
 	if wasPicker {
 		c.closePicker(false, "")
 	}
@@ -370,7 +390,7 @@ func (c *inputController) insertDraftText(text string) {
 func (c *inputController) cancelDraft() {
 	c.historyRecall = false
 	c.input.Reset()
-	c.host.notifySession(ui.InputChangedMsg{Text: "", Cursor: 0})
+	c.reportChanged()
 }
 
 // Exact physical bindings win; unbound keypad Enter shares ordinary Enter.
@@ -411,11 +431,11 @@ func (c *inputController) reportInputUpdate(oldValue string, oldCursor int) bool
 	newValue := c.input.Value()
 	newCursor := c.input.Position()
 	if newValue != oldValue {
-		c.host.notifySession(ui.InputChangedMsg{Text: newValue, Cursor: newCursor})
+		c.reportChanged()
 		return true
 	}
 	if newCursor != oldCursor {
-		c.host.notifySession(ui.CursorMovedMsg{Cursor: newCursor})
+		c.host.notifySession(ui.CursorMovedMsg{Cursor: newCursor, Rev: c.rev})
 	}
 	return false
 }

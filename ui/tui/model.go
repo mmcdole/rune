@@ -199,14 +199,16 @@ func (m *Model) dispatch(msg tea.Msg) (render, layout bool) {
 	case showSearchMsg:
 		m.inputCtl.ShowSearch(msg.options)
 	case setInputMsg:
-		m.inputCtl.SetText(string(msg))
+		m.inputCtl.rev = msg.rev
+		m.inputCtl.SetText(msg.text)
 	case setInputSubmissionMsg:
-		m.inputCtl.SetSubmission(input.Submission(msg))
+		m.inputCtl.rev = msg.rev
+		m.inputCtl.SetSubmission(msg.submission)
 
 	// Input primitives (from Lua)
 	case inputSetCursorMsg:
-		m.input.SetCursor(int(msg))
-		m.notifySession(ui.DraftAppliedMsg{Text: m.input.Value(), Cursor: m.input.Position()})
+		m.inputCtl.rev = msg.rev
+		m.inputCtl.SetCursor(msg.pos)
 		return true, m.layoutPlan.autoPanes[ui.OutputPaneName]
 
 	// Clipboard (from Lua). OSC 52 asks the terminal emulator to set

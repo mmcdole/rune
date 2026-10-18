@@ -261,7 +261,7 @@ func runStep(t *testing.T, c *client, st step, desc string) {
 		if st.Input.Cursor != nil {
 			cursor = *st.Input.Cursor
 		}
-		c.ui.events <- ui.InputChangedMsg{Text: st.Input.Text, Cursor: cursor}
+		c.ui.events <- ui.InputChangedMsg{Text: st.Input.Text, Cursor: cursor, Rev: c.ui.appliedInputRev()}
 	case st.Press != nil:
 		c.ui.events <- ui.ExecuteBindMsg(*st.Press)
 	case st.Resize != nil:

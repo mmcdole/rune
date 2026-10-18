@@ -83,6 +83,7 @@ type Session struct {
 	// Input and history
 	currentInput   string // Tracked so Lua can query via rune.input.get()
 	currentCursor  int    // Zero-based UTF-8 byte offset exposed to Lua
+	inputRev       uint64 // Latest draft edit sent to the UI; see ui.InputChangedMsg
 	historyEntries []input.Submission
 	historyLimit   int
 
@@ -419,15 +420,26 @@ func (s *Session) handleUIEvent(event ui.UIEvent) {
 	case ui.PickerSelectMsg:
 		s.engine.OnPickerResult(event.CallbackID, event.Value, event.Accepted)
 	case ui.InputChangedMsg:
+		// A report from before the UI applied our latest edit describes text
+		// that edit replaces. Keeping it would undo the edit in the mirror.
+		if event.Rev != s.inputRev {
+			return
+		}
 		s.currentInput = event.Text
 		s.currentCursor = input.RuneCursorToByte(event.Text, event.Cursor)
 		s.engine.NotifyDraftChanged(event.Text)
 	case ui.DraftAppliedMsg:
-		// The editor has applied our change, possibly after older queued typing.
-		// Match what it now shows without calling draft observers a second time.
+		// Match what the editor shows after our latest edit without calling
+		// draft observers a second time.
+		if event.Rev != s.inputRev {
+			return
+		}
 		s.currentInput = event.Text
 		s.currentCursor = input.RuneCursorToByte(event.Text, event.Cursor)
 	case ui.CursorMovedMsg:
+		if event.Rev != s.inputRev {
+			return
+		}
 		s.currentCursor = input.RuneCursorToByte(s.currentInput, event.Cursor)
 	}
 }

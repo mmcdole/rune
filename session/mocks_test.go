@@ -203,10 +203,10 @@ func (m *mockUI) CommitPrompt(text string) {
 	m.displayEvents = append(m.displayEvents, "commit:"+text)
 }
 
-func (m *mockUI) SetInput(text string) {
+func (m *mockUI) SetInput(text string, rev uint64) {
 }
 
-func (m *mockUI) SetInputSubmission(submission input.Submission) {
+func (m *mockUI) SetInputSubmission(submission input.Submission, rev uint64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.submissions = append(m.submissions, submission)
@@ -295,7 +295,7 @@ func (m *mockUI) WritePane(name, text string)      {}
 func (m *mockUI) ReplacePane(name, text string)    {}
 func (m *mockUI) ClearPane(name string)            {}
 
-func (m *mockUI) InputSetCursor(pos int) {
+func (m *mockUI) InputSetCursor(pos int, rev uint64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.inputCursor = append(m.inputCursor, pos)

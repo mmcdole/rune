@@ -139,7 +139,7 @@ func TestNamedEditorAppliesOnlySuccessfulResults(t *testing.T) {
 	}
 }
 
-func TestAppliedDraftReconcilesQueuedTypingWithoutNotifyingAgain(t *testing.T) {
+func TestAppliedDraftSupersedesQueuedTypingWithoutNotifyingAgain(t *testing.T) {
 	s, _, _ := newTestSession(t)
 	assertSessionLua(t, s.engine, `
   changes = {}
@@ -147,13 +147,39 @@ func TestAppliedDraftReconcilesQueuedTypingWithoutNotifyingAgain(t *testing.T) {
   rune.input.set("script edit")
   rune.input.set_cursor(3)
  `)
-	// The UI had already queued typing before it received the script's edit.
+	// The UI had already queued typing before it received the script's edit,
+	// which then replaced that typing on screen. Observers never see it.
 	s.handleUIEvent(ui.InputChangedMsg{Text: "older typing", Cursor: 12})
 	// Its applied edit and cursor then arrive in UI order, without callbacks.
-	s.handleUIEvent(ui.DraftAppliedMsg{Text: "script edit", Cursor: 11})
-	s.handleUIEvent(ui.DraftAppliedMsg{Text: "script edit", Cursor: 3})
+	s.handleUIEvent(ui.DraftAppliedMsg{Text: "script edit", Cursor: 11, Rev: 1})
+	s.handleUIEvent(ui.DraftAppliedMsg{Text: "script edit", Cursor: 3, Rev: 2})
 	if s.GetInput() != "script edit" || s.InputGetCursor() != 3 {
 		t.Fatalf("mirror = %q at %d", s.GetInput(), s.InputGetCursor())
 	}
-	assertSessionLua(t, s.engine, `assert(table.concat(changes, "|") == "script edit|older typing")`)
+	assertSessionLua(t, s.engine, `assert(table.concat(changes, "|") == "script edit")`)
+
+	// Typing after the edit is current and reaches observers.
+	s.handleUIEvent(ui.InputChangedMsg{Text: "script edits", Cursor: 12, Rev: 2})
+	assertSessionLua(t, s.engine, `assert(table.concat(changes, "|") == "script edit|script edits")`)
+}
+
+// A held key can run a second script edit before the UI acknowledges the
+// first. The older acknowledgement must not roll the mirror back, or the next
+// edit repeats work the second one already did.
+func TestStaleDraftAcknowledgementKeepsNewerScriptEdit(t *testing.T) {
+	s, _, _ := newTestSession(t)
+	s.handleUIEvent(ui.InputChangedMsg{Text: "go north west", Cursor: 13})
+	assertSessionLua(t, s.engine, `rune.input.delete_word()`)
+	assertSessionLua(t, s.engine, `rune.input.delete_word()`)
+	// The UI now acknowledges the first edit's text and cursor.
+	s.handleUIEvent(ui.DraftAppliedMsg{Text: "go north ", Cursor: 9, Rev: 1})
+	s.handleUIEvent(ui.CursorMovedMsg{Cursor: 9, Rev: 2})
+	s.handleUIEvent(ui.DraftAppliedMsg{Text: "go north ", Cursor: 9, Rev: 2})
+	if s.GetInput() != "go " || s.InputGetCursor() != 3 {
+		t.Fatalf("mirror = %q at %d, want %q at 3", s.GetInput(), s.InputGetCursor(), "go ")
+	}
+	assertSessionLua(t, s.engine, `rune.input.delete_word()`)
+	if s.GetInput() != "" {
+		t.Fatalf("third delete left %q", s.GetInput())
+	}
 }

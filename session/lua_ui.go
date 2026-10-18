@@ -52,7 +52,8 @@ func (s *Session) GetInput() string {
 // SetInput implements lua.Host.
 func (s *Session) SetInput(text string) {
 	text = input.NormalizeDraftText(text)
-	s.ui.SetInput(text)
+	s.inputRev++
+	s.ui.SetInput(text, s.inputRev)
 	s.currentInput = text
 	s.currentCursor = len(text)
 }
@@ -62,7 +63,8 @@ func (s *Session) SetInput(text string) {
 // would otherwise look like ordinary command input.
 func (s *Session) SetInputSubmission(submission input.Submission) {
 	submission.Text = input.NormalizeDraftText(submission.Text)
-	s.ui.SetInputSubmission(submission)
+	s.inputRev++
+	s.ui.SetInputSubmission(submission, s.inputRev)
 	s.currentInput = submission.Text
 	s.currentCursor = len(submission.Text)
 }
@@ -77,7 +79,8 @@ func (s *Session) InputGetCursor() int {
 func (s *Session) InputSetCursor(pos int) {
 	pos = input.ClampByteCursor(s.currentInput, pos)
 	s.currentCursor = pos
-	s.ui.InputSetCursor(input.ByteCursorToRune(s.currentInput, pos))
+	s.inputRev++
+	s.ui.InputSetCursor(input.ByteCursorToRune(s.currentInput, pos), s.inputRev)
 }
 
 // OpenEditor implements lua.Host.

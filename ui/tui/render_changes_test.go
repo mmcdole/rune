@@ -19,7 +19,7 @@ func TestAppearanceChangesReuseLayout(t *testing.T) {
 		{Type: ui.LayoutTypePane, Name: ui.OutputPaneName},
 		{Type: ui.LayoutTypeInput, Size: ui.AutoSize()},
 	}})
-	m.Update(setInputMsg("unchanged\nmultiline draft"))
+	m.Update(setInputMsg{text: "unchanged\nmultiline draft"})
 	for _, msg := range []tea.Msg{
 		printLineMsg("server text"), printLineMsg("local echo"),
 		setPromptMsg("HP>"), commitPromptMsg("HP>"),
@@ -180,9 +180,9 @@ func TestInputNavigationReusesLayout(t *testing.T) {
 			m.Update(printLineMsg("north one\nnorth two\nnorth three"))
 			switch mode {
 			case "normal":
-				m.Update(setInputMsg("look north"))
+				m.Update(setInputMsg{text: "look north"})
 			case "draft":
-				m.Update(setInputMsg(strings.Repeat("one two three\n", 20)))
+				m.Update(setInputMsg{text: strings.Repeat("one two three\n", 20)})
 			case "picker":
 				m.Update(showPickerMsg{options: ui.PickerOptions{Items: pickerTestItems}})
 			case "search":
@@ -214,12 +214,12 @@ func TestInputTransitionsMatchFreshLayout(t *testing.T) {
 			// cursor movement, to preserve the old navigation and scroll behavior.
 			messages := []tea.Msg{
 				printLineMsg("north one\nsouth two\nnorth three"),
-				setInputMsg("look"), textPress("!"), tea.PasteMsg{Content: " north"},
+				setInputMsg{text: "look"}, textPress("!"), tea.PasteMsg{Content: " north"},
 				ctrlPress('j'), textPress("界"),
-				setInputMsg(strings.Repeat("numbered draft line\n", 20)),
+				setInputMsg{text: strings.Repeat("numbered draft line\n", 20)},
 				ctrlPress(tea.KeyHome), keyPress(tea.KeyDown), keyPress(tea.KeyDown),
 				ctrlPress(tea.KeyEnd), keyPress(tea.KeyUp), keyPress(tea.KeyUp),
-				inputSetCursorMsg(0), keyPress(tea.KeyDown), keyPress(tea.KeyUp),
+				inputSetCursorMsg{pos: 0}, keyPress(tea.KeyDown), keyPress(tea.KeyUp),
 				keyPress(tea.KeyBackspace), keyPress(tea.KeyEsc), keyPress(tea.KeyEsc),
 				showPickerMsg{options: ui.PickerOptions{Items: pickerTestItems}}, textPress("disconnect"),
 				keyPress(tea.KeyBackspace), keyPress(tea.KeyEsc),

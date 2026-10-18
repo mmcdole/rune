@@ -80,27 +80,27 @@ func (u *countingUI) Print(text string) {
 		}
 	}
 }
-func (u *countingUI) Echo(string)                         { u.prints.Add(1) }
-func (u *countingUI) SetPrompt(string)                    { u.prompts.Add(1) }
-func (u *countingUI) CommitPrompt(string)                 { u.prompts.Add(1) }
-func (u *countingUI) SetInput(string)                     {}
-func (u *countingUI) SetInputSubmission(input.Submission) {}
-func (u *countingUI) UpdateBars(map[string]ui.BarContent) { u.bars.Add(1) }
-func (u *countingUI) UpdateBinds(input.Bindings)          {}
-func (u *countingUI) UpdateLayout(ui.LayoutTree)          {}
-func (u *countingUI) UpdateConfig(ui.Config)              {}
-func (u *countingUI) ShowPicker(ui.PickerOptions)         {}
-func (u *countingUI) ShowSearch(ui.SearchOptions)         {}
-func (u *countingUI) SetClipboard(string)                 {}
-func (u *countingUI) WritePane(string, string)            { u.panes.Add(1) }
-func (u *countingUI) ReplacePane(string, string)          {}
-func (u *countingUI) ClearPane(string)                    {}
-func (u *countingUI) InputSetCursor(int)                  {}
-func (u *countingUI) OpenEditor(string) (string, bool)    { return "", false }
-func (u *countingUI) PaneScrollUp(string, int)            {}
-func (u *countingUI) PaneScrollDown(string, int)          {}
-func (u *countingUI) PaneScrollToTop(string)              {}
-func (u *countingUI) PaneScrollToBottom(string)           {}
+func (u *countingUI) Echo(string)                                 { u.prints.Add(1) }
+func (u *countingUI) SetPrompt(string)                            { u.prompts.Add(1) }
+func (u *countingUI) CommitPrompt(string)                         { u.prompts.Add(1) }
+func (u *countingUI) SetInput(string, uint64)                     {}
+func (u *countingUI) SetInputSubmission(input.Submission, uint64) {}
+func (u *countingUI) UpdateBars(map[string]ui.BarContent)         { u.bars.Add(1) }
+func (u *countingUI) UpdateBinds(input.Bindings)                  {}
+func (u *countingUI) UpdateLayout(ui.LayoutTree)                  {}
+func (u *countingUI) UpdateConfig(ui.Config)                      {}
+func (u *countingUI) ShowPicker(ui.PickerOptions)                 {}
+func (u *countingUI) ShowSearch(ui.SearchOptions)                 {}
+func (u *countingUI) SetClipboard(string)                         {}
+func (u *countingUI) WritePane(string, string)                    { u.panes.Add(1) }
+func (u *countingUI) ReplacePane(string, string)                  {}
+func (u *countingUI) ClearPane(string)                            {}
+func (u *countingUI) InputSetCursor(int, uint64)                  {}
+func (u *countingUI) OpenEditor(string) (string, bool)            { return "", false }
+func (u *countingUI) PaneScrollUp(string, int)                    {}
+func (u *countingUI) PaneScrollDown(string, int)                  {}
+func (u *countingUI) PaneScrollToTop(string)                      {}
+func (u *countingUI) PaneScrollToBottom(string)                   {}
 
 // Result is one replay's measurements.
 type Result struct {

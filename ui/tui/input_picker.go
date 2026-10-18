@@ -100,7 +100,7 @@ func (c *inputController) handleInlineKey(msg tea.KeyPressMsg, action string) {
 			c.input.CursorEnd()
 			// Report the completed text before the selection fires so
 			// the session's input state is fresh inside the callback.
-			c.host.notifySession(ui.InputChangedMsg{Text: c.input.Value(), Cursor: c.input.Position()})
+			c.reportChanged()
 			c.closePicker(true, item.Value)
 		} else {
 			c.closePicker(false, "")

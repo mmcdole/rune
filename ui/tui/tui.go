@@ -223,20 +223,20 @@ func (b *BubbleTeaUI) SetClipboard(text string) {
 }
 
 // SetInput sets the input line content.
-func (b *BubbleTeaUI) SetInput(text string) {
-	b.send(setInputMsg(text))
+func (b *BubbleTeaUI) SetInput(text string, rev uint64) {
+	b.send(setInputMsg{text: text, rev: rev})
 }
 
 // SetInputSubmission restores input text with an explicit interpretation.
-func (b *BubbleTeaUI) SetInputSubmission(submission input.Submission) {
-	b.send(setInputSubmissionMsg(submission))
+func (b *BubbleTeaUI) SetInputSubmission(submission input.Submission, rev uint64) {
+	b.send(setInputSubmissionMsg{submission: submission, rev: rev})
 }
 
 // --- Input Primitives for Lua ---
 
 // InputSetCursor sets the widget cursor to a zero-based rune offset.
-func (b *BubbleTeaUI) InputSetCursor(pos int) {
-	b.send(inputSetCursorMsg(pos))
+func (b *BubbleTeaUI) InputSetCursor(pos int, rev uint64) {
+	b.send(inputSetCursorMsg{pos: pos, rev: rev})
 }
 
 // OpenEditor opens $EDITOR with the given initial text.

@@ -413,6 +413,14 @@ UI. A **submission** is the immutable block the user asked Rune to execute.
 A **line** is one physical line selected from that block. Session mirrors draft
 text and cursor so Lua can inspect them without calling the UI goroutine.
 
+Script edits (`rune.input.set`, `set_cursor`) update the mirror immediately and
+carry an increasing revision to the UI. Every draft report the UI sends back
+names the latest revision it had applied, and Session ignores reports with an
+older one: they describe text that the newer edit replaces on screen. Without
+this, a second script edit queued before the UI applied the first would be
+rolled back by the first one's acknowledgement. Built-in editing actions such
+as `input.delete_word` run in the UI and need no round trip at all.
+
 `Session.submit` is the complete accepted-submission sequence:
 
 1. Mirror the draft left after Enter, then finish the displayed partial prompt.
