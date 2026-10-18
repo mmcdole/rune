@@ -22,8 +22,8 @@ rune.input.delete_word()          -- delete the word before the cursor
 ```
 
 `get`/`set` operate on the whole buffer; the word operations combine
-them with cursor moves and are what the default `ctrl+w`,
-`alt+left`/`alt+right` binds call. The `"input_changed"`
+them with cursor moves. The default word-editing keys use the built-in
+[input actions](#input-bindings) instead, which edit the input directly. The `"input_changed"`
 [hook event](/reference/api/hooks/) fires whenever the buffer changes,
 including typing, history or completion, `rune.input.set`, and the draft left
 after submission. Script edits notify observers before `rune.input.set` returns;
@@ -66,6 +66,9 @@ rune.bind({"ctrl+j", "shift+enter", "ctrl+enter"}, "input.newline")
 | `input.toggle_mode` | Switch Command/Verbatim interpretation | Alt+V |
 | `input.open_editor` | Edit the current draft in `$EDITOR`; apply a successful result without submitting | Ctrl+E |
 | `input.cancel` | Cancel according to the current input context, as below | Esc |
+| `input.delete_word` | Delete from the start of the previous word to the cursor | Ctrl+W, Alt+Backspace |
+| `input.word_left` | Move the cursor to the start of the previous word | Alt+Left, Ctrl+Left |
+| `input.word_right` | Move the cursor to the start of the next word | Alt+Right, Ctrl+Right |
 
 | Cancel context | Behavior |
 |---|---|
@@ -73,6 +76,10 @@ rune.bind({"ctrl+j", "shift+enter", "ctrl+enter"}, "input.newline")
 | Multiline draft editor | First press requests confirmation; a second cancel press discards the draft |
 | Inline or modal picker | Close without accepting; preserve the draft |
 | Scrollback search | Cancel search and restore the previous view |
+
+The word actions apply in normal input, the inline picker, and the draft
+editor. They run in the input itself rather than calling Lua, so a held key
+repeats at the terminal's rate even while scripts are busy.
 
 Any intervening non-cancel key or binding update dismisses multiline discard
 confirmation. Rebinding cancel changes it across all these contexts. Ctrl+C also

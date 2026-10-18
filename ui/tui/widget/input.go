@@ -286,6 +286,47 @@ func (i *Input) SetCursor(pos int) {
 	i.textinput.SetCursor(pos)
 }
 
+// WordLeft moves the cursor to the start of the previous word.
+func (i *Input) WordLeft() {
+	i.Deselect()
+	if i.draftEditor != nil {
+		i.draftEditor.WordLeft()
+		i.scrollToCursor()
+		return
+	}
+	i.textinput.SetCursor(wordLeft([]rune(i.textinput.Value()), i.textinput.Position()))
+}
+
+// WordRight moves the cursor to the start of the next word.
+func (i *Input) WordRight() {
+	i.Deselect()
+	if i.draftEditor != nil {
+		i.draftEditor.WordRight()
+		i.scrollToCursor()
+		return
+	}
+	i.textinput.SetCursor(wordRight([]rune(i.textinput.Value()), i.textinput.Position()))
+}
+
+// DeleteWordBackward deletes from the start of the previous word to the
+// cursor.
+func (i *Input) DeleteWordBackward() {
+	i.Deselect()
+	if i.draftEditor != nil {
+		i.draftEditor.DeleteWordBack()
+		i.discardPending = false
+		return
+	}
+	text := []rune(i.textinput.Value())
+	end := i.textinput.Position()
+	start := wordLeft(text, end)
+	if start == end {
+		return
+	}
+	i.textinput.SetValue(string(text[:start]) + string(text[end:]))
+	i.textinput.SetCursor(start)
+}
+
 // Reset clears the input.
 func (i *Input) Reset() {
 	i.submissionMode = input.ModeCommand

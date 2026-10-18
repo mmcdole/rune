@@ -263,17 +263,6 @@ end
 -- Line editing
 rune.bind("ctrl+u", function() rune.input.set("") end)
 
--- Word navigation keybindings
-rune.bind("alt+left", function() rune.input.word_left() end)
-rune.bind("alt+right", function() rune.input.word_right() end)
-rune.bind("ctrl+left", function() rune.input.word_left() end)
-rune.bind("ctrl+right", function() rune.input.word_right() end)
-
--- Delete word keybindings. Most terminals send ctrl+backspace as
--- ctrl+h, so that combination cannot be bound distinctly.
-rune.bind("ctrl+w", function() rune.input.delete_word() end)
-rune.bind("alt+backspace", function() rune.input.delete_word() end)
-
 -- ============================================================
 -- TAB COMPLETION
 -- Word cache from server output + Tab cycling

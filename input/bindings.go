@@ -19,13 +19,19 @@ type Bindings map[string]Binding
 // Lua snapshot, even an empty one, replaces these completely.
 func DefaultBindings() Bindings {
 	return Bindings{
-		"enter":       {"input.submit", true, 1},
-		"ctrl+j":      {"input.newline", true, 2},
-		"shift+enter": {"input.newline", true, 3},
-		"ctrl+enter":  {"input.newline", true, 4},
-		"alt+v":       {"input.toggle_mode", true, 5},
-		"esc":         {"input.cancel", true, 6},
-		"ctrl+e":      {"input.open_editor", true, 7},
+		"enter":         {"input.submit", true, 1},
+		"ctrl+j":        {"input.newline", true, 2},
+		"shift+enter":   {"input.newline", true, 3},
+		"ctrl+enter":    {"input.newline", true, 4},
+		"alt+v":         {"input.toggle_mode", true, 5},
+		"esc":           {"input.cancel", true, 6},
+		"ctrl+e":        {"input.open_editor", true, 7},
+		"ctrl+w":        {"input.delete_word", true, 8},
+		"alt+backspace": {"input.delete_word", true, 9},
+		"alt+left":      {"input.word_left", true, 10},
+		"ctrl+left":     {"input.word_left", true, 11},
+		"alt+right":     {"input.word_right", true, 12},
+		"ctrl+right":    {"input.word_right", true, 13},
 	}
 }
 

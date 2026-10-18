@@ -24,9 +24,10 @@ the key without calling the callback.
 rune.bind("f1", function() rune.send("north") end, {group = "combat"})
 ```
 
-The [input action table](/reference/api/input/#input-bindings) lists the five
-named actions: `input.submit`, `input.newline`, `input.toggle_mode`,
-`input.open_editor`, and `input.cancel`, including their defaults and context rules.
+The [input action table](/reference/api/input/#input-bindings) lists the named
+actions: `input.submit`, `input.newline`, `input.toggle_mode`,
+`input.open_editor`, `input.cancel`, `input.delete_word`, `input.word_left`,
+and `input.word_right`, including their defaults and context rules.
 Unknown action strings are errors. Action names are not commands to send.
 
 ```lua

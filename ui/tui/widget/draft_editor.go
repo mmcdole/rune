@@ -130,23 +130,36 @@ func (c *draftEditor) DocEnd() {
 	c.goalCol = -1
 }
 
+// wordLeft returns the start of the word at or before pos, skipping any
+// whitespace immediately to its left first.
+func wordLeft(text []rune, pos int) int {
+	for pos > 0 && unicode.IsSpace(text[pos-1]) {
+		pos--
+	}
+	for pos > 0 && !unicode.IsSpace(text[pos-1]) {
+		pos--
+	}
+	return pos
+}
+
+// wordRight returns the start of the next word after pos.
+func wordRight(text []rune, pos int) int {
+	for pos < len(text) && !unicode.IsSpace(text[pos]) {
+		pos++
+	}
+	for pos < len(text) && unicode.IsSpace(text[pos]) {
+		pos++
+	}
+	return pos
+}
+
 func (c *draftEditor) WordLeft() {
-	for c.cursor > 0 && unicode.IsSpace(c.text[c.cursor-1]) {
-		c.cursor--
-	}
-	for c.cursor > 0 && !unicode.IsSpace(c.text[c.cursor-1]) {
-		c.cursor--
-	}
+	c.cursor = wordLeft(c.text, c.cursor)
 	c.goalCol = -1
 }
 
 func (c *draftEditor) WordRight() {
-	for c.cursor < len(c.text) && !unicode.IsSpace(c.text[c.cursor]) {
-		c.cursor++
-	}
-	for c.cursor < len(c.text) && unicode.IsSpace(c.text[c.cursor]) {
-		c.cursor++
-	}
+	c.cursor = wordRight(c.text, c.cursor)
 	c.goalCol = -1
 }
 

@@ -121,6 +121,10 @@ func (c *inputController) HandleKey(msg tea.KeyPressMsg) {
 			c.historyRecall = false
 			return
 		}
+
+		if c.applyEditAction(action) {
+			return
+		}
 	}
 
 	switch c.mode() {
@@ -135,6 +139,33 @@ func (c *inputController) HandleKey(msg tea.KeyPressMsg) {
 	default:
 		c.handleNormalKey(msg, action)
 	}
+}
+
+// applyEditAction runs a named editing action on the widget. These edits
+// stay in the UI instead of round-tripping through Lua, so a held key always
+// edits the text on screen.
+func (c *inputController) applyEditAction(action string) bool {
+	var edit func()
+	switch action {
+	case "input.delete_word":
+		edit = c.input.DeleteWordBackward
+	case "input.word_left":
+		edit = c.input.WordLeft
+	case "input.word_right":
+		edit = c.input.WordRight
+	default:
+		return false
+	}
+	wasInline := c.mode() == modePickerInline
+	oldValue, oldCursor := c.input.Value(), c.input.Position()
+	edit()
+	if c.reportInputUpdate(oldValue, oldCursor) {
+		c.historyRecall = false
+		if wasInline {
+			c.syncInlineFilter()
+		}
+	}
+	return true
 }
 
 // SetText applies a Session-owned edit and acknowledges its state. Lua editing

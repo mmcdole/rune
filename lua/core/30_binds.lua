@@ -43,6 +43,9 @@ local editor_actions = {
     ["input.toggle_mode"] = true,
     ["input.cancel"] = true,
     ["input.open_editor"] = true,
+    ["input.delete_word"] = true,
+    ["input.word_left"] = true,
+    ["input.word_right"] = true,
 }
 
 -- An array is shorthand for independent bindings; returns an array of handles.
@@ -162,3 +165,9 @@ rune.bind("alt+v", "input.toggle_mode")
 
 rune.bind("esc", "input.cancel")
 rune.bind("ctrl+e", "input.open_editor")
+
+-- Most terminals send ctrl+backspace as ctrl+h, so that combination
+-- cannot be bound distinctly.
+rune.bind({"ctrl+w", "alt+backspace"}, "input.delete_word")
+rune.bind({"alt+left", "ctrl+left"}, "input.word_left")
+rune.bind({"alt+right", "ctrl+right"}, "input.word_right")

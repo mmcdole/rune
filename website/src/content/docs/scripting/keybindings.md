@@ -109,6 +109,9 @@ rune.bind({"ctrl+j", "shift+enter", "ctrl+enter"}, "input.newline")
 rune.bind("alt+v", "input.toggle_mode")
 rune.bind("ctrl+e", "input.open_editor")
 rune.bind("esc", "input.cancel")
+rune.bind({"ctrl+w", "alt+backspace"}, "input.delete_word")
+rune.bind({"alt+left", "ctrl+left"}, "input.word_left")
+rune.bind({"alt+right", "ctrl+right"}, "input.word_right")
 ```
 
 A new key adds an alias; rebinding an existing key replaces its assignment.
@@ -193,11 +196,12 @@ rune.bind("f6", function() rune.send("south") end, { group = "movement" })
 -- /group movement off
 ```
 
-Editing helpers using the input API:
+Editing keys can call the input API or a built-in input action:
 
 ```lua
 rune.bind("ctrl+u", function() rune.input.set("") end)
-rune.bind("ctrl+w", function() rune.input.delete_word() end)
+-- On terminals that send Ctrl+Backspace distinctly
+rune.bind("ctrl+backspace", "input.delete_word")
 ```
 
 ## Defaults

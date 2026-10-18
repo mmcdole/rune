@@ -291,3 +291,72 @@ func TestSearchCancelHintUsesBindingSnapshot(t *testing.T) {
 		t.Fatalf("unbound search hint: %s", view)
 	}
 }
+
+// A held editing key repeats faster than a Session round trip, so the default
+// word actions edit the widget directly instead of asking Lua to.
+func TestDefaultWordActionsEditInputDirectly(t *testing.T) {
+	h := newControllerHarness()
+	h.ctl.input.SetBindings(input.DefaultBindings())
+	h.ctl.SetText("go north west")
+	h.events = nil
+	for _, want := range []string{"go north ", "go ", "", ""} {
+		h.ctl.HandleKey(tea.KeyPressMsg{Code: tea.KeyBackspace, Mod: tea.ModAlt})
+		if got := h.ctl.input.Value(); got != want {
+			t.Fatalf("after alt+backspace: %q, want %q", got, want)
+		}
+	}
+
+	h.ctl.SetText("say hi there")
+	for _, step := range []struct {
+		key    tea.KeyPressMsg
+		text   string
+		cursor int
+	}{
+		{tea.KeyPressMsg{Code: tea.KeyLeft, Mod: tea.ModAlt}, "say hi there", 7},
+		{tea.KeyPressMsg{Code: tea.KeyLeft, Mod: tea.ModCtrl}, "say hi there", 4},
+		{tea.KeyPressMsg{Code: tea.KeyRight, Mod: tea.ModAlt}, "say hi there", 7},
+		{ctrlPress('w'), "say there", 4},
+		{tea.KeyPressMsg{Code: tea.KeyRight, Mod: tea.ModCtrl}, "say there", 9},
+	} {
+		h.ctl.HandleKey(step.key)
+		if got, pos := h.ctl.input.Value(), h.ctl.input.Position(); got != step.text || pos != step.cursor {
+			t.Fatalf("after %v: %q at %d, want %q at %d", step.key, got, pos, step.text, step.cursor)
+		}
+	}
+
+	for _, event := range h.events {
+		if bind, ok := event.(ui.ExecuteBindMsg); ok {
+			t.Fatalf("word action went to Lua as bind %q", bind)
+		}
+	}
+	last := h.events[len(h.events)-1]
+	if last != (ui.CursorMovedMsg{Cursor: 9}) {
+		t.Fatalf("last event = %#v, want the cursor move reported to Session", last)
+	}
+}
+
+func TestWordActionsInDraftEditorAndInlinePicker(t *testing.T) {
+	h := newControllerHarness()
+	h.ctl.input.SetBindings(input.Bindings{"f2": {Action: "input.delete_word", Enabled: true}})
+	h.ctl.HandlePaste("say\nhello world")
+	h.ctl.HandleKey(keyPress(tea.KeyF2))
+	if got := h.ctl.input.Value(); got != "say\nhello " || !h.ctl.input.DraftEditorActive() {
+		t.Fatalf("draft editor delete_word = %q", got)
+	}
+
+	h = newControllerHarness()
+	h.ctl.input.SetBindings(input.Bindings{"f2": {Action: "input.delete_word", Enabled: true}})
+	h.ctl.SetText("cast mis")
+	h.ctl.ShowPicker(ui.PickerOptions{Items: pickerTestItems, CallbackID: 4, Inline: true})
+	h.ctl.HandleKey(keyPress(tea.KeyF2))
+	if got := h.ctl.input.Value(); got != "cast " || !h.ctl.input.PickerInline() || h.ctl.input.Picker().Query() != "cast " {
+		t.Fatalf("inline delete_word = %q, query %q", got, h.ctl.input.Picker().Query())
+	}
+	h.ctl.HandleKey(keyPress(tea.KeyF2))
+	if h.ctl.input.PickerActive() {
+		t.Fatal("clearing the input must close the inline picker")
+	}
+	if got := h.pickerSelects(); len(got) != 1 || got[0].CallbackID != 4 || got[0].Accepted {
+		t.Fatalf("picker settlement = %+v", got)
+	}
+}
