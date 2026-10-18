@@ -26,13 +26,27 @@ prefixes are lowercase.
 
 | Kind | Names | Examples |
 |---|---|---|
-| Printable | The character itself; use `space` for a space | `"j"`, `"/"`, `"."`, `"space"` |
+| Printable | The character the key types; use `space` for a space | `"j"`, `"?"`, `"§"`, `"@"`, `"space"` |
 | Editing | `esc`, `tab`, `backspace`, `delete`, `insert` | `"esc"`, `"shift+tab"`, `"alt+backspace"` |
 | Navigation | `up`, `down`, `left`, `right`, `home`, `end`, `pgup`, `pgdown` | `"left"`, `"ctrl+home"`, `"shift+pgup"` |
 | Function keys | `f1` through `f63` | `"f1"`, `"f13"`, `"f20"` |
 | Numpad digits | `numpad0` through `numpad9` | `"numpad8"`, `"ctrl+numpad4"` |
 | Numpad operators | `numpad_dot`, `numpad_slash`, `numpad_star`, `numpad_minus`, `numpad_plus`, `numpad_enter` | `"numpad_plus"`, `"numpad_enter"` |
 | Modifiers | `ctrl`, `alt`, `shift`, `meta`, `hyper`, `super` | `"ctrl+r"`, `"shift+a"`, `"ctrl+alt+x"` |
+
+A key that types a character is named by that character, whatever keys you
+hold to type it and whichever keyboard protocol your terminal uses. On a US
+layout Shift+1 is `"!"`. On a Norwegian layout, Shift and the key left of 1 is
+`"§"`, and AltGr+2 is `"@"`. Write these binds as the character: `"shift+1"`
+and `"shift+|"` never match. Capital letters are the exception: they are
+`shift+` and the lowercase letter, such as `"shift+a"` or `"shift+ø"`, also
+when Caps Lock typed them. Space is `"space"` with or without Shift.
+
+Chords with Ctrl or Alt type no character, so they name the unshifted key:
+Ctrl+Shift+1 is `"ctrl+shift+1"`. Alt with a shifted symbol depends on the
+terminal. Without the kitty keyboard protocol, Alt+Shift+1 arrives as
+`"alt+!"`; with it, the same chord is `"alt+shift+1"`. Bind both names to cover
+every terminal.
 
 For multiple modifiers, use the order `ctrl+alt+shift+meta+hyper+super`, then
 the base key. Your terminal determines which keys Rune can distinguish. In

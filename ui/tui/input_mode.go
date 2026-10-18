@@ -393,8 +393,10 @@ func (c *inputController) cancelDraft() {
 	c.reportChanged()
 }
 
-// Exact physical bindings win; unbound keypad Enter shares ordinary Enter.
-// Printable actions obey the same typing protection as callbacks.
+// Exact bindings win. An unbound numpad key falls back to Bubble Tea's
+// collapsed name, so keypad Enter shares ordinary Enter; every other key has
+// only its keyToString name. Printable actions obey the same typing
+// protection as callbacks.
 func (c *inputController) inputAction(msg tea.KeyPressMsg) string {
 	msg.Mod &= keyModifiers
 	if msg.Text != "" && (c.mode() == modeDraftEditor ||
@@ -402,7 +404,7 @@ func (c *inputController) inputAction(msg tea.KeyPressMsg) string {
 		return ""
 	}
 	binding, found := c.input.Bindings()[keyToString(msg)]
-	if !found {
+	if _, numpad := numpadKey(msg); !found && numpad {
 		if isEnterKey(msg) {
 			msg.Code = tea.KeyEnter
 			msg.BaseCode = 0

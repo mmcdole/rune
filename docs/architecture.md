@@ -217,6 +217,7 @@ Bar registrations survive layout replacement but are rebuilt on reload.
 
 - **Registration:** Lua registers a bind: `rune.bind("ctrl+r", fn)`.
 - **Sync:** Session pushes an `input.Bindings` snapshot to the UI (`UpdateBindsMsg`).
+- **Naming:** `keyToString` (`ui/tui/keys.go`) gives each press one name that does not depend on the keyboard protocol or numpad mode: numpad keys by physical name, text-typing presses (Shift-only, or Ctrl+Alt as AltGr) by their text, everything else by Bubble Tea's keystroke. `key_encodings_test.go` checks this against raw bytes from each encoding.
 - **Detection:** When a key is pressed, the UI checks this map.
   - **If Bound:** Within the current context, the UI executes named input actions locally or sends callbacks as an `ExecuteBindMsg` to Session. Disabled bindings are consumed.
   - **If Unbound:** The UI handles it normally (for example, typing text).

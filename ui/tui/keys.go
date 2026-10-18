@@ -1,6 +1,12 @@
 package tui
 
-import tea "charm.land/bubbletea/v2"
+import (
+	"strings"
+	"unicode"
+	"unicode/utf8"
+
+	tea "charm.land/bubbletea/v2"
+)
 
 const keyModifiers = tea.ModShift | tea.ModAlt | tea.ModCtrl |
 	tea.ModMeta | tea.ModHyper | tea.ModSuper
@@ -130,6 +136,9 @@ func normalizeNumpadText(msg tea.KeyPressMsg) tea.KeyPressMsg {
 }
 
 // keyToString returns Rune's canonical name at the Go/Lua bind boundary.
+// A name does not depend on which keyboard protocol the terminal speaks:
+// numpad keys use their physical names, a key that types text is named by
+// that text, and other keys and chords use Bubble Tea's keystroke spelling.
 func keyToString(msg tea.KeyPressMsg) string {
 	if info, ok := numpadKey(msg); ok {
 		if info.name == "" {
@@ -140,6 +149,36 @@ func keyToString(msg tea.KeyPressMsg) string {
 		msg.Code = tea.KeyExtended
 		msg.BaseCode = 0
 		msg.Text = info.name
+		return msg.Keystroke()
+	}
+	if name := textKeyName(msg); name != "" {
+		return name
 	}
 	return msg.Keystroke()
+}
+
+// textKeyName names a key press by the text it types, or returns "" for a
+// chord. Legacy input delivers such a press as the text alone, while kitty's
+// "report all keys as escape codes" reports the unshifted layout key, Shift
+// and lock state, and the text separately. Naming by text gives both the same
+// name: Norwegian Shift+| is "§" and US Shift+1 is "!". Ctrl+Alt with text is
+// AltGr as Windows console input reports it. A cased letter keeps the
+// "shift+a" spelling legacy decoding gives "A", whether Shift or Caps Lock
+// produced it.
+func textKeyName(msg tea.KeyPressMsg) string {
+	if msg.Text == "" || strings.ContainsFunc(msg.Text, unicode.IsControl) {
+		return ""
+	}
+	if mod := msg.Mod & keyModifiers &^ tea.ModShift; mod != 0 && mod != tea.ModCtrl|tea.ModAlt {
+		return ""
+	}
+	if msg.Text == " " {
+		return "space"
+	}
+	if r, size := utf8.DecodeRuneInString(msg.Text); size == len(msg.Text) {
+		if lower := unicode.ToLower(r); lower != r && unicode.ToUpper(lower) == r {
+			return "shift+" + string(lower)
+		}
+	}
+	return msg.Text
 }
