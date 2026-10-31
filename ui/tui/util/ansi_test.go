@@ -2,6 +2,7 @@ package util
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
@@ -144,9 +145,16 @@ func TestWrapSpans(t *testing.T) {
 }
 
 func TestCarrySGR(t *testing.T) {
-	rows := CarrySGR([]string{"\x1b[31maaa", "bb\x1b[1mb", "ccc\x1b[0m", "ddd"})
+	rows := carrySGR([]string{"\x1b[31maaa", "bb\x1b[1mb", "ccc\x1b[0m", "ddd"})
 	want := []string{"\x1b[31maaa", "\x1b[31mbb\x1b[1mb", "\x1b[31m\x1b[1mccc\x1b[0m", "ddd"}
 	if !slices.Equal(rows, want) {
 		t.Fatalf("CarrySGR = %q, want %q", rows, want)
+	}
+}
+
+func TestWrapLineCarriesStyleOntoContinuationRows(t *testing.T) {
+	rows := WrapLine("\x1b[31maaaaabbbbb\x1b[0m", 5)
+	if len(rows) != 2 || !strings.HasPrefix(rows[1], "\x1b[31m") {
+		t.Fatalf("rows = %q, want the second row to re-emit red", rows)
 	}
 }

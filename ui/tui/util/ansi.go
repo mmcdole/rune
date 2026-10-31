@@ -18,12 +18,12 @@ func SplitLines(s string) []string {
 }
 
 // WrapLine soft-wraps one line into rows of at most width columns,
-// returning at least one row. ANSI codes and wide runes are handled. A
-// line that fits, or a width below 1, passes through unchanged. The
-// byte-length check is a fast bound: a rune's display width never
-// exceeds its byte count.
+// returning at least one row. ANSI codes and wide runes are handled, and
+// each continuation row starts with the SGR state in effect at its break,
+// so it styles correctly even when drawn first. A line that fits, or a
+// width below 1, passes through unchanged.
 func WrapLine(line string, width int) []string {
-	if width < 1 || len(line) <= width || ansi.StringWidth(line) <= width {
+	if fits(line, width) {
 		return []string{line}
 	}
 	var rows []string
@@ -36,12 +36,27 @@ func WrapLine(line string, width int) []string {
 			rows = append(rows, wrapCells(row, width)...)
 		}
 	}
-	return rows
+	return carrySGR(rows)
+}
+
+// RowCount returns how many rows WrapLine splits line into, without
+// building them when the line fits.
+func RowCount(line string, width int) int {
+	if fits(line, width) {
+		return 1
+	}
+	return len(WrapLine(line, width))
+}
+
+// fits reports whether line needs no wrapping. The byte-length check is a
+// fast bound: a rune's display width never exceeds its byte count.
+func fits(line string, width int) bool {
+	return width < 1 || len(line) <= width || ansi.StringWidth(line) <= width
 }
 
 // WrapSpans reports the visible columns each of a line's WrapLine rows
 // covers, so callers can map line columns to rows. Break spaces the
-// wrapper drops fall between spans.
+// wrapper drops fall between spans; carried SGR prefixes are zero-width.
 func WrapSpans(line string, rows []string) []ColRange {
 	if len(rows) == 1 {
 		return []ColRange{{Start: 0, End: ansi.StringWidth(line)}}
@@ -70,10 +85,9 @@ func WrapSpans(line string, rows []string) []ColRange {
 	return spans
 }
 
-// CarrySGR prefixes each continuation row with the SGR sequences in effect
-// where the previous row ended, so a row keeps its style even when it is
-// drawn first. Sequences before the last reset are dropped.
-func CarrySGR(rows []string) []string {
+// carrySGR prefixes each continuation row with the SGR sequences in effect
+// where the previous row ended. Sequences before the last reset are dropped.
+func carrySGR(rows []string) []string {
 	var active string
 	for i, row := range rows {
 		if i > 0 && active != "" {

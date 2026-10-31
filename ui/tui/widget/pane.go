@@ -43,7 +43,7 @@ func (p *Pane) MeasureHeight(width, limit int) int {
 	}
 	rows := 0
 	for _, line := range p.lines {
-		rows += len(util.WrapLine(line, max(1, width)))
+		rows += util.RowCount(line, max(1, width))
 		if rows >= limit {
 			return limit
 		}

@@ -308,3 +308,12 @@ func TestClipRowTruncatesOverlongRows(t *testing.T) {
 		t.Errorf("ANSI row clipped to %d cols, want 20", got)
 	}
 }
+
+func TestPaneContinuationRowAtTopKeepsStyle(t *testing.T) {
+	p := NewPane("chat")
+	p.SetSize(5, 1)
+	p.Write("\x1b[31maaaaabbbbb\x1b[0m")
+	if got := p.View(); !strings.HasPrefix(got, "\x1b[31m") || !strings.Contains(got, "bbbbb") {
+		t.Fatalf("pane top row = %q, want the continuation row to re-emit red", got)
+	}
+}

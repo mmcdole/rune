@@ -4,8 +4,6 @@ import (
 	"image"
 	"strings"
 
-	"github.com/charmbracelet/x/ansi"
-
 	"github.com/mmcdole/rune/ui/tui/style"
 	"github.com/mmcdole/rune/ui/tui/util"
 )
@@ -95,18 +93,9 @@ func (o *Output) MeasureHeight(width, limit int) int {
 		rows++
 	}
 	for i := o.scrollback.Count() - 1; i >= 0 && rows < limit; i-- {
-		rows += measureRows(o.scrollback.At(i), width)
+		rows += util.RowCount(o.scrollback.At(i), width)
 	}
 	return min(rows, limit)
-}
-
-// measureRows counts the rows line wraps to at width. The byte-length
-// check is a fast bound: a rune's display width never exceeds its byte count.
-func measureRows(line string, width int) int {
-	if width < 1 || len(line) <= width || ansi.StringWidth(line) <= width {
-		return 1
-	}
-	return len(util.WrapLine(line, width))
 }
 
 // Write appends logical lines. Wrapping happens at render time.
@@ -217,7 +206,7 @@ func (o *Output) rows(i int) int {
 	seq := o.scrollback.Seq(i)
 	memo := &o.rowMemo[seq%uint64(len(o.rowMemo))]
 	if memo.rows == 0 || memo.seq != seq || int(memo.width) != o.width {
-		*memo = rowMemo{seq: seq, width: int32(o.width), rows: int32(measureRows(line, o.width))}
+		*memo = rowMemo{seq: seq, width: int32(o.width), rows: int32(util.RowCount(line, o.width))}
 	}
 	return int(memo.rows)
 }
@@ -239,7 +228,7 @@ func (o *Output) wrapped(i int) wrappedLine {
 		line = o.highlight(line)
 	}
 	rows := util.WrapLine(line, o.width)
-	w := wrappedLine{spans: util.WrapSpans(line, rows), rows: util.CarrySGR(rows)}
+	w := wrappedLine{rows: rows, spans: util.WrapSpans(line, rows)}
 	o.wrapCache[seq] = w
 	return w
 }
