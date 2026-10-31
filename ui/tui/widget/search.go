@@ -329,7 +329,9 @@ func (s *Search) footerLine(width int, cancel string) string {
 
 // renderMatch renders one match row, highlighting every occurrence.
 // Byte runs index into Stripped; render walks runes tracking their
-// byte offsets, so multi-byte text cannot misalign the highlight.
+// byte offsets, so multi-byte text cannot misalign the highlight. A
+// first occurrence past the row's width scrolls the text left behind an
+// ellipsis so the match stays visible.
 func (s *Search) renderMatch(m SearchMatch, width int, selected bool) string {
 	prefix := "  "
 	if selected {
@@ -337,8 +339,20 @@ func (s *Search) renderMatch(m SearchMatch, width int, selected bool) string {
 	}
 
 	var b strings.Builder
+	from := matchWindowStart(m, width-len(prefix))
+	if from > 0 {
+		ellipsis := "…"
+		if selected {
+			b.WriteString(s.styles.OverlaySelected.Render(ellipsis))
+		} else {
+			b.WriteString(s.styles.OverlayNormal.Render(ellipsis))
+		}
+	}
 	runIdx := 0
 	for off, r := range m.Stripped {
+		if off < from {
+			continue
+		}
 		for runIdx < len(m.ByteRuns) && off >= m.ByteRuns[runIdx][1] {
 			runIdx++
 		}
@@ -365,4 +379,27 @@ func (s *Search) renderMatch(m SearchMatch, width int, selected bool) string {
 		prefixStyled = s.styles.OverlayNormal.Render(prefix)
 	}
 	return util.ClipRow(prefixStyled+b.String(), max(1, width))
+}
+
+// matchWindowStart returns the byte offset in Stripped where the list row
+// starts: 0 when the first occurrence fits in width cells, otherwise the
+// rune boundary that puts the occurrence about a third of the way in.
+func matchWindowStart(m SearchMatch, width int) int {
+	if len(m.ByteRuns) == 0 || width < 1 {
+		return 0
+	}
+	first := m.ByteRuns[0]
+	if ansi.StringWidth(m.Stripped[:first[1]]) <= width {
+		return 0
+	}
+	lead := width / 3
+	from := first[0]
+	for from > 0 {
+		_, size := utf8.DecodeLastRuneInString(m.Stripped[:from])
+		if ansi.StringWidth(m.Stripped[from-size:first[0]]) > lead {
+			break
+		}
+		from -= size
+	}
+	return from
 }

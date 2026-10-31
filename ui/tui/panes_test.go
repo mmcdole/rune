@@ -51,7 +51,7 @@ func TestOutputRetainsLastPlacementGeometryWhileHidden(t *testing.T) {
 		t.Fatalf("hidden output width = %d, want retained placement width 24", output.Width())
 	}
 	output.Write(strings.Repeat("x", 30))
-	if output.Scrollback().Count() != 2 {
-		t.Fatalf("hidden write produced %d rows at retained width, want 2", output.Scrollback().Count())
+	if got := output.MeasureHeight(output.Width(), 10); got != 2 {
+		t.Fatalf("hidden write measures %d rows at retained width, want 2", got)
 	}
 }

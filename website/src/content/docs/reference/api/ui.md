@@ -140,12 +140,10 @@ height follows the active input mode. Pane automatic height
 measures content at the assigned inner width, plus border rows, bounded by the
 terminal height and `max_size`.
 
-Ordinary pane buffers store logical lines and re-wrap at their current width.
-The `output` pane keeps scrollback rows at their append-time width, so existing
-server output does not reflow after a resize. While `output` is hidden or
-omitted, new rows use its last placement width; before its first placement they
-use the terminal width, or 80 columns if no terminal size has arrived. Pane
-presentation fields are set directly on the leaf:
+Pane buffers, including `output` scrollback, store logical lines and re-wrap
+at their current width, so existing server output reflows after a resize or
+layout change. A scrolled `output` pane keeps the same text at its bottom row
+across a reflow. Pane presentation fields are set directly on the leaf:
 
 ```lua
 {

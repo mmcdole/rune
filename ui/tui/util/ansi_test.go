@@ -109,3 +109,36 @@ func TestWrapLine(t *testing.T) {
 		}
 	})
 }
+
+func TestWrapSpans(t *testing.T) {
+	tests := []struct {
+		name  string
+		line  string
+		width int
+		want  []ColRange
+	}{
+		{"Fits", "short", 10, []ColRange{{0, 5}}},
+		{"DropsBreakSpace", "hello world", 6, []ColRange{{0, 5}, {6, 11}}},
+		{"DropsSpaceRun", "aaaa    bbbb", 6, []ColRange{{0, 4}, {8, 12}}},
+		{"HardBreak", "abcdefghij", 4, []ColRange{{0, 4}, {4, 8}, {8, 10}}},
+		{"Styled", "\x1b[31mhello \x1b[1mworld\x1b[0m", 6, []ColRange{{0, 5}, {6, 11}}},
+		{"Wide", "界界界界", 4, []ColRange{{0, 4}, {4, 8}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := WrapSpans(tt.line, tt.width)
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("WrapSpans(%q, %d) = %v, want %v", tt.line, tt.width, got, tt.want)
+			}
+			// Each span cut from the line holds the same visible text as
+			// the WrapLine row it describes.
+			rows := WrapLine(tt.line, tt.width)
+			for i, span := range got {
+				cut := ansi.Strip(ansi.Cut(tt.line, span.Start, span.End))
+				if want := ansi.Strip(rows[i]); cut != want {
+					t.Errorf("span %d cuts %q, row is %q", i, cut, want)
+				}
+			}
+		})
+	}
+}

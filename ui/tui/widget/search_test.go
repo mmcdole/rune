@@ -386,3 +386,25 @@ func TestSearchSeqStableAcrossEviction(t *testing.T) {
 		t.Error("matched row should be evicted in this scenario")
 	}
 }
+
+// Scrollback holds logical lines, so a phrase the output window wraps
+// across rows still matches.
+func TestSearchMatchesAcrossOutputSoftWrap(t *testing.T) {
+	v := NewOutput(100, style.DefaultStyles())
+	v.SetSize(10, 3)
+	v.Write("you see a goblin warrior here")
+	matches, _ := scanOlder(v.Scrollback(), substringMatcher("goblin warrior"), v.Scrollback().Seq(0), searchPageSize)
+	if len(matches) != 1 {
+		t.Fatalf("got %d matches, want the wrapped phrase to match once", len(matches))
+	}
+}
+
+func TestSearchListShowsMatchPastRowWidth(t *testing.T) {
+	buf := newTestBuffer(strings.Repeat("x", 60) + " thief")
+	matches, _ := scanOlder(buf, substringMatcher("thief"), buf.Seq(0), searchPageSize)
+	s := NewSearch(buf, style.DefaultStyles())
+	row := runetext.StripANSI(s.renderMatch(matches[0], 30, false))
+	if !strings.Contains(row, "thief") || !strings.Contains(row, "…") {
+		t.Fatalf("list row = %q, want the match visible behind an ellipsis", row)
+	}
+}

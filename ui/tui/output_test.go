@@ -68,7 +68,8 @@ func TestOverlongPrintWordWrapsToWidth(t *testing.T) {
 	next, _ := m.Update(printLineMsg(head + " " + tail))
 	m = next.(*Model)
 
-	wantScrollback(t, m, head, tail)
+	wantScrollback(t, m, head+" "+tail)
+	wantOutputRows(t, m, head, tail)
 }
 
 // TestOverlongUnbreakableWordHardWraps verifies a single word wider
@@ -79,7 +80,8 @@ func TestOverlongUnbreakableWordHardWraps(t *testing.T) {
 	next, _ := m.Update(printLineMsg(strings.Repeat("z", 100)))
 	m = next.(*Model)
 
-	wantScrollback(t, m, strings.Repeat("z", 80), strings.Repeat("z", 20))
+	wantScrollback(t, m, strings.Repeat("z", 100))
+	wantOutputRows(t, m, strings.Repeat("z", 80), strings.Repeat("z", 20))
 }
 
 // TestMultiLineEchoSplitsIntoRows verifies the echo path splits like

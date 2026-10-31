@@ -39,6 +39,39 @@ func WrapLine(line string, width int) []string {
 	return rows
 }
 
+// WrapSpans reports the visible columns each WrapLine row covers within
+// line, so a caller can re-cut rows with ansi.Cut (which carries SGR state
+// onto continuation rows) and map line columns to rows. Break spaces the
+// wrapper drops fall between spans.
+func WrapSpans(line string, width int) []ColRange {
+	rows := WrapLine(line, width)
+	if len(rows) == 1 {
+		return []ColRange{{Start: 0, End: ansi.StringWidth(line)}}
+	}
+	plain := ansi.Strip(line)
+	spans := make([]ColRange, 0, len(rows))
+	pos, col := 0, 0
+	for _, row := range rows {
+		text := ansi.Strip(row)
+		skip := pos
+		for skip < len(plain) && plain[skip] == ' ' && !strings.HasPrefix(plain[skip:], text) {
+			skip++
+		}
+		if strings.HasPrefix(plain[skip:], text) {
+			col += ansi.StringWidth(plain[pos:skip])
+			pos = skip + len(text)
+		} else {
+			// wrapCells replaced an oversized grapheme; columns still
+			// advance by the row's rendered width.
+			pos = min(len(plain), pos+len(text))
+		}
+		w := ansi.StringWidth(text)
+		spans = append(spans, ColRange{Start: col, End: col + w})
+		col += w
+	}
+	return spans
+}
+
 func wrapCells(s string, width int) []string {
 	var rows []string
 	var row strings.Builder

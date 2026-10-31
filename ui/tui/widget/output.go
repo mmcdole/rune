@@ -4,6 +4,8 @@ import (
 	"image"
 	"strings"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/mmcdole/rune/ui/tui/style"
 	"github.com/mmcdole/rune/ui/tui/util"
 )
@@ -16,10 +18,14 @@ const (
 	ModeScrolled
 )
 
-// Output owns the main pane: append-time wrapping, scrollback, prompt, and scrolling.
+// Output owns the main pane: scrollback, prompt, and scrolling. Scrollback
+// holds logical lines; Output wraps the ones it shows at its current width,
+// so a width change reflows history.
 type Output struct {
 	scrollback   *Scrollback
-	offset       int // Lines from bottom (0 = showing newest)
+	live         bool   // showing newest; otherwise anchored below
+	anchorSeq    uint64 // line holding the bottom visible row while scrolled
+	anchorCol    int    // column where that row starts within its line
 	height       int
 	width        int
 	newLines     int
@@ -30,15 +36,26 @@ type Output struct {
 	hasPlacement bool
 
 	// Search-match highlight, anchored by sequence number so appends
-	// and ring eviction cannot smear it onto a different row.
+	// and ring eviction cannot smear it onto a different line.
 	hlSet    bool
 	hlSeq    uint64
 	hlRanges []util.ColRange
 }
 
+// cursor addresses one wrapped row: a scrollback line index and the row
+// within that line at the current width. It is never stored across
+// width changes; anchorSeq/anchorCol are.
+type cursor struct {
+	line, row int
+}
+
+func (c cursor) before(d cursor) bool {
+	return c.line < d.line || (c.line == d.line && c.row < d.row)
+}
+
 // NewOutput creates the main output pane with bounded scrollback.
 func NewOutput(capacity int, styles style.Styles) *Output {
-	return &Output{scrollback: NewScrollback(capacity), width: 80, styles: styles}
+	return &Output{scrollback: NewScrollback(capacity), live: true, width: 80, styles: styles}
 }
 
 func (o *Output) Scrollback() *Scrollback  { return o.scrollback }
@@ -47,31 +64,39 @@ func (o *Output) Prompt() string           { return o.prompt }
 func (o *Output) Title() string            { return "" }
 func (o *Output) MinimumSize() image.Point { return image.Pt(0, 1) }
 
+// MeasureHeight counts wrapped rows at width only until the layout's height budget is met.
 func (o *Output) MeasureHeight(width, limit int) int {
-	rows := o.scrollback.Count()
+	rows := 0
 	if o.prompt != "" {
 		rows++
+	}
+	for i := o.scrollback.Count() - 1; i >= 0 && rows < limit; i-- {
+		rows += o.scrollback.rowCount(i, width, measureRows)
 	}
 	return min(rows, limit)
 }
 
-// Write fixes physical rows at the current width. Resizing never reflows history.
+// measureRows counts the rows line wraps to at width. The byte-length
+// check is a fast bound: a rune's display width never exceeds its byte count.
+func measureRows(line string, width int) int {
+	if width < 1 || len(line) <= width || ansi.StringWidth(line) <= width {
+		return 1
+	}
+	return len(util.WrapLine(line, width))
+}
+
+// Write appends logical lines. Wrapping happens at render time.
 func (o *Output) Write(text string) {
-	// Byte length bounds display width. Most incoming rows can be retained
-	// directly, without allocating a slice or parsing ANSI/Unicode twice.
-	if len(text) <= o.width && !strings.ContainsAny(text, "\r\n\t") {
+	if !strings.ContainsAny(text, "\r\n\t") {
 		o.scrollback.Append(text)
-		o.onNewRows(1)
+		o.onNewLines(1)
 		return
 	}
-	count := 0
-	for _, line := range util.SplitLines(text) {
-		for _, row := range util.WrapLine(util.ExpandTabs(line), o.width) {
-			o.scrollback.Append(row)
-			count++
-		}
+	lines := util.SplitLines(text)
+	for _, line := range lines {
+		o.scrollback.Append(util.ExpandTabs(line))
 	}
-	o.onNewRows(count)
+	o.onNewLines(len(lines))
 }
 
 func (o *Output) CommitPrompt(text string) bool {
@@ -84,7 +109,7 @@ func (o *Output) CommitPrompt(text string) bool {
 }
 
 // SetFallbackSize supplies initial geometry until output has a real placement.
-// Hiding a previously placed pane retains its wrapping and search geometry.
+// Hiding a previously placed pane retains its last placement geometry.
 func (o *Output) SetFallbackSize(width, height int) {
 	if !o.hasPlacement && width > 0 {
 		o.resize(width, max(1, height))
@@ -103,36 +128,31 @@ func (o *Output) View() string {
 		return o.cachedView
 	}
 
-	var b strings.Builder
-	b.Grow(o.height * (o.width + 1))
-
-	hasPrompt := o.offset == 0 && o.prompt != ""
+	bottom, live := o.resolve()
+	hasPrompt := live && o.prompt != ""
 	contentHeight := o.height
 	if hasPrompt {
 		contentHeight--
 	}
 
-	// Sequence anchors live in the scrollback; only this window's indices are relative.
-	end := max(0, o.scrollback.Count()-o.offset)
-	start := max(0, end-contentHeight)
-	padding := contentHeight - (end - start)
-	highlight := -1
-	if o.hlSet {
-		if index, ok := o.scrollback.IndexOf(o.hlSeq); ok {
-			highlight = index
+	// Fill upward from the bottom row; rows left empty pad the top.
+	rows := make([]string, contentHeight)
+	y := contentHeight - 1
+	for line := bottom.line; line >= 0 && y >= 0; line-- {
+		last := bottom.row
+		if line != bottom.line {
+			last = o.rows(line) - 1
 		}
+		take := min(last+1, y+1)
+		o.renderRows(line, last+1-take, rows[y+1-take:y+1])
+		y -= take
 	}
-	for y := 0; y < contentHeight; y++ {
-		if y > 0 {
+
+	var b strings.Builder
+	b.Grow(o.height * (o.width + 1))
+	for i, row := range rows {
+		if i > 0 {
 			b.WriteByte('\n')
-		}
-		if y < padding {
-			continue
-		}
-		index := start + y - padding
-		row := o.scrollback.At(index)
-		if index == highlight {
-			row = util.HighlightRanges(row, o.hlRanges, func(s string) string { return o.styles.OverlayMatch.Render(s) })
 		}
 		b.WriteString(util.ClipRow(row, o.width))
 	}
@@ -147,51 +167,177 @@ func (o *Output) View() string {
 	return o.cachedView
 }
 
+// renderRows fills dst with the wrapped rows of line index i starting at
+// row first. Continuation rows are cut with ansi.Cut, which re-emits the
+// SGR state in effect at the cut, so a row styles correctly even when it
+// is the top of the window.
+func (o *Output) renderRows(i, first int, dst []string) {
+	line := o.scrollback.At(i)
+	if o.hlSet && o.scrollback.Seq(i) == o.hlSeq {
+		// Highlighting preserves visible text, so wrap points do not move.
+		line = util.HighlightRanges(line, o.hlRanges, func(s string) string { return o.styles.OverlayMatch.Render(s) })
+	}
+	if o.rows(i) == 1 {
+		dst[0] = line
+		return
+	}
+	spans := util.WrapSpans(line, o.width)
+	for k := range dst {
+		span := spans[first+k]
+		dst[k] = ansi.Cut(line, span.Start, span.End)
+	}
+}
+
+// rows returns how many rows line index i wraps to at the current width.
+func (o *Output) rows(i int) int {
+	return o.scrollback.rowCount(i, o.width, measureRows)
+}
+
+// rowAt returns the row of line index i that contains column col.
+func (o *Output) rowAt(i, col int) int {
+	if col <= 0 || o.rows(i) == 1 {
+		return 0
+	}
+	spans := util.WrapSpans(o.scrollback.At(i), o.width)
+	row := 0
+	for k, span := range spans {
+		if span.Start <= col {
+			row = k
+		}
+	}
+	return row
+}
+
+// colOf returns the line column where row c starts.
+func (o *Output) colOf(c cursor) int {
+	if c.row == 0 {
+		return 0
+	}
+	return util.WrapSpans(o.scrollback.At(c.line), o.width)[c.row].Start
+}
+
+// newest is the last row of the newest line.
+func (o *Output) newest() cursor {
+	n := o.scrollback.Count() - 1
+	return cursor{n, o.rows(n) - 1}
+}
+
+// up moves c toward older rows by n, stopping at the oldest row.
+func (o *Output) up(c cursor, n int) cursor {
+	for n > 0 {
+		if c.row >= n {
+			c.row -= n
+			break
+		}
+		n -= c.row
+		c.row = 0
+		if c.line == 0 {
+			break
+		}
+		c.line--
+		c.row = o.rows(c.line) - 1
+		n--
+	}
+	return c
+}
+
+// down moves c toward newer rows by n, stopping at the newest row.
+func (o *Output) down(c cursor, n int) cursor {
+	last := o.scrollback.Count() - 1
+	for n > 0 {
+		if rest := o.rows(c.line) - 1 - c.row; rest >= n {
+			c.row += n
+			break
+		} else {
+			c.row += rest
+			n -= rest
+		}
+		if c.line == last {
+			break
+		}
+		c.line++
+		c.row = 0
+		n--
+	}
+	return c
+}
+
+// clamp keeps a scrolled bottom row low enough that the window stays
+// full, and reports live once it reaches the newest row.
+func (o *Output) clamp(c cursor) (cursor, bool) {
+	if o.scrollback.Count() == 0 {
+		return cursor{}, true
+	}
+	if top := o.down(cursor{}, o.height-1); c.before(top) {
+		c = top
+	}
+	newest := o.newest()
+	if !c.before(newest) {
+		return newest, true
+	}
+	return c, false
+}
+
+// resolve maps the stored anchor onto the current width. An evicted
+// anchor pins to the oldest full window.
+func (o *Output) resolve() (cursor, bool) {
+	if o.scrollback.Count() == 0 {
+		return cursor{}, true
+	}
+	if o.live {
+		return o.newest(), true
+	}
+	return o.clamp(o.locate(o.anchorSeq, o.anchorCol))
+}
+
+// locate finds the row holding column col of the line with sequence seq,
+// or the oldest row when that line has been evicted.
+func (o *Output) locate(seq uint64, col int) cursor {
+	if idx, ok := o.scrollback.IndexOf(seq); ok {
+		return cursor{idx, o.rowAt(idx, col)}
+	}
+	return cursor{}
+}
+
+// setCursor makes c the bottom visible row, or returns to live at the newest row.
+func (o *Output) setCursor(c cursor) {
+	c, live := o.clamp(c)
+	o.live = live
+	if live {
+		o.newLines = 0
+	} else {
+		o.anchorSeq = o.scrollback.Seq(c.line)
+		o.anchorCol = o.colOf(c)
+	}
+	o.cacheValid = false
+}
+
 // SetSize applies output window dimensions and clamps its scroll position.
 func (o *Output) SetSize(width, height int) {
 	o.hasPlacement = true
 	o.resize(width, height)
 }
 
+// resize keeps the same text at the bottom of a scrolled window: the
+// anchor names a line and column, which survive rewrapping.
 func (o *Output) resize(width, height int) {
 	if width != o.width || height != o.height {
 		o.width = width
 		o.height = height
-		o.clampOffset()
+		if !o.live {
+			o.setCursor(o.locate(o.anchorSeq, o.anchorCol))
+		}
 		o.cacheValid = false
 	}
 }
 
-// onNewRows is called when rows are appended to the scrollback.
-func (o *Output) onNewRows(count int) {
-	if o.offset > 0 {
-		maxOffset := o.maxOffset()
-		if count >= maxOffset-o.offset {
-			o.offset = maxOffset
-		} else {
-			o.offset += count
-		}
+// onNewLines is called when lines are appended to the scrollback. A
+// scrolled window stays anchored to its line.
+func (o *Output) onNewLines(count int) {
+	if !o.live {
 		o.newLines += count
 	}
 	o.cacheValid = false
-}
-
-// maxOffset is the largest scroll offset that still fills the window
-// with buffered rows; 0 when the scrollback fits the output window.
-func (o *Output) maxOffset() int {
-	return max(0, o.scrollback.Count()-o.height)
-}
-
-func (o *Output) clampOffset() {
-	if o.offset < 0 {
-		o.offset = 0
-	}
-	if maxOffset := o.maxOffset(); o.offset > maxOffset {
-		o.offset = maxOffset
-	}
-	if o.offset == 0 {
-		o.newLines = 0
-	}
 }
 
 // SetPrompt replaces the prompt overlay.
@@ -207,76 +353,66 @@ func (o *Output) SetPrompt(text string) bool {
 
 // PageUp scrolls up one page.
 func (o *Output) PageUp() {
-	if lines := o.height - 1; lines > 0 {
-		o.ScrollUp(lines)
+	if rows := o.height - 1; rows > 0 {
+		o.ScrollUp(rows)
 	}
 }
 
 // PageDown scrolls down one page.
 func (o *Output) PageDown() {
-	if lines := o.height - 1; lines > 0 {
-		o.ScrollDown(lines)
+	if rows := o.height - 1; rows > 0 {
+		o.ScrollDown(rows)
 	}
 }
 
-// ScrollUp scrolls up by N lines (toward older content).
-func (o *Output) ScrollUp(lines int) {
-	if lines <= 0 {
+// ScrollUp scrolls up by n rows (toward older content).
+func (o *Output) ScrollUp(rows int) {
+	if rows <= 0 || o.scrollback.Count() == 0 {
 		return
 	}
-	maxOffset := o.maxOffset()
-	if lines >= maxOffset-o.offset {
-		o.offset = maxOffset
-	} else {
-		o.offset += lines
-	}
-	o.clampOffset()
-	o.cacheValid = false
+	c, _ := o.resolve()
+	o.setCursor(o.up(c, rows))
 }
 
-// ScrollDown scrolls down by N lines (toward newer content).
-func (o *Output) ScrollDown(lines int) {
-	if lines <= 0 {
+// ScrollDown scrolls down by n rows (toward newer content).
+func (o *Output) ScrollDown(rows int) {
+	if rows <= 0 || o.live {
 		return
 	}
-	if lines >= o.offset {
-		o.offset = 0
-	} else {
-		o.offset -= lines
-	}
-	o.clampOffset()
-	o.cacheValid = false
+	c, _ := o.resolve()
+	o.setCursor(o.down(c, rows))
 }
 
 // ScrollToBottom returns to live mode.
 func (o *Output) ScrollToBottom() {
-	o.offset = 0
+	o.live = true
 	o.newLines = 0
 	o.cacheValid = false
 }
 
 // ScrollToTop scrolls to the oldest line.
 func (o *Output) ScrollToTop() {
-	o.offset = o.maxOffset()
-	o.clampOffset()
-	o.cacheValid = false
-}
-
-// CenterOn scrolls so the row with the given sequence number sits
-// vertically centered (as close as clamping allows). An evicted row
-// pins to the oldest surviving window, like onNewRows.
-func (o *Output) CenterOn(seq uint64) {
-	idx, ok := o.scrollback.IndexOf(seq)
-	if !ok {
-		o.offset = o.maxOffset()
-	} else {
-		o.offset = o.scrollback.Count() - idx - (o.height+1)/2
+	if o.scrollback.Count() == 0 {
+		return
 	}
-	o.clampOffset()
-	o.cacheValid = false
+	o.setCursor(cursor{})
 }
 
-// SetHighlight marks visible column ranges of the row with the given
+// CenterOn scrolls so the row holding column col of the line with the
+// given sequence number sits vertically centered (as close as clamping
+// allows). An evicted line pins to the oldest surviving window.
+func (o *Output) CenterOn(seq uint64, col int) {
+	if o.scrollback.Count() == 0 {
+		return
+	}
+	if _, ok := o.scrollback.IndexOf(seq); !ok {
+		o.setCursor(cursor{})
+		return
+	}
+	o.setCursor(o.down(o.locate(seq, col), (o.height+1)/2-1))
+}
+
+// SetHighlight marks visible column ranges of the line with the given
 // sequence number to render restyled (search-match highlighting).
 func (o *Output) SetHighlight(seq uint64, ranges []util.ColRange) {
 	o.hlSet = true
@@ -298,7 +434,7 @@ func (o *Output) ClearHighlight() {
 // The live prompt remains visible.
 func (o *Output) Clear() {
 	o.scrollback.Clear()
-	o.offset = 0
+	o.live = true
 	o.newLines = 0
 	o.hlSet = false
 	o.hlRanges = nil
@@ -306,11 +442,11 @@ func (o *Output) Clear() {
 }
 
 // ScrollPos is a sequence-anchored snapshot of the output window position.
-// A raw offset would not survive appends: onNewRows re-anchors a
-// scrolled output window's offset on every append, and a snapshot taken
-// earlier would land newer by exactly the rows that arrived since.
+// It names the bottom visible row by line and starting column, which
+// survive both appends and rewrapping at a new width.
 type ScrollPos struct {
-	BottomSeq uint64 // sequence of the bottom visible row at save time
+	BottomSeq uint64 // sequence of the line holding the bottom visible row
+	BottomCol int    // column where that row starts within its line
 	Mode      ScrollMode
 	NewLines  int
 	Appended  uint64 // scrollback append counter at save time
@@ -319,12 +455,10 @@ type ScrollPos struct {
 // SaveScroll captures the current position for a later RestoreScroll.
 func (o *Output) SaveScroll() ScrollPos {
 	p := ScrollPos{Mode: o.Mode(), NewLines: o.newLines, Appended: o.scrollback.appended}
-	if c := o.scrollback.Count(); c > 0 {
-		bottom := c - 1 - o.offset
-		if bottom < 0 {
-			bottom = 0
-		}
-		p.BottomSeq = o.scrollback.Seq(bottom)
+	if o.scrollback.Count() > 0 {
+		c, _ := o.resolve()
+		p.BottomSeq = o.scrollback.Seq(c.line)
+		p.BottomCol = o.colOf(c)
 	}
 	return p
 }
@@ -332,29 +466,25 @@ func (o *Output) SaveScroll() ScrollPos {
 // RestoreScroll returns to a saved position: the same text, not the
 // same distance from live. A live snapshot returns to live (tailing is
 // itself a position); a scrolled snapshot re-anchors on the saved
-// bottom row, counting rows that arrived meanwhile into NewLineCount,
-// and pins to the oldest surviving window if the row was evicted.
+// bottom row, counting lines that arrived meanwhile into NewLineCount,
+// and pins to the oldest surviving window if the line was evicted.
 func (o *Output) RestoreScroll(p ScrollPos) {
-	if p.Mode == ModeLive {
+	if p.Mode == ModeLive || o.scrollback.Count() == 0 {
 		o.ScrollToBottom()
 		return
 	}
-	if idx, ok := o.scrollback.IndexOf(p.BottomSeq); ok {
-		o.offset = o.scrollback.Count() - 1 - idx
-	} else {
-		o.offset = o.maxOffset()
+	o.setCursor(o.locate(p.BottomSeq, p.BottomCol))
+	if !o.live {
+		o.newLines = p.NewLines + int(o.scrollback.appended-p.Appended)
 	}
-	o.newLines = p.NewLines + int(o.scrollback.appended-p.Appended)
-	o.clampOffset()
-	o.cacheValid = false
 }
 
 // Mode returns the current scroll mode.
 func (o *Output) Mode() ScrollMode {
-	if o.offset > 0 {
-		return ModeScrolled
+	if o.live {
+		return ModeLive
 	}
-	return ModeLive
+	return ModeScrolled
 }
 
 // NewLineCount returns lines added while scrolled.

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -57,11 +58,29 @@ func newBareModel(t *testing.T) *Model {
 func wantScrollback(t *testing.T, m *Model, want ...string) {
 	t.Helper()
 	if got := m.output.Scrollback().Count(); got != len(want) {
-		t.Fatalf("scrollback has %d rows, want %d", got, len(want))
+		t.Fatalf("scrollback has %d lines, want %d", got, len(want))
 	}
 	for i, w := range want {
 		if got := m.output.Scrollback().At(i); got != w {
 			t.Fatalf("scrollback[%d] = %q, want %q", i, got, w)
+		}
+	}
+}
+
+// wantOutputRows asserts the rendered output window, ignoring the blank
+// rows that pad the top of a short scrollback.
+func wantOutputRows(t *testing.T, m *Model, want ...string) {
+	t.Helper()
+	rows := strings.Split(m.output.View(), "\n")
+	for len(rows) > 0 && rows[0] == "" {
+		rows = rows[1:]
+	}
+	if len(rows) != len(want) {
+		t.Fatalf("output shows %d rows %q, want %q", len(rows), rows, want)
+	}
+	for i, w := range want {
+		if rows[i] != w {
+			t.Fatalf("output row %d = %q, want %q (rows %q)", i, rows[i], w, rows)
 		}
 	}
 }

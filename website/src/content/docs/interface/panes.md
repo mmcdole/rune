@@ -88,9 +88,9 @@ automatic scroll-state suffix. Set it to `""` to suppress title text, or omit it
 when the generated suffix should remain visible. `border = "full"`, the
 default, draws all four sides. `border = "none"`
 gives the whole assigned rectangle to content. `border = "horizontal"` draws
-only the titled top and closing bottom rules. Lines in user-created panes
-soft-wrap at render time and re-fit when the terminal or layout changes. The
-reserved output scrollback retains its append-time wrapping.
+only the titled top and closing bottom rules. Lines in every pane,
+including the reserved output scrollback, soft-wrap at render time and re-fit
+when the terminal or layout changes.
 
 See [Layout & UI](/interface/layout/) for nested sidebars and size constraints.
 

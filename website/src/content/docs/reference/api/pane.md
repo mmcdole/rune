@@ -29,8 +29,8 @@ opposite of [bars](/reference/api/ui/), whose callbacks Rune polls. An ordinary
 pane grows to 1000 logical lines, then trims to the newest 500. Its lines
 soft-wrap to the assigned content width during rendering, so they re-fit after
 a resize or layout change. The specialized `output` pane keeps up to 100,000
-physical scrollback rows wrapped at append time; existing output therefore does
-not reflow after a resize.
+logical lines of scrollback and wraps them the same way, so existing output
+reflows when its width changes.
 
 A pane's buffer and its placement are separate things. Placing
 `{ type = "pane", name = name }` in a layout creates the buffer if needed and

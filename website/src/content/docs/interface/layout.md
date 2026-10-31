@@ -155,9 +155,9 @@ receives the terminal width, even in a narrower slot. Returning
 `{ left = ..., center = ..., right = ... }` lets Rune align fields within the
 assigned slot; strings are clipped there. Empty bars collapse. See [Bars](/interface/bars/).
 
-Ordinary panes re-wrap logical lines at their current width. The reserved
-`output` pane retains rows wrapped at append time. While hidden or omitted,
-new output uses its last placement width. See [Panes](/interface/panes/).
+Every pane, including the reserved `output` pane, re-wraps logical lines at
+its current width, so showing or hiding a sidebar reflows existing output.
+See [Panes](/interface/panes/).
 
 ## Toggleable chat pane
 

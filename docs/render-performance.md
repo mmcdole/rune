@@ -138,8 +138,8 @@ checks for key negotiation or display artifacts follow `docs/testing.md`.
 ## Optimization order
 
 1. Eliminate geometry and draft editor work from ordinary output updates
-   when their sizes cannot change. Preserve append-time wrapping and apply any
-   pending resize before appending the next line.
+   when their sizes cannot change. Output wraps only the lines it renders, so
+   an append costs no wrapping and a resize costs one window of rewrapping.
 2. Reuse resolved geometry and border cells until geometry actually changes.
    Avoid building a terminal-sized border grid on every message.
 3. Measure frame scheduling against the latency workloads. Rune and Bubble Tea

@@ -355,18 +355,11 @@ func TestOutputPaneWrapsAtItsResolvedWidth(t *testing.T) {
 
 	next, _ := m.Update(printLineMsg("abcdefghijklmn"))
 	m = next.(*Model)
-	if got := m.output.Scrollback().Count(); got != 2 {
-		t.Fatalf("scrollback row count = %d, want 2", got)
-	}
-	if got := m.output.Scrollback().At(0); got != "abcdefghijkl" {
-		t.Fatalf("first physical row = %q, want twelve cells", got)
-	}
-	if got := m.output.Scrollback().At(1); got != "mn" {
-		t.Fatalf("second physical row = %q, want remainder", got)
-	}
+	wantScrollback(t, m, "abcdefghijklmn")
+	wantOutputRows(t, m, "abcdefghijkl", "mn")
 }
 
-func TestResizeReallocatesTreeWithoutReflowingExistingOutputRows(t *testing.T) {
+func TestResizeReflowsExistingOutputRows(t *testing.T) {
 	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 8)), 40, 8)
 	addPane(t, m, "map")
 	setLayout(m, ui.LayoutNode{
@@ -379,22 +372,50 @@ func TestResizeReallocatesTreeWithoutReflowingExistingOutputRows(t *testing.T) {
 
 	next, _ := m.Update(printLineMsg(strings.Repeat("a", 35)))
 	m = next.(*Model)
-	if got := m.output.Scrollback().Count(); got != 2 {
-		t.Fatalf("rows appended at thirty-cell output width = %d, want 2", got)
-	}
+	wantOutputRows(t, m, strings.Repeat("a", 30), "aaaaa")
 
 	m = resizeModel(t, m, 80, 8)
 	if got := m.layoutPlan.output.Dx(); got != 60 {
 		t.Fatalf("resized output width = %d, want 60", got)
 	}
-	if got := m.output.Scrollback().Count(); got != 2 {
-		t.Fatalf("resize reflowed existing rows: count = %d, want 2", got)
-	}
-	next, _ = m.Update(printLineMsg(strings.Repeat("b", 50)))
+	wantOutputRows(t, m, strings.Repeat("a", 35))
+
+	m = resizeModel(t, m, 20, 8)
+	wantOutputRows(t, m, strings.Repeat("a", 15), strings.Repeat("a", 15), "aaaaa")
+}
+
+// A side column toggled visible narrows output; history already on
+// screen must rewrap rather than disappear behind the column, and
+// unwrap again when the column hides.
+func TestOutputReflowsWhenSidePaneToggles(t *testing.T) {
+	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 8)), 30, 8)
+	addPane(t, m, "status")
+	tree := ui.LayoutTree{Root: ui.LayoutNode{
+		Type: ui.LayoutTypeRow,
+		Children: []ui.LayoutNode{
+			{Type: ui.LayoutTypePane, Name: ui.OutputPaneName, Border: ui.PaneBorderNone},
+			{Type: ui.LayoutTypePane, Name: "status", Size: ui.Cells(10), Border: ui.PaneBorderNone, Hidden: true},
+		},
+	}}
+	next, _ := m.Update(layoutUpdate(tree))
 	m = next.(*Model)
-	if got := m.output.Scrollback().Count(); got != 3 {
-		t.Fatalf("new fifty-cell line at resized width added count = %d, want 3", got)
+
+	line := "the quick brown fox jumps over"
+	next, _ = m.Update(printLineMsg(line))
+	m = next.(*Model)
+	wantOutputRows(t, m, line)
+
+	shown, _, _ := tree.WithPaneVisibility("status", true)
+	next, _ = m.Update(layoutUpdate(shown))
+	m = next.(*Model)
+	if got := m.layoutPlan.output.Dx(); got != 20 {
+		t.Fatalf("output width with status shown = %d, want 20", got)
 	}
+	wantOutputRows(t, m, "the quick brown fox", "jumps over")
+
+	next, _ = m.Update(layoutUpdate(tree))
+	m = next.(*Model)
+	wantOutputRows(t, m, line)
 }
 
 func TestConstrainedBarAndInputRenderInTheirOwnRowSlots(t *testing.T) {

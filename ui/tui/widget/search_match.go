@@ -11,19 +11,28 @@ import (
 	"github.com/mmcdole/rune/ui/tui/util"
 )
 
-// rowMatcher reports all non-overlapping occurrences in a stripped row
+// rowMatcher reports all non-overlapping occurrences in a stripped line
 // as byte-offset pairs, left to right; empty means no match.
 type rowMatcher func(stripped string) [][2]int
 
-// SearchMatch is one matching scrollback row. The result unit is the
-// row: every occurrence in it is carried (and highlighted), but
-// navigation steps rows, since stepping between occurrences of the
-// same row would re-center the same text.
+// SearchMatch is one matching scrollback line. The result unit is the
+// logical line, so an occurrence can span the output window's soft
+// wraps: every occurrence in it is carried (and highlighted), and
+// navigation steps lines.
 type SearchMatch struct {
-	Seq      uint64          // absolute row sequence number
+	Seq      uint64          // absolute line sequence number
 	Ranges   []util.ColRange // occurrences as visible columns (output window splice)
 	ByteRuns [][2]int        // occurrences as byte offsets into Stripped (list render)
-	Stripped string          // ANSI-stripped row text
+	Stripped string          // ANSI-stripped line text
+}
+
+// Col is the line column of the first occurrence, where the output
+// window centers a jump.
+func (m SearchMatch) Col() int {
+	if len(m.Ranges) == 0 {
+		return 0
+	}
+	return m.Ranges[0].Start
 }
 
 // substringMatcher builds the substring matcher: case-insensitive plain

@@ -75,23 +75,16 @@ func TestOutputBeforeFirstWindowSizeUsesBoundedStartupWidth(t *testing.T) {
 
 	next, _ := m.Update(printLineMsg(line))
 	m = next.(*Model)
-	if got := m.output.Scrollback().Count(); got != 2 {
-		t.Fatalf("pre-size output rows = %d, want 2 at startup width", got)
+	if got := m.output.Width(); got != 80 {
+		t.Fatalf("pre-size output width = %d, want startup width 80", got)
 	}
-	if got := m.output.Scrollback().At(0); got != strings.Repeat("x", 80) {
-		t.Fatalf("pre-size first row width = %d, want %d", len(got), 80)
-	}
-	if got := m.output.Scrollback().At(1); got != strings.Repeat("x", 7) {
-		t.Fatalf("pre-size remainder = %q, want seven cells", got)
-	}
+	wantScrollback(t, m, line)
 
 	m = resizeModel(t, m, 120, 20)
-	if got := m.output.Scrollback().Count(); got != 2 {
-		t.Fatalf("first terminal size reflowed startup rows: got %d", got)
-	}
+	wantOutputRows(t, m, line)
 }
 
-func TestOutputPaneBuffersWhileHiddenOrUnplacedAtRetainedWidth(t *testing.T) {
+func TestOutputPaneBuffersWhileHiddenOrUnplaced(t *testing.T) {
 	m := resizeModel(t, NewModel(make(chan ui.UIEvent, 64)), 20, 8)
 
 	next, _ := m.Update(layoutUpdate(ui.LayoutTree{Root: ui.LayoutNode{
@@ -119,7 +112,7 @@ func TestOutputPaneBuffersWhileHiddenOrUnplacedAtRetainedWidth(t *testing.T) {
 	if got := m.output.Width(); got != 12 {
 		t.Fatalf("hidden output changed retained width to %d", got)
 	}
-	wantScrollback(t, m, strings.Repeat("a", 12), "aa")
+	wantScrollback(t, m, strings.Repeat("a", 14))
 
 	next, _ = m.Update(layoutUpdate(ui.LayoutTree{Root: ui.LayoutNode{
 		Type: ui.LayoutTypeColumn,
@@ -136,7 +129,7 @@ func TestOutputPaneBuffersWhileHiddenOrUnplacedAtRetainedWidth(t *testing.T) {
 	if got := m.output.Width(); got != 12 {
 		t.Fatalf("unplaced output changed retained width to %d", got)
 	}
-	wantScrollback(t, m, strings.Repeat("a", 12), "aa", strings.Repeat("b", 12), "bb")
+	wantScrollback(t, m, strings.Repeat("a", 14), strings.Repeat("b", 14))
 
 	next, _ = m.Update(layoutUpdate(ui.LayoutTree{Root: ui.LayoutNode{
 		Type: ui.LayoutTypePane, Name: ui.OutputPaneName, Border: ui.PaneBorderNone,
@@ -147,8 +140,7 @@ func TestOutputPaneBuffersWhileHiddenOrUnplacedAtRetainedWidth(t *testing.T) {
 	}
 	next, _ = m.Update(paneWriteMsg{Name: ui.OutputPaneName, Text: strings.Repeat("c", 18)})
 	m = next.(*Model)
-	wantScrollback(t, m,
-		strings.Repeat("a", 12), "aa", strings.Repeat("b", 12), "bb", strings.Repeat("c", 18))
+	wantOutputRows(t, m, strings.Repeat("a", 14), strings.Repeat("b", 14), strings.Repeat("c", 18))
 }
 
 func TestClearOutputPaneResetsSearchAndScrollingButPreservesPrompt(t *testing.T) {

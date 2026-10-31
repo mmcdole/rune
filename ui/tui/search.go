@@ -50,7 +50,7 @@ func (m *Model) applySearchPosition(geometryChanged bool) {
 	if state.restore != nil {
 		m.output.RestoreScroll(*state.restore)
 	} else if state.focus != nil {
-		m.output.CenterOn(state.focus.Seq)
+		m.output.CenterOn(state.focus.Seq, state.focus.Col())
 	}
 	state.positionPending, state.restore = false, nil
 }

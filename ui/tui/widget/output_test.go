@@ -17,7 +17,7 @@ func newTestOutput(width, height int, lines ...string) (*Output, *Scrollback) {
 	v.SetSize(width, height)
 	for _, l := range lines {
 		buf.Append(l)
-		v.onNewRows(1)
+		v.onNewLines(1)
 	}
 	return v, buf
 }
@@ -34,21 +34,18 @@ func TestOutputPromptFitsSingleRow(t *testing.T) {
 	}
 }
 
-func TestOutputResizeClampsScrolledOffsetToVisibleHistory(t *testing.T) {
+func TestOutputResizeClampsScrolledWindowToVisibleHistory(t *testing.T) {
 	lines := make([]string, 10)
 	for i := range lines {
 		lines[i] = fmt.Sprintf("line %d", i+1)
 	}
 	v, buffer := newTestOutput(40, 2, lines...)
 	v.ScrollToTop()
-	if v.offset != 8 {
-		t.Fatalf("top offset = %d, want 8", v.offset)
+	if rows := viewRows(v); rows[0] != "line 1" || rows[1] != "line 2" {
+		t.Fatalf("top window = %q, want lines 1-2", rows)
 	}
 
 	v.SetSize(40, 5)
-	if v.offset != 5 {
-		t.Fatalf("grown output window offset = %d, want clamped maximum 5", v.offset)
-	}
 	rows := viewRows(v)
 	for i := 0; i < 5; i++ {
 		if rows[i] != lines[i] {
@@ -57,29 +54,29 @@ func TestOutputResizeClampsScrolledOffsetToVisibleHistory(t *testing.T) {
 	}
 
 	buffer.Append("line 11")
-	v.onNewRows(1)
+	v.onNewLines(1)
 	if v.NewLineCount() != 1 {
 		t.Fatalf("new line count = %d, want 1 while scrolled", v.NewLineCount())
 	}
 	v.SetSize(40, 20)
-	if v.Mode() != ModeLive || v.offset != 0 || v.NewLineCount() != 0 {
-		t.Fatalf("fully expanded output window = mode %v offset %d new %d, want live zero state",
-			v.Mode(), v.offset, v.NewLineCount())
+	if v.Mode() != ModeLive || v.NewLineCount() != 0 {
+		t.Fatalf("fully expanded output window = mode %v new %d, want live zero state",
+			v.Mode(), v.NewLineCount())
 	}
 }
 
 func TestOutputScrollDistancesCannotInvertOrOverflow(t *testing.T) {
 	v, _ := newTestOutput(40, 2, "one", "two", "three", "four", "five")
 	v.ScrollUp(1)
-	before := v.offset
+	before := v.SaveScroll()
 	v.ScrollUp(-1)
 	v.ScrollDown(-1)
-	if v.offset != before {
-		t.Fatalf("negative distance changed offset from %d to %d", before, v.offset)
+	if v.SaveScroll() != before {
+		t.Fatalf("negative distance moved the window from %+v to %+v", before, v.SaveScroll())
 	}
 	v.ScrollUp(int(^uint(0) >> 1))
-	if v.offset != v.maxOffset() {
-		t.Fatalf("huge distance offset = %d, want maximum %d", v.offset, v.maxOffset())
+	if rows := viewRows(v); rows[0] != "one" || rows[1] != "two" {
+		t.Fatalf("huge distance window = %q, want the oldest full window", rows)
 	}
 }
 
@@ -151,9 +148,9 @@ func TestOutputScrollAnchorsWhileNewLinesArrive(t *testing.T) {
 	before := viewRows(v)
 
 	buf.Append("seven")
-	v.onNewRows(1)
+	v.onNewLines(1)
 	buf.Append("eight")
-	v.onNewRows(1)
+	v.onNewLines(1)
 
 	after := viewRows(v)
 	for i := range before {
@@ -253,7 +250,7 @@ func TestOutputScrolledSurvivesRingBufferEviction(t *testing.T) {
 	v.SetSize(40, 3)
 	for i := 1; i <= 8; i++ {
 		buf.Append(fmt.Sprintf("line %d", i))
-		v.onNewRows(1)
+		v.onNewLines(1)
 	}
 
 	v.ScrollToTop() // anchored on lines 1-3
@@ -264,7 +261,7 @@ func TestOutputScrolledSurvivesRingBufferEviction(t *testing.T) {
 	// Push far past the anchor: lines 1-32 are evicted, 33-40 survive.
 	for i := 9; i <= 40; i++ {
 		buf.Append(fmt.Sprintf("line %d", i))
-		v.onNewRows(1)
+		v.onNewLines(1)
 	}
 
 	rows := viewRows(v)
@@ -289,18 +286,18 @@ func TestOutputScrolledSurvivesRingBufferEviction(t *testing.T) {
 }
 
 // View must never emit more rows than its height, whatever state the
-// offset is in - the output-height backstop behind the onNewRows clamp.
+// anchor is in - the output-height backstop behind the anchor clamp.
 func TestOutputViewNeverExceedsHeight(t *testing.T) {
 	v, _ := newTestOutput(40, 3, "a", "b", "c", "d", "e")
-	v.offset = 999
+	v.live, v.anchorSeq, v.anchorCol = false, 999, 999
 	before := v.SaveScroll()
 
 	rows := viewRows(v)
 	if len(rows) != 3 {
-		t.Fatalf("View emitted %d rows with a corrupt offset, want 3: %q", len(rows), rows)
+		t.Fatalf("View emitted %d rows with a corrupt anchor, want 3: %q", len(rows), rows)
 	}
 	v.View() // The cached path must preserve the same navigation state.
-	if v.offset != 999 || v.SaveScroll() != before {
+	if v.anchorSeq != 999 || v.SaveScroll() != before {
 		t.Fatal("rendering changed scroll state")
 	}
 }
@@ -355,7 +352,7 @@ func TestOutputCenterOn(t *testing.T) {
 	v, buf := newTestOutput(40, 5, lines...)
 
 	// Center on line 10 (seq 9): it should sit on the middle row.
-	v.CenterOn(buf.Seq(9))
+	v.CenterOn(buf.Seq(9), 0)
 	rows := viewRows(v)
 	if rows[2] != "line 10" {
 		t.Errorf("center row = %q, want %q (rows %q)", rows[2], "line 10", rows)
@@ -365,21 +362,21 @@ func TestOutputCenterOn(t *testing.T) {
 	}
 
 	// Near the top: clamps so the output window stays full.
-	v.CenterOn(buf.Seq(0))
+	v.CenterOn(buf.Seq(0), 0)
 	rows = viewRows(v)
 	if rows[0] != "line 1" {
 		t.Errorf("top clamp: rows = %q, want line 1 first", rows)
 	}
 
 	// Near the live edge: clamps to offset 0 and returns to live.
-	v.CenterOn(buf.Seq(19))
+	v.CenterOn(buf.Seq(19), 0)
 	if v.Mode() != ModeLive {
 		t.Error("centering on the newest row should land live")
 	}
 
 	// Buffer smaller than the output window: always live, never negative.
 	small, sbuf := newTestOutput(40, 10, "a", "b")
-	small.CenterOn(sbuf.Seq(0))
+	small.CenterOn(sbuf.Seq(0), 0)
 	if small.Mode() != ModeLive {
 		t.Error("centering within a short buffer should stay live")
 	}
@@ -400,10 +397,10 @@ func TestOutputHighlightRendersOnRightRowOnly(t *testing.T) {
 		}
 	}
 
-	// The highlight follows its row: while scrolled, appends re-anchor
-	// the view and the highlight must stay on the same text.
+	// The highlight follows its line: while scrolled, appends leave the
+	// view anchored and the highlight must stay on the same text.
 	buf.Append("five")
-	v.onNewRows(1)
+	v.onNewLines(1)
 	rows = viewRows(v)
 	if !strings.Contains(rows[0], "\x1b[") || !strings.Contains(rows[0], "thief") {
 		t.Errorf("after append the highlight must stay on its row; rows = %q", rows)
@@ -427,8 +424,8 @@ func TestOutputSetHighlightInvalidatesCache(t *testing.T) {
 }
 
 // Esc-restore must return to the same text, not the same distance from
-// live: appends during search re-anchor a scrolled output window (onNewRows),
-// and a raw saved offset would land newer by the rows that arrived.
+// live: a saved distance from the bottom would land newer by the lines
+// that arrived during the search.
 func TestOutputRestoreScrollSameTextAfterAppends(t *testing.T) {
 	var lines []string
 	for i := 1; i <= 10; i++ {
@@ -440,10 +437,10 @@ func TestOutputRestoreScrollSameTextAfterAppends(t *testing.T) {
 	before := viewRows(v)
 	saved := v.SaveScroll()
 
-	v.CenterOn(buf.Seq(0)) // search preview moves the output window
+	v.CenterOn(buf.Seq(0), 0) // search preview moves the output window
 	for i := 11; i <= 15; i++ {
 		buf.Append(fmt.Sprintf("line %d", i))
-		v.onNewRows(1)
+		v.onNewLines(1)
 	}
 
 	v.RestoreScroll(saved)
@@ -457,7 +454,7 @@ func TestOutputRestoreScrollSameTextAfterAppends(t *testing.T) {
 		t.Error("restore of a scrolled snapshot should stay scrolled")
 	}
 	if v.NewLineCount() != 5 {
-		t.Errorf("NewLineCount = %d, want 5 (rows appended during search)", v.NewLineCount())
+		t.Errorf("NewLineCount = %d, want 5 (lines appended during search)", v.NewLineCount())
 	}
 }
 
@@ -465,9 +462,9 @@ func TestOutputRestoreScrollFromLiveReturnsToLive(t *testing.T) {
 	v, buf := newTestOutput(40, 2, "one", "two", "three")
 	saved := v.SaveScroll()
 
-	v.CenterOn(buf.Seq(0))
+	v.CenterOn(buf.Seq(0), 0)
 	buf.Append("four")
-	v.onNewRows(1)
+	v.onNewLines(1)
 
 	v.RestoreScroll(saved)
 	if v.Mode() != ModeLive || v.NewLineCount() != 0 {
@@ -487,7 +484,7 @@ func TestOutputRestoreScrollClampsAfterResize(t *testing.T) {
 
 	v.SetSize(40, 10) // The larger window now fits the entire buffer.
 	v.RestoreScroll(saved)
-	if v.offset != 0 || v.Mode() != ModeLive || v.NewLineCount() != 0 {
+	if v.Mode() != ModeLive || v.NewLineCount() != 0 {
 		t.Fatal("restoring into a larger window must return to live with no unseen rows")
 	}
 }
@@ -498,7 +495,7 @@ func TestOutputRestoreScrollClampsAfterEviction(t *testing.T) {
 	v.SetSize(40, 2)
 	for i := 1; i <= 6; i++ {
 		buf.Append(fmt.Sprintf("line %d", i))
-		v.onNewRows(1)
+		v.onNewLines(1)
 	}
 
 	v.ScrollToTop() // anchored on lines 1,2
@@ -507,7 +504,7 @@ func TestOutputRestoreScrollClampsAfterEviction(t *testing.T) {
 	// Evict the anchor entirely.
 	for i := 7; i <= 20; i++ {
 		buf.Append(fmt.Sprintf("line %d", i))
-		v.onNewRows(1)
+		v.onNewLines(1)
 	}
 
 	v.RestoreScroll(saved)
@@ -543,11 +540,127 @@ func TestScrollbackAndOutputClearResetHistoryButKeepLivePrompt(t *testing.T) {
 	}
 
 	buf.Append("new")
-	v.onNewRows(1)
+	v.onNewLines(1)
 	if seq := buf.Seq(0); seq <= lastSeq {
 		t.Fatalf("sequence after clear = %d, want greater than old sequence %d", seq, lastSeq)
 	}
 	if _, ok := buf.IndexOf(lastSeq); ok {
 		t.Fatalf("old sequence %d resolved after clear", lastSeq)
+	}
+}
+
+func TestOutputReflowsHistoryOnResize(t *testing.T) {
+	v, buf := newTestOutput(10, 3, "alpha beta gamma")
+	if got := viewRows(v); got[1] != "alpha beta" || got[2] != "gamma" {
+		t.Fatalf("10-wide rows = %q", got)
+	}
+	if buf.Count() != 1 {
+		t.Fatalf("scrollback holds %d lines, want 1 logical line", buf.Count())
+	}
+	v.SetSize(20, 3)
+	if got := viewRows(v); got[2] != "alpha beta gamma" {
+		t.Fatalf("20-wide rows = %q, want the line unwrapped", got)
+	}
+}
+
+func TestOutputScrollStepsRowsWithinWrappedLines(t *testing.T) {
+	v, _ := newTestOutput(5, 2, "aaaaabbbbbccccc", "ddddd")
+	v.ScrollUp(1)
+	if got := viewRows(v); got[0] != "bbbbb" || got[1] != "ccccc" {
+		t.Fatalf("one row up = %q, want the wrapped line's last two rows", got)
+	}
+	v.ScrollUp(1)
+	if got := viewRows(v); got[0] != "aaaaa" || got[1] != "bbbbb" {
+		t.Fatalf("two rows up = %q, want the wrapped line's first two rows", got)
+	}
+	v.ScrollDown(2)
+	if v.Mode() != ModeLive {
+		t.Fatal("scrolling back to the newest row must return to live")
+	}
+}
+
+// A resize while scrolled keeps the same text at the bottom of the
+// window: the anchor is a line and column, not a row count.
+func TestOutputResizeWhileScrolledKeepsBottomText(t *testing.T) {
+	var lines []string
+	for i := 1; i <= 6; i++ {
+		lines = append(lines, fmt.Sprintf("line%d one two three four", i))
+	}
+	v, _ := newTestOutput(40, 3, lines...)
+	v.ScrollUp(2) // bottom row is line4
+	if got := viewRows(v); got[2] != lines[3] {
+		t.Fatalf("bottom row = %q, want %q", got[2], lines[3])
+	}
+
+	v.SetSize(10, 3)
+	if rows := viewRows(v); rows[2] != "line4 one" {
+		t.Fatalf("narrowed rows = %q, want line4's first row still at the bottom", rows)
+	}
+	if v.Mode() != ModeScrolled {
+		t.Fatal("resize while scrolled must stay scrolled")
+	}
+}
+
+func TestOutputContinuationRowAtTopKeepsStyle(t *testing.T) {
+	v, _ := newTestOutput(5, 1, "\x1b[31maaaaabbbbb\x1b[0m")
+	row := viewRows(v)[0]
+	if !strings.HasPrefix(row, "\x1b[31m") || ansi.Strip(row) != "bbbbb" {
+		t.Fatalf("continuation row = %q, want it to re-emit the red SGR", row)
+	}
+}
+
+func TestOutputCenterOnTargetsMatchRowOfWrappedLine(t *testing.T) {
+	var lines []string
+	for i := 0; i < 10; i++ {
+		lines = append(lines, fmt.Sprintf("pad%d", i))
+	}
+	long := "aaaaa bbbbb ccccc ddddd eeeee fffff ggggg"
+	lines = append(lines, long)
+	for i := 0; i < 10; i++ {
+		lines = append(lines, fmt.Sprintf("tail%d", i))
+	}
+	v, buf := newTestOutput(5, 3, lines...)
+	v.CenterOn(buf.Seq(10), strings.Index(long, "ggggg"))
+	if got := viewRows(v); got[1] != "ggggg" {
+		t.Fatalf("centered rows = %q, want the matching row in the middle", got)
+	}
+}
+
+func TestOutputHighlightSurvivesReflow(t *testing.T) {
+	v, buf := newTestOutput(10, 2, "first line thief here")
+	v.SetHighlight(buf.Seq(0), []util.ColRange{{Start: 11, End: 16}})
+	for _, width := range []int{10, 30} {
+		v.SetSize(width, 2)
+		found := false
+		for _, row := range viewRows(v) {
+			if strings.Contains(row, "\x1b[") && strings.Contains(ansi.Strip(row), "thief") {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("width %d: highlighted thief missing from %q", width, viewRows(v))
+		}
+	}
+}
+
+func TestOutputNewLineCountCountsLogicalLines(t *testing.T) {
+	v, _ := newTestOutput(5, 2, "one", "two", "three")
+	v.ScrollUp(1)
+	v.Write(strings.Repeat("x", 23)) // five rows at width 5, one line
+	if v.NewLineCount() != 1 {
+		t.Fatalf("NewLineCount = %d, want 1 logical line", v.NewLineCount())
+	}
+}
+
+func TestOutputMeasureHeightWrapsAtRequestedWidth(t *testing.T) {
+	v, _ := newTestOutput(40, 10, strings.Repeat("x", 30), "y")
+	if got := v.MeasureHeight(40, 10); got != 2 {
+		t.Errorf("MeasureHeight(40) = %d, want 2", got)
+	}
+	if got := v.MeasureHeight(10, 10); got != 4 {
+		t.Errorf("MeasureHeight(10) = %d, want 4", got)
+	}
+	if got := v.MeasureHeight(10, 3); got != 3 {
+		t.Errorf("MeasureHeight(10, limit 3) = %d, want 3", got)
 	}
 }
