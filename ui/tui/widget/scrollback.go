@@ -1,22 +1,14 @@
 package widget
 
-// Scrollback is a ring buffer of logical lines of terminal output. Lines
-// are stored unwrapped; Output wraps them to its current width on demand.
+// Scrollback is a ring buffer of logical lines of terminal output.
+// Lines are stored unwrapped; Output wraps them to its width on demand.
 type Scrollback struct {
 	lines    []string
-	rows     []rowMemo // per-slot wrapped row count, valid only at its width
 	head     int
 	tail     int
 	count    int
 	capacity int
 	appended uint64 // lines ever appended; assigns eviction-stable sequence numbers
-}
-
-// rowMemo caches how many rows a line wraps to at one width. A width
-// change invalidates every memo implicitly, with no pass over the ring.
-type rowMemo struct {
-	width int32
-	rows  int32
 }
 
 // NewScrollback creates a new ring buffer.
@@ -26,7 +18,6 @@ func NewScrollback(capacity int) *Scrollback {
 	}
 	return &Scrollback{
 		lines:    make([]string, capacity),
-		rows:     make([]rowMemo, capacity),
 		capacity: capacity,
 	}
 }
@@ -34,7 +25,6 @@ func NewScrollback(capacity int) *Scrollback {
 // Append adds a line to the buffer.
 func (sb *Scrollback) Append(line string) {
 	sb.lines[sb.tail] = line
-	sb.rows[sb.tail] = rowMemo{}
 	sb.tail = (sb.tail + 1) % sb.capacity
 	sb.appended++
 
@@ -54,7 +44,6 @@ func (sb *Scrollback) Count() int {
 // stale search anchors can never refer to newly appended content.
 func (sb *Scrollback) Clear() {
 	clear(sb.lines)
-	clear(sb.rows)
 	sb.head = 0
 	sb.tail = 0
 	sb.count = 0
@@ -67,18 +56,6 @@ func (sb *Scrollback) At(i int) string {
 	}
 	actualIndex := (sb.head + i) % sb.capacity
 	return sb.lines[actualIndex]
-}
-
-// rowCount returns how many rows the line at index i wraps to at width,
-// computing it with measure only on a memo miss.
-func (sb *Scrollback) rowCount(i, width int, measure func(string, int) int) int {
-	slot := (sb.head + i) % sb.capacity
-	if memo := sb.rows[slot]; memo.rows > 0 && int(memo.width) == width {
-		return int(memo.rows)
-	}
-	n := measure(sb.lines[slot], width)
-	sb.rows[slot] = rowMemo{width: int32(width), rows: int32(n)}
-	return n
 }
 
 // Seq returns the absolute sequence number of the line at index i.

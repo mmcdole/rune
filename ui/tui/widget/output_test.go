@@ -382,7 +382,7 @@ func TestOutputCenterOn(t *testing.T) {
 	}
 }
 
-func TestOutputHighlightRendersOnRightRowOnly(t *testing.T) {
+func TestOutputHighlightRendersOnRightLineOnly(t *testing.T) {
 	v, buf := newTestOutput(40, 3, "one thief", "two", "three", "four")
 	v.ScrollUp(1) // showing "one thief", "two", "three"
 	v.SetHighlight(buf.Seq(0), []util.ColRange{{Start: 4, End: 9}})

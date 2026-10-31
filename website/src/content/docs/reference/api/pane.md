@@ -96,7 +96,7 @@ on the history being read. With the default title its header shows
 `name · scroll +N`; a custom `title` replaces that suffix too. Calling
 `scroll_down` until it reaches the end, or calling `scroll_to_bottom`, returns
 it to live mode. User-created panes scroll by logical lines as written. The
-`output` pane scrolls the physical rows stored in its scrollback.
+`output` pane scrolls by wrapped rows, so a scroll can stop inside a long line.
 
 ```lua
 rune.bind("shift+pgup", function()

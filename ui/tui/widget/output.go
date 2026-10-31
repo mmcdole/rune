@@ -23,7 +23,7 @@ const (
 // so a width change reflows history.
 type Output struct {
 	scrollback   *Scrollback
-	live         bool   // showing newest; otherwise anchored below
+	live         bool   // tailing the newest row; otherwise scrolled to the anchor
 	anchorSeq    uint64 // line holding the bottom visible row while scrolled
 	anchorCol    int    // column where that row starts within its line
 	height       int
@@ -35,11 +35,27 @@ type Output struct {
 	styles       style.Styles
 	hasPlacement bool
 
+	rowMemo   []rowMemo              // wrapped row counts, indexed by seq modulo capacity
+	wrapCache map[uint64]wrappedLine // multi-row lines recently drawn at this width
+
 	// Search-match highlight, anchored by sequence number so appends
 	// and ring eviction cannot smear it onto a different line.
 	hlSet    bool
 	hlSeq    uint64
 	hlRanges []util.ColRange
+}
+
+// rowMemo caches how many rows one line wraps to at one width.
+type rowMemo struct {
+	seq         uint64
+	width, rows int32
+}
+
+// wrappedLine is a line split into styled rows, with the line columns
+// each row covers.
+type wrappedLine struct {
+	rows  []string
+	spans []util.ColRange
 }
 
 // cursor addresses one wrapped row: a scrollback line index and the row
@@ -55,7 +71,15 @@ func (c cursor) before(d cursor) bool {
 
 // NewOutput creates the main output pane with bounded scrollback.
 func NewOutput(capacity int, styles style.Styles) *Output {
-	return &Output{scrollback: NewScrollback(capacity), live: true, width: 80, styles: styles}
+	sb := NewScrollback(capacity)
+	return &Output{
+		scrollback: sb,
+		live:       true,
+		width:      80,
+		styles:     styles,
+		rowMemo:    make([]rowMemo, sb.capacity),
+		wrapCache:  map[uint64]wrappedLine{},
+	}
 }
 
 func (o *Output) Scrollback() *Scrollback  { return o.scrollback }
@@ -71,7 +95,7 @@ func (o *Output) MeasureHeight(width, limit int) int {
 		rows++
 	}
 	for i := o.scrollback.Count() - 1; i >= 0 && rows < limit; i-- {
-		rows += o.scrollback.rowCount(i, width, measureRows)
+		rows += measureRows(o.scrollback.At(i), width)
 	}
 	return min(rows, limit)
 }
@@ -167,30 +191,57 @@ func (o *Output) View() string {
 	return o.cachedView
 }
 
-// renderRows fills dst with the wrapped rows of line index i starting at
-// row first. Continuation rows are cut with ansi.Cut, which re-emits the
-// SGR state in effect at the cut, so a row styles correctly even when it
-// is the top of the window.
+// renderRows fills dst with the wrapped rows of line index i starting at row first.
 func (o *Output) renderRows(i, first int, dst []string) {
-	line := o.scrollback.At(i)
-	if o.hlSet && o.scrollback.Seq(i) == o.hlSeq {
-		// Highlighting preserves visible text, so wrap points do not move.
-		line = util.HighlightRanges(line, o.hlRanges, func(s string) string { return o.styles.OverlayMatch.Render(s) })
-	}
-	if o.rows(i) == 1 {
-		dst[0] = line
+	if o.rows(i) > 1 {
+		copy(dst, o.wrapped(i).rows[first:])
 		return
 	}
-	spans := util.WrapSpans(line, o.width)
-	for k := range dst {
-		span := spans[first+k]
-		dst[k] = ansi.Cut(line, span.Start, span.End)
+	line := o.scrollback.At(i)
+	if o.hlSet && o.scrollback.Seq(i) == o.hlSeq {
+		line = o.highlight(line)
 	}
+	dst[0] = line
+}
+
+func (o *Output) highlight(line string) string {
+	return util.HighlightRanges(line, o.hlRanges, func(s string) string { return o.styles.OverlayMatch.Render(s) })
 }
 
 // rows returns how many rows line index i wraps to at the current width.
 func (o *Output) rows(i int) int {
-	return o.scrollback.rowCount(i, o.width, measureRows)
+	line := o.scrollback.At(i)
+	if o.width < 1 || len(line) <= o.width {
+		return 1
+	}
+	seq := o.scrollback.Seq(i)
+	memo := &o.rowMemo[seq%uint64(len(o.rowMemo))]
+	if memo.rows == 0 || memo.seq != seq || int(memo.width) != o.width {
+		*memo = rowMemo{seq: seq, width: int32(o.width), rows: int32(measureRows(line, o.width))}
+	}
+	return int(memo.rows)
+}
+
+// wrapped splits line index i into rows at the current width. Lines are
+// cached while they stay on screen, so redrawing a very long line does
+// not rewrap it every frame.
+func (o *Output) wrapped(i int) wrappedLine {
+	seq := o.scrollback.Seq(i)
+	if w, ok := o.wrapCache[seq]; ok {
+		return w
+	}
+	if len(o.wrapCache) > 4*max(1, o.height) {
+		clear(o.wrapCache)
+	}
+	line := o.scrollback.At(i)
+	if o.hlSet && seq == o.hlSeq {
+		// Highlighting preserves visible text, so wrap points do not move.
+		line = o.highlight(line)
+	}
+	rows := util.WrapLine(line, o.width)
+	w := wrappedLine{spans: util.WrapSpans(line, rows), rows: util.CarrySGR(rows)}
+	o.wrapCache[seq] = w
+	return w
 }
 
 // rowAt returns the row of line index i that contains column col.
@@ -198,9 +249,8 @@ func (o *Output) rowAt(i, col int) int {
 	if col <= 0 || o.rows(i) == 1 {
 		return 0
 	}
-	spans := util.WrapSpans(o.scrollback.At(i), o.width)
 	row := 0
-	for k, span := range spans {
+	for k, span := range o.wrapped(i).spans {
 		if span.Start <= col {
 			row = k
 		}
@@ -213,7 +263,7 @@ func (o *Output) colOf(c cursor) int {
 	if c.row == 0 {
 		return 0
 	}
-	return util.WrapSpans(o.scrollback.At(c.line), o.width)[c.row].Start
+	return o.wrapped(c.line).spans[c.row].Start
 }
 
 // newest is the last row of the newest line.
@@ -245,13 +295,13 @@ func (o *Output) up(c cursor, n int) cursor {
 func (o *Output) down(c cursor, n int) cursor {
 	last := o.scrollback.Count() - 1
 	for n > 0 {
-		if rest := o.rows(c.line) - 1 - c.row; rest >= n {
+		rest := o.rows(c.line) - 1 - c.row
+		if rest >= n {
 			c.row += n
 			break
-		} else {
-			c.row += rest
-			n -= rest
 		}
+		c.row += rest
+		n -= rest
 		if c.line == last {
 			break
 		}
@@ -322,6 +372,9 @@ func (o *Output) SetSize(width, height int) {
 // anchor names a line and column, which survive rewrapping.
 func (o *Output) resize(width, height int) {
 	if width != o.width || height != o.height {
+		if width != o.width {
+			clear(o.wrapCache)
+		}
 		o.width = width
 		o.height = height
 		if !o.live {
@@ -365,7 +418,7 @@ func (o *Output) PageDown() {
 	}
 }
 
-// ScrollUp scrolls up by n rows (toward older content).
+// ScrollUp scrolls up by the given rows (toward older content).
 func (o *Output) ScrollUp(rows int) {
 	if rows <= 0 || o.scrollback.Count() == 0 {
 		return
@@ -374,7 +427,7 @@ func (o *Output) ScrollUp(rows int) {
 	o.setCursor(o.up(c, rows))
 }
 
-// ScrollDown scrolls down by n rows (toward newer content).
+// ScrollDown scrolls down by the given rows (toward newer content).
 func (o *Output) ScrollDown(rows int) {
 	if rows <= 0 || o.live {
 		return
@@ -405,10 +458,6 @@ func (o *Output) CenterOn(seq uint64, col int) {
 	if o.scrollback.Count() == 0 {
 		return
 	}
-	if _, ok := o.scrollback.IndexOf(seq); !ok {
-		o.setCursor(cursor{})
-		return
-	}
 	o.setCursor(o.down(o.locate(seq, col), (o.height+1)/2-1))
 }
 
@@ -418,6 +467,7 @@ func (o *Output) SetHighlight(seq uint64, ranges []util.ColRange) {
 	o.hlSet = true
 	o.hlSeq = seq
 	o.hlRanges = ranges
+	clear(o.wrapCache)
 	o.cacheValid = false
 }
 
@@ -426,6 +476,7 @@ func (o *Output) ClearHighlight() {
 	if o.hlSet {
 		o.hlSet = false
 		o.hlRanges = nil
+		clear(o.wrapCache)
 		o.cacheValid = false
 	}
 }
@@ -434,6 +485,7 @@ func (o *Output) ClearHighlight() {
 // The live prompt remains visible.
 func (o *Output) Clear() {
 	o.scrollback.Clear()
+	clear(o.wrapCache)
 	o.live = true
 	o.newLines = 0
 	o.hlSet = false

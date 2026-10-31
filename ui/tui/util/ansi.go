@@ -39,12 +39,10 @@ func WrapLine(line string, width int) []string {
 	return rows
 }
 
-// WrapSpans reports the visible columns each WrapLine row covers within
-// line, so a caller can re-cut rows with ansi.Cut (which carries SGR state
-// onto continuation rows) and map line columns to rows. Break spaces the
+// WrapSpans reports the visible columns each of a line's WrapLine rows
+// covers, so callers can map line columns to rows. Break spaces the
 // wrapper drops fall between spans.
-func WrapSpans(line string, width int) []ColRange {
-	rows := WrapLine(line, width)
+func WrapSpans(line string, rows []string) []ColRange {
 	if len(rows) == 1 {
 		return []ColRange{{Start: 0, End: ansi.StringWidth(line)}}
 	}
@@ -70,6 +68,38 @@ func WrapSpans(line string, width int) []ColRange {
 		col += w
 	}
 	return spans
+}
+
+// CarrySGR prefixes each continuation row with the SGR sequences in effect
+// where the previous row ended, so a row keeps its style even when it is
+// drawn first. Sequences before the last reset are dropped.
+func CarrySGR(rows []string) []string {
+	var active string
+	for i, row := range rows {
+		if i > 0 && active != "" {
+			rows[i] = active + row
+		}
+		for rest := row; ; {
+			start := strings.Index(rest, "\x1b[")
+			if start < 0 {
+				break
+			}
+			end := start + 2
+			for end < len(rest) && (rest[end] >= '0' && rest[end] <= '9' || rest[end] == ';' || rest[end] == ':') {
+				end++
+			}
+			if end < len(rest) && rest[end] == 'm' {
+				seq := rest[start : end+1]
+				if seq == "\x1b[m" || seq == "\x1b[0m" {
+					active = ""
+				} else {
+					active += seq
+				}
+			}
+			rest = rest[end:]
+		}
+	}
+	return rows
 }
 
 func wrapCells(s string, width int) []string {

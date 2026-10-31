@@ -116,7 +116,8 @@ writes continue landing in the buffer. With the default generated title, its
 header shows `chat · scroll +N`; a custom `title` replaces that suffix
 along with the pane name. `scroll_down` past the end or `scroll_to_bottom`
 returns the pane to live tailing. User-created panes scroll by logical lines as
-written; the output pane scrolls the physical rows stored in its scrollback.
+written; the output pane scrolls by wrapped rows, so a scroll can stop inside a
+long line.
 
 ## The mirror pattern
 

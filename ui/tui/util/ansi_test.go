@@ -126,7 +126,7 @@ func TestWrapSpans(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := WrapSpans(tt.line, tt.width)
+			got := WrapSpans(tt.line, WrapLine(tt.line, tt.width))
 			if !slices.Equal(got, tt.want) {
 				t.Fatalf("WrapSpans(%q, %d) = %v, want %v", tt.line, tt.width, got, tt.want)
 			}
@@ -140,5 +140,13 @@ func TestWrapSpans(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestCarrySGR(t *testing.T) {
+	rows := CarrySGR([]string{"\x1b[31maaa", "bb\x1b[1mb", "ccc\x1b[0m", "ddd"})
+	want := []string{"\x1b[31maaa", "\x1b[31mbb\x1b[1mb", "\x1b[31m\x1b[1mccc\x1b[0m", "ddd"}
+	if !slices.Equal(rows, want) {
+		t.Fatalf("CarrySGR = %q, want %q", rows, want)
 	}
 }
