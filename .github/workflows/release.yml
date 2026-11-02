@@ -23,6 +23,9 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # A stable tag can share its commit with the last beta tag;
+          # release the tag that was pushed, not whichever git describe picks.
+          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
 
   # rune-jit is cgo + statically linked LuaJIT, so it cannot be
   # cross-compiled from one runner; each target builds natively and
