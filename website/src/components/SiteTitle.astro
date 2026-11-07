@@ -1,0 +1,78 @@
+---
+// SiteTitle override: the ᚱune wordmark (the rune is the R), followed by the
+// section nav. The nav stays visible on small screens because Get started
+// pages have no sidebar menu to fall back on.
+import { sections, currentSection } from '../sections';
+
+const { siteTitleHref, sidebar } = Astro.locals.starlightRoute;
+const raw = import.meta.env.BASE_URL;
+const base = raw.endsWith('/') ? raw : raw + '/';
+const current = currentSection(sidebar);
+---
+
+<div class="title-nav">
+  <a href={siteTitleHref} class="site-title" aria-label="Rune" translate="no">
+    <span class="glyph" aria-hidden="true">ᚱ</span><span aria-hidden="true">une</span>
+  </a>
+  <nav class="header-nav" aria-label="Site sections">
+    {
+      sections.map((s) => (
+        <a href={base + s.href} aria-current={s === current ? 'page' : undefined}>
+          {s.label}
+        </a>
+      ))
+    }
+  </nav>
+</div>
+
+<style>
+  .title-nav {
+    display: flex;
+    align-items: center;
+    gap: 2rem;
+    min-width: 0;
+  }
+  .site-title {
+    display: flex;
+    align-items: baseline;
+    font-size: 1.15rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--sl-color-white);
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .glyph {
+    color: var(--sl-color-accent);
+    font-size: 1.3rem;
+    line-height: 1;
+  }
+  .header-nav {
+    display: flex;
+    gap: 1.4rem;
+    font-size: var(--sl-text-sm);
+    white-space: nowrap;
+  }
+  .header-nav a {
+    color: var(--sl-color-gray-2);
+    text-decoration: none;
+    padding-block: 1.05rem;
+    border-bottom: 2px solid transparent;
+  }
+  .header-nav a:hover {
+    color: var(--sl-color-white);
+  }
+  .header-nav a[aria-current='page'] {
+    color: var(--sl-color-white);
+    border-bottom-color: var(--sl-color-accent);
+  }
+  @media (max-width: 50rem) {
+    .title-nav {
+      gap: 1rem;
+    }
+    .header-nav {
+      gap: 0.9rem;
+      font-size: var(--sl-text-xs);
+    }
+  }
+</style>

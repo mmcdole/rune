@@ -1,62 +1,60 @@
-/* Rune site theme: TokyoNight-derived ground, amber accent.
-   Matches the VHS recording theme so screenshots and site agree. */
+/* Rune site theme: neutral near-black ground, IBM Plex type, and a brass
+   accent reserved for the wordmark rune and active navigation. */
 
 :root {
-  --sl-font: Charter, 'Bitstream Charter', Georgia, Cambria, serif;
-  --sl-font-mono: ui-monospace, 'JetBrains Mono', 'Cascadia Code', 'Fira Code', Menlo, Consolas, monospace;
+  --sl-font: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --sl-font-mono: 'IBM Plex Mono', ui-monospace, Menlo, Consolas, monospace;
 }
 
 :root[data-theme='dark'] {
-  --sl-color-accent-low: #3b2f1a;
-  --sl-color-accent: #e0af68;
-  --sl-color-accent-high: #f0cf9a;
-  --sl-color-bg: #14151f;
-  --sl-color-bg-nav: #1b1d2b;
-  --sl-color-bg-sidebar: #16171f;
-  --sl-color-hairline: #2a2d42;
-  --sl-color-hairline-light: #2a2d42;
-  --sl-color-text: #c9cede;
-  --sl-color-text-accent: #e0af68;
-  --sl-color-white: #e6e9f5;
-  --sl-color-gray-1: #c9cede;
-  --sl-color-gray-2: #a9afc4;
-  --sl-color-gray-3: #7a8099;
-  --sl-color-gray-5: #22243474;
-  --sl-color-gray-6: #1b1d2b;
+  --sl-color-accent-low: #2c2516;
+  --sl-color-accent: #c8a25a;
+  --sl-color-accent-high: #e2c58c;
+  --sl-color-bg: #101211;
+  --sl-color-bg-nav: #101211;
+  --sl-color-bg-sidebar: #101211;
+  --sl-color-bg-inline-code: #161918;
+  --sl-color-hairline: #262b29;
+  --sl-color-hairline-light: #262b29;
+  --sl-color-hairline-shade: #0a0b0b;
+  --sl-color-text: #c9cdc6;
+  --sl-color-text-accent: #e1e4de;
+  --sl-color-white: #e1e4de;
+  --sl-color-gray-1: #c9cdc6;
+  --sl-color-gray-2: #a3aaa4;
+  --sl-color-gray-3: #8e958f;
+  --sl-color-gray-4: #5d645f;
+  --sl-color-gray-5: #262b29;
+  --sl-color-gray-6: #161918;
+  --sl-color-black: #101211;
 }
 
-:root[data-theme='light'] {
-  --sl-color-accent-low: #f4e3c2;
-  --sl-color-accent: #a5761f;
-  --sl-color-accent-high: #6e4e12;
+/* Links are underlined text, not accent-colored. */
+.sl-markdown-content a:not(.not-content *) {
+  color: var(--sl-color-white);
+  text-decoration-color: var(--sl-color-gray-4);
+  text-underline-offset: 3px;
+}
+.sl-markdown-content a:not(.not-content *):hover {
+  text-decoration-color: var(--sl-color-gray-2);
 }
 
-/* Headings in mono: the site's typographic identity. */
 .sl-markdown-content h1,
 .sl-markdown-content h2,
 .sl-markdown-content h3,
 .sl-markdown-content h4,
-h1[data-page-title],
-.site-title {
-  font-family: var(--sl-font-mono);
-  letter-spacing: -0.01em;
-}
-
-.site-title {
-  color: var(--sl-color-accent);
-  font-weight: 700;
-  font-size: 1.45rem;
+h1[data-page-title] {
+  letter-spacing: -0.015em;
 }
 
 .sl-markdown-content code:not(pre code) {
-  background: var(--sl-color-gray-6);
   border: 1px solid var(--sl-color-hairline);
-  border-radius: 4px;
-  padding: 0.08em 0.35em;
+  border-radius: 3px;
+  padding: 0.05em 0.3em;
 }
 
 /* Starlight's reset sets `code { overflow-wrap: anywhere }`, which lets short
-   inline-code chips (input, output, prompt) shatter mid-word — "outpu\nt" —
+   inline-code chips (input, output, prompt) shatter mid-word ("outpu\nt")
    when an auto-layout table squeezes their column to min-content. Keep code
    chips in tables whole; the table already scrolls on overflow. */
 .sl-markdown-content table code:not(pre code) {
@@ -65,12 +63,46 @@ h1[data-page-title],
   white-space: nowrap;
 }
 
+/* Sidebar: group labels as small caps-style headings, and a thin accent
+   marker for the current page instead of a filled pill. */
+.sidebar-content .group-label .large {
+  font-size: var(--sl-text-xs);
+  font-weight: 500;
+  color: var(--sl-color-gray-3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.sidebar-content a {
+  color: var(--sl-color-gray-2);
+  border-inline-start: 2px solid transparent;
+  border-radius: 0;
+}
+.sidebar-content a:hover {
+  color: var(--sl-color-white);
+}
+.sidebar-content a[aria-current='page'],
+.sidebar-content a[aria-current='page']:hover {
+  background: none;
+  color: var(--sl-color-white);
+  font-weight: 500;
+  border-inline-start-color: var(--sl-color-accent);
+}
+.sidebar-content ul ul {
+  border-inline-start: 0;
+}
+
+/* Table of contents: quiet, with the current heading in plain white. */
+starlight-toc a[aria-current='true'],
+starlight-toc a[aria-current='true']:hover {
+  color: var(--sl-color-white);
+}
+
 /* On wide viewports Starlight docks the 45rem article against the right-hand
    TOC (`--sl-content-margin-inline: auto 0`), piling all the slack into a big
    empty gap between the left nav and the text. Give the article more room and
    center it in its pane so the leftover splits into small, even margins. */
 :root {
-  --sl-content-width: 52rem;
+  --sl-content-width: 50rem;
 }
 @media (min-width: 72rem) {
   .content-panel .sl-container {
@@ -78,27 +110,28 @@ h1[data-page-title],
   }
 }
 
-/* Demote search to a compact icon button: the section nav is the
-   header's primary affordance, search the secondary one. The header's
-   middle column is 1fr wide, so right-align the icon within it to dock
-   it against the nav links instead of floating mid-header. */
+/* Pages without a sidebar (Get started) read as a single centered column.
+   The landing page sizes its own sections. */
+html:not([data-has-sidebar]):not(:has(.landing)) .content-panel .sl-container {
+  max-width: 46rem;
+  margin-inline: auto;
+}
+
+/* Header: the wordmark and section nav sit on the left (SiteTitle.astro);
+   search is a compact field docked against the social icons. */
 .header > .sl-flex:has(> site-search) {
   justify-content: flex-end;
 }
 site-search {
   flex-grow: 0;
-  margin-inline-start: auto;
 }
 site-search button[data-open-modal] {
-  width: auto;
   background: transparent;
-  border-color: transparent;
-  padding-inline: 0.5rem;
-}
-site-search button[data-open-modal] > span,
-site-search button[data-open-modal] > kbd {
-  display: none !important;
-}
-site-search button[data-open-modal]:hover {
   border-color: var(--sl-color-hairline);
+  border-radius: 4px;
+}
+@media (min-width: 50rem) {
+  site-search button[data-open-modal] {
+    min-width: 12rem;
+  }
 }

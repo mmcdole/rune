@@ -1,0 +1,62 @@
+---
+// PageTitle override: Get started pages list the section's pages as numbered
+// steps above the title, standing in for the sidebar they don't show.
+import Default from '@astrojs/starlight/components/PageTitle.astro';
+import { currentSection, groupLinks } from '../sections';
+
+const { sidebar } = Astro.locals.starlightRoute;
+const steps = currentSection(sidebar)?.label === 'Get started' ? groupLinks(sidebar, 'Get started') : [];
+---
+
+{
+  steps.length > 0 && (
+    <ol class="steps" aria-label="Get started">
+      {steps.map((s) => (
+        <li class:list={{ on: s.isCurrent }}>
+          <a href={s.href} aria-current={s.isCurrent ? 'page' : undefined}>
+            {s.label}
+          </a>
+        </li>
+      ))}
+    </ol>
+  )
+}
+<Default />
+
+<style>
+  .steps {
+    list-style: none;
+    counter-reset: step;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1.4rem;
+    margin: 0.5rem 0 0;
+    padding: 0 0 0.9rem;
+    border-bottom: 1px solid var(--sl-color-hairline);
+    font-size: var(--sl-text-sm);
+  }
+  .steps li {
+    counter-increment: step;
+  }
+  .steps li::before {
+    content: counter(step) '  ';
+    white-space: pre;
+    color: var(--sl-color-gray-3);
+    font-family: var(--sl-font-mono);
+    font-size: var(--sl-text-xs);
+  }
+  .steps a {
+    color: var(--sl-color-gray-2);
+    text-decoration: none;
+  }
+  .steps a:hover {
+    color: var(--sl-color-white);
+  }
+  .steps li.on a {
+    color: var(--sl-color-white);
+    font-weight: 500;
+  }
+  .steps li.on::before {
+    color: var(--sl-color-accent);
+  }
+</style>

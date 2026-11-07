@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Render the website demo gifs. Each tape gets a fresh demo MUD server
+# Render the demo recordings. Each tape gets a fresh demo MUD server
 # (per-scenario cues) and a fresh rune profile, so every run is
-# deterministic. Requires: vhs, ttyd, ffmpeg, vim, go.
+# deterministic. Only the README montage is published; the other tapes
+# render to out/. Requires: vhs, ttyd, ffmpeg, vim, go.
 #
-#   ./render.sh            # all tapes
+#   ./render.sh            # the README montage
 #   ./render.sh verbatim   # one tape
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -23,7 +24,7 @@ cp -r config "$DEMO_CONFIG"
 
 mkdir -p out out/raw
 tapes=("$@")
-[ ${#tapes[@]} -eq 0 ] && tapes=(pickers tab editor verbatim)
+[ ${#tapes[@]} -eq 0 ] && tapes=(montage)
 
 for name in "${tapes[@]}"; do
   echo "=== $name ==="
@@ -54,23 +55,9 @@ for name in "${tapes[@]}"; do
 done
 echo "done:" && ls -la out/*.gif out/*.mp4 2>/dev/null
 
-# Publish: site videos + posters into public/, README montage into .github/.
+# Publish: README montage into .github/.
 for name in "${tapes[@]}"; do
   case "$name" in
-    hero|pickers|verbatim|editor|tab)
-      cp "out/$name.mp4" ../public/demos/
-      # Poster = the frame that best sells the feature (what reduced-motion
-      # visitors see). Times track the tapes; re-tune if pacing changes.
-      case "$name" in
-        pickers)  poster=(-ss 15.2) ;;   # alias picker open
-        verbatim) poster=(-ss 14.5) ;;   # composer, three numbered lines
-        editor)   poster=(-ss 16.7) ;;   # letter back in the composer
-        tab)      poster=(-ss 7.5) ;;    # candidates cycling on status line
-        *)        poster=(-sseof -1.5) ;; # hero: chat console open
-      esac
-      ffmpeg -y -loglevel error "${poster[@]}" -i "out/$name.mp4" \
-        -frames:v 1 -q:v 3 "../public/demos/$name-poster.jpg"
-      ;;
     montage)
       cp out/montage.gif ../../.github/montage.gif
       ;;
