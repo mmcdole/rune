@@ -133,21 +133,22 @@ Enter your message. End with a '.' on a line by itself.</pre>
         <div class="split">
           <div class="main">
 <pre class="out"><b>Market Square</b>
-Stalls crowd the square under striped awnings, and a
-fountain splashes at its centre. Traders call out
-prices for furs and lamp oil.
-<span class="d">    There are four obvious exits: </span><span class="g">north, east, south and west</span>
-<span class="y">A town guard</span> stands here, watching the crowd.
+Stalls crowd the square under striped
+awnings, and a fountain splashes at
+its centre. Traders call out prices
+for furs and lamp oil.
+<span class="d">    Exits: </span><span class="g">north, east, south, west</span>
+<span class="y">A town guard</span> watches the crowd.
 <Fragment set:html={prompt342} />
 <span class="g">&gt; buy lamp oil</span>
-The trader hands you a flask of lamp oil.</pre>
+The trader hands you a flask of oil.</pre>
             <div class="hr"></div>
             <pre class="out">&gt; <span class="cursor">_</span></pre>
           </div>
           <div class="side">
 <pre class="hbox"><span class="ttl">chat</span><span class="y">[Chat]</span> Knubo: almost done
-<span class="c">[Tell]</span> Kralk: knife is ready
-<span class="y">[Chat]</span> Mirel: wts torches</pre>
+<span class="c">[Tell]</span> Kralk: knife ready
+<span class="y">[Chat]</span> Mirel: wts torch</pre>
 <pre class="hbox"><span class="ttl">map</span><span class="d">      [ ]---[ ]
        |
 [ ]---</span>[<span class="y">*</span>]<span class="d">---[ ]
@@ -180,8 +181,8 @@ the threshold.
 <span class="y">A skeletal guard</span> blocks
 the stairs.
 <span class="g">&gt; kill guard</span>
-You smash the skeletal guard.
-<span class="r">The guard's blade cuts Ozric.</span>
+You smash the guard.
+<span class="r">The guard cuts Ozric.</span>
 Ozric is bleeding badly.</pre>
             <div class="hr"></div>
             <pre class="out">&gt; heal ozric<span class="cursor">_</span></pre>
@@ -190,7 +191,7 @@ Ozric is bleeding badly.</pre>
 <pre class="hbox"><span class="ttl">tells</span>Kralk: knife is ready
 Ozric: heal me pls!!</pre>
 <pre class="hbox"><span class="ttl">chat</span><span class="y">[Chat]</span> Knubo: soon
-<span class="y">[Chat]</span> Mirel: wts torch</pre>
+<span class="y">[Chat]</span> Mirel: torch?</pre>
           </div>
         </div>
         <div class="hr"></div>
@@ -438,10 +439,11 @@ Ozric: heal me pls!!</pre>
       padding: 14px 16px 8px;
       font: 14px/1.4 var(--mono);
       color: var(--text);
-      overflow-x: auto;
+      overflow: hidden;
       min-width: 0;
       & > * { min-width: 62ch; }
       & .out, & .num, & .bar, & .hbox { white-space: pre; }
+      & .out { overflow: hidden; }
       & b { font-weight: 600; color: #eef0ea; }
     }
     & .rt[data-anim] { cursor: pointer; }
@@ -481,10 +483,10 @@ Ozric: heal me pls!!</pre>
       & > .ttl { position: absolute; top: -0.72em; left: 0; line-height: 1.4; }
     }
     & .split, & .tri { display: grid; }
-    & .split { grid-template-columns: minmax(0, 1fr) 30ch; }
+    & .split { grid-template-columns: minmax(0, 1fr) 27ch; }
     & .split.hid { grid-template-columns: minmax(0, 1fr) 0; }
     & .split.hid .side { display: none; }
-    & .tri { grid-template-columns: 16ch minmax(0, 1fr) 24ch; min-width: 86ch; }
+    & .tri { grid-template-columns: 14ch minmax(0, 1fr) 22ch; }
     & .main {
       display: grid;
       align-content: end;
@@ -509,10 +511,10 @@ Ozric: heal me pls!!</pre>
     & .col.right { border-left: 1px solid var(--t-line); }
     & .gauge {
       display: inline-block;
-      width: 18ch;
+      width: 14ch;
       height: 0.7em;
       background: var(--t-line);
-      &.short { width: 10ch; }
+      &.short { width: 8ch; }
       & i { display: block; height: 100%; }
       & .hp { width: 85%; background: var(--t-green); }
       & .ep { width: 81%; background: var(--t-blue); }
@@ -563,15 +565,10 @@ Ozric: heal me pls!!</pre>
       & span { font: 13px var(--mono); color: var(--brass); }
     }
 
-    /* Phones: scale terminals to fit instead of clipping them */
+    /* Narrow screens: every terminal shrinks at the same rate so 66 columns
+       (40em of Plex Mono) always fit, and they share one font size. */
     & .hero, & .feature, & .pair { container-type: inline-size; }
-    @container (max-width: 700px) {
-      & .rt { font-size: max(7px, calc((100cqw - 34px) / 38)); }
-      & .hero .rt { font-size: max(6.5px, calc((100cqw - 34px) / 49)); }
-    }
-    @container (max-width: 700px) {
-      & .pair .rt { font-size: max(6.5px, calc((100cqw - 34px) / 54)); }
-    }
+    & .rt { font-size: clamp(6.5px, (100cqw - 34px) / 40, 14px); }
     @media (max-width: 760px) {
       & .hero { padding-block: 40px 48px; gap: 32px; }
     }
