@@ -330,13 +330,8 @@ You drop an empty bottle.
   </section>
 
   <section class="closing">
-    <h2>Get started</h2>
-    <p>Install Rune, connect to a MUD, then save the world so you can reconnect by name.</p>
-    <div class="cmd"><span class="sh">$</span><span class="txt">go install github.com/mmcdole/rune/cmd/rune@latest</span></div>
-    <div class="cmd"><span class="sh">$</span><span class="txt">rune mud.arctic.org 2700</span></div>
-    <div class="cmd"><span class="sh">&gt;</span><span class="txt">/world add arctic mud.arctic.org 2700</span></div>
     <p class="more">
-      <a href={`${base}getting-started/first-session/`}>Your first session</a> · <a href={`${base}getting-started/migrating/`}>Coming from Mudlet, TinTin++, or MUSHclient</a>
+      <a href={`${base}getting-started/first-session/`}>Your first session</a> · <a href={`${base}getting-started/migrating/`}>Coming from another client</a>
     </p>
   </section>
 </div>
@@ -642,14 +637,9 @@ You drop an empty bottle.
     /* Closing */
     & .closing {
       border-top: 1px solid var(--rule);
-      padding-block: 36px 56px;
-      display: grid;
-      gap: 12px;
-      justify-items: center;
+      padding-block: 24px 56px;
       text-align: center;
-      & h2 { font-size: 24px; line-height: 1.25; font-weight: 600; color: var(--fg); }
       & p { color: var(--muted); }
-      & .cmd { width: 100%; max-width: 34rem; }
     }
 
     /* Terminals: Rune's own UI. Text shrinks with the card so 66 columns
