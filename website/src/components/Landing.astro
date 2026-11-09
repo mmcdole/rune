@@ -331,7 +331,8 @@ You drop an empty bottle.
 
   <section class="closing">
     <h2>Get started</h2>
-    <p>Connect from your shell, then save the world so you can reconnect by name.</p>
+    <p>Install Rune, connect to a MUD, then save the world so you can reconnect by name.</p>
+    <div class="cmd"><span class="sh">$</span><span class="txt">go install github.com/mmcdole/rune/cmd/rune@latest</span></div>
     <div class="cmd"><span class="sh">$</span><span class="txt">rune mud.arctic.org 2700</span></div>
     <div class="cmd"><span class="sh">&gt;</span><span class="txt">/world add arctic mud.arctic.org 2700</span></div>
     <p class="more">
@@ -644,7 +645,8 @@ You drop an empty bottle.
       padding-block: 36px 56px;
       display: grid;
       gap: 12px;
-      justify-items: start;
+      justify-items: center;
+      text-align: center;
       & h2 { font-size: 24px; line-height: 1.25; font-weight: 600; color: var(--fg); }
       & p { color: var(--muted); }
       & .cmd { width: 100%; max-width: 34rem; }
