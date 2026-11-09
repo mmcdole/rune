@@ -1,15 +1,15 @@
 ---
 title: Quake-Style Chat Console
-description: A top pane for tells and channels, toggled with backtick, so nothing scrolls away in combat spam.
+description: A top pane for tells and channels, toggled with tilde, so nothing scrolls away in combat spam.
 ---
 
-Hit `` ` `` and a chat pane opens above the output pane with every
+Hit `~` and a chat pane opens above the output pane with every
 tell and channel message you've received; hit it again and it's gone. Tells
 can't scroll away under combat spam, and they're all in one place when you
 come back to the keyboard.
 
 ```lua
-rune.bind("`", function()
+rune.bind("~", function()
     rune.pane.toggle("chat")
 end)
 
@@ -45,8 +45,8 @@ rune.ui.layout({
 ## How it works
 
 - The [pane](/interface/panes/) accumulates writes whether visible or
-  not; `` ` `` only toggles visibility. A bound printable key fires only on
-  an empty input line, so typing backtick mid-sentence still works, and a
+  not; `~` only toggles visibility. A bound printable key fires only on
+  an empty input line, so typing a tilde mid-sentence still works, and a
   hidden pane takes no screen space.
 - The [triggers](/scripting/triggers/) mirror matching lines into the
   pane, restyled compactly. They don't gag, so chat still appears inline
