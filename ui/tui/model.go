@@ -292,32 +292,32 @@ func (m *Model) scrollPane(name string, scroll func(pane)) {
 // output window. Matches the common terminal-emulator default.
 const wheelScrollLines = 3
 
-// wheelPane is the named pane under the pointer, or nil when the pointer is
-// over the output window or anything that isn't a named pane.
-func (m *Model) wheelPane(x, y int) pane {
+// wheelPane returns the name of the pane under the pointer, or "" when the
+// pointer is over the output window or a leaf that is not a pane.
+func (m *Model) wheelPane(x, y int) string {
 	pt := image.Pt(x, y)
 	for _, leaf := range m.layoutPlan.leaves {
 		if !pt.In(leaf.outer) {
 			continue
 		}
-		if p, ok := leaf.widget.(*widget.Pane); ok {
-			return p
+		if leaf.node.Type == ui.LayoutTypePane && leaf.node.Name != ui.OutputPaneName {
+			return leaf.node.Name
 		}
-		return nil
+		return ""
 	}
-	return nil
+	return ""
 }
 
-// handleMouseWheel scrolls the named pane under the pointer. Elsewhere it
-// moves the search selection while search is open and scrolls the output
-// window otherwise.
+// handleMouseWheel scrolls the pane under the pointer when it is not the
+// output window. Elsewhere it moves the search selection while search is open
+// and scrolls the output window otherwise.
 func (m *Model) handleMouseWheel(msg tea.MouseWheelMsg) {
-	if p := m.wheelPane(msg.X, msg.Y); p != nil {
+	if name := m.wheelPane(msg.X, msg.Y); name != "" {
 		switch msg.Button {
 		case tea.MouseWheelUp:
-			p.ScrollUp(wheelScrollLines)
+			m.scrollPane(name, func(p pane) { p.ScrollUp(wheelScrollLines) })
 		case tea.MouseWheelDown:
-			p.ScrollDown(wheelScrollLines)
+			m.scrollPane(name, func(p pane) { p.ScrollDown(wheelScrollLines) })
 		}
 		return
 	}
