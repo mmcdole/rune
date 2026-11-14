@@ -1,5 +1,7 @@
 package session
 
+import "github.com/mmcdole/rune/text"
+
 type promptOverlayDisplay interface {
 	CommitPrompt(string)
 	SetPrompt(string)
@@ -44,13 +46,18 @@ func (p *promptOverlay) commitIfConfirmed() {
 	}
 }
 
-// commit moves the active prompt overlay to scrollback. It returns true even
-// when Lua gagged the overlay text.
+// commit moves the active prompt overlay to scrollback. Overlay text without
+// printable content, such as a Lua rewrite to a bare colour code, adds no
+// scrollback row. It returns true even when Lua gagged the overlay text.
 func (p *promptOverlay) commit() bool {
 	if !p.active {
 		return false
 	}
-	p.display.CommitPrompt(p.text)
+	committed := p.text
+	if !text.HasContent(committed) {
+		committed = ""
+	}
+	p.display.CommitPrompt(committed)
 	p.reset()
 	return true
 }

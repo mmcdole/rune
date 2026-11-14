@@ -2,6 +2,8 @@ package session
 
 import (
 	"bytes"
+
+	"github.com/mmcdole/rune/text"
 )
 
 // partialLineBuffer owns the partial server line. It joins application data
@@ -68,23 +70,42 @@ func (b *partialLineBuffer) appendData(data []byte) []string {
 	return lines
 }
 
-// peek returns the partial line without consuming it.
+// hasPartialLine reports whether the buffered bytes form a partial line: text
+// with printable content. Bytes without content, such as a colour reset after
+// the last delimiter or an escape sequence split across reads, are only the
+// start of the next line. They are never observed, confirmed, or finished as
+// a prompt; they stay buffered and become part of that line's raw text.
+func (b *partialLineBuffer) hasPartialLine() bool {
+	return text.HasContent(b.buffer.Bytes())
+}
+
+// peek returns the partial line without consuming it, or "" when there is none.
 func (b *partialLineBuffer) peek() string {
+	if !b.hasPartialLine() {
+		return ""
+	}
 	return b.buffer.String()
 }
 
-// take clears and returns the partial line.
+// take clears and returns the partial line at a prompt boundary. Without a
+// partial line it returns "" and keeps any buffered bytes.
 func (b *partialLineBuffer) take() string {
-	text := b.buffer.String()
+	if !b.hasPartialLine() {
+		return ""
+	}
+	line := b.buffer.String()
 	b.buffer.Reset()
-	return text
+	return line
 }
 
-// discard drops the partial line at a local boundary. pendingPartner
-// survives: a swallowed delimiter partner belongs to the previous completed
-// line, which a local boundary does not affect.
+// discard drops the partial line at a local boundary. Buffered bytes without
+// content survive, because the next server line begins with them.
+// pendingPartner survives too: a swallowed delimiter partner belongs to the
+// previous completed line, which a local boundary does not affect.
 func (b *partialLineBuffer) discard() {
-	b.buffer.Reset()
+	if b.hasPartialLine() {
+		b.buffer.Reset()
+	}
 }
 
 // reset drops the partial line and any pending delimiter partner, for a new

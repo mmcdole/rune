@@ -28,7 +28,9 @@ Refused (not implemented): MCCP3, MSSP, ZMP, MXP, MSP, LINEMODE.
 ## Ordering and prompt boundaries
 
 Rune does not guess prompts from text patterns or timers. Server text ending in
-a newline or bare CR is ordinary output. A partial line is exposed through
+a newline or bare CR is ordinary output. Text after the last newline is a
+partial line once it contains something printable; escape sequences alone
+are held as the start of the next line. A partial line is exposed through
 the `prompt` hook with `confirmed = false`; a following Telnet GA or EOR prompt
 boundary consumes it through the same hook with `confirmed = true`. When a
 partial line and its prompt boundary arrive in one event batch, Rune emits only

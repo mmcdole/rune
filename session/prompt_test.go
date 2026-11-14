@@ -1,7 +1,9 @@
 package session
 
 import (
+	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/mmcdole/rune/network"
@@ -525,5 +527,140 @@ func TestCRBeforePromptBoundaryIsAlwaysAnOrdinaryLine(t *testing.T) {
 			}
 			assertSessionLua(t, s.engine, `assert(prompt_count == 0)`)
 		})
+	}
+}
+
+// Bytes after the last delimiter that print nothing are the start of the next
+// line, not a prompt: no prompt hook, overlay, or commit, and the next line's
+// raw text begins with them unchanged.
+func TestContentlessTailIsNotAPrompt(t *testing.T) {
+	const reset = "\x1b[0m"
+	for _, tt := range []struct {
+		name    string
+		deliver func(*Session) // server bytes after "Hello\r\n", then the local boundary
+		wantRaw string         // raw text of the next server line, "Next"
+	}{
+		{
+			name: "submission",
+			deliver: func(s *Session) {
+				serverData(s, reset)
+				userInput(s, "look")
+			},
+			wantRaw: reset + "Next",
+		},
+		{
+			name: "GA in the same batch",
+			deliver: func(s *Session) {
+				serverBatch(s,
+					network.TelnetEvent{Kind: network.TelnetEventData, Data: []byte(reset)},
+					network.TelnetEvent{Kind: network.TelnetEventIAC, Command: network.CmdGA},
+				)
+				userInput(s, "look")
+			},
+			wantRaw: reset + "Next",
+		},
+		{
+			name: "EOR in a later batch",
+			deliver: func(s *Session) {
+				serverData(s, reset)
+				serverEOR(s)
+				userInput(s, "look")
+			},
+			wantRaw: reset + "Next",
+		},
+		{
+			name: "non-SGR escapes",
+			deliver: func(s *Session) {
+				serverData(s, "\x1b]0;title\x07\x1b[2J")
+				userInput(s, "look")
+			},
+			wantRaw: "\x1b]0;title\x07\x1b[2JNext",
+		},
+		{
+			name: "escape split across reads",
+			deliver: func(s *Session) {
+				serverData(s, "\x1b[1;3")
+				userInput(s, "look")
+				serverData(s, "1m")
+			},
+			wantRaw: "\x1b[1;31mNext",
+		},
+		{
+			name: "accepted send from an output trigger in the same batch",
+			deliver: func(s *Session) {
+				serverData(s, "E2E-SEND\r\n"+reset)
+			},
+			wantRaw: reset + "Next",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			s, net, uiMock := newTestSession(t)
+			net.connected = true
+			if err := s.engine.DoString("observe", `
+				prompts = 0
+				raws = {}
+				rune.hooks.on("prompt", function() prompts = prompts + 1 end)
+				rune.hooks.on("output", function(line) raws[#raws + 1] = line:raw() end)
+				rune.trigger.exact("E2E-SEND", "look")
+			`); err != nil {
+				t.Fatal(err)
+			}
+
+			uiMock.drainDisplayEvents()
+			completeLine(s, "Hello")
+			tt.deliver(s)
+			for _, event := range uiMock.drainDisplayEvents() {
+				if event != "print:Hello" && event != "print:E2E-SEND" && !strings.HasPrefix(event, "echo:") {
+					t.Fatalf("contentless tail reached the display: %q", event)
+				}
+			}
+			if sent := net.drainSent(); !contains(sent, "look") {
+				t.Fatalf("sent = %q, want look", sent)
+			}
+
+			completeLine(s, "Next")
+			assertSessionLua(t, s.engine, `
+				assert(prompts == 0, "prompt hook ran " .. prompts)
+				assert(raws[#raws] == `+luaString(tt.wantRaw)+`, raws[#raws])
+			`)
+		})
+	}
+}
+
+// luaString renders s as a Lua string literal that every backend reads back
+// byte for byte.
+func luaString(s string) string {
+	var b strings.Builder
+	b.WriteByte('"')
+	for i := 0; i < len(s); i++ {
+		fmt.Fprintf(&b, "\\%d", s[i])
+	}
+	b.WriteByte('"')
+	return b.String()
+}
+
+// A server-delimited line is a line even when it prints nothing.
+func TestDelimitedContentlessLineIsABlankLine(t *testing.T) {
+	s, _, uiMock := newTestSession(t)
+	serverData(s, "\x1b[0m\r\n")
+	if printed := uiMock.drainPrinted(); !slices.Equal(printed, []string{"\x1b[0m"}) {
+		t.Fatalf("printed = %q, want one blank row", printed)
+	}
+}
+
+// A prompt rewritten to text with no content is gagged in scrollback.
+func TestPromptRewrittenWithoutContentCommitsNoRow(t *testing.T) {
+	s, net, uiMock := newTestSession(t)
+	net.connected = true
+	if err := s.engine.DoString("rewrite", `
+		rune.hooks.on("prompt", function() return "\27[0m" end, { priority = 1 })
+	`); err != nil {
+		t.Fatal(err)
+	}
+	serverData(s, "HP> ")
+	uiMock.drainPrinted()
+	userInput(s, "look")
+	if printed := uiMock.drainPrinted(); len(printed) != 0 {
+		t.Fatalf("printed = %q, want no committed row", printed)
 	}
 }

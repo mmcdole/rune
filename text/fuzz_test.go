@@ -61,7 +61,8 @@ func FuzzSanitizeDisplay(f *testing.F) {
 	})
 }
 
-// FuzzStripANSI: trigger text contains no ESC and stripping is idempotent.
+// FuzzStripANSI: trigger text contains no ESC, stripping is idempotent, and
+// HasContent agrees with the stripped text.
 //
 //	go test ./text -run '^$' -fuzz FuzzStripANSI -fuzztime 2m
 func FuzzStripANSI(f *testing.F) {
@@ -75,6 +76,12 @@ func FuzzStripANSI(f *testing.F) {
 		}
 		if again := StripANSI(out); again != out {
 			t.Fatalf("not idempotent: %q -> %q -> %q", s, out, again)
+		}
+		want := strings.IndexFunc(out, func(r rune) bool {
+			return r == '\t' || r >= 0x20 && r != 0x7f
+		}) >= 0
+		if got := HasContent(s); got != want {
+			t.Fatalf("HasContent(%q) = %v, but StripANSI gives %q", s, got, out)
 		}
 	})
 }

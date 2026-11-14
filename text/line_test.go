@@ -42,6 +42,35 @@ func TestStripANSI(t *testing.T) {
 	}
 }
 
+func TestHasContent(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{"empty", "", false},
+		{"text", "HP> ", true},
+		{"space", " ", true},
+		{"tab", "\t", true},
+		{"sgr reset", "\x1b[0m", false},
+		{"sgr run", "\x1b[0m\x1b[1;31m", false},
+		{"text after sgr", "\x1b[31mred", true},
+		{"cursor and clear", "\x1b[2J\x1b[H", false},
+		{"osc title", "\x1b]0;title\x07", false},
+		{"unterminated csi", "\x1b[0", false},
+		{"bare esc", "\x1b", false},
+		{"bell", "\x07", false},
+		{"utf8 after sgr", "\x1b[0m→", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := HasContent(tc.in); got != tc.want {
+				t.Errorf("HasContent(%q) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestNewLine(t *testing.T) {
 	l := NewLine("\x1b[32mYou see a rat.\x1b[0m")
 	if l.Raw != "\x1b[32mYou see a rat.\x1b[0m" {
