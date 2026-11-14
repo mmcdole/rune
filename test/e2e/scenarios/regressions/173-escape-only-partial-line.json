@@ -3,6 +3,7 @@
   "scenarios": [
     {
       "name": "a colour reset after a newline is not committed as a blank line on submit",
+      "issue": "https://github.com/mmcdole/rune/issues/173",
       "init_lua": [
         "rune.hooks.on('output', function(line)",
         "  if line:raw() == '\\27[0;39;49mE2E-NEXT' then rune.echo('E2E-RAW-KEPT') end",
@@ -24,6 +25,7 @@
     },
     {
       "name": "a GA prompt made only of escape sequences is not committed as a blank line",
+      "issue": "https://github.com/mmcdole/rune/issues/173",
       "steps": [
         { "connect": true },
         {
