@@ -68,6 +68,36 @@ func TestMatcherNoMatchReturnsNil(t *testing.T) {
 	}
 }
 
+func TestMatcherSkipsInactivePatterns(t *testing.T) {
+	engine, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	assertLua(t, engine, `
+		local m = rune._regex.matcher({
+			{ mode = "contains", pattern = "troll" },
+			{ mode = "regex", pattern = "^You (\\w+)" },
+			{ mode = "starts", pattern = "You" },
+		})
+		local line = "You hit the troll."
+		local pos, caps = m:match(line, line, 1)
+		assert(#pos == 3, "all active: " .. #pos)
+
+		m:set_active({ true, false, true })
+		pos, caps = m:match(line, line, 1)
+		assert(#pos == 2 and pos[1] == 1 and pos[2] == 3, "inactive skipped")
+		assert(#caps[1] == 0 and #caps[2] == 0, "captures stay parallel")
+
+		m:set_active({ false, false, false })
+		assert(m:match(line, line, 1) == nil, "none active: no results")
+
+		m:set_active({ true, true, true })
+		pos = m:match(line, line, 1)
+		assert(#pos == 3, "reactivated: " .. #pos)
+
+		assert(not pcall(m.set_active, m, { true }), "wrong length raises")
+	`)
+}
+
 func TestMatcherSpecErrorsRaise(t *testing.T) {
 	engine, _, cleanup := setupTest(t)
 	defer cleanup()

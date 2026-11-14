@@ -97,6 +97,29 @@ func TestPromptTriggerDispatch(t *testing.T) {
 	`)
 }
 
+// The prompt pass, like the output pass, sees a trigger that an earlier
+// action enabled on the same prompt.
+func TestPromptTriggerEnabledMidPrompt(t *testing.T) {
+	engine, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	if err := engine.DoString("setup", `
+		later_fired = 0
+		local later = rune.trigger.exact("HP>", function()
+			later_fired = later_fired + 1
+		end, { on = "prompt", priority = 20 })
+		later:disable()
+		rune.trigger.exact("HP>", function() later:enable() end,
+			{ on = "prompt", priority = 10 })
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	engine.OnPrompt(text.NewLine("HP>"), true)
+
+	assertLua(t, engine, `assert(later_fired == 1, "later fired: " .. later_fired)`)
+}
+
 func TestPromptTriggerOptionsValidate(t *testing.T) {
 	for _, tc := range []struct {
 		name string
