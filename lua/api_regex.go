@@ -96,6 +96,24 @@ func (e *Engine) registerRegexFuncs() {
 			c.Return(script.Tree{V: pos}, script.Tree{V: caps})
 			return nil
 		},
+
+		// m:set_active(flags) marks each pattern active or inactive from an
+		// array of booleans, one per pattern in order; match skips inactive
+		// patterns. The trigger module calls it when the registry changes.
+		"set_active": func(c *script.Call) error {
+			m, ok := c.Payload(1).(matcher)
+			if !ok {
+				return c.Errorf("matcher expected")
+			}
+			flags := c.Table(2)
+			if flags.Len() != len(m) {
+				return c.Errorf("set_active: %d flags expected", len(m))
+			}
+			for i := range m {
+				m[i].off = !flags.Index(i + 1).Truthy()
+			}
+			return nil
+		},
 	})
 
 	e.vm.RegisterModule("rune._regex", map[string]script.GoFunc{
