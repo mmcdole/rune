@@ -123,7 +123,10 @@ end)
 
 If the text turns out to be an ordinary line, it arrives once more through
 `output` as a complete line, and that complete line replaces its partial line.
-An empty prompt boundary does not fire `prompt`. Rune uses no timer or prompt
+Text after the last newline that prints nothing, such as a color reset, is not
+a partial line: it never fires `prompt`, and it stays at the start of the next
+line, so that line's `line:raw()` begins with it. A prompt boundary with no
+partial line does not fire `prompt`. Rune uses no timer or prompt
 pattern to infer one. A confirmed prompt is committed before later server text
 and closes open spans before `prompt` handlers run, so span actions have
 already fired by the time your handler sees the prompt.

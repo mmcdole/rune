@@ -102,3 +102,68 @@ func StripANSI(s string) string {
 
 	return b.String()
 }
+
+// HasContent reports whether s contains text a terminal would print: a byte
+// outside every escape sequence that is not a terminal-control character.
+// Whitespace, including tab, is content. A string of only escape sequences
+// and controls, including an unterminated escape, has none.
+//
+// HasContent(s) is equivalent to StripANSI(s) containing a tab or a byte
+// >= 0x20 other than DEL; the states mirror StripANSI, but the scan stops at
+// the first such byte without allocating.
+func HasContent[S ~string | ~[]byte](s S) bool {
+	state := stText
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch state {
+		case stText:
+			switch {
+			case c == 0x1b:
+				state = stEsc
+			case c == '\t' || c >= 0x20 && c != 0x7f:
+				return true
+			}
+
+		case stEsc:
+			switch {
+			case c == '[':
+				state = stCSI
+			case c == ']' || c == 'P' || c == 'X' || c == '^' || c == '_':
+				state = stString
+			case c == 0x1b || c >= 0x20 && c <= 0x2f:
+				// Restart or intermediate byte: still in the escape
+			default:
+				state = stText
+			}
+
+		case stCSI:
+			switch {
+			case c >= 0x40 && c <= 0x7e:
+				state = stText
+			case c == 0x1b:
+				state = stEsc
+			case c == '\t':
+				// StripANSI keeps C0 controls embedded in CSI; tab is content
+				return true
+			}
+
+		case stString:
+			switch c {
+			case 0x07:
+				state = stText
+			case 0x1b:
+				state = stStringEsc
+			}
+
+		case stStringEsc:
+			switch c {
+			case '\\':
+				state = stText
+			case 0x1b:
+			default:
+				state = stString
+			}
+		}
+	}
+	return false
+}

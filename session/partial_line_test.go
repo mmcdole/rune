@@ -95,6 +95,25 @@ func TestPartialLineBufferDiscard(t *testing.T) {
 	}
 }
 
+// Bytes without content are not a partial line: prompt boundaries and local
+// boundaries leave them to begin the next line.
+func TestPartialLineBufferKeepsContentlessTailForNextLine(t *testing.T) {
+	var partialLine partialLineBuffer
+	partialLine.appendData([]byte("done\r\n\x1b[0m\x1b["))
+
+	if got := partialLine.peek(); got != "" {
+		t.Fatalf("peek = %q, want no partial line", got)
+	}
+	if got := partialLine.take(); got != "" {
+		t.Fatalf("take = %q, want no partial line", got)
+	}
+	partialLine.discard()
+
+	if lines := partialLine.appendData([]byte("1mnext\r\n")); len(lines) != 1 || lines[0] != "\x1b[0m\x1b[1mnext" {
+		t.Fatalf("next line = %q, want escapes kept at its start", lines)
+	}
+}
+
 func TestPartialLineBufferResetClearsDelimiterState(t *testing.T) {
 	var partialLine partialLineBuffer
 	partialLine.appendData([]byte("old\r"))

@@ -1,0 +1,42 @@
+{
+  "description": "Regression: an escape sequence after the last newline (a colour reset, for example) was treated as a partial line. It was shown as an invisible prompt, and a submission before more server text committed it to scrollback as a blank line. Bytes with no printable text are not a prompt; they stay in the line assembler and begin the next server line.",
+  "scenarios": [
+    {
+      "name": "a colour reset after a newline is not committed as a blank line on submit",
+      "issue": "https://github.com/mmcdole/rune/issues/173",
+      "init_lua": [
+        "rune.hooks.on('output', function(line)",
+        "  if line:raw() == '\\27[0;39;49mE2E-NEXT' then rune.echo('E2E-RAW-KEPT') end",
+        "end)"
+      ],
+      "steps": [
+        { "connect": true },
+        {
+          "server_bytes": [69, 50, 69, 45, 72, 69, 76, 76, 79, 13, 10, 27, 91, 48, 59, 51, 57, 59, 52, 57, 109],
+          "note": "E2E-HELLO CR LF, then ESC[0;39;49m with no text after it, in one server write"
+        },
+        { "expect_printed": "E2E-HELLO" },
+        { "type": "look" },
+        { "expect_sent": "look", "note": "the submission has finished the partial line before its send" },
+        { "expect_not_printed": "\u001b[0;39;49m", "note": "no blank row was committed for the escape-only bytes" },
+        { "server_line": "E2E-NEXT" },
+        { "expect_printed": "E2E-RAW-KEPT", "note": "the escape begins the next line's raw text, unmodified" }
+      ]
+    },
+    {
+      "name": "a GA prompt made only of escape sequences is not committed as a blank line",
+      "issue": "https://github.com/mmcdole/rune/issues/173",
+      "steps": [
+        { "connect": true },
+        {
+          "server_bytes": [69, 50, 69, 45, 71, 65, 13, 10, 27, 91, 48, 59, 51, 57, 59, 52, 57, 109, 255, 249],
+          "note": "E2E-GA CR LF, then ESC[0;39;49m IAC GA in one server write"
+        },
+        { "expect_printed": "E2E-GA" },
+        { "type": "look" },
+        { "expect_sent": "look" },
+        { "expect_not_printed": "\u001b[0;39;49m" }
+      ]
+    }
+  ]
+}

@@ -292,6 +292,16 @@ the end of an event or batch; an optional following LF is swallowed even when
 it arrives in a later event or batch. Because the buffer and Protocol are
 confined to Session, neither needs a mutex.
 
+A line is the raw bytes between delimiters; a delimited line is output even
+when it prints nothing (`\x1b[0m\r\n` is a blank line). The bytes after the
+last delimiter form a partial line only when they have content: a byte
+outside every escape sequence that is not a terminal control
+(`text.HasContent`). Content-free bytes, such as a color reset or an escape
+split across reads, are the start of the next line. They are never observed,
+confirmed, committed, or discarded as a prompt; they stay buffered until a
+connection change and appear unchanged at the start of the next line's raw
+text. Every prompt rule below applies only to a partial line with content.
+
 Session turns those facts into Rune events:
 
 | Observation | Session behavior |
