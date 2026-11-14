@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"image"
 	"os"
 	"time"
 
@@ -291,9 +292,35 @@ func (m *Model) scrollPane(name string, scroll func(pane)) {
 // output window. Matches the common terminal-emulator default.
 const wheelScrollLines = 3
 
-// handleMouseWheel moves the search selection while search is open and
-// scrolls the output window otherwise.
+// wheelPane returns the name of the pane under the pointer, or "" when the
+// pointer is over the output window or a leaf that is not a pane.
+func (m *Model) wheelPane(x, y int) string {
+	pt := image.Pt(x, y)
+	for _, leaf := range m.layoutPlan.leaves {
+		if !pt.In(leaf.outer) {
+			continue
+		}
+		if leaf.node.Type == ui.LayoutTypePane && leaf.node.Name != ui.OutputPaneName {
+			return leaf.node.Name
+		}
+		return ""
+	}
+	return ""
+}
+
+// handleMouseWheel scrolls the pane under the pointer when it is not the
+// output window. Elsewhere it moves the search selection while search is open
+// and scrolls the output window otherwise.
 func (m *Model) handleMouseWheel(msg tea.MouseWheelMsg) {
+	if name := m.wheelPane(msg.X, msg.Y); name != "" {
+		switch msg.Button {
+		case tea.MouseWheelUp:
+			m.scrollPane(name, func(p pane) { p.ScrollUp(wheelScrollLines) })
+		case tea.MouseWheelDown:
+			m.scrollPane(name, func(p pane) { p.ScrollDown(wheelScrollLines) })
+		}
+		return
+	}
 	switch msg.Button {
 	case tea.MouseWheelUp:
 		if !m.inputCtl.selectOlderSearch() {

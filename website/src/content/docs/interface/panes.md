@@ -97,7 +97,8 @@ See [Layout & UI](/interface/layout/) for nested sidebars and size constraints.
 ## Scrolling
 
 Every pane scrolls its own buffer. The default PageUp, PageDown, Ctrl+Home, and
-Ctrl+End bindings target the reserved `output` pane.
+Ctrl+End bindings target the reserved `output` pane. With mouse capture on (the
+`mouse` setting), the wheel scrolls whichever pane is under the pointer.
 
 ```lua
 rune.pane.scroll_up("output", 20)

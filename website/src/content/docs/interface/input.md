@@ -130,8 +130,9 @@ rune.config.set("mouse", true)
 
 The change takes effect immediately and does not require a restart. Put it in
 `init.lua` to enable it on each start. While capture is enabled, each wheel tick
-scrolls three lines and most terminals require holding `Shift` while dragging
-for native text selection.
+scrolls three lines of the pane under the pointer (the output anywhere else),
+and most terminals require holding `Shift` while dragging for native text
+selection.
 
 <span id="multiline-verbatim-composer"></span>
 
@@ -236,7 +237,8 @@ call `rune.send` or `rune.send_raw` and return `false` to consume the original l
 
 The draft editor handles editing keys locally. `Up`/`Down`
 move through the draft's visual rows, `PageUp`/`PageDown` move by a draft editor
-page, and the mouse wheel still scrolls output when mouse capture is enabled.
+page, and the mouse wheel still scrolls the output (or the pane under the
+pointer) when mouse capture is enabled.
 The ordinary one-line input and its bindings return after the draft editor closes.
 
 Recalling a verbatim entry from history restores the draft editor, even when that
