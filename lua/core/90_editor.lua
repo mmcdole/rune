@@ -57,19 +57,20 @@ local function history_reset()
     history_state.draft = command_entry("")
 end
 
-local function history_up()
-    local history = rune._history.entries()
-    if #history == 0 then
-        return
-    end
+-- Entries are found in Go one at a time (rune._history.find), so Up and
+-- Down never copy the whole history into Lua.
 
+-- The input still shows the entry at the current position: not edited,
+-- cleared, or trimmed out of history since it was restored.
+local function at_current_entry()
+    local pos, text = rune._history.find("", history_state.index, 1)
+    return pos ~= nil and rune.input.get() == text
+end
+
+local function history_up()
     -- If input was externally modified (Ctrl+C, manual edit), reset state
-    if history_state.index > 0 then
-        local current = rune.input.get()
-        local expected = history[#history - history_state.index + 1]
-        if current ~= expected.text then
-            history_reset()
-        end
+    if history_state.index > 0 and not at_current_entry() then
+        history_reset()
     end
 
     -- Save draft on first navigation
@@ -77,29 +78,14 @@ local function history_up()
         history_state.draft = command_entry(rune.input.get())
     end
 
-    local prefix = history_state.draft.text
-
-    -- Search backwards from current position
-    local start = history_state.index + 1
-    if start > #history then
-        return -- Already at oldest
-    end
-
-    if prefix ~= "" then
-        -- Prefix matching: find next entry that starts with prefix
-        for i = start, #history do
-            local entry = history[#history - i + 1] -- history is oldest-first
-            if entry.text:sub(1, #prefix) == prefix then
-                history_state.index = i
-                restore_history_entry(entry)
-                return
-            end
-        end
-        -- No match found, stay where we are
-    else
-        -- No prefix: cycle through all history
-        history_state.index = start
-        restore_history_entry(history[#history - start + 1])
+    -- Search backwards from the current position for the next entry that
+    -- starts with the draft (an empty draft matches every entry). No match,
+    -- or already at the oldest: stay where we are.
+    local pos, text, mode = rune._history.find(
+        history_state.draft.text, history_state.index + 1, 1)
+    if pos then
+        history_state.index = pos
+        rune._input.restore(text, mode)
     end
 end
 
@@ -108,41 +94,22 @@ local function history_down()
         return -- Already at draft
     end
 
-    local history = rune._history.entries()
-
     -- If input was externally modified (Ctrl+C, manual edit), reset state
-    local current = rune.input.get()
-    local expected = history[#history - history_state.index + 1]
-    if current ~= expected.text then
+    if not at_current_entry() then
         history_reset()
         return -- Now at draft, can't go down further
     end
 
-    local prefix = history_state.draft.text
-
-    if prefix ~= "" then
-        -- Prefix matching: find next newer entry that starts with prefix
-        for i = history_state.index - 1, 1, -1 do
-            local entry = history[#history - i + 1]
-            if entry.text:sub(1, #prefix) == prefix then
-                history_state.index = i
-                restore_history_entry(entry)
-                return
-            end
-        end
-        -- No more matches - return to draft
+    -- Search forwards for the next newer entry that starts with the draft
+    -- (an empty draft matches every entry). None left: back to the draft.
+    local pos, text, mode = rune._history.find(
+        history_state.draft.text, history_state.index - 1, -1)
+    if pos then
+        history_state.index = pos
+        rune._input.restore(text, mode)
+    else
         history_state.index = 0
         restore_history_entry(history_state.draft)
-    else
-        -- No prefix: cycle through history
-        if history_state.index == 1 then
-            -- Back to draft
-            history_state.index = 0
-            restore_history_entry(history_state.draft)
-        else
-            history_state.index = history_state.index - 1
-            restore_history_entry(history[#history - history_state.index + 1])
-        end
     end
 end
 
