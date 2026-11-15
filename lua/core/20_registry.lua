@@ -35,8 +35,9 @@
 --
 -- on_change runs after anything that can change which entries are active:
 -- add, remove, enable, disable, toggle, and a group switch covering one of
--- its entries. Registries whose state the UI renders (binds, bars) use it
--- to mark their snapshot stale; dispatch-only registries leave it unset.
+-- its entries. Registries that keep state derived from that (a rendered
+-- snapshot, a compiled matcher) use it to mark the state stale; others
+-- leave it unset.
 --
 -- Handle API: :enable() :disable() :remove() :name() :group() :action()
 

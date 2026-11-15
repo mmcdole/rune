@@ -35,7 +35,15 @@
 --       (collected line objects); their return values are ignored, since
 --       the collected lines have already been displayed.
 
-local registry = rune.registry.new{ kind = "trigger" }
+-- Bumped on anything that can change which triggers are active (add,
+-- remove, enable, disable, a group switch); passes resync their matcher's
+-- active flags when it has moved.
+local changes = 0
+
+local registry = rune.registry.new{
+    kind = "trigger",
+    on_change = function() changes = changes + 1 end,
+}
 
 -- Match modes
 local MODE_EXACT = "exact"
@@ -180,10 +188,12 @@ function rune.trigger.count()
 end
 
 -- Matching runs in Go: each pass (output, prompt) has a Matcher that tests
--- a line against every trigger of the pass in one call and returns the
--- positions that match. Everything a match means (enabled, groups, spans,
--- gags, rewrites, once) is decided here. Passes are rebuilt when the registry
+-- a line against every active trigger of the pass in one call and returns
+-- the positions that match, so disabled triggers cost nothing. Everything
+-- else a match means (spans, gags, rewrites, once) is decided here, and
+-- active() is still checked per visit. Passes are rebuilt when the registry
 -- list changes; the registry replaces that list on every add and remove.
+-- Their active flags are resynced when `changes` moves.
 local built_from
 local passes = {}
 
@@ -200,6 +210,20 @@ local function build_pass(triggers)
     }
 end
 
+-- Bring the pass's matcher flags up to date with the registry: one Go call
+-- per batch of changes, none while nothing changes.
+local function sync(pass)
+    if pass.synced == changes or not pass.matcher then
+        return
+    end
+    local flags = {}
+    for i, data in ipairs(pass.triggers) do
+        flags[i] = registry:active(data)
+    end
+    pass.matcher:set_active(flags)
+    pass.synced = changes
+end
+
 -- The pass for `on` ("output" or "prompt") over the current snapshot.
 local function current_pass(on)
     local snapshot = registry:snapshot()
@@ -213,7 +237,9 @@ local function current_pass(on)
         passes[ON_PROMPT] = build_pass(lists[ON_PROMPT])
         built_from = snapshot
     end
-    return passes[on]
+    local pass = passes[on]
+    sync(pass)
+    return pass
 end
 
 local function trim(s)
@@ -396,6 +422,7 @@ function rune.trigger._process_output(line)
         local data = pass.triggers[pos]
         if registry:active(data) then
             local matches = matches_at[pos]
+            local replacement
             if open[data] then
                 local span_state
                 if matches then
@@ -439,23 +466,27 @@ function rune.trigger._process_output(line)
                         open[data] = span_state
                     end
                 else
-                    local action_gagged, replacement = fire_trigger(
+                    local action_gagged
+                    action_gagged, replacement = fire_trigger(
                         data, matches, trigger_context(data, matches, line),
                         to_remove)
                     if action_gagged then
                         gagged = true
                     end
                     if replacement ~= nil then
-                        -- Later triggers see rewrites from earlier actions,
-                        -- so the rest of the pass is matched again.
                         line = rune.line.new(replacement)
                         raw_line = line:raw()
                         clean_line = line:clean()
-                        order, matches_at = output_visits(pass, pos + 1,
-                            pass.matcher:match(clean_line, raw_line, pos + 1))
-                        k = 1
                     end
                 end
+            end
+            if replacement ~= nil or pass.synced ~= changes then
+                -- Later triggers see rewrites and enables/disables from
+                -- earlier actions, so the rest of the pass is matched again.
+                sync(pass)
+                order, matches_at = output_visits(pass, pos + 1,
+                    pass.matcher:match(clean_line, raw_line, pos + 1))
+                k = 1
             end
         end
     end
@@ -496,11 +527,15 @@ function rune.trigger._process_prompt(line, confirmed)
                 gagged = true
             end
             if replacement ~= nil then
-                -- Later prompt triggers see rewrites from earlier actions,
-                -- so the rest of the pass is matched again.
                 line = rune.line.new(replacement)
                 raw_line = line:raw()
                 clean_line = line:clean()
+            end
+            if replacement ~= nil or pass.synced ~= changes then
+                -- Later prompt triggers see rewrites and enables/disables
+                -- from earlier actions, so the rest of the pass is matched
+                -- again.
+                sync(pass)
                 positions, captures = pass.matcher:match(clean_line, raw_line, pos + 1)
                 positions = positions or {}
                 i = 1

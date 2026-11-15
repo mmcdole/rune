@@ -2,19 +2,38 @@ package lua
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
+
+// disableAllPrelude wraps the trigger constructors so every trigger a set
+// registers is disabled at once: a set's "-off" variant, the cost of
+// triggers that are registered but switched off.
+const disableAllPrelude = `
+for _, mode in ipairs({ "exact", "starts", "contains", "regex" }) do
+    local add = rune.trigger[mode]
+    rune.trigger[mode] = function(...)
+        local h = add(...)
+        h:disable()
+        return h
+    end
+end
+`
 
 func dispatchSetup(tb testing.TB, name string) string {
 	tb.Helper()
 	if name == "core" {
 		return ""
 	}
+	prelude := ""
+	if base, ok := strings.CutSuffix(name, "-off"); ok {
+		name, prelude = base, disableAllPrelude
+	}
 	src, err := os.ReadFile(triggerSetPath(name))
 	if err != nil {
 		tb.Fatal(err)
 	}
-	return string(src)
+	return prelude + string(src)
 }
 
 // runDispatchEvent delivers one corpus event the way Session does: a
@@ -30,12 +49,13 @@ func runDispatchEvent(e *Engine, ev replayEvent) {
 
 // BenchmarkTriggerDispatch is the cost per corpus event (output line or
 // prompt) for the synthetic trigger sets in testdata/triggers. "core" has no
-// user triggers and is the fixed cost of the hook chain. Compare runs with
+// user triggers and is the fixed cost of the hook chain; an "-off" set is
+// its set with every trigger disabled. Compare runs with
 //
 //	go test ./lua -run '^$' -bench TriggerDispatch -benchmem -count 10 | benchstat -
 func BenchmarkTriggerDispatch(b *testing.B) {
 	events := loadReplayEvents(b, "session")
-	for _, name := range []string{"core", "set70", "set150", "set300"} {
+	for _, name := range []string{"core", "set70", "set150", "set300", "set150-off", "set300-off"} {
 		b.Run(name, func(b *testing.B) {
 			setup := dispatchSetup(b, name)
 			engine := benchEngine(b, `H = function() end`)

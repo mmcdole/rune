@@ -7,8 +7,9 @@ import (
 
 // A matcher tests one line against an ordered list of trigger patterns in a
 // single call. It is mechanism only: the trigger module builds one from its
-// registry snapshot and decides in Lua what each match means (enabled,
-// groups, spans, gags, rewrites, once).
+// registry snapshot, marks the patterns whose triggers are inactive so they
+// cost nothing, and decides in Lua what each match means (groups, spans,
+// gags, rewrites, once).
 type matcher []matchPattern
 
 type matchMode uint8
@@ -33,13 +34,18 @@ type matchPattern struct {
 	literal string         // exact, starts, and contains
 	re      *regexp.Regexp // regex
 	raw     bool           // test the raw line (with ANSI codes), not the clean one
+	off     bool           // inactive: skipped by match (zero value = active)
 }
 
-// match returns the 1-based positions at or after from whose pattern matches,
-// with each match's captures (empty for literal modes), or nil when none does.
+// match returns the 1-based positions at or after from whose active pattern
+// matches, with each match's captures (empty for literal modes), or nil when
+// none does.
 func (m matcher) match(clean, raw string, from int) (positions []int, captures [][]string) {
 	for i := max(from, 1) - 1; i < len(m); i++ {
 		p := &m[i]
+		if p.off {
+			continue
+		}
 		line := clean
 		if p.raw {
 			line = raw

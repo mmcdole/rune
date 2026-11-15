@@ -6,7 +6,11 @@ package lua
 // semantics (upsert, priority, once) in registry_test.go; the e2e
 // wiring proof in test/e2e/scenarios/output.json.
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/mmcdole/rune/text"
+)
 
 func TestTriggerMatchTypes(t *testing.T) {
 	runFeatureCases(t, []featureCase{
@@ -166,6 +170,83 @@ func TestTriggerHandles(t *testing.T) {
 			want:   []string{"flee"},
 		},
 	})
+}
+
+// The matcher skips inactive triggers, so it must learn of every enable and
+// disable: before the next line, and mid-line when an earlier action of the
+// same line makes the change.
+func TestTriggerActiveChanges(t *testing.T) {
+	runFeatureCases(t, []featureCase{
+		{
+			name: "earlier action enables a later trigger on the same line",
+			setup: `
+				local later = rune.trigger.contains('goblin', 'flee', {priority = 20})
+				later:disable()
+				rune.trigger.contains('goblin', function() later:enable() end, {priority = 10})
+			`,
+			output: "A goblin attacks you!",
+			want:   []string{"flee"},
+		},
+		{
+			name: "earlier action disables a later trigger on the same line",
+			setup: `
+				rune.trigger.contains('goblin', 'flee', {name = 'later', priority = 20})
+				rune.trigger.contains('goblin', function() rune.trigger.disable('later') end, {priority = 10})
+			`,
+			output: "A goblin attacks you!",
+			want:   []string{},
+		},
+		{
+			name: "earlier action enables a group on the same line",
+			setup: `
+				rune.trigger.contains('goblin', 'flee', {group = 'combat', priority = 20})
+				rune.group.disable('combat')
+				rune.trigger.contains('goblin', function() rune.group.enable('combat') end, {priority = 10})
+			`,
+			output: "A goblin attacks you!",
+			want:   []string{"flee"},
+		},
+		{
+			name: "span action enables a later trigger on the same line",
+			setup: `
+				local later = rune.trigger.contains('goblin', 'flee', {priority = 20})
+				later:disable()
+				rune.trigger.contains('goblin', function() later:enable() end, {priority = 10, span = {max = 1}})
+			`,
+			output: "A goblin attacks you!",
+			want:   []string{"flee"},
+		},
+	})
+}
+
+func TestTriggerActiveChangesBetweenLines(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+
+	if err := engine.DoString("setup", `
+		local flee = rune.trigger.contains('goblin', 'flee')
+		rune.trigger.exact('disable', function() flee:disable() end)
+		rune.trigger.exact('enable', function() flee:enable() end)
+		rune.trigger.exact('mute', function() rune.group.disable('g') end)
+		rune.trigger.contains('goblin', 'grouped', {group = 'g'})
+		rune.trigger.exact('unmute', function() rune.group.enable('g') end)
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, line := range []string{
+		"goblin",  // flee, grouped
+		"disable", //
+		"goblin",  // grouped
+		"mute",    //
+		"goblin",  // nothing
+		"enable",  //
+		"unmute",  //
+		"goblin",  // flee, grouped
+	} {
+		engine.OnOutput(text.NewLine(line))
+	}
+	assertCommands(t, host, []string{"flee", "grouped", "grouped", "flee", "grouped"})
 }
 
 // The raw option matches against the line with ANSI codes intact;
