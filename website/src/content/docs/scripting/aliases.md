@@ -47,8 +47,8 @@ rune.alias.regex(pattern, action, opts?)  -- Go regexp against the whole line
 Exact aliases match literal words at the start of what you type. If phrases
 overlap, the longest active phrase wins. Whitespace separates phrase words,
 so `chat off` also matches `chat   off`. Regex aliases see the entire input
-line and can capture pieces of it. They run in `priority` order before exact
-aliases are tried.
+line and can capture pieces of it. They are tried in `priority` order only
+when no exact alias matches.
 
 Regex patterns are validated at registration: a bad pattern raises
 immediately instead of failing silently at match time.

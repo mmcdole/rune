@@ -161,13 +161,41 @@ func TestAliasMatching(t *testing.T) {
 			want:  []string{"go n"},
 		},
 		{
-			name: "regex priority over exact",
+			name: "exact priority over regex",
 			setup: `
 				rune.alias.exact('test', 'exact-matched')
 				rune.alias.regex('^test$', 'regex-matched')
 			`,
 			input: "test",
-			want:  []string{"regex-matched"},
+			want:  []string{"exact-matched"},
+		},
+		{
+			name: "exact alias with arguments beats a regex that matches the line",
+			setup: `
+				rune.alias.exact('k', 'kill')
+				rune.alias.regex('^k\\s+(\\w+)$', 'regex-matched')
+			`,
+			input: "k orc",
+			want:  []string{"kill orc"},
+		},
+		{
+			name: "regex runs when no exact alias matches",
+			setup: `
+				rune.alias.exact('su', 'spellup')
+				rune.alias.regex('^[nsewud]+$', 'walked')
+			`,
+			input: "ss",
+			want:  []string{"walked"},
+		},
+		{
+			name: "disabled exact alias falls through to regex",
+			setup: `
+				local su = rune.alias.exact('su', 'spellup')
+				rune.alias.regex('^[nsewud]+$', 'walked')
+				su:disable()
+			`,
+			input: "su",
+			want:  []string{"walked"},
 		},
 	})
 }
