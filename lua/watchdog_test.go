@@ -216,3 +216,32 @@ func TestWatchdogRunawayHookDoesNotHang(t *testing.T) {
 		t.Fatal("runaway input hook cancellation was not reported")
 	}
 }
+
+// A deadline that expires between entries fires the backend's watchdog with
+// no script running. The backends keep their watchdog across entries, so the
+// next entry must start clean: no pending interrupt hook (LuaJIT), no
+// cancelled context left in place (Lunar).
+func TestWatchdogExpiryBetweenEntriesDoesNotInterruptNext(t *testing.T) {
+	engine, _, cleanup := setupTest(t)
+	defer cleanup()
+	vm := engine.vm
+	vm.RegisterModule("expiryprobe", map[string]script.GoFunc{
+		"pause": func(c *script.Call) error {
+			time.Sleep(5 * time.Millisecond)
+			return nil
+		},
+	}, nil)
+
+	for range 10 {
+		vm.SetDeadline(time.Now().Add(time.Millisecond))
+		time.Sleep(5 * time.Millisecond) // the deadline passes while no script runs
+		vm.SetDeadline(time.Time{})
+
+		vm.SetDeadline(time.Now().Add(time.Second))
+		err := vm.DoString("next", `expiryprobe.pause(); local x = 1 + 1`)
+		vm.SetDeadline(time.Time{})
+		if err != nil {
+			t.Fatalf("next entry interrupted: %v", err)
+		}
+	}
+}

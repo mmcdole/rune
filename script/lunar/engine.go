@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 	"unsafe"
 
@@ -55,9 +56,17 @@ type Engine struct {
 	// rebuilt with the State on every Init.
 	classes map[string]*lua.UserDataType[any]
 
-	// Lunar observes a deadline through a context installed on the State;
-	// cancelDeadline releases the one SetDeadline installed.
-	cancelDeadline context.CancelFunc
+	// The watchdog. Lunar observes a deadline through a context installed
+	// on the State, and a context can be cancelled only once, so one
+	// context is reused until it fires and one timer cancels it.
+	// SetDeadline moves the timer; a disarm leaves it running, and a fire
+	// checks the deadline under watchMu, so a stale fire does nothing and
+	// one for a later deadline re-arms the timer for what is left.
+	watchMu       sync.Mutex
+	watchDeadline time.Time
+	watchTimer    *time.Timer
+	watchCtx      context.Context
+	watchCancel   context.CancelCauseFunc
 }
 
 // New creates an uninitialized engine; call Init before use.
@@ -87,7 +96,7 @@ func (e *Engine) Init() error {
 	}
 	e.state = state
 	e.classes = map[string]*lua.UserDataType[any]{}
-	e.releaseDeadline()
+	e.disarmWatchdog()
 
 	for _, t := range e.types {
 		if err := e.installType(t); err != nil {
@@ -113,7 +122,7 @@ func (e *Engine) Close() {
 		e.state = nil
 	}
 	e.classes = map[string]*lua.UserDataType[any]{}
-	e.releaseDeadline()
+	e.disarmWatchdog()
 }
 
 func (e *Engine) RegisterModule(
@@ -392,27 +401,47 @@ func (e *Engine) call(
 }
 
 func (e *Engine) SetDeadline(t time.Time) error {
-	e.releaseDeadline()
 	if e.state == nil {
 		return nil // no VM, nothing to interrupt
 	}
 	if t.IsZero() {
+		e.disarmWatchdog()
 		return e.state.RemoveContext()
 	}
-	ctx, cancel := context.WithDeadline(context.Background(), t)
-	if err := e.state.SetContext(ctx); err != nil {
-		cancel()
-		return err
+	e.watchMu.Lock()
+	if e.watchCtx == nil || e.watchCtx.Err() != nil {
+		e.watchCtx, e.watchCancel = context.WithCancelCause(context.Background())
 	}
-	e.cancelDeadline = cancel
-	return nil
+	e.watchDeadline = t
+	if e.watchTimer == nil {
+		e.watchTimer = time.AfterFunc(time.Until(t), e.watchdogFired)
+	} else {
+		e.watchTimer.Reset(time.Until(t))
+	}
+	ctx := e.watchCtx
+	e.watchMu.Unlock()
+	return e.state.SetContext(ctx)
 }
 
-func (e *Engine) releaseDeadline() {
-	if e.cancelDeadline != nil {
-		e.cancelDeadline()
-		e.cancelDeadline = nil
+func (e *Engine) disarmWatchdog() {
+	e.watchMu.Lock()
+	e.watchDeadline = time.Time{}
+	e.watchMu.Unlock()
+}
+
+// watchdogFired runs on the timer's goroutine.
+func (e *Engine) watchdogFired() {
+	e.watchMu.Lock()
+	defer e.watchMu.Unlock()
+	d := e.watchDeadline
+	if d.IsZero() {
+		return // the entry it was armed for has finished
 	}
+	if left := time.Until(d); left > 0 {
+		e.watchTimer.Reset(left)
+		return
+	}
+	e.watchCancel(context.DeadlineExceeded)
 }
 
 // ---------------------------------------------------------------------------
