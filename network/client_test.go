@@ -263,20 +263,43 @@ func expectBytes(t *testing.T, conn net.Conn, want []byte, what string) []byte {
 	return got
 }
 
+var (
+	errDropped = errors.New("connection dropped")
+	errTimeout = errors.New("timed out")
+)
+
+// next returns the next effect, errDropped once the connection has dropped
+// and every effect before the drop has been returned, or errTimeout. The
+// driver queues effects before it closes disconnected, but a select with
+// both ready picks either, so the drop is reported only once the queue is
+// empty.
+func (c *protocolClient) next(deadline <-chan time.Time) (Effect, error) {
+	select {
+	case effect := <-c.effects:
+		return effect, nil
+	case <-c.disconnected:
+		select {
+		case effect := <-c.effects:
+			return effect, nil
+		default:
+			return Effect{}, errDropped
+		}
+	case <-deadline:
+		return Effect{}, errTimeout
+	}
+}
+
 // nextEffect waits for the next protocol effect of the given kind.
 func nextEffect(t *testing.T, c *protocolClient, kind EffectKind, what string) Effect {
 	t.Helper()
 	deadline := time.After(5 * time.Second)
 	for {
-		select {
-		case effect := <-c.effects:
-			if effect.Kind == kind {
-				return effect
-			}
-		case <-c.disconnected:
-			t.Fatalf("%s: connection dropped while waiting", what)
-		case <-deadline:
-			t.Fatalf("%s: timed out waiting for effect kind %d", what, kind)
+		effect, err := c.next(deadline)
+		if err != nil {
+			t.Fatalf("%s: %v waiting for effect kind %d", what, err, kind)
+		}
+		if effect.Kind == kind {
+			return effect
 		}
 	}
 }
@@ -289,19 +312,15 @@ func dataThrough(t *testing.T, c *protocolClient, want, what string) string {
 	deadline := time.After(5 * time.Second)
 	var got bytes.Buffer
 	for {
-		select {
-		case effect := <-c.effects:
-			switch effect.Kind {
-			case EffectServerData:
-				got.Write(effect.Data)
-				if bytes.Contains(got.Bytes(), []byte(want)) {
-					return got.String()
-				}
+		effect, err := c.next(deadline)
+		if err != nil {
+			t.Fatalf("%s: %v waiting for %q in data %q", what, err, want, got.String())
+		}
+		if effect.Kind == EffectServerData {
+			got.Write(effect.Data)
+			if bytes.Contains(got.Bytes(), []byte(want)) {
+				return got.String()
 			}
-		case <-c.disconnected:
-			t.Fatalf("%s: connection dropped after data %q", what, got.String())
-		case <-deadline:
-			t.Fatalf("%s: timed out waiting for %q in data %q", what, want, got.String())
 		}
 	}
 }
