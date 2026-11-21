@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"runtime/cgo"
 	"strings"
+	"sync"
 	"time"
 	"unsafe"
 
@@ -52,8 +53,17 @@ type Engine struct {
 	funcs   []script.GoFunc    // trampoline targets, addressed by upvalue
 	ownMeta map[uintptr]string // lua_topointer of our type metatables -> type name
 
-	watchStop chan struct{}
-	watchDone chan struct{}
+	// The watchdog: one goroutine and one timer for the state's life
+	// (startWatchdog). SetDeadline only records the deadline and resets
+	// the timer, so a Lua entry costs no goroutine, channel or thread
+	// wakeup. watchMu guards the deadline and the hook between the
+	// session goroutine and the watchdog's.
+	watchMu       sync.Mutex
+	watchDeadline time.Time
+	watchHooked   bool
+	watchTimer    *time.Timer
+	watchStop     chan struct{}
+	watchDone     chan struct{}
 }
 
 // engines resolves callbacks back to their Engine. Unsynchronized:
@@ -79,6 +89,7 @@ func (e *Engine) Init() error {
 	}
 	C.luaL_openlibs(l)
 	e.l = l
+	e.startWatchdog(l)
 	e.funcs = nil
 	e.ownMeta = map[uintptr]string{}
 	engines[l] = e
@@ -338,42 +349,65 @@ func (e *Engine) pcall(nargs, nret int) error {
 // disable the JIT); the hook is armed asynchronously only after the
 // deadline expires. A JIT-compiled loop that never exits its trace may
 // not observe it — the standard LuaJIT embedding tradeoff.
+//
+// One goroutine per state waits on one timer. SetDeadline records the
+// deadline and moves the timer; a disarm leaves the timer running; when
+// it fires the goroutine looks at the deadline under watchMu, so a stale
+// fire (the entry it was armed for has finished) does nothing, and one
+// for a later deadline re-arms the timer for what's left.
 // ---------------------------------------------------------------------------
 
 func (e *Engine) SetDeadline(t time.Time) error {
-	e.stopWatchdog()
 	if e.l == nil {
 		return nil // no VM, nothing to interrupt
 	}
-	C.rune_clearhook(e.l)
-	if t.IsZero() {
-		return nil
+	e.watchMu.Lock()
+	defer e.watchMu.Unlock()
+	if e.watchHooked {
+		C.rune_clearhook(e.l)
+		e.watchHooked = false
 	}
-	stop := make(chan struct{})
-	done := make(chan struct{})
-	e.watchStop = stop
-	e.watchDone = done
-	l := e.l
-	go func() {
-		defer close(done)
-		timer := time.NewTimer(time.Until(t))
-		defer timer.Stop()
-		select {
-		case <-timer.C:
-			// The timer and stop can become ready together; re-check stop
-			// so a finished entry cannot poison the next one.
-			select {
-			case <-stop:
-				return
-			default:
-			}
-			C.rune_sethook_interrupt(l)
-		case <-stop:
-		}
-	}()
+	e.watchDeadline = t
+	if !t.IsZero() {
+		e.watchTimer.Reset(time.Until(t))
+	}
 	return nil
 }
 
+func (e *Engine) startWatchdog(l *C.lua_State) {
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	timer := time.NewTimer(time.Hour)
+	timer.Stop()
+	e.watchMu.Lock()
+	e.watchDeadline, e.watchHooked, e.watchTimer = time.Time{}, false, timer
+	e.watchMu.Unlock()
+	e.watchStop, e.watchDone = stop, done
+	go func() {
+		defer close(done)
+		defer timer.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-timer.C:
+			}
+			e.watchMu.Lock()
+			if d := e.watchDeadline; !d.IsZero() && !e.watchHooked {
+				if left := time.Until(d); left > 0 {
+					timer.Reset(left)
+				} else {
+					C.rune_sethook_interrupt(l)
+					e.watchHooked = true
+				}
+			}
+			e.watchMu.Unlock()
+		}
+	}()
+}
+
+// stopWatchdog ends the state's watchdog goroutine (before lua_close:
+// it holds the state pointer).
 func (e *Engine) stopWatchdog() {
 	if e.watchStop != nil {
 		close(e.watchStop)
@@ -381,6 +415,9 @@ func (e *Engine) stopWatchdog() {
 		e.watchStop = nil
 		e.watchDone = nil
 	}
+	e.watchMu.Lock()
+	e.watchDeadline, e.watchHooked = time.Time{}, false
+	e.watchMu.Unlock()
 }
 
 // ---------------------------------------------------------------------------
