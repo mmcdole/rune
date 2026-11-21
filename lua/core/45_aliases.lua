@@ -16,6 +16,8 @@
 --   once     = true       -- Auto-remove after first match
 --   priority = 50         -- Execution order for regex aliases (lower = first)
 --
+-- Exact aliases are tried first; regex aliases only when none matches.
+--
 -- Action can be:
 --   - String: expansion text, %1 %2 etc substituted from captures (regex only)
 --   - Function (exact):  function(args, ctx)  -- args = text after matched phrase
@@ -226,37 +228,9 @@ end
 -- If processed is true and result is string, use result as new input
 -- If processed is false, no alias matched
 function rune.alias.process(input)
-    -- First try regex aliases (priority order) - uses Go regexp
-    for _, data in ipairs(registry:items()) do
-        if not data.is_exact and registry:active(data) then
-            local matches = rune.regex.match(data.pattern, input)
-            if matches then
-                local result = nil
-
-                if type(data.action) == "function" then
-                    local ctx = {
-                        line = input,
-                        name = data.name,
-                        group = data.group,
-                        type = "alias",
-                        matches = matches,
-                    }
-                    result = run_action(data, matches, ctx)
-                elseif type(data.action) == "string" then
-                    result = rune.substitute_captures(data.action, matches)
-                end
-
-                if data.once then
-                    data._handle:remove()
-                end
-
-                return true, result
-            end
-        end
-    end
-
-    -- Then walk the exact-alias trie. Retaining the last active candidate
-    -- makes the most specific (longest) phrase win.
+    -- First walk the exact-alias trie: a named phrase beats a pattern that
+    -- happens to match it. Retaining the last active candidate makes the
+    -- most specific (longest) phrase win.
     local winner, winner_end = nil, nil
     local node = exact_root
     local token_start, token_end = input:find("%S+")
@@ -302,6 +276,35 @@ function rune.alias.process(input)
         end
 
         return true, result
+    end
+
+    -- Then try regex aliases (priority order) - uses Go regexp
+    for _, data in ipairs(registry:items()) do
+        if not data.is_exact and registry:active(data) then
+            local matches = rune.regex.match(data.pattern, input)
+            if matches then
+                local result = nil
+
+                if type(data.action) == "function" then
+                    local ctx = {
+                        line = input,
+                        name = data.name,
+                        group = data.group,
+                        type = "alias",
+                        matches = matches,
+                    }
+                    result = run_action(data, matches, ctx)
+                elseif type(data.action) == "string" then
+                    result = rune.substitute_captures(data.action, matches)
+                end
+
+                if data.once then
+                    data._handle:remove()
+                end
+
+                return true, result
+            end
+        end
     end
 
     return false, nil

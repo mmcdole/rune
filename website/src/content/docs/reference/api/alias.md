@@ -25,10 +25,11 @@ as usual.
 
 ## Matching
 
-Regex aliases are checked first, in `priority` order. If none match, an
-exact alias can match one or more complete words at the beginning of what
-you type. When more than one matches, the longest active phrase wins, so
-`"chat off"` takes precedence over `"chat"`. Only one alias fires per
+Exact aliases are checked first: one can match one or more complete words
+at the beginning of what you type. When more than one matches, the longest
+active phrase wins, so `"chat off"` takes precedence over `"chat"`. If none
+match, regex aliases are checked in `priority` order, so a pattern never
+hides an exact alias whose phrase it also matches. Only one alias fires per
 command. A string result — whether from a string action or returned by a
 function — is fed back through
 [`rune.send`](/reference/api/core/), so aliases can expand to other
