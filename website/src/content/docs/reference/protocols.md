@@ -1,56 +1,42 @@
 ---
 title: Protocols
-description: What rune negotiates on the wire, and the policy behind it.
+description: The telnet and terminal protocols rune supports.
 ---
 
-Rune advertises only what it implements. Agreeing to an option and then
-ignoring its subnegotiations breaks real servers, so the compatibility
-table and the feature list are the same list.
+## Telnet
 
 | Protocol | Option | What rune does |
 |---|---|---|
-| ECHO | 1 | Server-controlled local echo (passwords hidden) |
-| SGA / EOR | 3 / 25 | Telnet character and record framing; GA/EOR confirms a non-empty current prompt |
-| TTYPE / MTTS | 24 | Reports `RUNE`, terminal type, and an honest MTTS bitvector (ANSI, VT100, UTF-8, 256 colors, truecolor, MNES; bit 2048 on TLS connections) |
-| NAWS | 31 | Window size, re-sent on every resize |
+| ECHO | 1 | Server-controlled local echo, so passwords stay hidden |
+| SGA / EOR | 3 / 25 | GA and EOR mark the end of a prompt; see [prompt semantics](/scripting/hooks/#prompt-semantics) |
+| TTYPE / MTTS | 24 | Reports `RUNE`, the terminal type, and MTTS flags: ANSI, VT100, UTF-8, 256 colors, truecolor, MNES, and TLS on TLS connections |
+| NAWS | 31 | Sends the window size, and sends it again on every resize |
 | NEW-ENVIRON / MNES | 39 | `CLIENT_NAME`, `CLIENT_VERSION`, `CHARSET`, `MTTS`, `TERMINAL_TYPE` |
-| CHARSET | 42 | Accepts UTF-8, rejects everything else |
-| MCCP2 | 86 | zlib decompression; a clean stream end resumes plain telnet |
-| GMCP | 201 | Framing and JSON in Go; handlers and `Core.Supports` policy in Lua ([rune.gmcp](/scripting/gmcp/)) |
+| CHARSET | 42 | UTF-8 only |
+| MCCP2 | 86 | Compression |
+| GMCP | 201 | Handled from Lua; see [GMCP](/scripting/gmcp/) |
 
-**TLS** is address-level rather than a telnet option: `tls://host:port`
-verifies certificates, and `tls+insecure://host:port` accepts self-signed
-ones (common on MUDs). Plain telnet is the default; `telnet://` is
-accepted explicitly.
+Not supported: MXP, MSP, MSDP, MSSP, MCCP3, ZMP, LINEMODE. Rune declines
+these when a server offers them.
 
-Refused (not implemented): MCCP3, MSSP, ZMP, MXP, MSP, LINEMODE.
+### TLS
 
-## Ordering and prompt boundaries
+Connect with `tls://host:port` for a verified TLS connection, or
+`tls+insecure://host:port` to accept a self-signed certificate, which is
+common on MUDs. Plain telnet is the default; `telnet://` also works.
 
-Rune does not guess prompts from text patterns or timers. Server text ending in
-a newline or bare CR is ordinary output. Text after the last newline is a
-partial line once it contains something printable; escape sequences alone
-are held as the start of the next line. A partial line is exposed through
-the `prompt` hook with `confirmed = false`; a following Telnet GA or EOR prompt
-boundary consumes it through the same hook with `confirmed = true`. When a
-partial line and its prompt boundary arrive in one event batch, Rune emits only
-the confirmed observation. When they arrive in separate batches, scripts may
-first observe the growing partial line and later its confirmation. CR
-terminates a line immediately, including at the end of an event or batch; an
-optional following LF is swallowed even when it arrives in a later event or
-batch.
+## Terminal
 
-Rune applies each batch of parsed Telnet events synchronously and in wire
-order, including Lua callbacks and the frames they send, so TCP chunking
-cannot reorder negotiation effects.
+| Protocol | How rune uses it |
+|---|---|
+| ANSI SGR color | 16, 256, and truecolor |
+| Kitty keyboard protocol | Unambiguous key reporting; see [key bindings](/scripting/keybindings/) |
+| xterm modifyOtherKeys | Fallback for terminals without the Kitty protocol |
+| DEC application keypad (DECKPAM) | Numpad keys, with the `numpad` setting; see [numpad keys](/scripting/keybindings/#numpad-keys) |
+| xterm mouse (SGR) | Wheel scrolling, with the `mouse` setting |
+| Bracketed paste | Multi-line paste |
+| OSC 52 | Clipboard; see [`rune.clipboard`](/reference/api/clipboard/) |
+| Synchronized output (mode 2026) | Flicker-free redraws, when the terminal supports it |
+| Unicode core (mode 2027) | Grapheme-cluster widths for emoji and CJK text |
 
-GMCP follows that same wire order. A server's `WILL GMCP` queues Rune's `DO`,
-enables GMCP, and runs the `gmcp_enabled` policy that sends `Core.Hello` and
-the configured support set when it is non-empty. Later payloads in the batch
-are then delivered to handlers. A subsequent `WONT GMCP` queues `DONT` and
-disables GMCP; a payload that arrived while GMCP was active is still
-delivered even when the batch ends with GMCP disabled. Outbound game lines and protocol frames are checked and
-queued against the connection that produced the callback, preventing a
-reconnect from redirecting an old write to a new server.
-
-**Related:** [GMCP](/scripting/gmcp/)
+Not supported: Kitty graphics, Sixel, iTerm2 inline images, OSC 8 hyperlinks.
