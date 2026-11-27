@@ -72,11 +72,17 @@ local registry = rune.registry.new{
 -- opts: name, group, priority (see registry.lua).
 -- Returns a handle with :enable/:disable/:remove.
 function rune.gmcp.on(package, handler, opts)
+    if type(package) ~= "string" then
+        error("rune.gmcp.on: package must be a string", 2)
+    end
+    if type(handler) ~= "function" then
+        error("rune.gmcp.on: handler must be a function", 2)
+    end
     return registry:add({
         package = package:lower(),
         handler = handler,
         source = rune.caller_source(1),
-    }, opts)
+    }, opts, "rune.gmcp.on")
 end
 
 function rune.gmcp.remove(name)

@@ -146,3 +146,18 @@ func TestGroupMasterSwitch(t *testing.T) {
 		},
 	})
 }
+
+// Regression: rune.group.list() used a hardcoded module list that missed
+// GMCP handlers, so their groups never appeared in /groups.
+func TestGroupListIncludesEveryRegistry(t *testing.T) {
+	engine, _, cleanup := setupTest(t)
+	defer cleanup()
+	assertLua(t, engine, `
+		rune.gmcp.on("Char.Vitals", function() end, { group = "vitals" })
+		local found = false
+		for _, g in ipairs(rune.group.list()) do
+			if g.name == "vitals" then found = true end
+		end
+		assert(found, "gmcp group missing from rune.group.list()")
+	`)
+}

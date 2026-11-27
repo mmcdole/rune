@@ -19,7 +19,7 @@ rune.store.get(key)           -- the decoded value, or nil
 rune.store.delete(key)        -- remove a key
 
 rune.world.add(name, address, opts?)  -- save a bookmark; true or nil + err
-rune.world.remove(name)               -- true if it existed
+rune.world.remove(name)               -- true if it existed, false if not; nil + err if saving failed
 rune.world.get(name)                  -- entry table ({address=...}), or nil
 rune.world.list()                     -- sorted array of {name, address}
 ```

@@ -49,8 +49,6 @@ end
 -- a message when the request itself failed (DNS, timeout, TLS, ...).
 -- Both opts and callback are optional; get(url, callback) works.
 function rune.http.get(url, opts, callback)
-    -- Sequential, not `opts, callback = nil, opts`: gopher-lua clears
-    -- opts before the right-hand side is read, losing the callback.
     if type(opts) == "function" and callback == nil then
         callback = opts
         opts = nil

@@ -396,7 +396,10 @@ rune.hooks.on("output", function(line)
 end, { name = "_completion_cache", priority = 200 })
 
 -- Add words from the effective input after core history expansion.
-rune.hooks.on("input", function(text)
+rune.hooks.on("input", function(text, context)
+    if context.hidden then
+        return -- never remember a password
+    end
     for word in text:gmatch("[%w_'%-]+") do
         cache_add(word)
     end

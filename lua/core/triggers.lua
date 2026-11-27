@@ -56,6 +56,14 @@ local ON_PROMPT = "prompt"
 
 -- Create a trigger (internal)
 local function create_trigger(pattern, action, opts, mode)
+    local api = "rune.trigger." .. mode
+    local action_type = type(action)
+    if action_type ~= "function" and action_type ~= "string" and action ~= nil then
+        rune._raise(api .. ": action must be a function, string, or nil")
+    end
+    if opts ~= nil and type(opts) ~= "table" then
+        rune._raise(api .. ": opts must be a table")
+    end
     opts = opts or {}
 
     local on = opts.on
@@ -106,7 +114,7 @@ local function create_trigger(pattern, action, opts, mode)
         on = on,
         span = span,
         source = rune.caller_source(2),
-    }, opts)
+    }, opts, api)
 end
 
 -- Public API

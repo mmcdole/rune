@@ -107,12 +107,16 @@ local registry = rune.registry.new{
 
 -- Create an alias (internal)
 local function create_alias(pattern, action, opts, is_exact)
+    local api = is_exact and "rune.alias.exact" or "rune.alias.regex"
+    if type(action) ~= "function" and type(action) ~= "string" then
+        rune._raise(api .. ": action must be a function or string")
+    end
     return registry:add({
         pattern = pattern,
         action = action,
         is_exact = is_exact,
         source = rune.caller_source(2),
-    }, opts)
+    }, opts, api)
 end
 
 -- Public API

@@ -48,7 +48,7 @@ function rune.command.add(name, handler, description, opts)
         handler = handler,
         description = description or "",
         source = rune.caller_source(1),
-    }, rune.registry.keyed_opts(name, opts, "rune.command.add"))
+    }, rune.registry.keyed_opts(name, opts, "rune.command.add"), "rune.command.add")
 end
 
 -- Remove a slash command by name. Returns true if one existed.

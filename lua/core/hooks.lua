@@ -14,7 +14,9 @@
 --   priority = 50         -- Execution order (lower = first, default 50)
 --
 -- Events (data-flow):
---   "input"        -- User input: (text, context); strings rewrite, false consumes
+--   "input"        -- User input: (text, context); strings rewrite, false consumes.
+--                     context.mode is "command" or "verbatim"; context.hidden is
+--                     true while the server hides input (a password prompt)
 --   "output"       -- Server output line object (false gags, string rewrites)
 --   "prompt"       -- Prompt observation: (line, confirmed); confirmed is
 --                     false for a partial line, true for a GA/EOR-confirmed
@@ -62,11 +64,17 @@ rune.hooks = {}
 -- Attach a handler to an event
 -- Returns: Handle with :remove(), :enable(), :disable(), :name(), :group()
 function rune.hooks.on(event, handler, opts)
+    if type(event) ~= "string" then
+        error("rune.hooks.on: event must be a string", 2)
+    end
+    if type(handler) ~= "function" then
+        error("rune.hooks.on: handler must be a function", 2)
+    end
     return registry:add({
         event = event,
         handler = handler,
         source = rune.caller_source(1),
-    }, opts)
+    }, opts, "rune.hooks.on")
 end
 
 -- Management by name
@@ -111,21 +119,22 @@ local function reject_input_context_write()
     error("input context is read-only", 2)
 end
 
-local input_context_metatables = {
-    command = {
-        __index = { mode = "command" },
-        __newindex = reject_input_context_write,
-        __metatable = false,
-    },
-    verbatim = {
-        __index = { mode = "verbatim" },
-        __newindex = reject_input_context_write,
-        __metatable = false,
-    },
-}
+-- One shared metatable per (mode, hidden) pair.
+local input_context_metatables = {}
+for _, mode in ipairs({ "command", "verbatim" }) do
+    input_context_metatables[mode] = {}
+    for _, hidden in ipairs({ true, false }) do
+        input_context_metatables[mode][hidden] = {
+            __index = { mode = mode, hidden = hidden },
+            __newindex = reject_input_context_write,
+            __metatable = false,
+        }
+    end
+end
 
-local function input_context(mode)
-    return setmetatable({}, input_context_metatables[mode] or input_context_metatables.command)
+local function input_context(mode, hidden)
+    local by_hidden = input_context_metatables[mode] or input_context_metatables.command
+    return setmetatable({}, by_hidden[hidden == true])
 end
 
 -- Output and prompt chain Line objects; strings replace the object seen by
@@ -171,9 +180,10 @@ end
 -- can act on them, and isolate each handler's view of the canonical mode.
 local function run_input_hooks(_, handlers, text, context)
     local mode = context and context.mode or "command"
+    local hidden = context and context.hidden
     for _, entry in ipairs(handlers) do
         if registry:active(entry) then
-            local result = run_handler(entry, text, input_context(mode))
+            local result = run_handler(entry, text, input_context(mode, hidden))
             if result == false then
                 return false
             elseif type(result) == "string" then

@@ -194,35 +194,55 @@ end
 
 -- Command sequences, single-command repeats, and alias expansion.
 
-local MAX_RECURSION_DEPTH = 100
+local MAX_DEPTH = 100     -- nested alias expansions
+local MAX_COMMANDS = 1000 -- commands one top-level send may run
+
+-- The expansion in progress. One top-level send (a typed line, a trigger or
+-- timer action) owns the depth and command budget; a rune.send made while it
+-- runs, e.g. from an alias function, joins it instead of starting fresh.
+local expansion
+
+local function stop_expansion(message)
+    expansion.stopped = true
+    rune.echo(rune.style.red("[Error]") .. " " .. message)
+end
 
 -- Execute a game-command sequence: split separators, decode literal separators,
 -- apply #N repeats, then try aliases before sending each command. Alias text is
 -- processed recursively; an alias returning no text consumes the command.
 -- This does not interpret slash commands or perform interactive preparation.
-local function execute_commands(input, depth)
-    if depth > MAX_RECURSION_DEPTH then
-        rune.echo(rune.style.red("[Error]") .. " Alias loop detected (depth limit exceeded)")
-        return
+local function execute_commands(input)
+    local state = expansion
+    if state.depth > MAX_DEPTH then
+        return stop_expansion("Alias loop detected (more than " .. MAX_DEPTH .. " nested expansions)")
     end
 
     local separator = rune.config.get("command_separator")
     for source, command in commands(input, separator) do
+        if state.stopped then return end
         command = command:match("^%s*(.-)%s*$")
         -- Recognize the prefix before decoding can introduce a literal '#'.
         local count = source:match("^%s*#(%d+)%s+%S")
         local line = count and command:match("^#%d+%s+(.-)%s*$") or command
+        local repeats = tonumber(count) or 1
+        if repeats > state.remaining then
+            return stop_expansion("Too many commands (limit " .. MAX_COMMANDS .. " per input)")
+        end
 
-        for _ = 1, tonumber(count) or 1 do
-            if line == "" then
-                rune.send_raw(line)
-            else
-                local processed, result = rune.alias.process(line)
-                if not processed then
-                    rune.send_raw(line)
-                elseif result then
-                    execute_commands(result, depth + 1) -- alias result is new command text
+        for _ = 1, repeats do
+            if state.stopped then return end
+            state.remaining = state.remaining - 1
+            local processed, result = false, nil
+            if line ~= "" then
+                state.depth = state.depth + 1
+                processed, result = rune.alias.process(line)
+                if processed and result and not state.stopped then
+                    execute_commands(result) -- alias result is new command text
                 end
+                state.depth = state.depth - 1
+            end
+            if not processed and not rune.send_raw(line) then
+                state.stopped = true -- send_raw already echoed the failure
             end
         end
     end
@@ -232,13 +252,25 @@ end
 -- Does not run input hooks, expand history, echo input, record history, or dispatch
 -- slash commands. Send failures are reported by send_raw; no status is returned.
 function rune.send(input)
-    execute_commands(input, 0)
+    if expansion then
+        if not expansion.stopped then
+            execute_commands(input)
+        end
+        return
+    end
+    expansion = { depth = 0, remaining = MAX_COMMANDS, stopped = false }
+    local ok, err = pcall(execute_commands, input)
+    expansion = nil
+    if not ok then
+        error(err, 0)
+    end
 end
 
 -- Process one submitted line: expand history in Command mode, then
--- run input hooks in either mode. Return text, or false to skip this line.
+-- run input hooks in either mode. `hidden` is true while the server hides
+-- input (a password prompt). Return text, or false to skip this line.
 -- Does not send, echo input, or record history; Session owns those steps.
-function rune.input._process_submitted_line(text, mode)
+function rune.input._process_submitted_line(text, mode, hidden)
     if mode == "command" then
         text = expand_history(text)
         if text == false then return false end
@@ -247,7 +279,7 @@ function rune.input._process_submitted_line(text, mode)
     if type(rune.hooks) ~= "table" or type(rune.hooks.call) ~= "function" then
         return text
     end
-    return rune.hooks.call("input", text, { mode = mode })
+    return rune.hooks.call("input", text, { mode = mode, hidden = hidden == true })
 end
 
 -- Execute one processed line: Verbatim sends literally; Command mode

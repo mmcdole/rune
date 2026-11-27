@@ -75,7 +75,7 @@ function rune.bind(key, action, opts)
             key = name,
             action = action,
             source = rune.caller_source(1),
-        }, rune.registry.keyed_opts(name, opts, "rune.bind"))
+        }, rune.registry.keyed_opts(name, opts, "rune.bind"), "rune.bind")
     end
     return type(key) == "table" and handles or handles[1]
 end

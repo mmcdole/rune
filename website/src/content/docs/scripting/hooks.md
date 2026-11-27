@@ -28,7 +28,7 @@ Handlers run in priority order:
 
 | Event | Handler receives | Notes |
 |---|---|---|
-| `input` | one physical line, context | Before echo and history: a string, including `""`, replaces the text for later handlers, `false` consumes that line, and any other value leaves it unchanged. `context.mode` is read-only and always `"command"` or `"verbatim"`. |
+| `input` | one physical line, context | Before echo and history: a string, including `""`, replaces the text for later handlers, `false` consumes that line, and any other value leaves it unchanged. The context is read-only: `context.mode` is `"command"` or `"verbatim"`, and `context.hidden` is `true` while the server hides input (a password prompt). |
 | `output` | a line object | Once per complete line. `false` gags, a string rewrites. The core handler runs output triggers at priority 100. |
 | `prompt` | a line object, `confirmed` | Cumulative partial-line observation (`false`) or GA/EOR-confirmed prompt (`true`). The core runs prompt triggers at priority 100. |
 | `echo` | one display-safe line of the final input | Like `output` but a plain string. Terminal controls have already been made visible. The `> ` prefix is the core handler; replace it if you like. |

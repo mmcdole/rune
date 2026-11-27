@@ -48,7 +48,7 @@ function rune.ui.bar(name, render_fn, opts)
         bar = name,
         renderer = render_fn,
         source = rune.caller_source(1),
-    }, rune.registry.keyed_opts(name, opts, "rune.ui.bar"))
+    }, rune.registry.keyed_opts(name, opts, "rune.ui.bar"), "rune.ui.bar")
 end
 
 -- INTERNAL: called by Go on the render tick.

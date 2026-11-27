@@ -50,7 +50,7 @@ local Handle = {}
 Handle.__index = Handle
 
 local function set_enabled(handle, enabled)
-    if handle._data.enabled == enabled then
+    if handle._data.removed or handle._data.enabled == enabled then
         return
     end
     handle._data.enabled = enabled
@@ -60,7 +60,10 @@ local function set_enabled(handle, enabled)
     end
 end
 
+-- Enabling also forgives past failures, so a quarantined entry gets a
+-- fresh run of chances.
 function Handle:enable()
+    self._data.failures = nil
     set_enabled(self, true)
     return self
 end
@@ -172,11 +175,25 @@ function rune.registry._without(list, data)
     return copy
 end
 
--- Register an item. opts: name, group, priority, once.
+-- Option types, checked before anything changes: a bad option must not
+-- cost the entry it would have replaced.
+local OPTION_TYPES = { name = "string", group = "string", priority = "number", once = "boolean" }
+
+-- Register an item. opts: name, group, priority, once. `api` names the
+-- public function for error messages (default "rune.<kind>").
 -- The caller sets module-specific fields (including `source`, since
 -- only the caller knows its stack depth for rune.caller_source).
-function Registry:add(data, opts)
+function Registry:add(data, opts, api)
+    api = api or ("rune." .. self.kind)
+    if opts ~= nil and type(opts) ~= "table" then
+        rune._raise(api .. ": opts must be a table")
+    end
     opts = opts or {}
+    for key, want in pairs(OPTION_TYPES) do
+        if opts[key] ~= nil and type(opts[key]) ~= want then
+            rune._raise(api .. ": opts." .. key .. " must be a " .. want)
+        end
+    end
 
     data.id = self.next_id
     self.next_id = self.next_id + 1
@@ -222,6 +239,9 @@ function Registry:add(data, opts)
 end
 
 function Registry:_remove_data(data)
+    if data.removed then
+        return
+    end
     data.removed = true -- tombstone: skipped by active() in snapshots
     self.list = rune.registry._without(self.list, data)
     if data.name and self.by_name[data.name] == data._handle then
@@ -371,22 +391,15 @@ function rune.group.enable(group_name)
     set_group_enabled(group_name, true)
 end
 
--- List all known groups (aggregated from every registry that honors
--- group switches: aliases, triggers, timers, hooks, binds, bars,
--- commands). Returns array of {name, enabled}.
+-- List all known groups, aggregated from every registry.
+-- Returns array of {name, enabled}.
 function rune.group.list()
     local seen = {}
 
-    local modules = {
-        rune.alias, rune.trigger, rune.timer, rune.hooks,
-        rune.binds, rune.bars, rune.command,
-    }
-    for _, mod in ipairs(modules) do
-        if mod and mod.list then
-            for _, item in ipairs(mod.list()) do
-                if item.group then
-                    seen[item.group] = true
-                end
+    for _, registry in ipairs(registries) do
+        for group_name, members in pairs(registry.by_group) do
+            if next(members) then
+                seen[group_name] = true
             end
         end
     end

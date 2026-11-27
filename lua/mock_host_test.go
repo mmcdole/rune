@@ -16,7 +16,8 @@ var _ Host = (*MockHost)(nil)
 
 // MockHost implements all service interfaces for testing.
 type MockHost struct {
-	mu sync.Mutex
+	StoreErr error // returned by StoreSet when set
+	mu       sync.Mutex
 
 	// Captured calls
 	SendCalls       []string
@@ -259,6 +260,9 @@ func (m *MockHost) SessionDelete(key string) {
 func (m *MockHost) StoreSet(key, rawJSON string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.StoreErr != nil {
+		return m.StoreErr
+	}
 	if m.StoreData == nil {
 		m.StoreData = make(map[string]string)
 	}

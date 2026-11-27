@@ -97,7 +97,9 @@ rune.hooks.on("output", function(line)
 end, { name = "log-output", priority = 200 })
 
 rune.hooks.on("echo", function(text)
-    rune._log.write(raw_mode and text or rune._strip_ansi(text))
+    if log_open then
+        rune._log.write(raw_mode and text or rune._strip_ansi(text))
+    end
 end, { name = "log-echo", priority = 200 })
 
 -- /log - registered here rather than in commands.lua so the whole

@@ -51,6 +51,13 @@ end
 
 -- Create a timer (internal)
 local function create_timer(seconds, action, opts, repeating)
+    local api = repeating and "rune.timer.every" or "rune.timer.after"
+    if type(seconds) ~= "number" or not (seconds > 0) or seconds == math.huge then
+        rune._raise(api .. ": seconds must be a positive number")
+    end
+    if type(action) ~= "function" and type(action) ~= "string" then
+        rune._raise(api .. ": action must be a function or string")
+    end
     local data = {
         seconds = seconds,
         action = action,
@@ -58,7 +65,7 @@ local function create_timer(seconds, action, opts, repeating)
         source = rune.caller_source(2),
     }
 
-    local handle = registry:add(data, opts)
+    local handle = registry:add(data, opts, api)
     handle.cancel = handle.remove -- :cancel() is intuitive for timers
     handle.remaining = remaining
 

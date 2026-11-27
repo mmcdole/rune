@@ -12,7 +12,7 @@ import (
 // line. keep=false means the line was consumed. Errors are separate so Session
 // can report a rejected line or stop an exhausted submission without retrying it.
 // The interpretation mode cannot be changed by scripts.
-func (e *Engine) ProcessSubmittedLine(line input.Line) (input.Line, bool, error) {
+func (e *Engine) ProcessSubmittedLine(line input.Line, hidden bool) (input.Line, bool, error) {
 	if !line.Valid() {
 		return line, false, fmt.Errorf("expected a valid input line")
 	}
@@ -20,7 +20,7 @@ func (e *Engine) ProcessSubmittedLine(line input.Line) (input.Line, bool, error)
 	var found bool
 	err := e.guard(func() error {
 		var callErr error
-		results, found, callErr = e.vm.CallModule("rune.input", "_process_submitted_line", 1, line.Text, line.Mode.String())
+		results, found, callErr = e.vm.CallModule("rune.input", "_process_submitted_line", 1, line.Text, line.Mode.String(), hidden)
 		return callErr
 	})
 	if err != nil {

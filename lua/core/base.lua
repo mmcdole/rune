@@ -154,6 +154,28 @@ function rune.caller_source(level)
     return nil
 end
 
+-- Raise `message` at the first stack frame outside the embedded core, so
+-- argument checks inside shared helpers still point at the user's call.
+-- Falls back to the immediate caller when every frame is core code.
+function rune._raise(message)
+    local getinfo = debug and debug.getinfo
+    if getinfo then
+        local level = 2
+        while true do
+            local info = getinfo(level, "S")
+            if not info then
+                break
+            end
+            local src = info.source or ""
+            if src ~= "=[C]" and src ~= "=(tail call)" and not src:find("^@?core/") then
+                error(message, level)
+            end
+            level = level + 1
+        end
+    end
+    error(message, 2)
+end
+
 -- Line objects
 -- Server output arrives as objects with :raw() and :clean() methods
 -- (raw keeps ANSI codes, clean strips them). rune.line.new builds a

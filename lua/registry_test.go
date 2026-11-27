@@ -6,6 +6,7 @@ package lua
 // dispatch (the snapshot guarantee).
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/mmcdole/rune/text"
@@ -278,5 +279,88 @@ func TestRegistryAdditionSortedLaterWaitsForNext(t *testing.T) {
 	assertLua(t, engine, `
 		assert(table.concat(fired, ",") == "adder,adder,added",
 			"next dispatch order wrong: " .. table.concat(fired, ","))
+	`)
+}
+
+// Regression: an invalid option on re-registration deleted the existing
+// entry (the name upsert ran first), then failed with a sort error.
+func TestRegistryInvalidOptionsLeaveExistingEntry(t *testing.T) {
+	engine, _, cleanup := setupTest(t)
+	defer cleanup()
+	assertLua(t, engine, `
+		rune.timer.every(60, function() end, { name = "tick" })
+		local ok, err = pcall(rune.timer.every, 30, function() end, { name = "tick", priority = "high" })
+		assert(not ok, "invalid priority must raise")
+		assert(tostring(err):find("rune.timer.every: opts.priority must be a number", 1, true), tostring(err))
+		assert(rune.timer.get("tick"), "existing timer must survive a rejected re-registration")
+	`)
+}
+
+// Constructors reject arguments that could never work, naming the call.
+func TestRegistryConstructorsRejectBadArguments(t *testing.T) {
+	cases := []struct{ call, want string }{
+		{`rune.alias.exact("kill", nil)`, "rune.alias.exact: action must be a function or string"},
+		{`rune.alias.regex("^k$", 42)`, "rune.alias.regex: action must be a function or string"},
+		{`rune.trigger.contains("x", 42)`, "rune.trigger.contains: action must be a function, string, or nil"},
+		{`rune.timer.after(-1, function() end)`, "rune.timer.after: seconds must be a positive number"},
+		{`rune.timer.every("5", function() end)`, "rune.timer.every: seconds must be a positive number"},
+		{`rune.timer.after(5, nil)`, "rune.timer.after: action must be a function or string"},
+		{`rune.hooks.on(42, function() end)`, "rune.hooks.on: event must be a string"},
+		{`rune.hooks.on("output", "look")`, "rune.hooks.on: handler must be a function"},
+		{`rune.gmcp.on(nil, function() end)`, "rune.gmcp.on: package must be a string"},
+		{`rune.gmcp.on("Char", nil)`, "rune.gmcp.on: handler must be a function"},
+		{`rune.trigger.contains("x", "y", { group = 7 })`, "rune.trigger.contains: opts.group must be a string"},
+		{`rune.alias.regex("^k$", "kill", { once = "yes" })`, "rune.alias.regex: opts.once must be a boolean"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.call, func(t *testing.T) {
+			engine, _, cleanup := setupTest(t)
+			defer cleanup()
+			err := engine.DoString("user_script", tc.call)
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error %q does not contain %q", err, tc.want)
+			}
+			if !strings.Contains(err.Error(), "user_script") {
+				t.Fatalf("error %q does not point at the caller", err)
+			}
+		})
+	}
+}
+
+// Removing an entry twice is a no-op the second time: no second
+// on_remove or on_change for an entry that is already gone.
+func TestRegistryRemoveIsIdempotent(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+	assertLua(t, engine, `_G.h = rune.bind("f5", function() end)`)
+	host.DrainSnapshotChanges()
+	assertLua(t, engine, `h:remove(); h:remove(); h:disable(); h:enable()`)
+	if binds, _, _ := host.DrainSnapshotChanges(); binds != 1 {
+		t.Fatalf("binds changed %d times, want 1", binds)
+	}
+}
+
+// Regression: enable() is documented to reset the failure count, but a
+// quarantined entry re-enabled was disabled again on its next failure.
+func TestRegistryEnableResetsFailures(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+	assertLua(t, engine, `
+		rune.trigger.contains("boom", function() error("broken") end, { name = "bad" })
+	`)
+	for range 3 {
+		engine.OnOutput(text.NewLine("boom"))
+	}
+	assertLua(t, engine, `
+		assert(not rune.trigger.get("bad")._data.enabled, "three failures must quarantine")
+		rune.trigger.enable("bad")
+	`)
+	engine.OnOutput(text.NewLine("boom"))
+	host.DrainPrintCalls()
+	assertLua(t, engine, `
+		assert(rune.trigger.get("bad")._data.enabled, "one failure after enable() must not quarantine again")
 	`)
 }

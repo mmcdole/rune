@@ -35,15 +35,15 @@ function rune.world.add(name, address, opts)
     return rune.store.set(KEY, worlds)
 end
 
--- Remove a world. Returns true if it existed.
+-- Remove a world. Returns true if it existed, false if not, or nil + error
+-- message if saving failed.
 function rune.world.remove(name)
     local worlds = load_worlds()
     if not worlds[name] then
         return false
     end
     worlds[name] = nil
-    rune.store.set(KEY, worlds)
-    return true
+    return rune.store.set(KEY, worlds)
 end
 
 -- Returns the stored entry table ({address=..., ...}), or nil.
@@ -117,8 +117,11 @@ rune.command.add("world", function(args)
             rune.echo("[Usage] /world remove <name>")
             return
         end
-        if rune.world.remove(name) then
+        local ok, err = rune.world.remove(name)
+        if ok then
             rune.echo(green("[World]") .. " removed " .. name)
+        elseif err then
+            rune.echo(red("[Error]") .. " " .. tostring(err))
         else
             rune.echo(red("[Error]") .. " no world named " .. name)
         end

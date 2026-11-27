@@ -109,7 +109,7 @@ func dispatchTestCommand(engine *Engine, text string) bool {
 }
 
 func processTestLine(engine *Engine, line input.Line) (input.Line, bool) {
-	result, keep, err := engine.ProcessSubmittedLine(line)
+	result, keep, err := engine.ProcessSubmittedLine(line, false)
 	if err != nil {
 		engine.reportError("submitted line", err)
 	}

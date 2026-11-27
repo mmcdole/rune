@@ -102,9 +102,12 @@ open spans before `prompt` handlers run. Finishing a partial line on submission
 or accepted send commits its latest processed overlay without calling the
 `prompt` hook again.
 
-Every `input` handler receives `(text, context)`. The context is read-only, and
-`context.mode` is always `"command"` or `"verbatim"`. Each handler sees the
-text returned by the preceding handler:
+Every `input` handler receives `(text, context)`. The context is read-only:
+`context.mode` is always `"command"` or `"verbatim"`, and `context.hidden` is
+`true` while the server hides input, as at a password prompt. Rune neither
+echoes nor records a hidden line in history; a handler that remembers input
+should skip it too. Each handler sees the text returned by the preceding
+handler:
 
 ```lua
 rune.hooks.on("input", function(text, context)
