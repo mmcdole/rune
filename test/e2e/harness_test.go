@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/mmcdole/rune/input"
-	"github.com/mmcdole/rune/lua"
 	"github.com/mmcdole/rune/network"
 	"github.com/mmcdole/rune/session"
 	"github.com/mmcdole/rune/ui"
@@ -308,8 +307,7 @@ func newClient(t *testing.T, initLua string) *client {
 
 	uiMock := newMockUI()
 	s := session.New(network.NewTCPClient(), uiMock, session.Config{
-		CoreScripts: lua.CoreScripts,
-		ConfigDir:   cfgDir,
+		ConfigDir: cfgDir,
 	})
 
 	done := make(chan struct{})

@@ -5,8 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/mmcdole/rune/lua"
 )
 
 // newTestSessionInDir is newTestSession with a caller-owned config
@@ -18,8 +16,7 @@ func newTestSessionInDir(t *testing.T, dir string) (*Session, *mockNetwork, *moc
 	net := newMockNetwork()
 	uiMock := newMockUI()
 	s := New(net, uiMock, Config{
-		CoreScripts: lua.CoreScripts,
-		ConfigDir:   dir,
+		ConfigDir: dir,
 	})
 	if err := s.startup(); err != nil {
 		t.Fatalf("boot failed: %v", err)
@@ -66,7 +63,7 @@ func TestCorruptStoreBackedUpNotDiscarded(t *testing.T) {
 
 	net := newMockNetwork()
 	uiMock := newMockUI()
-	s := New(net, uiMock, Config{CoreScripts: lua.CoreScripts, ConfigDir: dir})
+	s := New(net, uiMock, Config{ConfigDir: dir})
 	if err := s.startup(); err != nil {
 		t.Fatalf("boot failed: %v", err)
 	}

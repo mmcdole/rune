@@ -21,7 +21,7 @@ func benchEngine(b *testing.B, setup string) *Engine {
 		b.Fatal(err)
 	}
 	b.Cleanup(engine.Close)
-	if err := loadCoreScripts(engine); err != nil {
+	if err := engine.LoadCore(); err != nil {
 		b.Fatal(err)
 	}
 	if setup != "" {

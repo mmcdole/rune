@@ -2,13 +2,10 @@ package session
 
 import (
 	"context"
-	"embed"
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"sync"
 	"time"
 
@@ -38,9 +35,8 @@ var _ Network = (*network.TCPClient)(nil)
 
 // Config holds startup settings for a Session.
 type Config struct {
-	CoreScripts   embed.FS // Embedded core Lua scripts
-	ConfigDir     string   // Directory for all of Rune's files (init.lua, store.json, worlds, logs)
-	ConnectTarget string   // CLI connect target (world, host port, or address)
+	ConfigDir     string // Directory for all of Rune's files (init.lua, store.json, worlds, logs)
+	ConnectTarget string // CLI connect target (world, host port, or address)
 }
 
 // Session owns application and Lua state. Its event loop serializes all access
@@ -459,7 +455,7 @@ func (s *Session) boot() error {
 	// scripts apply their initial layout from state, not from a
 	// synthetic resize event.
 	s.engine.UpdateState(s.clientState)
-	if err := s.loadCoreScripts(); err != nil {
+	if err := s.engine.LoadCore(); err != nil {
 		return err
 	}
 	// User scripts must never abort boot: a syntax error in a new
@@ -503,33 +499,6 @@ func (s *Session) initLua() error {
 		return err
 	}
 	s.engine.SetConfigDir(s.config.ConfigDir)
-	return nil
-}
-
-// loadCoreScripts loads embedded core Lua scripts in sorted order.
-func (s *Session) loadCoreScripts() error {
-	entries, err := fs.ReadDir(s.config.CoreScripts, "core")
-	if err != nil {
-		return fmt.Errorf("reading core scripts: %w", err)
-	}
-
-	var files []string
-	for _, e := range entries {
-		if !e.IsDir() {
-			files = append(files, e.Name())
-		}
-	}
-	sort.Strings(files)
-
-	for _, file := range files {
-		content, err := s.config.CoreScripts.ReadFile("core/" + file)
-		if err != nil {
-			return fmt.Errorf("core/%s: %w", file, err)
-		}
-		if err := s.engine.DoString(file, string(content)); err != nil {
-			return fmt.Errorf("core/%s: %w", file, err)
-		}
-	}
 	return nil
 }
 

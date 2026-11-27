@@ -363,7 +363,7 @@ discarded without firing.
 
 ### 4.2 Supported options
 
-The default compatibility table advertises only implemented options: Echo, SGA, EOR, TTYPE/MTTS, NAWS, CHARSET, NEW-ENVIRON/MNES (identity responders in `network/negotiate.go`, pure functions with byte-exact tests), MCCP2 (zlib read path in `client.go`; the source is a byte-exact `bufio.Reader`, so a clean stream end resumes plain telnet), and GMCP (option 201; framing and JSON conversion in Go, policy in `70_gmcp.lua`). MCCP3, MSSP, ZMP, and Linemode stay refused. The parser accepts subnegotiations for options enabled on either side (server-offered GMCP/MCCP are remote; client-answered TTYPE/NAWS are local).
+The default compatibility table advertises only implemented options: Echo, SGA, EOR, TTYPE/MTTS, NAWS, CHARSET, NEW-ENVIRON/MNES (identity responders in `network/negotiate.go`, pure functions with byte-exact tests), MCCP2 (zlib read path in `client.go`; the source is a byte-exact `bufio.Reader`, so a clean stream end resumes plain telnet), and GMCP (option 201; framing and JSON conversion in Go, policy in `gmcp.lua`). MCCP3, MSSP, ZMP, and Linemode stay refused. The parser accepts subnegotiations for options enabled on either side (server-offered GMCP/MCCP are remote; client-answered TTYPE/NAWS are local).
 
 ### 4.3 Ordered negotiation and GMCP
 
@@ -407,7 +407,7 @@ carry the Lua generation that created their callback; a result from before
 - `cmd/rune/`: Entry point
 - `internal/paths/`: Config dir resolution (XDG/APPDATA) and `~` expansion for user-given paths
 - `input/`: Input submission types and cursor conversions
-- `lua/`: Scripting engine, `rune._*` primitive registration, embedded Lua core (`lua/core/`)
+- `lua/`: Scripting engine, `rune._*` primitive registration, embedded Lua core (`lua/core/`). `Engine.LoadCore` runs the core files in the order listed by `CoreOrder` (`lua/assets.go`); a file loads after everything it uses at load time.
 - `network/`: TCP and Telnet logic
 - `session/`: Main application controller (implements `lua.Host`)
 - `text/`: Line type, ANSI stripper, degraded-path colors
@@ -501,7 +501,7 @@ bounded conversion; GMCP and storage select their existing compatibility
 policy. GMCP still owns raw-control-byte repair and its protocol-specific
 nesting check.
 
-`lua/core/10_json.lua` owns the public null value and private weak table-kind
+`lua/core/json.lua` owns the public null value and private weak table-kind
 marks. Its Go boundary uses tagged container trees so the existing script
 backend interface can carry nulls and empty arrays without losing their
 identity. Lua scalars cross directly. `lua/api_json.go` adapts those trees to

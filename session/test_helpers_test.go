@@ -19,8 +19,7 @@ func newTestSession(t *testing.T) (*Session, *mockNetwork, *mockUI) {
 	net := newMockNetwork()
 	uiMock := newMockUI()
 	s := New(net, uiMock, Config{
-		CoreScripts: lua.CoreScripts,
-		ConfigDir:   t.TempDir(),
+		ConfigDir: t.TempDir(),
 	})
 	if err := s.startup(); err != nil {
 		t.Fatalf("boot failed: %v", err)

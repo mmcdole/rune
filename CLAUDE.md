@@ -9,8 +9,8 @@ Read `docs/architecture.md` before structural changes and `docs/testing.md` befo
 ## Go/Lua boundary rules
 
 - Other goroutines send Session typed data, never closures.
-- Go registers only `rune._*` primitives. Every public `rune.*` name is defined in Lua (`lua/core/`), even thin wrappers. New public functions must be documented in `website/src/content/docs/reference/api/` or `lua/api_docs_coverage_test.go` fails.
-- Registries (hooks, timers, aliases, triggers, binds, bars, commands) all use `rune.registry.new` (`20_registry.lua`). Dispatch loops iterate `Registry:snapshot()`.
+- Go registers only `rune._*` primitives. Every public `rune.*` name is defined in Lua (`lua/core/`, boot order in `lua/assets.go` `CoreOrder`), even thin wrappers. New public functions must be documented in `website/src/content/docs/reference/api/` or `lua/api_docs_coverage_test.go` fails.
+- Registries (hooks, timers, aliases, triggers, binds, bars, commands) all use `rune.registry.new` (`lua/core/registry.lua`). Dispatch loops iterate `Registry:snapshot()`.
 - Config is Go-owned and typed; Lua uses `rune.config.get/set` only.
 - Presentation (styling, echo prefix) belongs in Lua via `rune.style`. Raw escape codes live in exactly one file per language.
 - Primitives return `nil, err` for recoverable failures; raise only for programmer errors.

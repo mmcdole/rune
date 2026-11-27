@@ -40,7 +40,7 @@ func validHistoryCharacter(value string) bool {
 }
 
 // registerConfigFuncs registers the rune._config primitives behind the public
-// rune.config.get/set wrappers in 00_init.lua.
+// rune.config.get/set wrappers in base.lua.
 func (e *Engine) registerConfigFuncs() {
 	e.vm.RegisterModule("rune._config", map[string]script.GoFunc{
 		"get": func(c *script.Call) error {

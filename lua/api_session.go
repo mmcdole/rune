@@ -3,7 +3,7 @@ package lua
 import "github.com/mmcdole/rune/script"
 
 // registerSessionFuncs registers rune._session.* primitives.
-// The public rune.session API is defined in Lua (00_init.lua).
+// The public rune.session API is defined in Lua (base.lua).
 func (e *Engine) registerSessionFuncs() {
 	e.vm.RegisterModule("rune._session", map[string]script.GoFunc{
 		// rune._session.set(key, value): store a string

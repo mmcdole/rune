@@ -1,6 +1,6 @@
 package lua
 
-// Tests for 90_editor.lua: history navigation, word operations, and
+// Tests for editor.lua: history navigation, word operations, and
 // tab completion. The MockHost input state stands in for the real
 // input widget. Only simulated user edits notify draft changes manually.
 
@@ -367,7 +367,7 @@ func TestTabCompletionIgnoresShortPrefixAndInput(t *testing.T) {
 	assertInput(t, host, "brandish ")
 }
 
-// The word cache caps at 5,000 entries (MAX_WORDS in 90_editor.lua) and
+// The word cache caps at 5,000 entries (MAX_WORDS in editor.lua) and
 // evicts in insertion order: past the cap the oldest words stop
 // completing while newer ones still do. Pins the contract, not the
 // data structure.

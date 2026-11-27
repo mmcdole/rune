@@ -83,7 +83,6 @@ func main() {
 	tcpClient := network.NewTCPClient()
 	tuiInstance := tui.NewBubbleTeaUI()
 	sess := session.New(tcpClient, tuiInstance, session.Config{
-		CoreScripts:   lua.CoreScripts,
 		ConfigDir:     paths.ConfigDir(*configDir),
 		ConnectTarget: target,
 	})

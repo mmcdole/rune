@@ -1,7 +1,6 @@
 package lua
 
 import (
-	"sort"
 	"testing"
 
 	"github.com/mmcdole/rune/input"
@@ -32,31 +31,9 @@ func setupTest(t *testing.T) (*Engine, *MockHost, func()) {
 // loadTestCoreScripts loads the embedded core in production boot order.
 func loadTestCoreScripts(t *testing.T, engine *Engine) {
 	t.Helper()
-	// Load core scripts (mimicking Session.boot())
-	entries, err := CoreScripts.ReadDir("core")
-	if err != nil {
-		t.Fatal("Failed to read core scripts:", err)
+	if err := engine.LoadCore(); err != nil {
+		t.Fatal(err)
 	}
-
-	var files []string
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			files = append(files, entry.Name())
-		}
-	}
-	// Sort for consistent load order (mirrors Session.loadCoreScripts)
-	sort.Strings(files)
-
-	for _, file := range files {
-		content, err := CoreScripts.ReadFile("core/" + file)
-		if err != nil {
-			t.Fatalf("Failed to read %s: %v", file, err)
-		}
-		if err := engine.DoString(file, string(content)); err != nil {
-			t.Fatalf("Failed to execute %s: %v", file, err)
-		}
-	}
-
 }
 
 // featureCase is one semantic variant: register something in Lua,

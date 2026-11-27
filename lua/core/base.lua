@@ -271,7 +271,7 @@ function rune.store.delete(key)
 end
 
 -- UI namespace
--- rune.ui.bar is added by 35_bars.lua, which owns the bar registry.
+-- rune.ui.bar is added by bars.lua, which owns the bar registry.
 
 rune.ui = {}
 

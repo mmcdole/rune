@@ -1,38 +1,11 @@
 package lua
 
 import (
-	"sort"
 	"strings"
 	"testing"
 
 	"github.com/mmcdole/rune/text"
 )
-
-// loadCoreScripts loads the embedded core into a fresh engine, in
-// order — what Session.boot does after /reload.
-func loadCoreScripts(engine *Engine) error {
-	entries, err := CoreScripts.ReadDir("core")
-	if err != nil {
-		return err
-	}
-	var files []string
-	for _, e := range entries {
-		if !e.IsDir() {
-			files = append(files, e.Name())
-		}
-	}
-	sort.Strings(files)
-	for _, f := range files {
-		content, err := CoreScripts.ReadFile("core/" + f)
-		if err != nil {
-			return err
-		}
-		if err := engine.DoString(f, string(content)); err != nil {
-			return err
-		}
-	}
-	return nil
-}
 
 func logContains(host *MockHost, substr string) bool {
 	for _, w := range host.LogWrites {
@@ -112,7 +85,7 @@ func TestLogRawModeSurvivesReload(t *testing.T) {
 	if err := engine2.Init(); err != nil {
 		t.Fatal(err)
 	}
-	if err := loadCoreScripts(engine2); err != nil {
+	if err := engine2.LoadCore(); err != nil {
 		t.Fatal(err)
 	}
 	defer engine2.Close()
