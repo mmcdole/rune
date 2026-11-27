@@ -10,7 +10,16 @@ var coreFS embed.FS
 // not constrain the order. TestCoreOrderMatchesEmbeddedFiles keeps this
 // list and the embedded files in step.
 var CoreOrder = []string{
-	"base", "style", "json", "regex", "registry", "hooks",
-	"binds", "bars", "timers", "aliases", "triggers", "commands",
-	"log", "worlds", "gmcp", "input", "http", "events", "editor", "ui",
+	// Foundation: no load-time dependency on other core files.
+	"base", "style", "guard", "json", "regex", "registry",
+	// Registries: commands first, so every later file can add its own /command.
+	"commands", "hooks", "binds", "timers", "aliases", "triggers",
+	// Screen: ui creates rune.ui, bars extends it, statusbar uses bars.
+	"ui", "bars", "statusbar",
+	// Input
+	"input", "history", "completion",
+	// Features
+	"connection", "gmcp", "http", "log",
+	// Last: the banner prints only once everything above has loaded.
+	"notices",
 }

@@ -1,16 +1,21 @@
--- Notices and local echo styling
--- The scrollback messages Rune prints for system events, and the "> "
--- styling of echoed input. Each is a named hook, so a script can hide
--- one (rune.hooks.disable("notice-reloaded")) or replace it by
--- registering its own handler under the same name. Notification hooks
--- ignore return values, so disabling by name is how to silence one.
--- The status bar (ui.lua) renders reactively from rune.state.
+-- Notices
+-- What Rune says to you: the startup banner, the first-run welcome, and
+-- the [System]/[Error] lines for client events.
+--
+-- Go fires the events; this file owns the messages. It loads last, so the
+-- banner only appears once the whole core has loaded.
+--
+-- Notes:
+--   Each notice is a named hook, notice-<event>: disable one to silence it
+--   (rune.hooks.disable("notice-reloaded")), or register your own handler
+--   under the name to restyle it. Notification hooks ignore return values.
 
--- Local echo styling. Re-register "echo-style" to restyle echoed input
--- (Go keeps a plain fallback for when the Lua core is unavailable).
-rune.hooks.on("echo", function(text)
-    return rune.style.green("> " .. text)
-end, { name = "echo-style", priority = 100 })
+local red, gray, cyan = rune.style.red, rune.style.gray, rune.style.cyan
+
+-- Startup
+
+rune.echo("Rune MUD Client " .. rune.version .. " (lua: " .. rune.engine .. ")")
+rune.echo("Type /help for commands")
 
 -- First-run welcome: shown at startup only while no init.lua exists, so
 -- new users learn where config lives and how to connect; it disappears
@@ -22,7 +27,6 @@ if rune.config_dir then
     if f then
         f:close()
     else
-        local gray, cyan = rune.style.gray, rune.style.cyan
         rune.echo("")
         rune.echo(gray("Welcome! To get started:"))
         rune.echo(gray("  connect:   ") .. cyan("/connect <host> <port>") ..
@@ -34,6 +38,8 @@ if rune.config_dir then
         rune.echo("")
     end
 end
+
+-- Defaults
 
 -- [System] notices, one named hook per event: notice-<event>.
 local function notice(event, render)
@@ -49,4 +55,4 @@ notice("disconnected", function() return "[System] Disconnected" end)
 notice("reloading", function() return "[System] Reloading scripts..." end)
 notice("reloaded", function() return "[System] Scripts reloaded" end)
 notice("loaded", function(path) return "[System] Loaded: " .. path end)
-notice("error", function(msg) return rune.style.red("[Error]") .. " " .. msg end)
+notice("error", function(msg) return red("[Error]") .. " " .. msg end)

@@ -1,50 +1,56 @@
 -- Registries
--- The one factory behind every callback registry: hooks, binds, bars,
--- timers, aliases, triggers, commands, and GMCP handlers. It owns an
--- entry's lifecycle; each module owns only how its entries match and fire.
+-- The one factory behind every callback registry (hooks, binds, bars,
+-- timers, aliases, triggers, commands, GMCP handlers), and group switches.
 --
--- Usage:
---   local registry = rune.registry.new{
---       kind = "trigger",          -- names the kind in labels and messages
---       options = { "gag", "raw" }, -- module options beyond the common set
---       index_by = "event",        -- optional: registry.indexed[value] lists
---       label = function(data) end, -- optional: label for errors
---       on_add = function(data) end,
---       on_remove = function(data) end,
---       on_change = function() end,
---   }
---   rune.trigger = registry:expose({})
---   local handle = registry:add(data, opts, "rune.trigger.contains")
+-- Pure Lua: Go never sees registry entries. The registry owns an entry's
+-- lifecycle; each module owns only how its entries match and fire.
 --
--- Every entry gets: id (insertion order), enabled, priority (default 50,
--- lower runs first), name (unique; re-adding a name replaces the entry),
--- group (master switch, see rune.group), once, core, and _handle. The
--- callback always lives in data.action.
+-- API:
+--   rune.group.enable/disable/toggle(name)  rune.group.is_enabled(name)
+--   rune.group.list()
+--   rune.registry.new(spec)                  -- internal, for core modules:
+--     local registry = rune.registry.new{
+--         kind = "trigger",            -- names the kind in labels and messages
+--         options = { "gag", "raw" },  -- module options beyond the common set
+--         index_by = "event",          -- optional: registry.indexed[value] lists
+--         label = function(data) end,  -- optional: error label
+--         on_add = function(data) end, on_remove = function(data) end,
+--         on_change = function() end,
+--     }
+--     rune.trigger = registry:expose({})  -- get enable disable toggle remove
+--                                         -- count clear remove_group
+--     local handle = registry:add(data, opts, "rune.trigger.contains")
 --
--- Common options: name, group, priority, once. An option outside those
--- and spec.options is ignored with a notice, which catches typos.
+-- Options (every registry):
+--   name     = "string"  -- unique; re-adding a name replaces the entry
+--   group    = "string"  -- membership for rune.group switches
+--   priority = 50        -- lower runs first
+--   once     = true      -- the module removes the entry after it fires
 --
--- Entry names are kebab-case ("log-output"); Rune's internal entries add a
--- leading underscore ("_trigger-output") and may change between releases.
+-- Notes:
+--   Every entry gets id (insertion order), enabled, priority, name, group,
+--   once, core, and _handle; the callback always lives in data.action. An
+--   option outside the common set and spec.options is ignored with a
+--   notice, which catches typos.
 --
--- Name is the only identity. Registries whose entries have a natural key
--- (a bind's key, a bar's name, a command, an exact alias's phrase) pass it
--- as the name via rune.registry.keyed_opts, so the management functions
--- address what the user typed.
+--   Entry names are kebab-case ("log-output"); Rune's internal entries add
+--   a leading underscore ("_trigger-output") and may change between
+--   releases. Name is the only identity: registries with a natural key (a
+--   bind's key, a bar, a command, an exact alias's phrase) pass it as the
+--   name via rune.registry.keyed_opts.
 --
--- Lists are replaced, never mutated, so a dispatch loop over snapshot()
--- (or an indexed list) is unaffected by callbacks that add or remove
--- entries; removals are honored through active().
+--   Lists are replaced, never mutated, so a dispatch loop over snapshot()
+--   (or an indexed list) is unaffected by callbacks that add or remove
+--   entries; removals are honored through active().
 --
--- Core entries: everything registered while the embedded core loads is
--- sealed as a default (rune.registry._seal, called by the loader). clear()
--- removes user entries and restores the defaults.
+--   Everything registered while the core loads is sealed as a default
+--   (rune.registry._seal, called by the loader); clear() removes user
+--   entries and restores the defaults.
 --
--- on_change runs after anything that can change which entries are active:
--- add, remove, enable, disable, toggle, and a group switch covering one of
--- the registry's entries.
+--   on_change runs after anything that can change which entries are
+--   active: add, remove, enable, disable, toggle, and a group switch.
 --
--- Handle API: :enable() :disable() :toggle() :remove() :name() :group() :action()
+--   Handle: :enable() :disable() :toggle() :remove() :name() :group() :action()
 
 rune.registry = {}
 
@@ -429,6 +435,15 @@ function Registry:expose(ns)
     return ns
 end
 
+-- Where a listed entry came from, for the /aliases-style listings: "core"
+-- for Rune's own defaults, otherwise the registering file:line.
+function rune.registry._origin(row)
+    if row.core then
+        return "  " .. rune.style.gray("core")
+    end
+    return row.source and ("  " .. rune.style.gray("@" .. row.source)) or ""
+end
+
 -- INTERNAL: called once by the loader after the core has loaded. What
 -- every registry holds now is Rune's defaults.
 function rune.registry._seal()
@@ -441,16 +456,11 @@ function rune.registry._seal()
     end
 end
 
--- Group System (Control Only)
--- Manages the master enable/disable state for groups.
--- Item deletion is handled by each module (alias, trigger, timer, hooks).
---
--- Two-level enable/disable:
---   - Group level: master switch (rune.group.disable/enable)
---   - Item level: individual state (handle:disable/enable)
---
--- An item fires only if BOTH are enabled.
--- Group disable doesn't mutate individual states - they're preserved for re-enable.
+-- Groups
+-- A group is a master switch over its members in every registry. An entry
+-- fires only if both it and its group are enabled; switching a group never
+-- changes members' own state. Removal by group is per registry
+-- (remove_group).
 
 rune.group = {}
 
@@ -514,10 +524,10 @@ function rune.group.list()
 
     local result = {}
     for group_name in pairs(seen) do
-        table.insert(result, {
+        result[#result + 1] = {
             name = group_name,
             enabled = rune.group.is_enabled(group_name),
-        })
+        }
     end
     table.sort(result, function(a, b) return a.name < b.name end)
     return result

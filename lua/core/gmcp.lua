@@ -1,14 +1,28 @@
--- GMCP (Generic MUD Communication Protocol)
--- Go owns the transport (option 201 framing, JSON encode/decode via
--- the shared bridge); this module owns the policy: the Core.Hello
--- handshake, package subscriptions, and handler dispatch.
+-- GMCP
+-- Generic MUD Communication Protocol: package handlers, subscriptions,
+-- sending, and the Core.Hello handshake.
 --
--- Handlers are registry-based, so they get names, groups, priorities,
--- failure quarantine, and source attribution like every other
--- callback. Package names match case-insensitively (per the spec).
+-- Go owns the transport (telnet option 201 framing and JSON conversion);
+-- this file owns the policy.
+--
+-- API:
+--   rune.gmcp.on(package, handler, opts?)  -- handler(data, package)
+--   rune.gmcp.send(package, data?)         -- true, or nil + error
+--   rune.gmcp.send_raw(package, json)      -- pre-encoded; a debug tool
+--   rune.gmcp.subscribe(package, version?)  rune.gmcp.unsubscribe(package)
+--   rune.gmcp.is_enabled()                 -- negotiated on this connection
+--   rune.gmcp.list()                       -- {package, ...}
+--   + shared management (get, enable, disable, toggle, remove, count,
+--     clear, remove_group); see registry.lua
+--
+-- Options (beyond name, group):
+--   priority = 50   -- order among a package's handlers (lower first)
+--
+-- Notes:
+--   Package names match case-insensitively, per the spec. Core.Supports.Set
+--   is maintained for you and re-sent whenever subscriptions change.
 
-local green, red, yellow, dim =
-    rune.style.green, rune.style.red, rune.style.yellow, rune.style.gray
+local green, red, yellow, gray = rune.style.green, rune.style.red, rune.style.yellow, rune.style.gray
 
 rune.gmcp = {}
 
@@ -19,7 +33,7 @@ local subscriptions = {} -- package -> version (what Core.Supports.Set sends)
 local function send_supports()
     local list = {}
     for package, version in pairs(subscriptions) do
-        table.insert(list, package .. " " .. version)
+        list[#list + 1] = package .. " " .. version
     end
     table.sort(list)
     if #list > 0 then
@@ -129,6 +143,8 @@ function rune.gmcp._dispatch(package, data, raw)
     end
 end
 
+-- Defaults
+
 -- Handshake: when the server negotiates GMCP, introduce ourselves.
 -- Re-register "gmcp-hello" to send a different hello.
 rune.hooks.on("gmcp_enabled", function()
@@ -158,21 +174,21 @@ rune.command.add("gmcp", function(args)
         return
     end
 
-    local status = rune._gmcp.is_active() and green("negotiated") or dim("not negotiated")
+    local status = rune._gmcp.is_active() and green("negotiated") or gray("not negotiated")
     rune.echo(green("[GMCP]") .. " " .. status)
     local subs = {}
     for package, version in pairs(subscriptions) do
-        table.insert(subs, package .. " " .. version)
+        subs[#subs + 1] = package .. " " .. version
     end
     table.sort(subs)
     rune.echo("  subscriptions: " ..
-        (#subs > 0 and table.concat(subs, ", ") or dim("(none)")))
+        (#subs > 0 and table.concat(subs, ", ") or gray("(none)")))
     local handlers = rune.gmcp.list()
-    rune.echo("  handlers: " .. dim("(" .. #handlers .. " total)"))
+    rune.echo("  handlers: " .. gray("(" .. #handlers .. " total)"))
     for _, h in ipairs(handlers) do
         local status_str = h.enabled and green("[on] ") or red("[off]")
-        local name_str = h.name and ("  " .. dim("name:") .. h.name) or ""
-        local src_str = h.core and ("  " .. dim("core")) or (h.source and ("  " .. dim("@" .. h.source)) or "")
+        local name_str = h.name and ("  " .. gray("name:") .. h.name) or ""
+        local src_str = h.core and ("  " .. gray("core")) or (h.source and ("  " .. gray("@" .. h.source)) or "")
         rune.echo(string.format("  %s %-24s%s%s",
             status_str, yellow(h.package), name_str, src_str))
     end

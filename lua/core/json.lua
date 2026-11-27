@@ -1,12 +1,26 @@
--- Go parses and writes JSON. This module handles the Lua-specific details:
--- which tables represent arrays or objects, and how to represent JSON null.
--- The kinds table remembers each table's JSON type without adding fields or
--- changing its metatable. Weak keys let unused tables be garbage-collected.
+-- JSON
+-- Encoding and decoding JSON text.
+--
+-- Go parses and writes the text (rune._json) and sets the limits; this
+-- file owns the Lua-specific details: which tables are arrays or objects,
+-- and how JSON null is represented.
+--
+-- API:
+--   rune.json.encode(value)   -- JSON text, or nil + error
+--   rune.json.decode(text)    -- value, or nil + error
+--   rune.json.array(t?)  rune.json.object(t?)  -- mark a table's JSON type
+--   rune.json.null            -- the JSON null value
+--
+-- Notes:
+--   The kinds table remembers each table's JSON type without adding fields
+--   or changing its metatable; weak keys let unused tables be collected.
+
 local native = rune._json
 local null = native.null
 local kinds = setmetatable({}, { __mode = "k" })
 local next, rawget, type, rawequal = next, rawget, type, rawequal
 local max_depth, max_bytes, max_nodes = native.max_depth, native.max_bytes, native.max_nodes
+local TOO_LARGE = ": JSON exceeds " .. math.floor(max_bytes / 1048576) .. " MiB"
 
 rune.json = { null = null }
 
@@ -41,7 +55,7 @@ function rune.json.encode(value)
         -- Stop obviously oversized inputs before copying their tables.
         -- Go checks the final size, including any JSON escape sequences.
         bytes = bytes + (kind == "string" and #v + 2 or 1)
-        if bytes > max_bytes then return nil, path .. ": JSON exceeds 5 MiB" end
+        if bytes > max_bytes then return nil, path .. TOO_LARGE end
         if v == nil or rawequal(v, null) then return { "null" } end
         if kind ~= "table" then
             if kind == "string" or kind == "number" or kind == "boolean" then return v end
@@ -69,7 +83,7 @@ function rune.json.encode(value)
         local contents = {}
         for key, child in next, v do
             if type(key) == "string" then bytes = bytes + #key + 3 end
-            if bytes > max_bytes then return nil, path .. ": JSON exceeds 5 MiB" end
+            if bytes > max_bytes then return nil, path .. TOO_LARGE end
             local child_path = path .. "[" .. (type(key) == "string" and string.format("%q", key) or key) .. "]"
             local packed, err = pack(child, depth + 1, child_path)
             if err then return nil, err end
@@ -91,14 +105,14 @@ function rune.json.decode(text)
     if err then return nil, err end
     -- Remove Go's temporary wrappers, restore null values, and remember
     -- whether each returned table came from a JSON array or object.
-    local function unpack(v)
+    local function unwrap(v)
         if type(v) ~= "table" then return v end
         local kind = rawget(v, 1)
         if kind == "null" then return null end
         local result = rawget(v, 2)
-        for key, child in next, result do result[key] = unpack(child) end
+        for key, child in next, result do result[key] = unwrap(child) end
         kinds[result] = kind
         return result
     end
-    return unpack(packed)
+    return unwrap(packed)
 end

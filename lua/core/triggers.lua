@@ -1,39 +1,40 @@
--- Trigger System
--- Triggers match server output and execute actions.
--- Built on rune.registry (registry.lua).
+-- Triggers
+-- Match server output and prompts, and act on them: send, run a function,
+-- gag, rewrite, or collect a multi-line message.
 --
--- API (literal matching):
---   rune.trigger.exact(line, action, opts?)      -- Exact line match (literal)
---   rune.trigger.starts(prefix, action, opts?)   -- Prefix match (literal)
---   rune.trigger.contains(substr, action, opts?) -- Substring match (literal)
+-- Go matches each line against every active trigger in one call
+-- (rune._regex.matcher); this file owns the registry and everything a
+-- match means: spans, gags, rewrites, and once.
 --
--- API (regex matching):
---   rune.trigger.regex(pattern, action, opts?)   -- Go regexp match
+-- API:
+--   rune.trigger.exact(line, action, opts?)       -- whole line, literal
+--   rune.trigger.starts(prefix, action, opts?)    -- line starts with
+--   rune.trigger.contains(substr, action, opts?)  -- line contains
+--   rune.trigger.regex(pattern, action, opts?)    -- Go regexp
+--   rune.trigger.list()
+--   + shared management (get, enable, disable, toggle, remove, count,
+--     clear, remove_group); see registry.lua
 --
--- Returns a handle with :disable(), :enable(), :remove(), :name(), :group()
---
--- Options:
---   name     = "string"   -- Unique ID for upsert/management
---   group    = "string"   -- Group membership for bulk operations
---   once     = true       -- Auto-remove after first match (spans: first fire)
---   priority = 50         -- Execution order (lower = first)
---   gag      = true       -- Hide matching line (spans: every collected line)
---   raw      = true       -- Match against raw line (with ANSI codes)
---   on       = "output"   -- "output" (default) or "prompt"
---   span     = {          -- Collect a multi-line message; action fires once
---     to  = "regex",      --   line that ends the span, inclusive (optional)
---     raw = true,         --   match `to` against the raw line
---     max = 8,            --   flush after N lines, header included
+-- Options (beyond name, group):
+--   priority = 50        -- lower runs first
+--   once     = true      -- remove after the first match (spans: first fire)
+--   gag      = true      -- hide the matching line (spans: every line)
+--   raw      = true      -- match the raw line, with ANSI codes
+--   on       = "output"  -- "output" (default) or "prompt"
+--   span     = {         -- collect a multi-line message; the action fires once
+--     to  = "regex",     --   line that ends the span, inclusive (optional)
+--     raw = true,        --   match `to` against the raw line
+--     max = 8,           --   flush after N lines, header included
 --   }
 --
--- Action can be:
---   - String: sent as command, %1 %2 etc substituted from captures (regex only)
---   - Function: function(matches, ctx)
---       matches = array of captures (empty for literal modes, populated for regex)
---       ctx = {line, name, group, type, matches, confirmed?}
---       Span actions also get ctx.text (joined message) and ctx.lines
---       (collected line objects); their return values are ignored, since
---       the collected lines have already been displayed.
+-- Notes:
+--   An action is a string (sent; %1 %2 substitute regex captures), a
+--   function(matches, ctx), or nil (with gag, a pure gag). ctx = {line,
+--   name, group, type = "trigger", matches, confirmed?}; span actions also
+--   get ctx.text (the joined message) and ctx.lines, and their return
+--   values are ignored because the lines were already displayed.
+
+local green, red, yellow, cyan, gray = rune.style.green, rune.style.red, rune.style.yellow, rune.style.cyan, rune.style.gray
 
 -- Bumped on anything that can change which triggers are active (add,
 -- remove, enable, disable, a group switch); passes resync their matcher's
@@ -73,33 +74,33 @@ local function create_trigger(pattern, action, opts, mode)
     end
     if type(on) ~= "string" or
             (on ~= ON_OUTPUT and on ~= ON_PROMPT) then
-        error('trigger on must be "output" or "prompt"', 3)
+        rune._raise(api .. ': on must be "output" or "prompt"')
     end
 
     if opts.span ~= nil and on ~= ON_OUTPUT then
-        error('trigger span requires on = "output"', 3)
+        rune._raise(api .. ': span requires on = "output"')
     end
 
     local span = nil
     if opts.span ~= nil then
         if type(opts.span) ~= "table" then
-            error("trigger span must be a table", 3)
+            rune._raise(api .. ": span must be a table")
         end
         local to = opts.span.to
         if to ~= nil then
             if type(to) ~= "string" then
-                error("trigger span.to must be a string pattern", 3)
+                rune._raise(api .. ": span.to must be a string pattern")
             end
             local ok, err = rune.regex.validate(to)
             if not ok then
-                error("invalid span.to pattern '" .. tostring(to) .. "': " .. tostring(err), 3)
+                rune._raise(api .. ": invalid span.to pattern '" .. tostring(to) .. "': " .. tostring(err))
             end
         end
         local max = opts.span.max
         if max == nil then
             max = 8
         elseif type(max) ~= "number" or max < 1 or max % 1 ~= 0 then
-            error("trigger span.max must be an integer >= 1", 3)
+            rune._raise(api .. ": span.max must be an integer >= 1")
         end
         -- Copy, so callers mutating their opts table later can't skew
         -- an already-registered trigger.
@@ -119,6 +120,7 @@ local function create_trigger(pattern, action, opts, mode)
 end
 
 -- Public API
+
 rune.trigger = registry:expose({})
 
 -- Exact line match (literal, whole line)
@@ -142,7 +144,7 @@ end
 function rune.trigger.regex(pattern, action, opts)
     local ok, err = rune.regex.validate(pattern)
     if not ok then
-        error("invalid trigger pattern '" .. tostring(pattern) .. "': " .. tostring(err), 2)
+        error("rune.trigger.regex: invalid pattern '" .. tostring(pattern) .. "': " .. tostring(err), 2)
     end
     return create_trigger(pattern, action, opts, MODE_REGEX)
 end
@@ -518,7 +520,9 @@ function rune.trigger._process_prompt(line, confirmed)
     return raw_line, true
 end
 
--- Register output handler
+-- Defaults
+
+-- Every output line runs through the triggers at priority 100.
 rune.hooks.on("output", function(line)
     local modified, show = rune.trigger._process_output(line)
     if not show then
@@ -535,3 +539,45 @@ rune.hooks.on("prompt", function(line, confirmed)
     end
     return modified
 end, { name = "_trigger-prompt", priority = 100 })
+
+-- /triggers - List all triggers
+rune.command.add("triggers", function()
+    local triggers = rune.trigger.list()
+    rune.echo(green("[Triggers]") .. gray(" (" .. #triggers .. " total)"))
+    if #triggers == 0 then
+        rune.echo("  " .. gray("(none)"))
+        return
+    end
+    for _, t in ipairs(triggers) do
+        local status = t.enabled and green("[on] ") or red("[off]")
+        local group_str = t.group and ("  " .. cyan("<" .. t.group .. ">")) or ""
+        local flags = {}
+        if t.gag then flags[#flags + 1] = "gag" end
+        if t.once then flags[#flags + 1] = "once" end
+        if t.raw then flags[#flags + 1] = "raw" end
+        if t.span then flags[#flags + 1] = "span" end
+        if t.on == "prompt" then flags[#flags + 1] = "on:prompt" end
+        local name_str = t.name and (" " .. gray("name:") .. t.name) or ""
+        local flags_str = #flags > 0 and ("  " .. gray("(" .. table.concat(flags, ", ") .. ")")) or ""
+        local src_str = rune.registry._origin(t)
+        rune.echo(string.format("  %s %-8s %s %s %s%s%s%s%s",
+            status, t.mode, yellow('"' .. t.match .. '"'), gray("->"), t.value, name_str, group_str, flags_str, src_str))
+    end
+end, "List all triggers")
+
+-- /test <line> - Simulate server output (test triggers)
+rune.command.add("test", function(args)
+    if args == "" then
+        rune.echo("[Usage] /test <line>")
+        return
+    end
+
+    rune.echo("[Test Input] " .. args)
+
+    local modified, show = rune.trigger._process_output(rune.line.new(args))
+    if show and modified ~= "" then
+        rune.echo("[Test Output] " .. modified)
+    else
+        rune.echo("[Test Output] (gagged)")
+    end
+end, "Test triggers with simulated line")

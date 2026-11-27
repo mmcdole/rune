@@ -1,19 +1,23 @@
--- Session Logging
--- Go owns the file handle (rune._log), so an active log survives
--- /reload and is closed on exit. This module owns the policy: WHAT
--- gets written, ANSI stripping, and the header/footer lines.
+-- Log
+-- Session logging to a file: what gets written, and /log.
 --
--- Policy: server output lines (after triggers - rewrites are logged as
--- rewritten, gagged lines are not logged) and the local echo of typed
--- input. Plain mode (the default) strips ANSI so the log reads like
--- the screen; raw mode (opts.raw / "/log start raw") keeps the codes
--- for color-faithful transcripts (view with `less -R`). Prompt
--- observations are skipped because partial lines can repeat. Client
--- chrome (rune.echo, /help output) is not logged. Re-register the
--- "log-output" / "log-echo" hooks with rune.log.write for a different policy; echo does not
--- fire while the server hides input (passwords stay out of logs).
+-- Go owns the file handle (rune._log), so an active log survives /reload
+-- and is closed on exit; this file owns the policy.
+--
+-- API:
+--   rune.log.start(path?, opts?)  -- opts.raw keeps ANSI; path, or nil + error
+--   rune.log.stop()               -- true if a log was open
+--   rune.log.status()             -- the active path, or nil
+--   rune.log.write(text)          -- append a line (no-op while not logging)
+--
+-- Notes:
+--   Written: server output after triggers (rewritten as rewritten, gagged
+--   lines skipped) and the local echo of typed input. Echo never fires
+--   while the server hides input, so passwords stay out. Plain mode strips
+--   ANSI so the log reads like the screen. Change the policy by
+--   re-registering the "log-output" / "log-echo" hooks.
 
-local green, red, dim = rune.style.green, rune.style.red, rune.style.gray
+local green, red, gray = rune.style.green, rune.style.red, rune.style.gray
 
 rune.log = {}
 
@@ -82,10 +86,11 @@ function rune.log.status()
 end
 
 -- Append one line to the log directly. No-op while no log is open.
--- For custom policies: disable the default hooks and write your own.
 function rune.log.write(text)
     rune._log.write(text)
 end
+
+-- Defaults
 
 -- Priority 200: runs after the core trigger handlers (priority 100),
 -- so the log sees the final rewritten text and never sees gagged
@@ -102,17 +107,16 @@ rune.hooks.on("echo", function(text)
     end
 end, { name = "log-echo", priority = 200 })
 
--- /log - registered here rather than in commands.lua so the whole
--- logging feature lives in one file.
+-- /log - status, start [raw|path], stop
 rune.command.add("log", function(args)
     local sub, rest = args:match("^(%S*)%s*(.*)$")
     if sub == "" or sub == "status" then
         local path = rune.log.status()
         if path then
             rune.echo(green("[Log]") .. " logging to " .. path ..
-                (raw_mode and dim("  (raw)") or ""))
+                (raw_mode and gray("  (raw)") or ""))
         else
-            rune.echo(dim("[Log] not logging") ..
+            rune.echo(gray("[Log] not logging") ..
                 "  (/log start [raw] [file], /log stop)")
         end
     elseif sub == "start" then
@@ -132,7 +136,7 @@ rune.command.add("log", function(args)
         local path, err = rune.log.start(file ~= "" and file or nil, { raw = raw })
         if path then
             rune.echo(green("[Log]") .. " logging to " .. path ..
-                (raw and dim("  (raw)") or ""))
+                (raw and gray("  (raw)") or ""))
         else
             rune.echo(red("[Error]") .. " " .. tostring(err))
         end
@@ -141,7 +145,7 @@ rune.command.add("log", function(args)
         if rune.log.stop() then
             rune.echo(green("[Log]") .. " stopped (" .. path .. ")")
         else
-            rune.echo(dim("[Log] not logging"))
+            rune.echo(gray("[Log] not logging"))
         end
     else
         rune.echo("[Usage] /log [status] | /log start [raw] [file] | /log stop")

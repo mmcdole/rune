@@ -1,21 +1,23 @@
--- Key Binding System
--- Built on rune.registry (registry.lua), so binds get the same
--- names, groups, source attribution, quarantine, and listings as
--- hooks/triggers/aliases/timers.
+-- Binds
+-- Key bindings: a key runs a function, or a named input action the UI
+-- performs itself (input.submit, input.newline, ...).
+--
+-- Go routes keys: named actions run in the UI, callbacks round-trip to
+-- rune.binds._dispatch. This file owns the registry and the defaults.
 --
 -- API:
---   rune.bind(key, action, opts?)  -- Bind a key ("ctrl+r", "f1", "j")
---   rune.unbind(key)                 -- Remove a binding
---   rune.binds.get(key)              -- The binding's handle, or nil
---   rune.binds.list()                -- For /binds
+--   rune.bind(key or {keys}, action, opts?)  -- returns a handle (or handles)
+--   rune.unbind(key)
+--   rune.binds.list()                       -- {key, action, ...} by key
+--   + shared management by key (get, enable, disable, toggle, remove,
+--     count, clear, remove_group); see registry.lua
 --
--- The key is the registry name, so rune.binds.disable("ctrl+g") and
--- rune.binds.get("ctrl+g") address a bind by the same string you bound.
--- Options: group (see registry.lua). Once the UI routes a key to a
--- disabled bind (or disabled group), it is consumed without a callback.
---
--- Named editor actions run in the UI. Callbacks round-trip through Session.
--- Both use the same registry and bind snapshot.
+-- Notes:
+--   The key is the registry name, so rune.binds.disable("ctrl+g") names the
+--   bind you made. A key routed to a disabled bind is consumed without a
+--   callback. clear() restores the default keys.
+
+local green, red, yellow, cyan, gray = rune.style.green, rune.style.red, rune.style.yellow, rune.style.cyan, rune.style.gray
 
 local registry = rune.registry.new{
     kind = "bind",
@@ -24,6 +26,7 @@ local registry = rune.registry.new{
 
 rune.binds = registry:expose({})
 
+-- Actions the UI runs itself; anything else must be a function.
 local editor_actions = {
     ["input.submit"] = true,
     ["input.newline"] = true,
@@ -72,6 +75,16 @@ function rune.unbind(key)
     return registry:remove(key)
 end
 
+-- List all binds - returns array of {key, action, name, group, enabled, source, core}
+function rune.binds.list()
+    local result = registry:list(function(row, data)
+        row.key = data.key
+        row.action = type(data.action) == "string" and data.action or nil
+    end)
+    table.sort(result, function(a, b) return a.key < b.key end)
+    return result
+end
+
 -- INTERNAL: called by Go when a bound key is pressed.
 -- Returns true if the key had an active callback binding.
 function rune.binds._dispatch(key)
@@ -96,17 +109,8 @@ function rune.binds._bindings()
     return bindings
 end
 
--- List all binds - returns array of {key, action, name, group, enabled, source, core}
-function rune.binds.list()
-    local result = registry:list(function(row, data)
-        row.key = data.key
-        row.action = type(data.action) == "string" and data.action or nil
-    end)
-    table.sort(result, function(a, b) return a.key < b.key end)
-    return result
-end
-
--- Defaults are ordinary bindings, installed before user configuration.
+-- Defaults
+-- Ordinary bindings, installed before user configuration.
 rune.bind("enter", "input.submit")
 rune.bind({"ctrl+j", "shift+enter", "ctrl+enter"}, "input.newline")
 rune.bind("alt+v", "input.toggle_mode")
@@ -119,3 +123,21 @@ rune.bind("ctrl+e", "input.open_editor")
 rune.bind({"ctrl+w", "alt+backspace"}, "input.delete_word")
 rune.bind({"alt+left", "ctrl+left"}, "input.word_left")
 rune.bind({"alt+right", "ctrl+right"}, "input.word_right")
+
+-- /binds - List all key bindings
+rune.command.add("binds", function()
+    local binds = rune.binds.list()
+    rune.echo(green("[Binds]") .. gray(" (" .. #binds .. " total)"))
+    if #binds == 0 then
+        rune.echo("  " .. gray("(none)"))
+        return
+    end
+    -- The key is the name, so there is no separate name column to print.
+    for _, b in ipairs(binds) do
+        local status = b.enabled and green("[on] ") or red("[off]")
+        local group_str = b.group and ("  " .. cyan("<" .. b.group .. ">")) or ""
+        local src_str = rune.registry._origin(b)
+        rune.echo(string.format("  %s %-16s%s%s",
+            status, yellow(b.key), group_str, src_str))
+    end
+end, "List all key bindings")

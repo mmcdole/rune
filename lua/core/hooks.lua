@@ -1,42 +1,37 @@
--- Hook Registry System
--- Allows multiple handlers per event with priority ordering.
--- Built on rune.registry (registry.lua) for handles, names,
--- groups, and priorities.
+-- Hooks
+-- Event handlers: inspect or change input, output, prompts, and echo, and
+-- react to client events. Several handlers per event, in priority order.
+--
+-- Go fires the events (Engine.callHooks / notify); this file owns the
+-- handler registry and how each event chains its handlers' results.
 --
 -- API:
---   rune.hooks.on(event, handler, opts?)  -- Attach handler to event
+--   rune.hooks.on(event, handler, opts?)   -- returns a handle
+--   rune.hooks.call(event, ...)            -- internal: run an event's chain
+--   rune.hooks.has(event)  rune.hooks.count(event?)  rune.hooks.clear(event?)
+--   rune.hooks.list()                      -- {event, priority, name, ...}
+--   + shared management (get, enable, disable, toggle, remove,
+--     remove_group); see registry.lua
 --
--- Returns a handle with :disable(), :enable(), :remove(), :name(), :group()
+-- Options (beyond name, group):
+--   priority = 50   -- lower runs first
 --
--- Options:
---   name     = "string"   -- Unique ID for upsert/management
---   group    = "string"   -- Group membership for bulk operations
---   priority = 50         -- Execution order (lower = first, default 50)
---
--- Events (data-flow):
---   "input"        -- User input: (text, context); strings rewrite, false consumes.
---                     context.mode is "command" or "verbatim"; context.hidden is
---                     true while the server hides input (a password prompt)
---   "output"       -- Server output line object (false gags, string rewrites)
---   "prompt"       -- Prompt observation: (line, confirmed); confirmed is
---                     false for a partial line, true for a GA/EOR-confirmed
---                     prompt (false gags, string rewrites)
---   "echo"         -- Local echo of final input after rewrites, plain string (false hides,
---                     string rewrites; core handler adds the "> " styling)
--- Events (notifications):
---   "ready"        -- Core and user scripts loaded; staged settings not yet applied
---   "connecting"   -- Dial started
---   "connected"    -- After connection established
---   "disconnecting"-- Disconnect requested
---   "disconnected" -- After disconnection
---   "reloading"    -- Before script reload
---   "reloaded"     -- After script reload
---   "loaded"       -- After a script file loads
---   "error"        -- On system error
---   "input_changed"-- Input buffer content changed
---   "gmcp"         -- Every GMCP message: (package, data, raw);
---                     catch-all alongside rune.gmcp.on (gmcp.lua)
---   "gmcp_enabled" -- GMCP negotiated; the core handler sends Core.Hello
+-- Notes:
+--   Data-flow events chain results:
+--     "input"   (text, context) -- a string rewrites, false consumes.
+--                context.mode is "command" or "verbatim"; context.hidden
+--                is true while the server hides input (a password prompt)
+--     "output"  (line)          -- false gags, a string rewrites
+--     "prompt"  (line, confirmed) -- confirmed is false for a partial
+--                line, true for a GA/EOR-confirmed prompt
+--     "echo"    (text)          -- false hides, a string rewrites; the
+--                core echo-style handler adds the "> "
+--   Notification events ignore return values: ready, connecting,
+--   connected, disconnecting, disconnected, reloading, reloaded, loaded,
+--   error, input_changed, window_size_changed, gmcp (package, data, raw;
+--   a catch-all beside rune.gmcp.on), gmcp_enabled.
+
+local green, red, cyan, gray = rune.style.green, rune.style.red, rune.style.cyan, rune.style.gray
 
 -- A failing handler is reported under this label. Built only on failure.
 local function hook_label(entry)
@@ -57,10 +52,10 @@ local by_event = registry.indexed
 local no_handlers = {}
 
 -- Public API
+
 rune.hooks = registry:expose({})
 
--- Attach a handler to an event
--- Returns: Handle with :remove(), :enable(), :disable(), :name(), :group()
+-- Attach a handler to an event. Returns its handle.
 function rune.hooks.on(event, handler, opts)
     if type(event) ~= "string" then
         error("rune.hooks.on: event must be a string", 2)
@@ -74,6 +69,40 @@ function rune.hooks.on(event, handler, opts)
         source = rune.caller_source(1),
     }, opts, "rune.hooks.on")
 end
+
+-- List all registered handlers
+function rune.hooks.list()
+    return registry:list(function(row, entry)
+        row.event = entry.event
+        row.priority = entry.priority
+    end)
+end
+
+-- Remove user handlers for an event (or all events) and restore Rune's
+-- own handlers there.
+function rune.hooks.clear(event)
+    if event == nil then
+        return registry:clear()
+    end
+    registry:clear(function(entry)
+        return entry.event == event
+    end)
+end
+
+-- Check if any handlers are registered for an event
+function rune.hooks.has(event)
+    return by_event[event] ~= nil
+end
+
+-- Count handlers for an event, or all handlers
+function rune.hooks.count(event)
+    if event then
+        return by_event[event] and #by_event[event] or 0
+    end
+    return registry:count()
+end
+
+-- Dispatch
 
 -- Run a single handler protected. A failing handler is reported and
 -- treated as returning nil (pass through), so one broken handler
@@ -93,7 +122,7 @@ end
 
 -- Give each input handler its own read-only context.
 local function reject_input_context_write()
-    error("input context is read-only", 2)
+    error("rune.hooks: input context is read-only", 2)
 end
 
 -- One shared metatable per (mode, hidden) pair.
@@ -118,7 +147,7 @@ end
 -- later handlers, and false gags it. Only prompt receives a second argument.
 local function line_chain(event, handlers, line, confirmed)
     if event == "prompt" and #handlers > 0 and type(confirmed) ~= "boolean" then
-        error("prompt requires an explicit confirmed boolean", 2)
+        error("rune.hooks.call: prompt requires an explicit confirmed boolean", 2)
     end
     for _, entry in ipairs(handlers) do
         if registry:active(entry) then
@@ -200,34 +229,23 @@ function rune.hooks.call(event, ...)
     return (chains[event] or notify)(event, by_event[event] or no_handlers, ...)
 end
 
--- List all registered handlers
-function rune.hooks.list()
-    return registry:list(function(row, entry)
-        row.event = entry.event
-        row.priority = entry.priority
-    end)
-end
+-- Defaults
 
--- Remove user handlers for an event (or all events) and restore Rune's
--- own handlers there.
-function rune.hooks.clear(event)
-    if event == nil then
-        return registry:clear()
+-- /hooks - List all hooks
+rune.command.add("hooks", function()
+    local hooks = rune.hooks.list()
+    rune.echo(green("[Hooks]") .. gray(" (" .. #hooks .. " total)"))
+    if #hooks == 0 then
+        rune.echo("  " .. gray("(none)"))
+        return
     end
-    registry:clear(function(entry)
-        return entry.event == event
-    end)
-end
-
--- Check if any handlers are registered for an event
-function rune.hooks.has(event)
-    return by_event[event] ~= nil
-end
-
--- Count handlers for an event, or all handlers
-function rune.hooks.count(event)
-    if event then
-        return by_event[event] and #by_event[event] or 0
+    for _, h in ipairs(hooks) do
+        local status = h.enabled and green("[on] ") or red("[off]")
+        local group_str = h.group and ("  " .. cyan("<" .. h.group .. ">")) or ""
+        local name_str = h.name or "(anonymous)"
+        local pri_str = gray("pri:") .. tostring(h.priority)
+        local src_str = rune.registry._origin(h)
+        rune.echo(string.format("  %s %-12s %s %s %s%s%s",
+            status, h.event, pri_str, gray("->"), name_str, group_str, src_str))
     end
-    return registry:count()
-end
+end, "List all hooks")

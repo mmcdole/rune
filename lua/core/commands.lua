@@ -1,13 +1,22 @@
--- Slash Command System
--- Built on rune.registry (registry.lua), so commands get the same
--- upsert-by-name, source attribution, and failure quarantine as every
--- other callback registry. A command that keeps throwing is disabled
--- individually - it can never take the terminal input dispatcher down with it.
+-- Commands
+-- Slash commands: the registry behind /name input, and the commands about
+-- the client as a whole (/help, /lua, /echo, /load, /reload, /quit,
+-- /version, /groups, /group).
+--
+-- Pure Lua. Other features add their own commands in their own files
+-- (/triggers in triggers.lua, /log in log.lua, ...).
+--
+-- API:
+--   rune.command.add(name, handler, description?, opts?)
+--   rune.command.list()            -- {name, description, ...} for /help
+--   + shared management (get, enable, disable, toggle, remove, count,
+--     clear, remove_group); see registry.lua
+--
+-- Notes:
+--   The command name is the registry name. A handler that keeps failing
+--   is disabled on its own; it can never take input dispatch down.
 
--- Styling shorthands (see style.lua)
-local green, red, yellow, cyan, dim =
-    rune.style.green, rune.style.red, rune.style.yellow,
-    rune.style.cyan, rune.style.gray
+local green, red, yellow, gray = rune.style.green, rune.style.red, rune.style.yellow, rune.style.gray
 
 local registry = rune.registry.new{
     kind = "command",
@@ -19,8 +28,7 @@ local registry = rune.registry.new{
 
 rune.command = registry:expose({})
 
--- Add a slash command. opts: group (see registry.lua).
--- Returns a handle with :enable/:disable/:remove.
+-- Add a slash command. Returns its handle.
 function rune.command.add(name, handler, description, opts)
     if type(name) ~= "string" then
         error("rune.command.add: name must be a string", 2)
@@ -42,6 +50,17 @@ function rune.command.add(name, handler, description, opts)
     }, rune.registry.keyed_opts(name, opts, "rune.command.add"), "rune.command.add")
 end
 
+-- List all commands for the picker and /help.
+-- Returns array of {name, description, enabled, group, source}.
+function rune.command.list()
+    local result = registry:list(function(row, data)
+        row.name = data.command
+        row.description = data.description
+    end)
+    table.sort(result, function(a, b) return a.name < b.name end)
+    return result
+end
+
 -- INTERNAL: run a command protected (called by the input dispatcher).
 -- Returns true if the name was a known command, even when it is
 -- disabled or its handler failed - the input is consumed either way.
@@ -59,94 +78,7 @@ function rune.command.dispatch(name, args)
     return true
 end
 
--- List all commands for the picker and /help.
--- Returns array of {name, description, enabled, group, source}.
-function rune.command.list()
-    local result = registry:list(function(row, data)
-        row.name = data.command
-        row.description = data.description
-    end)
-    table.sort(result, function(a, b) return a.name < b.name end)
-    return result
-end
-
--- /connect - three forms, resolved in order:
---   no args              -> picker over saved worlds (worlds.lua)
---   <world name>         -> saved world's address
---   <host> <port> [tls|tls+insecure], or a bare address ("host:port",
---                           optionally with a scheme) -> direct
--- rune.world is checked defensively: it loads after this file, and
--- may be missing in degraded mode.
-local USAGE_CONNECT = "[Usage] /connect <world> | /connect <host> <port> [tls|tls+insecure]"
-
-rune.command.add("connect", function(args)
-    if args == "" then
-        local worlds = rune.world and rune.world.list() or {}
-        if #worlds == 0 then
-            rune.echo(USAGE_CONNECT)
-            return
-        end
-        local items = {}
-        for _, w in ipairs(worlds) do
-            table.insert(items, { text = w.name, desc = w.address, value = w.name })
-        end
-        rune.ui.picker.show{
-            title = "Connect",
-            items = items,
-            match_description = true,
-            on_select = function(name)
-                local entry = rune.world and rune.world.get(name)
-                if entry then
-                    rune.connect(entry.address)
-                end
-            end,
-        }
-        return
-    end
-
-    local word = args:match("^(%S+)$")
-    if word and rune.world then
-        local entry = rune.world.get(word)
-        if entry then
-            rune.connect(entry.address)
-            return
-        end
-    end
-
-    local host, port, scheme = args:match("^(%S+)%s+(%d+)%s*(%S*)$")
-    if host and port then
-        if scheme == "" then
-            rune.connect(host .. ":" .. port)
-        elseif scheme == "tls" or scheme == "tls+insecure" then
-            rune.connect(scheme .. "://" .. host .. ":" .. port)
-        else
-            rune.echo(USAGE_CONNECT)
-        end
-        return
-    end
-    if word and word:find(":") then
-        rune.connect(word)
-    else
-        rune.echo(USAGE_CONNECT)
-    end
-end, "Connect to a world or address")
-
--- /disconnect - Disconnect from server
-rune.command.add("disconnect", function(args)
-    rune.disconnect()
-end, "Disconnect from server")
-
--- /reconnect - Reconnect to last server. The address is stored in
--- rune.store (on the "connected" event), so it survives /reload and
--- client restarts.
-rune.command.add("reconnect", function(args)
-    local addr = rune.store.get("last_address")
-    if addr then
-        rune.connect(addr)
-    else
-        rune.echo(red("[Error]") .. " No previous connection")
-    end
-end, "Reconnect to last server")
+-- Defaults
 
 -- /load <path> - Load a Lua script
 rune.command.add("load", function(args)
@@ -154,16 +86,16 @@ rune.command.add("load", function(args)
         rune.echo("[Usage] /load <path>")
         return
     end
+    -- Success is announced by the notice-loaded hook, which also covers
+    -- rune.load() from scripts; only the failure is reported here.
     local ok, err = rune.load(args)
-    if ok then
-        rune.echo(green("[Loaded]") .. " " .. args)
-    else
+    if not ok then
         rune.echo(red("[Error]") .. " " .. tostring(err))
     end
 end, "Load a Lua script file")
 
 -- /reload - Clear state and reload init.lua
-rune.command.add("reload", function(args)
+rune.command.add("reload", function()
     rune.reload()
 end, "Reload all scripts")
 
@@ -189,159 +121,12 @@ rune.command.add("lua", function(args)
     end
 end, "Execute Lua code")
 
--- Where a listed entry came from: "core" for Rune's own defaults,
--- otherwise the registering file:line.
-local function origin(row)
-    if row.core then
-        return "  " .. dim("core")
-    end
-    return row.source and ("  " .. dim("@" .. row.source)) or ""
-end
-
--- /aliases - List all aliases
-rune.command.add("aliases", function(args)
-    local aliases = rune.alias.list()
-    rune.echo(green("[Aliases]") .. dim(" (" .. #aliases .. " total)"))
-    if #aliases == 0 then
-        rune.echo("  " .. dim("(none)"))
-        return
-    end
-    for _, a in ipairs(aliases) do
-        local status = a.enabled and green("[on] ") or red("[off]")
-        local group_str = a.group and ("  " .. cyan("<" .. a.group .. ">")) or ""
-        local flags = {}
-        if a.once then flags[#flags + 1] = "once" end
-        -- An exact alias is named for its phrase, already in the match column.
-        local name_str = (a.name and a.name ~= a.match)
-            and (" " .. dim("name:") .. a.name) or ""
-        local flags_str = #flags > 0 and ("  " .. dim("(" .. table.concat(flags, ", ") .. ")")) or ""
-        local src_str = origin(a)
-        rune.echo(string.format("  %s %-8s %s %s %s %s%s%s%s",
-            status, a.mode, yellow('"' .. a.match .. '"'), dim("->"), a.value, name_str, group_str, flags_str, src_str))
-    end
-end, "List all aliases")
-
--- /triggers - List all triggers
-rune.command.add("triggers", function(args)
-    local triggers = rune.trigger.list()
-    rune.echo(green("[Triggers]") .. dim(" (" .. #triggers .. " total)"))
-    if #triggers == 0 then
-        rune.echo("  " .. dim("(none)"))
-        return
-    end
-    for _, t in ipairs(triggers) do
-        local status = t.enabled and green("[on] ") or red("[off]")
-        local group_str = t.group and ("  " .. cyan("<" .. t.group .. ">")) or ""
-        local flags = {}
-        if t.gag then flags[#flags + 1] = "gag" end
-        if t.once then flags[#flags + 1] = "once" end
-        if t.raw then flags[#flags + 1] = "raw" end
-        if t.span then flags[#flags + 1] = "span" end
-        if t.on == "prompt" then flags[#flags + 1] = "on:prompt" end
-        local name_str = t.name and (" " .. dim("name:") .. t.name) or ""
-        local flags_str = #flags > 0 and ("  " .. dim("(" .. table.concat(flags, ", ") .. ")")) or ""
-        local src_str = origin(t)
-        rune.echo(string.format("  %s %-8s %s %s %s%s%s%s%s",
-            status, t.mode, yellow('"' .. t.match .. '"'), dim("->"), t.value, name_str, group_str, flags_str, src_str))
-    end
-end, "List all triggers")
-
--- /test <line> - Simulate server output (test triggers)
-rune.command.add("test", function(args)
-    if args == "" then
-        rune.echo("[Usage] /test <line>")
-        return
-    end
-
-    rune.echo("[Test Input] " .. args)
-
-    local modified, show = rune.trigger._process_output(rune.line.new(args))
-    if show and modified ~= "" then
-        rune.echo("[Test Output] " .. modified)
-    else
-        rune.echo("[Test Output] (gagged)")
-    end
-end, "Test triggers with simulated line")
-
--- /timers - List all timers
-rune.command.add("timers", function(args)
-    local timers = rune.timer.list()
-    rune.echo(green("[Timers]") .. dim(" (" .. #timers .. " total)"))
-    if #timers == 0 then
-        rune.echo("  " .. dim("(none)"))
-        return
-    end
-    for _, t in ipairs(timers) do
-        local status = t.enabled and green("[on] ") or red("[off]")
-        local group_str = t.group and ("  " .. cyan("<" .. t.group .. ">")) or ""
-        local name_str = t.name and (" " .. dim("name:") .. t.name) or ""
-        local src_str = origin(t)
-        local timing = string.format("%s %.1fs (%.1fs left)", t.mode, t.seconds, t.remaining)
-        rune.echo(string.format("  %s %-12s %s %s%s%s%s",
-            status, timing, dim("->"), t.value, group_str, name_str, src_str))
-    end
-end, "List all timers")
-
--- /hooks - List all hooks
-rune.command.add("hooks", function(args)
-    local hooks = rune.hooks.list()
-    rune.echo(green("[Hooks]") .. dim(" (" .. #hooks .. " total)"))
-    if #hooks == 0 then
-        rune.echo("  " .. dim("(none)"))
-        return
-    end
-    for _, h in ipairs(hooks) do
-        local status = h.enabled and green("[on] ") or red("[off]")
-        local group_str = h.group and ("  " .. cyan("<" .. h.group .. ">")) or ""
-        local name_str = h.name or "(anonymous)"
-        local pri_str = dim("pri:") .. tostring(h.priority)
-        local src_str = origin(h)
-        rune.echo(string.format("  %s %-12s %s %s %s%s%s",
-            status, h.event, pri_str, dim("->"), name_str, group_str, src_str))
-    end
-end, "List all hooks")
-
--- /binds - List all key bindings
-rune.command.add("binds", function(args)
-    local binds = rune.binds.list()
-    rune.echo(green("[Binds]") .. dim(" (" .. #binds .. " total)"))
-    if #binds == 0 then
-        rune.echo("  " .. dim("(none)"))
-        return
-    end
-    -- The key is the name, so there is no separate name column to print.
-    for _, b in ipairs(binds) do
-        local status = b.enabled and green("[on] ") or red("[off]")
-        local group_str = b.group and ("  " .. cyan("<" .. b.group .. ">")) or ""
-        local src_str = origin(b)
-        rune.echo(string.format("  %s %-16s%s%s",
-            status, yellow(b.key), group_str, src_str))
-    end
-end, "List all key bindings")
-
--- /bars - List all bar renderers
-rune.command.add("bars", function(args)
-    local bars = rune.bars.list()
-    rune.echo(green("[Bars]") .. dim(" (" .. #bars .. " total)"))
-    if #bars == 0 then
-        rune.echo("  " .. dim("(none)"))
-        return
-    end
-    for _, b in ipairs(bars) do
-        local status = b.enabled and green("[on] ") or red("[off]")
-        local group_str = b.group and ("  " .. cyan("<" .. b.group .. ">")) or ""
-        local src_str = origin(b)
-        rune.echo(string.format("  %s %-16s%s%s",
-            status, yellow(b.bar), group_str, src_str))
-    end
-end, "List all bar renderers")
-
 -- /groups - List all groups and their enabled state
-rune.command.add("groups", function(args)
+rune.command.add("groups", function()
     local groups = rune.group.list()
-    rune.echo(green("[Groups]") .. dim(" (" .. #groups .. " total)"))
+    rune.echo(green("[Groups]") .. gray(" (" .. #groups .. " total)"))
     if #groups == 0 then
-        rune.echo("  " .. dim("(none)"))
+        rune.echo("  " .. gray("(none)"))
         return
     end
     for _, g in ipairs(groups) do
@@ -365,22 +150,13 @@ rune.command.add("group", function(args)
     if action == "on" then
         rune.group.enable(name)
         rune.echo(green("[Group]") .. " " .. name .. " enabled" ..
-            (known and "" or dim("  (no items in this group yet)")))
+            (known and "" or gray("  (no items in this group yet)")))
     else
         rune.group.disable(name)
         rune.echo(yellow("[Group]") .. " " .. name .. " disabled" ..
-            (known and "" or dim("  (no items in this group yet)")))
+            (known and "" or gray("  (no items in this group yet)")))
     end
 end, "Enable/disable a group (/group <name> on|off)")
-
--- /raw <text> - Send without alias expansion
-rune.command.add("raw", function(args)
-    if args == "" then
-        rune.echo("[Usage] /raw <text>")
-        return
-    end
-    rune.send_raw(args)
-end, "Send text without alias expansion")
 
 -- /echo <text> - Print to the local screen (never sent to the server).
 -- Handy for testing and for use in alias/bind command strings.
@@ -388,19 +164,13 @@ rune.command.add("echo", function(args)
     rune.echo(args)
 end, "Print text locally")
 
--- /find [pattern] - Search the scrollback. With no pattern the overlay
--- reopens with the previous query (find-next lives in the overlay).
-rune.command.add("find", function(args)
-    rune.ui.search({ query = args })
-end, "Search scrollback")
-
 -- /version - Client version
-rune.command.add("version", function(args)
+rune.command.add("version", function()
     rune.echo("Rune " .. rune.version .. " (lua: " .. rune.engine .. ")")
 end, "Show client version")
 
 -- /quit - Exit the client
-rune.command.add("quit", function(args)
+rune.command.add("quit", function()
     rune.echo("[System] Goodbye!")
     rune.quit()
 end, "Exit the client")
@@ -408,9 +178,9 @@ end, "Exit the client")
 -- /help - Show available commands, generated from the registry so
 -- user-added commands appear automatically and descriptions cannot
 -- drift from what the picker shows.
-rune.command.add("help", function(args)
+rune.command.add("help", function()
     local cmds = rune.command.list()
-    rune.echo(green("[Commands]") .. dim(" (" .. #cmds .. " total)"))
+    rune.echo(green("[Commands]") .. gray(" (" .. #cmds .. " total)"))
     for _, c in ipairs(cmds) do
         local status = c.enabled and "" or (" " .. red("[off]"))
         rune.echo(string.format("  %-12s %s%s",

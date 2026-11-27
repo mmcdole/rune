@@ -1,30 +1,27 @@
--- Timer System
--- Timers execute actions after a delay or repeatedly at intervals.
--- Built on rune.registry (registry.lua).
+-- Timers
+-- Run an action after a delay, or repeatedly at an interval.
+--
+-- Go schedules the wake-ups (rune._timer); this file owns the registry,
+-- the actions, and what disabling means.
 --
 -- API:
---   rune.timer.after(seconds, action, opts?)  -- One-shot timer
---   rune.timer.every(seconds, action, opts?)  -- Repeating timer
+--   rune.timer.after(seconds, action, opts?)  -- one-shot
+--   rune.timer.every(seconds, action, opts?)  -- repeating
+--   rune.timer.list()                         -- {seconds, remaining, mode, ...}
+--   + shared management (get, enable, disable, toggle, remove, count,
+--     clear, remove_group); see registry.lua. cancel is remove.
 --
--- every() uses fixed-interval scheduling: the next firing is
--- scheduled the moment the previous one fires, regardless of how
--- long the action takes to run.
+-- Notes:
+--   An action is a string (sent as a command) or function(ctx), with
+--   ctx = {name, group, type = "timer", remove()}. Handles add
+--   :remaining(), seconds until the next wake-up (nil once removed).
 --
--- Disabling suppresses firing. A repeating timer keeps its schedule
--- and resumes on re-enable; a one-shot whose moment passes while
--- disabled is removed - its wake-up is spent and cannot recur.
---
--- Returns a handle with :disable(), :enable(), :cancel(), :name(), :group()
--- and :remaining() (seconds until the next wake-up, or nil after removal).
---
--- Options:
---   name  = "string"  -- Unique ID for upsert/management
---   group = "string"  -- Group membership for bulk operations
---
--- Action can be:
---   - String: sent as command
---   - Function: function(ctx)
---       ctx = {name, group, type, remove()}
+--   every() uses fixed-interval scheduling: the next firing is scheduled
+--   when the previous one fires, however long the action runs. Disabling
+--   suppresses firing; a repeating timer keeps its schedule, and a
+--   one-shot whose moment passes while disabled is removed.
+
+local green, red, cyan, gray = rune.style.green, rune.style.red, rune.style.cyan, rune.style.gray
 
 -- Go timer id -> callback. Go only schedules wake-ups; this module
 -- owns dispatch, so all callback state dies with the VM on reload.
@@ -113,17 +110,9 @@ local function create_timer(seconds, action, opts, repeating)
 end
 
 -- Public API
+
 rune.timer = registry:expose({})
 rune.timer.cancel = rune.timer.remove -- cancel is the natural verb for timers
-
--- INTERNAL: called by Go when a timer fires. Unknown ids - cancelled
--- mid-flight, or scheduled by a previous VM generation - are ignored.
-function rune.timer._fire(id)
-    local callback = pending[id]
-    if callback then
-        callback()
-    end
-end
 
 -- One-shot timer (fires once after delay)
 function rune.timer.after(seconds, action, opts)
@@ -145,3 +134,35 @@ function rune.timer.list()
         row.value = type(data.action) == "function" and "(function)" or tostring(data.action)
     end)
 end
+
+-- Dispatch
+
+-- INTERNAL: called by Go when a timer fires. Unknown ids - cancelled
+-- mid-flight, or scheduled by a previous VM generation - are ignored.
+function rune.timer._fire(id)
+    local callback = pending[id]
+    if callback then
+        callback()
+    end
+end
+
+-- Defaults
+
+-- /timers - List all timers
+rune.command.add("timers", function()
+    local timers = rune.timer.list()
+    rune.echo(green("[Timers]") .. gray(" (" .. #timers .. " total)"))
+    if #timers == 0 then
+        rune.echo("  " .. gray("(none)"))
+        return
+    end
+    for _, t in ipairs(timers) do
+        local status = t.enabled and green("[on] ") or red("[off]")
+        local group_str = t.group and ("  " .. cyan("<" .. t.group .. ">")) or ""
+        local name_str = t.name and (" " .. gray("name:") .. t.name) or ""
+        local src_str = rune.registry._origin(t)
+        local timing = string.format("%s %.1fs (%.1fs left)", t.mode, t.seconds, t.remaining)
+        rune.echo(string.format("  %s %-12s %s %s%s%s%s",
+            status, timing, gray("->"), t.value, group_str, name_str, src_str))
+    end
+end, "List all timers")

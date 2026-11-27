@@ -1,6 +1,6 @@
 package lua
 
-// Smoke tests for the listing slash commands (commands.lua): each
+// Smoke tests for the listing slash commands (each in its registry file): each
 // must run without error and mention what was registered. These guard
 // the /listing surface that has no other coverage - a formatting typo
 // in a listing otherwise only surfaces when a user types it.
