@@ -72,7 +72,7 @@ input, inline and modal pickers, scrollback search, and the draft editor.
 ## Managing
 
 Standard registry management applies, addressed by key:
-`rune.binds.get/enable/disable/remove(key)`, `.list()`, `.count()`,
+`rune.binds.get/enable/disable/toggle/remove(key)`, `.list()`, `.count()`,
 `.clear()`, `.remove_group(group)`. See
 [Registries](/reference/api/#managing). `/binds` lists everything.
 

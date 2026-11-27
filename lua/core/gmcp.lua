@@ -27,43 +27,18 @@ local function send_supports()
     end
 end
 
--- Per-package dispatch index (mirrors hooks.lua's by_event)
-local by_package = {} -- lowercase package -> sorted array of data
-
-local function sort_handlers(handlers)
-    table.sort(handlers, function(a, b)
-        if a.priority ~= b.priority then
-            return a.priority < b.priority
-        end
-        return a.id < b.id
-    end)
-end
-
 local registry = rune.registry.new{
     kind = "gmcp",
-    action_field = "handler",
-    on_add = function(data)
-        local handlers = by_package[data.package]
-        if not handlers then
-            handlers = {}
-            by_package[data.package] = handlers
-        end
-        table.insert(handlers, data)
-        sort_handlers(handlers)
-    end,
-    on_remove = function(data)
-        local handlers = by_package[data.package]
-        if not handlers then
-            return
-        end
-        for i, entry in ipairs(handlers) do
-            if entry == data then
-                table.remove(handlers, i)
-                break
-            end
-        end
+    index_by = "package",
+    label = function(data)
+        return 'GMCP "' .. data.package .. '"' ..
+            (data.name and (' "' .. data.name .. '"') or "") ..
+            (data.source and (" @" .. data.source) or "")
     end,
 }
+
+-- Per-package dispatch lists (lowercase package -> sorted entries).
+local by_package = registry.indexed
 
 -- Attach a handler to a GMCP package (exact match, case-insensitive).
 -- handler receives (data, package): data is the decoded JSON value
@@ -80,26 +55,12 @@ function rune.gmcp.on(package, handler, opts)
     end
     return registry:add({
         package = package:lower(),
-        handler = handler,
+        action = handler,
         source = rune.caller_source(1),
     }, opts, "rune.gmcp.on")
 end
 
-function rune.gmcp.remove(name)
-    return registry:remove(name)
-end
-
-function rune.gmcp.get(name)
-    return registry:get(name)
-end
-
-function rune.gmcp.enable(name)
-    return registry:enable(name)
-end
-
-function rune.gmcp.disable(name)
-    return registry:disable(name)
-end
+registry:expose(rune.gmcp)
 
 -- Send a GMCP message. data may be a string, number, boolean, or
 -- JSON-able table; nil sends the bare package name.
@@ -148,17 +109,9 @@ end
 
 -- List handlers for /gmcp: array of {package, name, enabled, group, source}.
 function rune.gmcp.list()
-    local result = {}
-    for _, data in ipairs(registry:items()) do
-        table.insert(result, {
-            package = data.package,
-            name = data.name,
-            enabled = data.enabled,
-            group = data.group,
-            source = data.source,
-        })
-    end
-    return result
+    return registry:list(function(row, data)
+        row.package = data.package
+    end)
 end
 
 -- INTERNAL: called by Go (Engine.OnGMCP) with the package name, the
@@ -167,21 +120,11 @@ end
 function rune.gmcp._dispatch(package, data, raw)
     rune.hooks.call("gmcp", package, data, raw)
 
-    local live = by_package[package:lower()]
-    if not live or #live == 0 then
-        return
-    end
-    -- Snapshot: a handler may add/remove handlers mid-dispatch.
-    local handlers = {}
-    for i, entry in ipairs(live) do
-        handlers[i] = entry
-    end
-    for _, entry in ipairs(handlers) do
+    -- The list is replaced, never mutated, when handlers change, so
+    -- handlers added or removed mid-dispatch can't perturb this loop.
+    for _, entry in ipairs(by_package[package:lower()] or {}) do
         if registry:active(entry) then
-            local label = 'GMCP "' .. package .. '"' ..
-                (entry.name and (' "' .. entry.name .. '"') or "") ..
-                (entry.source and (" @" .. entry.source) or "")
-            rune.guarded_call(label, entry, entry.handler, data, package)
+            registry:call(entry, data, package)
         end
     end
 end
@@ -226,7 +169,7 @@ rune.command.add("gmcp", function(args)
     for _, h in ipairs(handlers) do
         local status_str = h.enabled and green("[on] ") or red("[off]")
         local name_str = h.name and ("  " .. dim("name:") .. h.name) or ""
-        local src_str = h.source and ("  " .. dim("@" .. h.source)) or ""
+        local src_str = h.core and ("  " .. dim("core")) or (h.source and ("  " .. dim("@" .. h.source)) or "")
         rune.echo(string.format("  %s %-24s%s%s",
             status_str, yellow(h.package), name_str, src_str))
     end

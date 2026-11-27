@@ -119,21 +119,28 @@ listed on each page.
 
 ## Managing
 
-Every registry namespace exposes the same functions, each taking the
-item's name:
+Every registry namespace (`rune.trigger`, `rune.alias`, `rune.timer`,
+`rune.hooks`, `rune.binds`, `rune.bars`, `rune.command`, `rune.gmcp`)
+exposes the same functions, each taking the item's name:
 
 | Function | Effect |
 |---|---|
 | `.get(name)` | The item's handle, or nil |
-| `.enable(name)` / `.disable(name)` | Enable or disable an item |
+| `.enable(name)` / `.disable(name)` / `.toggle(name)` | Enable, disable, or flip an item; `true` if it exists |
 | `.remove(name)` | Unregister an item |
-| `.list()` | All items with name, enabled state, group, and source `file:line` |
+| `.list()` | All items with name, enabled state, group, source `file:line`, and `core` for Rune's own |
 | `.count()` | Number of registered items |
-| `.clear()` | Remove everything in the registry |
+| `.clear()` | Remove your items and restore Rune's defaults |
 | `.remove_group(group)` | Remove all items in a group |
 
-The bar registry also exposes `.toggle(name)`, returning whether that bar
-exists. See [rune.ui](/reference/api/ui/#managing-bars).
+Handles have the same verbs: `h:enable()`, `h:disable()`, `h:toggle()`,
+`h:remove()`. Enabling an item also resets its failure count.
+
+Rune registers its own defaults in the same registries: the core hooks,
+the default binds, the status bar, the built-in commands. `.clear()` removes
+only what you added, then restores any default you removed, replaced, or
+disabled, so `.count()` can be non-zero afterwards. `rune.hooks.clear(event)`
+does the same for one event. To silence one default, disable it by name.
 
 The matching slash commands — `/triggers`, `/aliases`, `/timers`,
 `/hooks`, `/binds`, `/bars` — print the same listings.

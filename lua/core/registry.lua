@@ -1,49 +1,51 @@
--- Shared Registry Factory
--- Hooks, timers, aliases, and triggers are all the same shape: a
--- registry of callbacks with handles, upsert-by-name, group
--- membership, priority ordering, and two-level enable/disable. This
--- factory implements that machinery exactly once, so every module has
--- identical semantics and a fix here fixes all of them.
+-- Registries
+-- The one factory behind every callback registry: hooks, binds, bars,
+-- timers, aliases, triggers, commands, and GMCP handlers. It owns an
+-- entry's lifecycle; each module owns only how its entries match and fire.
 --
 -- Usage:
---   local reg = rune.registry.new{
---       kind = "trigger",               -- label for messages
---       action_field = "action",        -- data field holding the callback
---       on_add = function(data) end,    -- optional, after insertion
---       on_remove = function(data) end, -- optional, after removal
---       on_change = function() end,     -- optional, see below
+--   local registry = rune.registry.new{
+--       kind = "trigger",          -- names the kind in labels and messages
+--       options = { "gag", "raw" }, -- module options beyond the common set
+--       index_by = "event",        -- optional: registry.indexed[value] lists
+--       label = function(data) end, -- optional: label for errors
+--       on_add = function(data) end,
+--       on_remove = function(data) end,
+--       on_change = function() end,
 --   }
---   local handle = reg:add(data, opts)
+--   rune.trigger = registry:expose({})
+--   local handle = registry:add(data, opts, "rune.trigger.contains")
 --
--- The module owns `data` (pattern, action, ...); the factory
--- standardizes these fields on it:
---   id       -- insertion order (tiebreak for equal priorities)
---   enabled  -- individual switch (see reg:active)
---   priority -- opts.priority or 50, lower runs first
---   name     -- opts.name, unique: adding a duplicate replaces the old
---   group    -- opts.group, master-switch membership (rune.group)
---   once     -- opts.once, module removes the item after first fire
---   _handle  -- back-reference to the handle
+-- Every entry gets: id (insertion order), enabled, priority (default 50,
+-- lower runs first), name (unique; re-adding a name replaces the entry),
+-- group (master switch, see rune.group), once, core, and _handle. The
+-- callback always lives in data.action.
 --
--- Name is the ONLY identity. Registries whose entries have a natural
--- key (a bind's key, a bar's layout name, a command's name, an exact
--- alias's phrase) pass that key as the name via rune.registry.keyed_opts,
--- so `reg:get(key)` and the management suite address the same thing the
--- user typed. Those registries must not also upsert by their own index:
--- the name upsert below already replaces the old entry, firing on_remove
--- for it before on_add for the new one.
+-- Common options: name, group, priority, once. An option outside those
+-- and spec.options is ignored with a notice, which catches typos.
+--
+-- Name is the only identity. Registries whose entries have a natural key
+-- (a bind's key, a bar's name, a command, an exact alias's phrase) pass it
+-- as the name via rune.registry.keyed_opts, so the management functions
+-- address what the user typed.
+--
+-- Lists are replaced, never mutated, so a dispatch loop over snapshot()
+-- (or an indexed list) is unaffected by callbacks that add or remove
+-- entries; removals are honored through active().
+--
+-- Core entries: everything registered while the embedded core loads is
+-- sealed as a default (rune.registry._seal, called by the loader). clear()
+-- removes user entries and restores the defaults.
 --
 -- on_change runs after anything that can change which entries are active:
 -- add, remove, enable, disable, toggle, and a group switch covering one of
--- its entries. Registries that keep state derived from that (a rendered
--- snapshot, a compiled matcher) use it to mark the state stale; others
--- leave it unset.
+-- the registry's entries.
 --
--- Handle API: :enable() :disable() :remove() :name() :group() :action()
+-- Handle API: :enable() :disable() :toggle() :remove() :name() :group() :action()
 
 rune.registry = {}
 
--- Every registry, for group switches that span them.
+-- Every registry, for group switches and sealing.
 local registries = {}
 
 local Handle = {}
@@ -73,6 +75,13 @@ function Handle:disable()
     return self
 end
 
+function Handle:toggle()
+    if self._data.enabled then
+        return self:disable()
+    end
+    return self:enable()
+end
+
 function Handle:remove()
     self._registry:_remove_data(self._data)
     return self
@@ -91,7 +100,7 @@ end
 -- checks and the failure quarantine, so this is for capturing and
 -- wrapping an existing entry, not for dispatch.
 function Handle:action()
-    return self._data[self._registry.action_field]
+    return self._data.action
 end
 
 local Registry = {}
@@ -100,11 +109,9 @@ Registry.__index = Registry
 -- Build the opts table for a registry whose entries have a natural key,
 -- making that key the name.
 --
--- A name used to be a second identity for the same entry, which is the
--- bug this avoids. It is now dropped with a notice rather than raised:
+-- A different opts.name is dropped with a notice rather than raised:
 -- raising aborts the rest of the user's script, so one stale option in
--- an old init.lua would cost every registration below it. The notice
--- names the key to use instead.
+-- an old init.lua would cost every registration below it.
 function rune.registry.keyed_opts(key, opts, label)
     if opts ~= nil and type(opts) ~= "table" then
         error(label .. ": opts must be a table", 3)
@@ -125,17 +132,43 @@ function rune.registry.keyed_opts(key, opts, label)
     return merged
 end
 
-function rune.registry.new(opts)
-    opts = opts or {}
+local function capitalize(s)
+    return (s:gsub("^%l", string.upper))
+end
+
+-- The default error label: Kind "name" @source, or Kind #id @source.
+local function default_label(title)
+    return function(data)
+        local who = data.name and ('"' .. data.name .. '"') or ("#" .. data.id)
+        return title .. " " .. who .. (data.source and (" @" .. data.source) or "")
+    end
+end
+
+local COMMON_OPTIONS = { name = "string", group = "string", priority = "number", once = "boolean" }
+
+function rune.registry.new(spec)
+    spec = spec or {}
+    local kind = spec.kind or "item"
+    local allowed = {}
+    for key in pairs(COMMON_OPTIONS) do
+        allowed[key] = true
+    end
+    for _, key in ipairs(spec.options or {}) do
+        allowed[key] = true
+    end
     local registry = setmetatable({
-        kind = opts.kind or "item",
-        action_field = opts.action_field or "action",
-        on_add = opts.on_add,
-        on_remove = opts.on_remove,
-        on_change = opts.on_change,
-        list = {},     -- all items, sorted by (priority, id); replaced, never mutated
+        kind = kind,
+        label = spec.label or default_label(capitalize(kind)),
+        allowed = allowed,
+        index_by = spec.index_by,
+        indexed = {},  -- index_by value -> sorted list (replaced, never mutated)
+        on_add = spec.on_add,
+        on_remove = spec.on_remove,
+        on_change = spec.on_change,
+        entries = {},  -- all entries, sorted by (priority, id); replaced, never mutated
         by_name = {},  -- name -> handle
         by_group = {}, -- group -> {handle -> true}
+        defaults = {}, -- core entries, recorded by rune.registry._seal
         next_id = 1,
     }, Registry)
     registries[#registries + 1] = registry
@@ -151,10 +184,8 @@ local function sort_list(list)
     end)
 end
 
--- A copy of `list` with `data` added in (priority, id) order. Registries
--- replace their lists rather than mutating them, so a dispatch loop already
--- iterating the old list is unaffected and needs no copy of its own.
-function rune.registry._sorted_with(list, data)
+-- A copy of `list` with `data` added in (priority, id) order.
+local function sorted_with(list, data)
     local copy = {}
     for i, item in ipairs(list) do
         copy[i] = item
@@ -165,7 +196,7 @@ function rune.registry._sorted_with(list, data)
 end
 
 -- A copy of `list` without `data`.
-function rune.registry._without(list, data)
+local function without(list, data)
     local copy = {}
     for _, item in ipairs(list) do
         if item ~= data then
@@ -175,26 +206,69 @@ function rune.registry._without(list, data)
     return copy
 end
 
--- Option types, checked before anything changes: a bad option must not
--- cost the entry it would have replaced.
-local OPTION_TYPES = { name = "string", group = "string", priority = "number", once = "boolean" }
+local EMPTY = {}
 
--- Register an item. opts: name, group, priority, once. `api` names the
--- public function for error messages (default "rune.<kind>").
--- The caller sets module-specific fields (including `source`, since
--- only the caller knows its stack depth for rune.caller_source).
-function Registry:add(data, opts, api)
-    api = api or ("rune." .. self.kind)
-    if opts ~= nil and type(opts) ~= "table" then
+-- Check opts before anything changes: a bad option must not cost the
+-- entry it would have replaced. Unknown options are ignored with a notice.
+local function check_options(registry, opts, api)
+    if opts == nil then
+        return {}
+    end
+    if type(opts) ~= "table" then
         rune._raise(api .. ": opts must be a table")
     end
-    opts = opts or {}
-    for key, want in pairs(OPTION_TYPES) do
+    for key, want in pairs(COMMON_OPTIONS) do
         if opts[key] ~= nil and type(opts[key]) ~= want then
             rune._raise(api .. ": opts." .. key .. " must be a " .. want)
         end
     end
+    for key in pairs(opts) do
+        if not registry.allowed[key] then
+            local source = rune.caller_source(3)
+            rune.echo(rune.style.yellow("[Warning]") .. " " .. api .. ": unknown option '" ..
+                tostring(key) .. "' ignored" .. (source and (" @" .. source) or ""))
+        end
+    end
+    return opts
+end
 
+-- Put an entry (new, or a core default being restored) into the indexes.
+function Registry:_insert(data)
+    data.removed = nil
+    local handle = data._handle
+    if data.name and self.by_name[data.name] then
+        self.by_name[data.name]:remove() -- upsert: the new entry replaces the old
+    end
+    self.entries = sorted_with(self.entries, data)
+    if self.index_by then
+        local value = data[self.index_by]
+        self.indexed[value] = sorted_with(self.indexed[value] or EMPTY, data)
+    end
+    if data.name then
+        self.by_name[data.name] = handle
+    end
+    if data.group then
+        local members = self.by_group[data.group]
+        if not members then
+            members = {}
+            self.by_group[data.group] = members
+        end
+        members[handle] = true
+    end
+    if self.on_add then
+        self.on_add(data)
+    end
+    if self.on_change then
+        self.on_change()
+    end
+end
+
+-- Register an entry. opts: name, group, priority, once, plus spec.options.
+-- `api` names the public function for messages (default "rune.<kind>").
+-- The caller sets module fields, including `action` and `source` (only
+-- the caller knows its stack depth for rune.caller_source).
+function Registry:add(data, opts, api)
+    opts = check_options(self, opts, api or ("rune." .. self.kind))
     data.id = self.next_id
     self.next_id = self.next_id + 1
     data.enabled = true
@@ -202,40 +276,9 @@ function Registry:add(data, opts, api)
     data.name = opts.name
     data.group = opts.group
     data.once = opts.once or false
-
-    local handle = setmetatable({
-        _data = data,
-        _registry = self,
-    }, Handle)
-    data._handle = handle
-
-    -- Upsert: a new item with an existing name replaces the old one
-    if data.name and self.by_name[data.name] then
-        self.by_name[data.name]:remove()
-    end
-
-    self.list = rune.registry._sorted_with(self.list, data)
-
-    if data.name then
-        self.by_name[data.name] = handle
-    end
-    if data.group then
-        local grp = self.by_group[data.group]
-        if not grp then
-            grp = {}
-            self.by_group[data.group] = grp
-        end
-        grp[handle] = true
-    end
-
-    if self.on_add then
-        self.on_add(data)
-    end
-    if self.on_change then
-        self.on_change()
-    end
-
-    return handle
+    data._handle = setmetatable({ _data = data, _registry = self }, Handle)
+    self:_insert(data)
+    return data._handle
 end
 
 function Registry:_remove_data(data)
@@ -243,7 +286,15 @@ function Registry:_remove_data(data)
         return
     end
     data.removed = true -- tombstone: skipped by active() in snapshots
-    self.list = rune.registry._without(self.list, data)
+    self.entries = without(self.entries, data)
+    if self.index_by then
+        local value = data[self.index_by]
+        local list = self.indexed[value]
+        if list then
+            list = without(list, data)
+            self.indexed[value] = #list > 0 and list or nil
+        end
+    end
     if data.name and self.by_name[data.name] == data._handle then
         self.by_name[data.name] = nil
     end
@@ -258,77 +309,72 @@ function Registry:_remove_data(data)
     end
 end
 
+-- Run an entry's action protected, under the registry's label.
+function Registry:call(data, ...)
+    return rune.guarded_call(self.label, data, data.action, ...)
+end
+
 function Registry:get(name)
     return self.by_name[name]
 end
 
-function Registry:enable(name)
+-- The entry registered under `name`, or nil.
+function Registry:entry(name)
     local handle = self.by_name[name]
-    if handle then
-        handle:enable()
-        return true
+    return handle and handle._data
+end
+
+local function by_name(verb)
+    return function(self, name)
+        local handle = self.by_name[name]
+        if handle then
+            handle[verb](handle)
+            return true
+        end
+        return false
     end
-    return false
 end
 
-function Registry:disable(name)
-    local handle = self.by_name[name]
-    if handle then
-        handle:disable()
-        return true
-    end
-    return false
-end
+Registry.enable = by_name("enable")
+Registry.disable = by_name("disable")
+Registry.toggle = by_name("toggle")
+Registry.remove = by_name("remove")
 
-function Registry:toggle(name)
-    local handle = self.by_name[name]
-    if handle then
-        set_enabled(handle, not handle._data.enabled)
-        return true
-    end
-    return false
-end
-
-function Registry:remove(name)
-    local handle = self.by_name[name]
-    if handle then
-        handle:remove()
-        return true
-    end
-    return false
-end
-
--- The sorted item list. Do not mutate it.
-function Registry:items()
-    return self.list
-end
-
--- The sorted item list as of now, for dispatch loops that run user
--- callbacks. Adding or removing an item replaces the registry's list
--- instead of mutating it, so a callback that changes the registry
--- cannot skip or double-run neighbors in a loop over this one, and
--- no per-dispatch copy is needed. Additions take effect on the next
--- dispatch; removals are honored via the active() check.
+-- The sorted entry list as of now. Dispatch loops iterate it directly:
+-- changes replace the list, so a callback that changes the registry
+-- cannot skip or double-run neighbors. Do not mutate it.
 function Registry:snapshot()
-    return self.list
+    return self.entries
 end
 
 function Registry:count()
-    return #self.list
+    return #self.entries
 end
 
--- Remove every item (on_remove fires for each).
-function Registry:clear()
-    local handles = {}
-    for _, data in ipairs(self.list) do
-        handles[#handles + 1] = data._handle
+-- Remove user entries (those `match` accepts, or all), then restore every
+-- matching core default: re-inserted if it was removed or replaced,
+-- re-enabled, and its failure count reset.
+function Registry:clear(match)
+    local doomed = {}
+    for _, data in ipairs(self.entries) do
+        if not data.core and (not match or match(data)) then
+            doomed[#doomed + 1] = data
+        end
     end
-    for _, handle in ipairs(handles) do
-        handle:remove()
+    for _, data in ipairs(doomed) do
+        self:_remove_data(data)
+    end
+    for _, data in ipairs(self.defaults) do
+        if not match or match(data) then
+            if data.removed then
+                self:_insert(data)
+            end
+            data._handle:enable()
+        end
     end
 end
 
--- Remove all items in a group; returns how many were removed.
+-- Remove all entries in a group; returns how many were removed.
 function Registry:remove_group(group_name)
     if not group_name or not self.by_group[group_name] then
         return 0
@@ -341,6 +387,55 @@ function Registry:remove_group(group_name)
         handle:remove()
     end
     return #handles
+end
+
+-- Listing rows: name, group, enabled, source, core, plus whatever
+-- `extra(row, data)` adds. In registry order.
+function Registry:list(extra)
+    local rows = {}
+    for _, data in ipairs(self.entries) do
+        local row = {
+            name = data.name,
+            group = data.group,
+            enabled = data.enabled,
+            source = data.source,
+            core = data.core or nil,
+        }
+        if extra then
+            extra(row, data)
+        end
+        rows[#rows + 1] = row
+    end
+    return rows
+end
+
+local VERBS = { "get", "enable", "disable", "toggle", "remove", "count", "remove_group" }
+
+-- Install the shared management functions on a public namespace.
+-- clear() takes no arguments here; a module that filters (hooks by
+-- event) defines its own.
+function Registry:expose(ns)
+    for _, verb in ipairs(VERBS) do
+        ns[verb] = function(...)
+            return self[verb](self, ...)
+        end
+    end
+    ns.clear = function()
+        self:clear()
+    end
+    return ns
+end
+
+-- INTERNAL: called once by the loader after the core has loaded. What
+-- every registry holds now is Rune's defaults.
+function rune.registry._seal()
+    for _, registry in ipairs(registries) do
+        registry.defaults = {}
+        for i, data in ipairs(registry.entries) do
+            data.core = true
+            registry.defaults[i] = data
+        end
+    end
 end
 
 -- Group System (Control Only)
@@ -389,6 +484,11 @@ end
 -- Enable a group (master switch on)
 function rune.group.enable(group_name)
     set_group_enabled(group_name, true)
+end
+
+-- Flip a group's master switch
+function rune.group.toggle(group_name)
+    set_group_enabled(group_name, not rune.group.is_enabled(group_name))
 end
 
 -- List all known groups, aggregated from every registry.

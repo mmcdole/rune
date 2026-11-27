@@ -81,7 +81,9 @@ func TestBarRefreshPublishesOnlySuccessfulSnapshots(t *testing.T) {
 	s, _, uiMock := newTestSession(t)
 	uiMock.drainBarPushes()
 
-	assertSessionLua(t, s.engine, `rune.bars.clear()`)
+	assertSessionLua(t, s.engine, `
+		for _, b in ipairs(rune.bars.list()) do rune.bars.remove(b.bar) end
+	`)
 	s.pushBars()
 
 	count, bars := uiMock.drainBarPushes()

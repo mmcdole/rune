@@ -9,24 +9,15 @@ local green, red, yellow, cyan, dim =
     rune.style.green, rune.style.red, rune.style.yellow,
     rune.style.cyan, rune.style.gray
 
-local by_cmd = {} -- command name -> data, the dispatch index
-
 local registry = rune.registry.new{
     kind = "command",
-    action_field = "handler",
-    on_add = function(data)
-        -- The command name is the registry name, so re-adding one has
-        -- already removed the old entry through the name upsert.
-        by_cmd[data.command] = data
-    end,
-    on_remove = function(data)
-        if by_cmd[data.command] == data then
-            by_cmd[data.command] = nil
-        end
+    label = function(data)
+        return 'Command "/' .. data.command .. '"' ..
+            (data.source and (" @" .. data.source) or "")
     end,
 }
 
-rune.command = {}
+rune.command = registry:expose({})
 
 -- Add a slash command. opts: group (see registry.lua).
 -- Returns a handle with :enable/:disable/:remove.
@@ -45,28 +36,17 @@ function rune.command.add(name, handler, description, opts)
     end
     return registry:add({
         command = name,
-        handler = handler,
+        action = handler,
         description = description or "",
         source = rune.caller_source(1),
     }, rune.registry.keyed_opts(name, opts, "rune.command.add"), "rune.command.add")
-end
-
--- Remove a slash command by name. Returns true if one existed.
-function rune.command.remove(name)
-    return registry:remove(name)
-end
-
--- The command's handle, or nil. Its :action() is the raw handler,
--- which is how you wrap a built-in command.
-function rune.command.get(name)
-    return registry:get(name)
 end
 
 -- INTERNAL: run a command protected (called by the input dispatcher).
 -- Returns true if the name was a known command, even when it is
 -- disabled or its handler failed - the input is consumed either way.
 function rune.command.dispatch(name, args)
-    local data = by_cmd[name]
+    local data = registry:entry(name)
     if not data then
         return false
     end
@@ -75,35 +55,17 @@ function rune.command.dispatch(name, args)
             " (re-enable with rune.command.enable)")
         return true
     end
-    local label = 'Command "/' .. name .. '"' ..
-        (data.source and (" @" .. data.source) or "")
-    rune.guarded_call(label, data, data.handler, args)
+    registry:call(data, args)
     return true
-end
-
--- Management by name
-function rune.command.enable(name)
-    return registry:enable(name)
-end
-
-function rune.command.disable(name)
-    return registry:disable(name)
 end
 
 -- List all commands for the picker and /help.
 -- Returns array of {name, description, enabled, group, source}.
 function rune.command.list()
-    local result = {}
-    for _, data in ipairs(registry:items()) do
-        table.insert(result, {
-            name = data.command,
-            description = data.description,
-            enabled = data.enabled,
-            group = data.group,
-            source = data.source,
-        })
-    end
-    -- Sort alphabetically
+    local result = registry:list(function(row, data)
+        row.name = data.command
+        row.description = data.description
+    end)
     table.sort(result, function(a, b) return a.name < b.name end)
     return result
 end
@@ -227,6 +189,15 @@ rune.command.add("lua", function(args)
     end
 end, "Execute Lua code")
 
+-- Where a listed entry came from: "core" for Rune's own defaults,
+-- otherwise the registering file:line.
+local function origin(row)
+    if row.core then
+        return "  " .. dim("core")
+    end
+    return row.source and ("  " .. dim("@" .. row.source)) or ""
+end
+
 -- /aliases - List all aliases
 rune.command.add("aliases", function(args)
     local aliases = rune.alias.list()
@@ -244,7 +215,7 @@ rune.command.add("aliases", function(args)
         local name_str = (a.name and a.name ~= a.match)
             and (" " .. dim("name:") .. a.name) or ""
         local flags_str = #flags > 0 and ("  " .. dim("(" .. table.concat(flags, ", ") .. ")")) or ""
-        local src_str = a.source and ("  " .. dim("@" .. a.source)) or ""
+        local src_str = origin(a)
         rune.echo(string.format("  %s %-8s %s %s %s %s%s%s%s",
             status, a.mode, yellow('"' .. a.match .. '"'), dim("->"), a.value, name_str, group_str, flags_str, src_str))
     end
@@ -269,7 +240,7 @@ rune.command.add("triggers", function(args)
         if t.on == "prompt" then flags[#flags + 1] = "on:prompt" end
         local name_str = t.name and (" " .. dim("name:") .. t.name) or ""
         local flags_str = #flags > 0 and ("  " .. dim("(" .. table.concat(flags, ", ") .. ")")) or ""
-        local src_str = t.source and ("  " .. dim("@" .. t.source)) or ""
+        local src_str = origin(t)
         rune.echo(string.format("  %s %-8s %s %s %s%s%s%s%s",
             status, t.mode, yellow('"' .. t.match .. '"'), dim("->"), t.value, name_str, group_str, flags_str, src_str))
     end
@@ -304,7 +275,7 @@ rune.command.add("timers", function(args)
         local status = t.enabled and green("[on] ") or red("[off]")
         local group_str = t.group and ("  " .. cyan("<" .. t.group .. ">")) or ""
         local name_str = t.name and (" " .. dim("name:") .. t.name) or ""
-        local src_str = t.source and ("  " .. dim("@" .. t.source)) or ""
+        local src_str = origin(t)
         local timing = string.format("%s %.1fs (%.1fs left)", t.mode, t.seconds, t.remaining)
         rune.echo(string.format("  %s %-12s %s %s%s%s%s",
             status, timing, dim("->"), t.value, group_str, name_str, src_str))
@@ -324,7 +295,7 @@ rune.command.add("hooks", function(args)
         local group_str = h.group and ("  " .. cyan("<" .. h.group .. ">")) or ""
         local name_str = h.name or "(anonymous)"
         local pri_str = dim("pri:") .. tostring(h.priority)
-        local src_str = h.source and ("  " .. dim("@" .. h.source)) or ""
+        local src_str = origin(h)
         rune.echo(string.format("  %s %-12s %s %s %s%s%s",
             status, h.event, pri_str, dim("->"), name_str, group_str, src_str))
     end
@@ -342,7 +313,7 @@ rune.command.add("binds", function(args)
     for _, b in ipairs(binds) do
         local status = b.enabled and green("[on] ") or red("[off]")
         local group_str = b.group and ("  " .. cyan("<" .. b.group .. ">")) or ""
-        local src_str = b.source and ("  " .. dim("@" .. b.source)) or ""
+        local src_str = origin(b)
         rune.echo(string.format("  %s %-16s%s%s",
             status, yellow(b.key), group_str, src_str))
     end
@@ -359,7 +330,7 @@ rune.command.add("bars", function(args)
     for _, b in ipairs(bars) do
         local status = b.enabled and green("[on] ") or red("[off]")
         local group_str = b.group and ("  " .. cyan("<" .. b.group .. ">")) or ""
-        local src_str = b.source and ("  " .. dim("@" .. b.source)) or ""
+        local src_str = origin(b)
         rune.echo(string.format("  %s %-16s%s%s",
             status, yellow(b.bar), group_str, src_str))
     end

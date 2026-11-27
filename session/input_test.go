@@ -97,10 +97,13 @@ func TestBindingEnableChangesReachUI(t *testing.T) {
 
 func TestEmptyBindingsDoNotUseDegradedCoreDefaults(t *testing.T) {
 	s, _, uiMock := newTestSession(t)
-	assertSessionLua(t, s.engine, `rune.binds.clear()`)
+	// Removing every bind (defaults included) publishes an empty set.
+	assertSessionLua(t, s.engine, `
+		for _, b in ipairs(rune.binds.list()) do rune.unbind(b.key) end
+	`)
 	s.pushBinds()
 	if len(uiMock.pushedBinds()) != 0 {
-		t.Fatal("clearing bindings restored defaults")
+		t.Fatal("removing every binding restored defaults")
 	}
 	assertSessionLua(t, s.engine, `rune.binds = nil`)
 	s.pushBinds()

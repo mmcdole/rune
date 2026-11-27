@@ -364,3 +364,104 @@ func TestRegistryEnableResetsFailures(t *testing.T) {
 		assert(rune.trigger.get("bad")._data.enabled, "one failure after enable() must not quarantine again")
 	`)
 }
+
+// Everything the embedded core registers is a core default; anything
+// registered afterwards is not.
+func TestRegistryCoreEntriesAreSealedAtBoot(t *testing.T) {
+	engine, _, cleanup := setupTest(t)
+	defer cleanup()
+	assertLua(t, engine, `
+		local namespaces = { rune.hooks, rune.binds, rune.bars, rune.timer,
+			rune.alias, rune.trigger, rune.command, rune.gmcp }
+		for _, ns in ipairs(namespaces) do
+			for _, row in ipairs(ns.list()) do
+				assert(row.core, "boot entry not core: " .. tostring(row.name or row.event or row.key))
+			end
+		end
+		rune.trigger.contains("x", "y", { name = "mine" })
+		for _, row in ipairs(rune.trigger.list()) do
+			if row.name == "mine" then assert(not row.core, "user entry marked core") end
+		end
+		assert(rune.timer.count() == 0, "the core registers no timers")
+	`)
+}
+
+// Regression: hooks.clear() removed the core trigger dispatcher, so every
+// trigger silently stopped. clear() now removes only user entries and
+// restores Rune's own.
+func TestRegistryClearRestoresCoreDefaults(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+	assertLua(t, engine, `
+		rune.trigger.contains("food", "eat food")
+		rune.hooks.on("output", function() end, { name = "mine" })
+		rune.hooks.clear()
+		assert(rune.hooks.get("mine") == nil, "user hook survived clear()")
+		assert(rune.hooks.count() > 0, "core hooks must be restored")
+	`)
+	engine.OnOutput(text.NewLine("some food"))
+	if sent := host.DrainNetworkCalls(); len(sent) != 1 || sent[0] != "eat food" {
+		t.Fatalf("triggers stopped after hooks.clear(): %v", sent)
+	}
+
+	// clear(event) touches only that event; a removed or disabled core
+	// entry comes back enabled with its failures forgiven.
+	assertLua(t, engine, `
+		rune.hooks.on("echo", function() end, { name = "echo-mine" })
+		rune.hooks.on("output", function() end, { name = "out-mine" })
+		local core
+		for _, h in ipairs(rune.hooks.list()) do
+			if h.event == "output" and h.core then core = h end
+		end
+		assert(core, "no core output hook")
+		rune.hooks.clear("output")
+		assert(rune.hooks.get("out-mine") == nil, "clear(event) kept a user hook on that event")
+		assert(rune.hooks.get("echo-mine"), "clear(event) removed a hook on another event")
+	`)
+}
+
+// Every registry namespace has the same management set, and handles and
+// groups can toggle.
+func TestRegistryUniformManagement(t *testing.T) {
+	engine, _, cleanup := setupTest(t)
+	defer cleanup()
+	assertLua(t, engine, `
+		local namespaces = {
+			hooks = rune.hooks, binds = rune.binds, bars = rune.bars, timer = rune.timer,
+			alias = rune.alias, trigger = rune.trigger, command = rune.command, gmcp = rune.gmcp,
+		}
+		for label, ns in pairs(namespaces) do
+			for _, verb in ipairs({ "get", "enable", "disable", "toggle", "remove",
+					"list", "count", "clear", "remove_group" }) do
+				assert(type(ns[verb]) == "function", label .. "." .. verb .. " missing")
+			end
+		end
+
+		local h = rune.trigger.contains("x", "y", { name = "t", group = "g" })
+		h:toggle()
+		assert(not h._data.enabled, "handle toggle did not disable")
+		assert(rune.trigger.toggle("t") and h._data.enabled, "namespace toggle did not enable")
+		rune.group.toggle("g")
+		assert(not rune.group.is_enabled("g"), "group toggle did not disable")
+		rune.group.toggle("g")
+		assert(rune.group.is_enabled("g"), "group toggle did not enable")
+	`)
+}
+
+// An option no registry understands is ignored with a notice, which
+// catches typos; the registration still succeeds.
+func TestRegistryUnknownOptionNotice(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+	host.DrainPrintCalls()
+	assertLua(t, engine, `assert(rune.trigger.contains("x", "y", { gagg = true }))`)
+	printed := strings.Join(host.DrainPrintCalls(), "\n")
+	if !strings.Contains(printed, "unknown option 'gagg'") {
+		t.Fatalf("no notice for unknown option: %q", printed)
+	}
+	host.DrainPrintCalls()
+	assertLua(t, engine, `rune.trigger.contains("x", "y", { gag = true, priority = 10, once = true, group = "g" })`)
+	if printed := host.DrainPrintCalls(); len(printed) != 0 {
+		t.Fatalf("known options produced output: %q", printed)
+	}
+}

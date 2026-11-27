@@ -12,6 +12,7 @@ task-oriented introduction, see [Groups](/scripting/groups/).
 ```lua
 rune.group.enable(name)       -- master switch on
 rune.group.disable(name)      -- master switch off
+rune.group.toggle(name)       -- flip the master switch
 rune.group.is_enabled(name)   -- true/false; unknown groups default to true
 rune.group.list()             -- array of {name, enabled} across all registries
 ```

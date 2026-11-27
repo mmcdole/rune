@@ -37,6 +37,7 @@ var sharedContractSuffixes = map[string]bool{
 	"get":          true,
 	"enable":       true,
 	"disable":      true,
+	"toggle":       true,
 	"remove":       true,
 	"cancel":       true,
 	"list":         true,

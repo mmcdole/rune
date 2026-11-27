@@ -258,8 +258,7 @@ case-insensitive substring match. The viewport follows the selected match.
 
 Registry management uses the bar name:
 `rune.bars.get/enable/disable/toggle/remove(name)`, `.list()`, `.count()`,
-`.clear()`, and `.remove_group(group)`. `toggle` returns `true` when the named
-bar exists and `false` otherwise. See
+`.clear()`, and `.remove_group(group)`, as for every registry. See
 [Registries](/reference/api/#managing). `/bars` lists registered bars.
 
 **Related:** [Bars guide](/interface/bars/),

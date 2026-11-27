@@ -91,9 +91,7 @@ local function create_timer(seconds, action, opts, repeating)
         end
 
         if type(data.action) == "function" then
-            local label = (data.name and ('Timer "' .. data.name .. '"') or "Timer") ..
-                (data.source and (" @" .. data.source) or "")
-            rune.guarded_call(label, data, data.action, ctx)
+            registry:call(data, ctx)
         elseif type(data.action) == "string" and data.action ~= "" then
             rune.send(data.action)
         end
@@ -115,7 +113,8 @@ local function create_timer(seconds, action, opts, repeating)
 end
 
 -- Public API
-rune.timer = {}
+rune.timer = registry:expose({})
+rune.timer.cancel = rune.timer.remove -- cancel is the natural verb for timers
 
 -- INTERNAL: called by Go when a timer fires. Unknown ids - cancelled
 -- mid-flight, or scheduled by a previous VM generation - are ignored.
@@ -136,56 +135,13 @@ function rune.timer.every(seconds, action, opts)
     return create_timer(seconds, action, opts, true)
 end
 
--- Management by name
-function rune.timer.get(name)
-    return registry:get(name)
-end
-
-function rune.timer.disable(name)
-    return registry:disable(name)
-end
-
-function rune.timer.enable(name)
-    return registry:enable(name)
-end
-
-function rune.timer.remove(name)
-    return registry:remove(name)
-end
-
--- Alias: cancel is intuitive for timers
-rune.timer.cancel = rune.timer.remove
-
 -- List all timers. Remaining seconds come from the Go schedule, even when
 -- callbacks are suppressed by disable/group state. A spent wake-up reads zero.
 function rune.timer.list()
-    local result = {}
-    for _, data in ipairs(registry:items()) do
-        table.insert(result, {
-            seconds = data.seconds,
-            remaining = rune._timer.remaining(data.timer_id),
-            mode = data.repeating and "every" or "after",
-            value = type(data.action) == "function" and "(function)" or tostring(data.action),
-            name = data.name,
-            enabled = data.enabled,
-            group = data.group,
-            source = data.source,
-        })
-    end
-    return result
-end
-
--- Clear all timers
-function rune.timer.clear()
-    registry:clear()
-end
-
--- Count timers
-function rune.timer.count()
-    return registry:count()
-end
-
--- Group operations
-function rune.timer.remove_group(group_name)
-    return registry:remove_group(group_name)
+    return registry:list(function(row, data)
+        row.seconds = data.seconds
+        row.remaining = rune._timer.remaining(data.timer_id)
+        row.mode = data.repeating and "every" or "after"
+        row.value = type(data.action) == "function" and "(function)" or tostring(data.action)
+    end)
 end

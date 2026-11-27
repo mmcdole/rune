@@ -138,7 +138,8 @@ rune.unbind("enter")
 
 Arrays create independent bindings and return an array of handles. Removing one
 alias leaves the others intact. Defaults load before user scripts, so removal
-also works for defaults; there is no hidden default underneath an unbound key.
+also works for defaults: an unbound key stays unbound. `rune.binds.clear()`
+removes your binds and restores Rune's defaults.
 
 Draft editor hints show the earliest registered active binding for each action.
 Removing or disabling that binding promotes the next alias. An action with no

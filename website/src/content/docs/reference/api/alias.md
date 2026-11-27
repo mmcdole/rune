@@ -96,7 +96,7 @@ result of an alias, does not go through history expansion again.
 ## Managing
 
 Standard registry management applies:
-`rune.alias.get/enable/disable/remove(name)`, `.list()`, `.count()`,
+`rune.alias.get/enable/disable/toggle/remove(name)`, `.list()`, `.count()`,
 `.clear()`, `.remove_group(group)`. See
 [Registries](/reference/api/#managing). `/aliases` lists everything.
 

@@ -100,7 +100,8 @@ rune.unbind("esc")
 Arrays create independent bindings and return an array of handles. A single key
 returns one handle. Removing one alias leaves the others intact. Disabling a
 binding or its group prevents its action. Defaults are ordinary registrations;
-unbinding them does not reveal a hidden default.
+unbinding one leaves the key unbound until `rune.binds.clear()` restores the
+defaults.
 
 Multiline hints use the earliest registered active binding for each action;
 search uses the same cancel binding for its hint. If no active binding remains,

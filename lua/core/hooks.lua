@@ -38,28 +38,26 @@
 --                     catch-all alongside rune.gmcp.on (gmcp.lua)
 --   "gmcp_enabled" -- GMCP negotiated; the core handler sends Core.Hello
 
--- Per-event dispatch index, maintained alongside the registry so
--- rune.hooks.call doesn't scan unrelated events on every line. Like the
--- registry's own list, each array is replaced on change, never mutated.
-local by_event = {} -- event -> sorted array of data
-local no_handlers = {}
+-- A failing handler is reported under this label. Built only on failure.
+local function hook_label(entry)
+    return "Hook " .. entry.event .. " " ..
+        (entry.name and ('"' .. entry.name .. '"') or ("#" .. entry.id)) ..
+        (entry.source and (" @" .. entry.source) or "")
+end
 
 local registry = rune.registry.new{
     kind = "hook",
-    action_field = "handler",
-    on_add = function(data)
-        by_event[data.event] = rune.registry._sorted_with(by_event[data.event] or no_handlers, data)
-    end,
-    on_remove = function(data)
-        local handlers = by_event[data.event]
-        if handlers then
-            by_event[data.event] = rune.registry._without(handlers, data)
-        end
-    end,
+    index_by = "event",
+    label = hook_label,
 }
 
+-- Per-event dispatch lists (event -> sorted entries), so rune.hooks.call
+-- doesn't scan unrelated events on every line.
+local by_event = registry.indexed
+local no_handlers = {}
+
 -- Public API
-rune.hooks = {}
+rune.hooks = registry:expose({})
 
 -- Attach a handler to an event
 -- Returns: Handle with :remove(), :enable(), :disable(), :name(), :group()
@@ -72,26 +70,9 @@ function rune.hooks.on(event, handler, opts)
     end
     return registry:add({
         event = event,
-        handler = handler,
+        action = handler,
         source = rune.caller_source(1),
     }, opts, "rune.hooks.on")
-end
-
--- Management by name
-function rune.hooks.get(name)
-    return registry:get(name)
-end
-
-function rune.hooks.disable(name)
-    return registry:disable(name)
-end
-
-function rune.hooks.enable(name)
-    return registry:enable(name)
-end
-
-function rune.hooks.remove(name)
-    return registry:remove(name)
 end
 
 -- Run a single handler protected. A failing handler is reported and
@@ -100,14 +81,10 @@ end
 -- Errors are echoed directly (not re-dispatched through the "error"
 -- event) to avoid recursion when an error handler itself fails.
 -- Repeated failures disable the handler (see rune.guarded_call).
-local function hook_label(entry)
-    return "Hook " .. entry.event .. " " ..
-        (entry.name and ('"' .. entry.name .. '"') or ("#" .. entry.id)) ..
-        (entry.source and (" @" .. entry.source) or "")
-end
-
 local function run_handler(entry, ...)
-    local ok, result = rune.guarded_call(hook_label, entry, entry.handler, ...)
+    -- guarded_call directly, not registry:call: this runs for every
+    -- handler on every line, and the extra frame is measurable.
+    local ok, result = rune.guarded_call(hook_label, entry, entry.action, ...)
     if ok then
         return result
     end
@@ -225,53 +202,32 @@ end
 
 -- List all registered handlers
 function rune.hooks.list()
-    local result = {}
-    for _, entry in ipairs(registry:items()) do
-        table.insert(result, {
-            event = entry.event,
-            name = entry.name,
-            group = entry.group,
-            priority = entry.priority,
-            enabled = entry.enabled,
-            source = entry.source,
-        })
-    end
-    return result
+    return registry:list(function(row, entry)
+        row.event = entry.event
+        row.priority = entry.priority
+    end)
 end
 
--- Clear all handlers for an event (or all if no event specified)
+-- Remove user handlers for an event (or all events) and restore Rune's
+-- own handlers there.
 function rune.hooks.clear(event)
-    if event then
-        local handlers = by_event[event]
-        if not handlers then
-            return
-        end
-        local handles = {}
-        for _, entry in ipairs(handlers) do
-            handles[#handles + 1] = entry._handle
-        end
-        for _, handle in ipairs(handles) do
-            handle:remove()
-        end
-    else
-        registry:clear()
+    if event == nil then
+        return registry:clear()
     end
+    registry:clear(function(entry)
+        return entry.event == event
+    end)
 end
 
 -- Check if any handlers are registered for an event
 function rune.hooks.has(event)
-    return by_event[event] ~= nil and #by_event[event] > 0
+    return by_event[event] ~= nil
 end
 
--- Count handlers
+-- Count handlers for an event, or all handlers
 function rune.hooks.count(event)
     if event then
         return by_event[event] and #by_event[event] or 0
     end
     return registry:count()
-end
-
--- Group operations
-function rune.hooks.remove_group(group_name)
-    return registry:remove_group(group_name)
 end

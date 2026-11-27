@@ -72,9 +72,15 @@ func TestEditorBindingsShareRegistry(t *testing.T) {
 	if engine.GetBindings()["f2"].Enabled {
 		t.Fatal("disabled handle remained active")
 	}
+	// clear() removes user binds and restores Rune's own: the replaced
+	// Enter comes back as input.submit, and f2 (a user bind) is gone.
 	assertLua(t, engine, `rune.binds.clear()`)
-	if bindings := engine.GetBindings(); bindings == nil || len(bindings) != 0 {
-		t.Fatalf("clear must publish an empty snapshot: %+v", bindings)
+	bindings := engine.GetBindings()
+	if _, ok := bindings["f2"]; ok {
+		t.Fatal("clear kept a user bind")
+	}
+	if !bindings.Matches("submit", "enter") {
+		t.Fatalf("clear did not restore the default Enter: %+v", bindings["enter"])
 	}
 	if err := engine.Init(); err != nil {
 		t.Fatal(err)

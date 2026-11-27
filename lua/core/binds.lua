@@ -17,25 +17,12 @@
 -- Named editor actions run in the UI. Callbacks round-trip through Session.
 -- Both use the same registry and bind snapshot.
 
-local by_key = {} -- key -> data, the dispatch index
-
 local registry = rune.registry.new{
     kind = "bind",
-    action_field = "action",
-    on_add = function(data)
-        -- Rebinding a key replaces the old binding through the registry's
-        -- name upsert, which has already removed it by the time we get here.
-        by_key[data.key] = data
-    end,
-    on_remove = function(data)
-        if by_key[data.key] == data then
-            by_key[data.key] = nil
-        end
-    end,
     on_change = rune._ui.binds_changed,
 }
 
-rune.binds = {}
+rune.binds = registry:expose({})
 
 local editor_actions = {
     ["input.submit"] = true,
@@ -88,22 +75,19 @@ end
 -- INTERNAL: called by Go when a bound key is pressed.
 -- Returns true if the key had an active callback binding.
 function rune.binds._dispatch(key)
-    local data = by_key[key]
+    local data = registry:entry(key)
     if not data or not registry:active(data) or type(data.action) ~= "function" then
         return false
     end
-
-    local label = 'Bind "' .. key .. '"' ..
-        (data.source and (" @" .. data.source) or "")
-    rune.guarded_call(label, data, data.action)
+    registry:call(data)
     return true
 end
 
 -- Include inactive entries so disabled keys are consumed, but not advertised.
 function rune.binds._bindings()
     local bindings = {}
-    for key, data in pairs(by_key) do
-        bindings[key] = {
+    for _, data in ipairs(registry:snapshot()) do
+        bindings[data.key] = {
             action = type(data.action) == "string" and data.action or "",
             enabled = registry:active(data),
             order = data.id,
@@ -112,50 +96,14 @@ function rune.binds._bindings()
     return bindings
 end
 
--- Management by key (the key is the name)
-function rune.binds.get(name)
-    return registry:get(name)
-end
-
-function rune.binds.disable(name)
-    return registry:disable(name)
-end
-
-function rune.binds.enable(name)
-    return registry:enable(name)
-end
-
-function rune.binds.remove(name)
-    return registry:remove(name)
-end
-
--- List all binds - returns array of {key, name, group, enabled, source}
+-- List all binds - returns array of {key, action, name, group, enabled, source, core}
 function rune.binds.list()
-    local result = {}
-    for _, data in ipairs(registry:items()) do
-        table.insert(result, {
-            key = data.key,
-            action = type(data.action) == "string" and data.action or nil,
-            name = data.name,
-            group = data.group,
-            enabled = data.enabled,
-            source = data.source,
-        })
-    end
+    local result = registry:list(function(row, data)
+        row.key = data.key
+        row.action = type(data.action) == "string" and data.action or nil
+    end)
     table.sort(result, function(a, b) return a.key < b.key end)
     return result
-end
-
-function rune.binds.count()
-    return registry:count()
-end
-
-function rune.binds.clear()
-    registry:clear()
-end
-
-function rune.binds.remove_group(group_name)
-    return registry:remove_group(group_name)
 end
 
 -- Defaults are ordinary bindings, installed before user configuration.

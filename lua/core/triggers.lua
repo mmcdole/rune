@@ -42,6 +42,7 @@ local changes = 0
 
 local registry = rune.registry.new{
     kind = "trigger",
+    options = { "gag", "raw", "on", "span" },
     on_change = function() changes = changes + 1 end,
 }
 
@@ -118,7 +119,7 @@ local function create_trigger(pattern, action, opts, mode)
 end
 
 -- Public API
-rune.trigger = {}
+rune.trigger = registry:expose({})
 
 -- Exact line match (literal, whole line)
 function rune.trigger.exact(line, action, opts)
@@ -146,53 +147,18 @@ function rune.trigger.regex(pattern, action, opts)
     return create_trigger(pattern, action, opts, MODE_REGEX)
 end
 
--- Management by name
-function rune.trigger.get(name)
-    return registry:get(name)
-end
-
-function rune.trigger.disable(name)
-    return registry:disable(name)
-end
-
-function rune.trigger.enable(name)
-    return registry:enable(name)
-end
-
-function rune.trigger.remove(name)
-    return registry:remove(name)
-end
-
 -- List all triggers - returns array of {match, value, mode, name, enabled, ...}
 function rune.trigger.list()
-    local result = {}
-    for _, data in ipairs(registry:items()) do
-        table.insert(result, {
-            match = data.pattern,
-            value = type(data.action) == "function" and "(function)" or tostring(data.action),
-            mode = data.mode,
-            name = data.name,
-            enabled = data.enabled,
-            group = data.group,
-            gag = data.gag,
-            once = data.once,
-            raw = data.raw,
-            on = data.on,
-            span = data.span and { to = data.span.to, raw = data.span.raw, max = data.span.max } or nil,
-            source = data.source,
-        })
-    end
-    return result
-end
-
--- Clear all triggers
-function rune.trigger.clear()
-    registry:clear()
-end
-
--- Count triggers
-function rune.trigger.count()
-    return registry:count()
+    return registry:list(function(row, data)
+        row.match = data.pattern
+        row.value = type(data.action) == "function" and "(function)" or tostring(data.action)
+        row.mode = data.mode
+        row.gag = data.gag
+        row.once = data.once
+        row.raw = data.raw
+        row.on = data.on
+        row.span = data.span and { to = data.span.to, raw = data.span.raw, max = data.span.max } or nil
+    end)
 end
 
 -- Matching runs in Go: each pass (output, prompt) has a Matcher that tests
@@ -258,11 +224,6 @@ end
 -- state, so /reload drops any in-progress span with the VM.
 local open = {}
 
-local function trigger_label(data)
-    return (data.name and ('Trigger "' .. data.name .. '"') or "Trigger") ..
-        (data.source and (" @" .. data.source) or "")
-end
-
 local function drop_inactive_spans()
     for data in pairs(open) do
         if not registry:active(data) then
@@ -284,7 +245,7 @@ local function fire_span(data, span_state, to_remove)
         matches = span_state.matches,
     }
     if type(data.action) == "function" then
-        rune.guarded_call(trigger_label(data), data, data.action, span_state.matches, ctx)
+        registry:call(data, span_state.matches, ctx)
     elseif type(data.action) == "string" and data.action ~= "" then
         rune.send(rune.substitute_captures(data.action, span_state.matches))
     end
@@ -360,8 +321,7 @@ local function fire_trigger(data, matches, ctx, to_remove)
 
     if data.action then
         if type(data.action) == "function" then
-            local ok, result = rune.guarded_call(
-                trigger_label(data), data, data.action, matches, ctx)
+            local ok, result = registry:call(data, matches, ctx)
             if ok then
                 if result == false then
                     gagged = true
@@ -556,11 +516,6 @@ function rune.trigger._process_prompt(line, confirmed)
         return "", false
     end
     return raw_line, true
-end
-
--- Group operations
-function rune.trigger.remove_group(group_name)
-    return registry:remove_group(group_name)
 end
 
 -- Register output handler
