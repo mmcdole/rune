@@ -69,7 +69,7 @@ if they should start again when you reload.
 ## Managing
 
 Manage timers by name:
-`rune.timer.get/enable/disable/remove(name)`, `.cancel(name)`, `.list()`,
+`rune.timer.get/enable/disable/toggle/remove(name)`, `.cancel(name)`, `.list()`,
 `.count()`, `.clear()`, `.remove_group(group)` — see
 [Registries](/reference/api/#managing). `/timers` lists everything.
 

@@ -39,6 +39,13 @@ func (e *Engine) registerCoreFuncs() {
 			return nil
 		},
 
+		// rune._time(): Wall-clock seconds since the Unix epoch, with
+		// sub-second precision.
+		"_time": func(c *script.Call) error {
+			c.Return(float64(e.host.Now().UnixNano()) / 1e9)
+			return nil
+		},
+
 		// rune._quit(): Exit the client
 		"_quit": func(c *script.Call) error {
 			e.host.Quit()

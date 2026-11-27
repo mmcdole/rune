@@ -6,7 +6,7 @@ import (
 )
 
 // registerPickerFuncs registers the rune._ui.picker_show primitive.
-// The public rune.ui.picker.show API is defined in Lua (00_init.lua),
+// The public rune.ui.picker.show API is defined in Lua (ui.lua),
 // which keeps each on_select callback in a pending table under the id
 // returned here. Opts parsing stays in Go because it marshals Lua
 // tables into Go types for the UI.

@@ -19,7 +19,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/colorprofile"
 
-	"github.com/mmcdole/rune/lua"
 	"github.com/mmcdole/rune/network"
 	"github.com/mmcdole/rune/session"
 	"github.com/mmcdole/rune/test/replay"
@@ -209,7 +208,6 @@ func runPipeline(tb testing.TB, corpus []byte, repeat int, withUser, probes bool
 		appendUserScript(tb, configDir, extra)
 	}
 	sess := session.New(tcp, u, session.Config{
-		CoreScripts:   lua.CoreScripts,
 		ConfigDir:     configDir,
 		ConnectTarget: srv.Addr(),
 	})

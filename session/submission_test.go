@@ -1,12 +1,14 @@
 package session
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/mmcdole/rune/input"
+	"github.com/mmcdole/rune/network"
 	runetext "github.com/mmcdole/rune/text"
 	"github.com/mmcdole/rune/ui"
 )
@@ -529,5 +531,52 @@ func TestSubmissionStopsAfterInputHookDeadline(t *testing.T) {
 	submitTestSubmission(s, input.Command("recovered"))
 	if got := net.drainSent(); !slices.Equal(got, []string{"recovered"}) {
 		t.Fatalf("next submission = %q", got)
+	}
+}
+
+// Regression: a line typed while the server hides input (a password
+// prompt) reached tab completion's word cache and Up-arrow history.
+// Input hooks now see context.hidden, and hidden lines aren't recorded.
+func TestHiddenInputStaysOutOfCompletionAndHistory(t *testing.T) {
+	for _, hidden := range []bool{true, false} {
+		t.Run(fmt.Sprintf("hidden=%v", hidden), func(t *testing.T) {
+			s, net, _ := newTestSession(t)
+			net.connected = true
+			if hidden {
+				serverBatch(s, network.TelnetEvent{
+					Kind:    network.TelnetEventNegotiation,
+					Command: network.CmdWILL,
+					Option:  network.OptEcho,
+				})
+			}
+			assertSessionLua(t, s.engine, `
+				seen_hidden = nil
+				rune.hooks.on("input", function(_, ctx) seen_hidden = ctx.hidden end)
+			`)
+			userInput(s, "hunter2")
+
+			recorded := false
+			for _, entry := range s.historyEntries {
+				if strings.Contains(entry.Text, "hunter2") {
+					recorded = true
+				}
+			}
+			if recorded == hidden {
+				t.Fatalf("history recorded=%v for hidden=%v", recorded, hidden)
+			}
+
+			assertSessionLua(t, s.engine, fmt.Sprintf(`
+				assert(seen_hidden == %v, "context.hidden = " .. tostring(seen_hidden))
+				rune.input.set("hun")
+			`, hidden))
+			s.engine.HandleKeyBind("tab")
+			want := "hunter2 "
+			if hidden {
+				want = "hun"
+			}
+			assertSessionLua(t, s.engine, fmt.Sprintf(`
+				assert(rune.input.get() == %q, "input after Tab: " .. rune.input.get())
+			`, want))
+		})
 	}
 }

@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/mmcdole/rune/input"
-	"github.com/mmcdole/rune/lua"
 	"github.com/mmcdole/rune/network"
 	"github.com/mmcdole/rune/session"
 	"github.com/mmcdole/rune/ui"
@@ -129,7 +128,6 @@ func replaySession(tb testing.TB, corpus []byte, chunking Chunking, repeat int, 
 	tcp := network.NewTCPClient()
 	u := newCountingUI()
 	sess := session.New(tcp, u, session.Config{
-		CoreScripts:   lua.CoreScripts,
 		ConfigDir:     ConfigDir(tb, withUser),
 		ConnectTarget: srv.Addr(),
 	})

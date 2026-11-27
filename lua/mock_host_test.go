@@ -16,7 +16,9 @@ var _ Host = (*MockHost)(nil)
 
 // MockHost implements all service interfaces for testing.
 type MockHost struct {
-	mu sync.Mutex
+	clock    time.Time
+	StoreErr error // returned by StoreSet when set
+	mu       sync.Mutex
 
 	// Captured calls
 	SendCalls       []string
@@ -86,7 +88,21 @@ type MockHTTPCall struct {
 }
 
 func NewMockHost() *MockHost {
-	return &MockHost{}
+	return &MockHost{clock: time.Unix(1_700_000_000, 0)}
+}
+
+// Now returns the mock clock; tests move it with Advance.
+func (m *MockHost) Now() time.Time {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.clock
+}
+
+// Advance moves the mock clock forward.
+func (m *MockHost) Advance(d time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.clock = m.clock.Add(d)
 }
 
 func (m *MockHost) Send(data string) error {
@@ -259,6 +275,9 @@ func (m *MockHost) SessionDelete(key string) {
 func (m *MockHost) StoreSet(key, rawJSON string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.StoreErr != nil {
+		return m.StoreErr
+	}
 	if m.StoreData == nil {
 		m.StoreData = make(map[string]string)
 	}

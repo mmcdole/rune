@@ -45,8 +45,11 @@ func (s *Session) submit(event ui.InputSubmittedMsg) {
 		if s.backgroundCtx.Err() != nil {
 			break
 		}
+		// While the server hides input (a password prompt), the line is
+		// neither echoed nor remembered, and input hooks are told so.
+		hidden := !s.protocol.LocalEchoEnabled()
 		// Expand history, then let input hooks rewrite or consume this line.
-		line, keep, err := s.engine.ProcessSubmittedLine(input.Line{Text: authored, Mode: submission.Mode})
+		line, keep, err := s.engine.ProcessSubmittedLine(input.Line{Text: authored, Mode: submission.Mode}, hidden)
 		if err != nil {
 			err = fmt.Errorf("input line %d: %w", index+1, err)
 			// A bad line can be skipped; an expired budget stops the whole submission.
@@ -62,7 +65,9 @@ func (s *Session) submit(event ui.InputSubmittedMsg) {
 		}
 		// Echo and remember the rewritten text before executing it. A command
 		// still belongs in history if execution fails or the send is rejected.
-		history = append(history, line.Text)
+		if !hidden {
+			history = append(history, line.Text)
+		}
 		s.echoInput(line.Text)
 		if err := s.engine.ExecuteInputLine(line); err != nil {
 			// Execution may already have sent commands. Never retry it.

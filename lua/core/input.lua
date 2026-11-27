@@ -1,7 +1,112 @@
--- Input processing.
--- Session processes one submitted line, echoes the result, then executes it.
--- Session owns splitting submissions into lines and recording their history.
--- Programmatic rune.send executes game commands without history expansion or input hooks.
+-- Input
+-- The input line and what happens to a submitted line: rune.input, command
+-- syntax (";" separators, #N repeats, "!" history references), alias and
+-- slash-command dispatch, and sending.
+--
+-- Go owns the input widget (rune._input), splits a submission into lines,
+-- and echoes and records each; this file owns each line's processing.
+--
+-- API:
+--   rune.input.get()  rune.input.set(text)
+--   rune.input.get_cursor()  rune.input.set_cursor(pos)  -- UTF-8 byte offsets
+--   rune.input.word_left()  rune.input.word_right()  rune.input.delete_word()
+--   rune.input.open_editor(initial)   -- $EDITOR; edited_text, ok
+--   rune.send(text)                   -- command syntax and aliases, then send
+--   rune.send_raw(text)               -- literal game lines
+--
+-- Notes:
+--   One top-level send (a typed line, a trigger or timer action) may nest
+--   aliases 100 deep and run 1000 commands; past either, the whole
+--   expansion stops with one error. "!" history expansion runs once per
+--   typed line, before input hooks; history navigation is history.lua.
+
+rune.input = {}
+
+-- The input line
+
+function rune.input.get()
+    return rune._input.get()
+end
+
+function rune.input.set(text)
+    rune._input.set(text)
+end
+
+function rune.input.get_cursor()
+    return rune._input.get_cursor()
+end
+
+function rune.input.set_cursor(pos)
+    rune._input.set_cursor(pos)
+end
+
+-- Open $EDITOR with the given initial text.
+-- Returns edited_text, ok.
+function rune.input.open_editor(initial)
+    return rune._input.open_editor(initial)
+end
+
+-- Find previous word boundary
+local function find_word_left(text, pos)
+    if pos <= 0 then return 0 end
+    local new_pos = pos
+    -- Skip spaces (going backwards)
+    while new_pos > 0 and text:sub(new_pos, new_pos) == " " do
+        new_pos = new_pos - 1
+    end
+    -- Skip word characters
+    while new_pos > 0 and text:sub(new_pos, new_pos) ~= " " do
+        new_pos = new_pos - 1
+    end
+    return new_pos
+end
+
+-- Find next word boundary
+local function find_word_right(text, pos)
+    local len = #text
+    if pos >= len then return len end
+    local new_pos = pos + 1
+    -- Skip current word characters
+    while new_pos <= len and text:sub(new_pos, new_pos) ~= " " do
+        new_pos = new_pos + 1
+    end
+    -- Skip spaces
+    while new_pos <= len and text:sub(new_pos, new_pos) == " " do
+        new_pos = new_pos + 1
+    end
+    return new_pos - 1
+end
+
+-- Word left: move cursor to previous word boundary
+function rune.input.word_left()
+    local text = rune.input.get()
+    local pos = rune.input.get_cursor()
+    local new_pos = find_word_left(text, pos)
+    rune.input.set_cursor(new_pos)
+end
+
+-- Word right: move cursor to next word boundary
+function rune.input.word_right()
+    local text = rune.input.get()
+    local pos = rune.input.get_cursor()
+    local new_pos = find_word_right(text, pos)
+    rune.input.set_cursor(new_pos)
+end
+
+-- Delete word before cursor
+function rune.input.delete_word()
+    local text = rune.input.get()
+    local pos = rune.input.get_cursor()
+    if pos <= 0 then return end
+
+    local new_pos = find_word_left(text, pos)
+    local before = text:sub(1, new_pos)
+    local after = text:sub(pos + 1)
+    rune.input.set(before .. after)
+    rune.input.set_cursor(new_pos)
+end
+
+-- Sending
 
 -- Send literal game text, splitting LF, CRLF, and bare CR into physical lines.
 -- Bypasses history expansion, input hooks, aliases, repeats, and slash commands.
@@ -24,27 +129,6 @@ function rune.send_raw(text)
         rune.echo(rune.style.red("[Error]") .. " " .. tostring(err))
     end
     return ok, err
-end
-
--- Input history (Go owns storage so it survives reloads)
-
-rune.history = {}
-
--- Return history text oldest-first, including multiline and Verbatim entries.
--- Mode metadata stays in Go; this public API returns only the text.
-function rune.history.get()
-    local entries = rune._history.entries()
-    local history = {}
-    for i, entry in ipairs(entries) do
-        history[i] = entry.text
-    end
-    return history
-end
-
--- Record Command-mode text without sending it or running input processing.
--- Go validates the text and applies the normal history storage rules.
-function rune.history.add(cmd)
-    rune._history.add(cmd)
 end
 
 -- Iterate separator-delimited commands, yielding source text and decoded text.
@@ -194,35 +278,55 @@ end
 
 -- Command sequences, single-command repeats, and alias expansion.
 
-local MAX_RECURSION_DEPTH = 100
+local MAX_DEPTH = 100     -- nested alias expansions
+local MAX_COMMANDS = 1000 -- commands one top-level send may run
+
+-- The expansion in progress. One top-level send (a typed line, a trigger or
+-- timer action) owns the depth and command budget; a rune.send made while it
+-- runs, e.g. from an alias function, joins it instead of starting fresh.
+local expansion
+
+local function stop_expansion(message)
+    expansion.stopped = true
+    rune.echo(rune.style.red("[Error]") .. " " .. message)
+end
 
 -- Execute a game-command sequence: split separators, decode literal separators,
 -- apply #N repeats, then try aliases before sending each command. Alias text is
 -- processed recursively; an alias returning no text consumes the command.
 -- This does not interpret slash commands or perform interactive preparation.
-local function execute_commands(input, depth)
-    if depth > MAX_RECURSION_DEPTH then
-        rune.echo(rune.style.red("[Error]") .. " Alias loop detected (depth limit exceeded)")
-        return
+local function execute_commands(input)
+    local state = expansion
+    if state.depth > MAX_DEPTH then
+        return stop_expansion("Alias loop detected (more than " .. MAX_DEPTH .. " nested expansions)")
     end
 
     local separator = rune.config.get("command_separator")
     for source, command in commands(input, separator) do
+        if state.stopped then return end
         command = command:match("^%s*(.-)%s*$")
         -- Recognize the prefix before decoding can introduce a literal '#'.
         local count = source:match("^%s*#(%d+)%s+%S")
         local line = count and command:match("^#%d+%s+(.-)%s*$") or command
+        local repeats = tonumber(count) or 1
+        if repeats > state.remaining then
+            return stop_expansion("Too many commands (limit " .. MAX_COMMANDS .. " per input)")
+        end
 
-        for _ = 1, tonumber(count) or 1 do
-            if line == "" then
-                rune.send_raw(line)
-            else
-                local processed, result = rune.alias.process(line)
-                if not processed then
-                    rune.send_raw(line)
-                elseif result then
-                    execute_commands(result, depth + 1) -- alias result is new command text
+        for _ = 1, repeats do
+            if state.stopped then return end
+            state.remaining = state.remaining - 1
+            local processed, result = false, nil
+            if line ~= "" then
+                state.depth = state.depth + 1
+                processed, result = rune.alias.process(line)
+                if processed and result and not state.stopped then
+                    execute_commands(result) -- alias result is new command text
                 end
+                state.depth = state.depth - 1
+            end
+            if not processed and not rune.send_raw(line) then
+                state.stopped = true -- send_raw already echoed the failure
             end
         end
     end
@@ -232,13 +336,25 @@ end
 -- Does not run input hooks, expand history, echo input, record history, or dispatch
 -- slash commands. Send failures are reported by send_raw; no status is returned.
 function rune.send(input)
-    execute_commands(input, 0)
+    if expansion then
+        if not expansion.stopped then
+            execute_commands(input)
+        end
+        return
+    end
+    expansion = { depth = 0, remaining = MAX_COMMANDS, stopped = false }
+    local ok, err = pcall(execute_commands, input)
+    expansion = nil
+    if not ok then
+        error(err, 0)
+    end
 end
 
 -- Process one submitted line: expand history in Command mode, then
--- run input hooks in either mode. Return text, or false to skip this line.
+-- run input hooks in either mode. `hidden` is true while the server hides
+-- input (a password prompt). Return text, or false to skip this line.
 -- Does not send, echo input, or record history; Session owns those steps.
-function rune.input._process_submitted_line(text, mode)
+function rune.input._process_submitted_line(text, mode, hidden)
     if mode == "command" then
         text = expand_history(text)
         if text == false then return false end
@@ -247,7 +363,7 @@ function rune.input._process_submitted_line(text, mode)
     if type(rune.hooks) ~= "table" or type(rune.hooks.call) ~= "function" then
         return text
     end
-    return rune.hooks.call("input", text, { mode = mode })
+    return rune.hooks.call("input", text, { mode = mode, hidden = hidden == true })
 end
 
 -- Execute one processed line: Verbatim sends literally; Command mode
@@ -272,3 +388,22 @@ function rune.input._execute_input_line(text, mode)
 
     rune.send(text)
 end
+
+-- Defaults
+
+-- Local echo styling. Re-register "echo-style" to restyle echoed input
+-- (Go keeps a plain fallback for when the Lua core is unavailable).
+rune.hooks.on("echo", function(text)
+    return rune.style.green("> " .. text)
+end, { name = "echo-style", priority = 100 })
+
+rune.bind("ctrl+u", function() rune.input.set("") end)
+
+-- /raw <text> - Send without alias expansion
+rune.command.add("raw", function(args)
+    if args == "" then
+        rune.echo("[Usage] /raw <text>")
+        return
+    end
+    rune.send_raw(args)
+end, "Send text without alias expansion")

@@ -8,7 +8,7 @@ import (
 )
 
 // registerHistoryFuncs registers rune._history.* primitives.
-// The public rune.history API is defined in Lua (75_input.lua).
+// The public rune.history API is defined in Lua (history.lua).
 func (e *Engine) registerHistoryFuncs() {
 	e.vm.RegisterModule("rune._history", map[string]script.GoFunc{
 		// rune._history.entries() - Returns structured history, oldest first.

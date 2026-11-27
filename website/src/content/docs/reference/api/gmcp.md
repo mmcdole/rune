@@ -89,10 +89,11 @@ to `init.lua` reaches the server as soon as the reloaded script
 declares it.
 
 When the server negotiates GMCP, the `"gmcp_enabled"` event fires and
-the core handler named `gmcp-hello` sends
-`Core.Hello {client, version}` plus the current subscription set.
-Subscribe at load time; the handshake picks it up on connect. Disable
-or replace `gmcp-hello` like any named hook.
+the core handler named `gmcp-hello` sends `Core.Hello {client, version}`;
+Rune then sends the current subscription set. Subscribe at load time; the
+handshake picks it up on connect. Replace `gmcp-hello` by registering a
+handler under that name (priority 100 or below keeps it ahead of the
+subscriptions); replacing or disabling it does not stop subscriptions.
 
 ```lua
 rune.gmcp.subscribe("Char")
@@ -101,8 +102,9 @@ rune.gmcp.subscribe("Room", 2)
 
 ## Managing
 
-`rune.gmcp.get/enable/disable/remove(name)` manage handlers by name;
-`rune.gmcp.list()` returns them — see
+`rune.gmcp.get/enable/disable/toggle/remove(name)` manage handlers by name;
+`rune.gmcp.list()`, `.count()`, `.clear()`, and `.remove_group(group)` work as
+for every registry — see
 [Registries](/reference/api/#managing). `/gmcp` shows negotiation
 state, subscriptions, and handlers; `/gmcp send <package> [json]`
 sends a raw message for debugging.

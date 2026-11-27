@@ -64,7 +64,8 @@ and input handling keeps working. Fix the error and
 ## Managing
 
 Standard registry management applies:
-`rune.command.get/enable/disable/remove(name)`, `.list()`. See
+`rune.command.get/enable/disable/toggle/remove(name)`, `.list()`, `.count()`,
+`.clear()`, `.remove_group(group)`. See
 [Registries](/reference/api/#managing). `/help` lists everything.
 
 **Related:** [Slash Commands guide](/scripting/commands/) ·

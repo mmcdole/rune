@@ -47,9 +47,11 @@ current connection.
 it. Rune maintains `Core.Supports.Set` for you, re-sending the full set
 whenever it changes (an empty set is never sent). When a server negotiates
 GMCP, the `gmcp_enabled` event fires
-and a core handler (named `gmcp-hello`) sends `Core.Hello` plus your
-subscriptions. Subscribe at load time and the handshake picks it up on
-connect. Replace the handler if your server needs a different hello.
+and a core handler (named `gmcp-hello`) sends `Core.Hello`; Rune sends your
+subscriptions right after it. Subscribe at load time and the handshake picks
+it up on connect. If your server needs a different hello, register your own
+handler under the name `gmcp-hello` (keep its priority at 100 or below);
+subscriptions are still sent.
 
 ## Options
 

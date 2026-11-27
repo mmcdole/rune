@@ -5,8 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/mmcdole/rune/lua"
 )
 
 // bootSessionInDir builds and boots a session against a caller-owned
@@ -18,8 +16,7 @@ func bootSessionInDir(t *testing.T, dir string) (*Session, *mockNetwork, *mockUI
 	net := newMockNetwork()
 	uiMock := newMockUI()
 	s := New(net, uiMock, Config{
-		CoreScripts: lua.CoreScripts,
-		ConfigDir:   dir,
+		ConfigDir: dir,
 	})
 	if err := s.startup(); err != nil {
 		t.Fatalf("boot must not fail on user-script errors: %v", err)

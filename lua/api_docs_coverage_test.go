@@ -37,6 +37,7 @@ var sharedContractSuffixes = map[string]bool{
 	"get":          true,
 	"enable":       true,
 	"disable":      true,
+	"toggle":       true,
 	"remove":       true,
 	"cancel":       true,
 	"list":         true,
@@ -65,19 +66,12 @@ func isInternalName(name string) bool {
 func publicCoreFunctions(t *testing.T) []string {
 	t.Helper()
 	fnRe := regexp.MustCompile(`(?m)^function (rune\.[A-Za-z0-9_.]+)\s*\(`)
-	entries, err := os.ReadDir("core")
-	if err != nil {
-		t.Fatalf("reading core/: %v", err)
-	}
 	var names []string
 	seen := map[string]bool{}
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".lua") {
-			continue
-		}
-		src, err := os.ReadFile(filepath.Join("core", e.Name()))
+	for _, file := range CoreOrder {
+		src, err := coreFS.ReadFile("core/" + file + ".lua")
 		if err != nil {
-			t.Fatalf("reading %s: %v", e.Name(), err)
+			t.Fatalf("reading core/%s.lua: %v", file, err)
 		}
 		for _, m := range fnRe.FindAllStringSubmatch(string(src), -1) {
 			name := m[1]

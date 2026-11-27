@@ -4,8 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/mmcdole/rune/lua"
 )
 
 // bootWithTarget builds and boots a session with a CLI connect target.
@@ -15,7 +13,6 @@ func bootWithTarget(t *testing.T, dir, target string) (*Session, *mockNetwork, *
 	net := newMockNetwork()
 	uiMock := newMockUI()
 	s := New(net, uiMock, Config{
-		CoreScripts:   lua.CoreScripts,
 		ConfigDir:     dir,
 		ConnectTarget: target,
 	})

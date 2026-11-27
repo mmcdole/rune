@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mmcdole/rune/input"
 )
@@ -465,4 +466,140 @@ func TestSendRawSplitsEmbeddedNewlines(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertCommands(t, host, []string{"north", "look", "say hi", "wait", ""})
+}
+
+// Expansion guards: an alias loop or an oversized repeat stops the whole
+// top-level expansion with one error and sends nothing it hasn't already
+// sent. Regression: loops used to send their siblings 100 times, x -> x;x
+// printed millions of errors, and #N had no limit.
+func TestSendExpansionGuards(t *testing.T) {
+	cases := []struct {
+		name    string
+		setup   string
+		send    string
+		want    []string
+		errWant string
+	}{
+		{
+			name:    "self-referencing alias with a sibling sends nothing",
+			setup:   `rune.alias.exact("a", "a;look")`,
+			send:    "a",
+			want:    nil,
+			errWant: "Alias loop",
+		},
+		{
+			name:    "branching alias loop stops with one error",
+			setup:   `rune.alias.exact("x", "x;x")`,
+			send:    "x",
+			want:    nil,
+			errWant: "Alias loop",
+		},
+		{
+			name:    "repeat over the command budget is rejected before sending",
+			send:    "#100000 look",
+			want:    nil,
+			errWant: "Too many commands",
+		},
+		{
+			name: "repeat at the budget is allowed",
+			send: "#1000 look",
+			want: func() []string {
+				out := make([]string, 1000)
+				for i := range out {
+					out[i] = "look"
+				}
+				return out
+			}(),
+		},
+		{
+			name:    "alias function that re-sends itself joins the expansion",
+			setup:   `rune.alias.exact("r", function() rune.send("r;look") end)`,
+			send:    "r",
+			want:    nil,
+			errWant: "Alias loop",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			engine, host, cleanup := setupTest(t)
+			defer cleanup()
+			if tc.setup != "" {
+				if err := engine.DoString("setup", tc.setup); err != nil {
+					t.Fatal(err)
+				}
+			}
+			host.DrainPrintCalls()
+			if err := engine.DoString("send", fmt.Sprintf("rune.send(%q)", tc.send)); err != nil {
+				t.Fatal(err)
+			}
+			sent := host.DrainNetworkCalls()
+			if len(sent) != len(tc.want) {
+				t.Fatalf("sent %d commands, want %d (first: %v)", len(sent), len(tc.want), head(sent))
+			}
+			errors := 0
+			for _, p := range host.DrainPrintCalls() {
+				if strings.Contains(p, "[Error]") {
+					errors++
+					if !strings.Contains(p, tc.errWant) {
+						t.Errorf("error %q does not mention %q", p, tc.errWant)
+					}
+				}
+			}
+			wantErrors := 0
+			if tc.errWant != "" {
+				wantErrors = 1
+			}
+			if errors != wantErrors {
+				t.Errorf("printed %d errors, want %d", errors, wantErrors)
+			}
+		})
+	}
+}
+
+// A failed send stops the expansion: the error is echoed once, not once
+// per remaining repeat.
+func TestSendExpansionStopsAtFirstFailedSend(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+	host.SendErr = errNotConnected
+	if err := engine.DoString("send", `rune.send("#5 look;north")`); err != nil {
+		t.Fatal(err)
+	}
+	errors := 0
+	for _, p := range host.DrainPrintCalls() {
+		if strings.Contains(p, "not connected") {
+			errors++
+		}
+	}
+	if errors != 1 {
+		t.Errorf("printed %d send errors, want 1", errors)
+	}
+}
+
+func head(s []string) []string {
+	if len(s) > 3 {
+		return s[:3]
+	}
+	return s
+}
+
+// A watchdog interruption inside an expansion must not leave the expansion
+// marked active, or every later rune.send would silently join a dead one.
+func TestSendRecoversAfterRunawayInsideExpansion(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+	engine.CallTimeout = 100 * time.Millisecond
+	if err := engine.DoString("setup", `rune.alias.exact("spin", function() `+runawayLoop(engine)+` end)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.DoString("spin", `rune.send("spin")`); err == nil {
+		t.Fatal("expected the watchdog to interrupt the runaway alias")
+	}
+	host.DrainNetworkCalls()
+	if err := engine.DoString("after", `rune.send("look")`); err != nil {
+		t.Fatal(err)
+	}
+	if got := host.DrainNetworkCalls(); len(got) != 1 || got[0] != "look" {
+		t.Fatalf("sent %q after recovery, want [look]", got)
+	}
 }

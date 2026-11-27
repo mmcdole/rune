@@ -1,40 +1,37 @@
--- Alias System
--- Aliases match user input and transform/expand it.
--- Built on rune.registry (20_registry.lua).
+-- Aliases
+-- Match typed commands and expand or handle them.
 --
--- API (literal matching):
---   rune.alias.exact(phrase, action, opts?)   -- Match a literal command phrase
+-- Pure Lua; the regex engine is Go's (rune.regex). Input dispatch
+-- (input.lua) calls rune.alias.process on every command.
 --
--- API (regex matching):
---   rune.alias.regex(pattern, action, opts?)  -- Go regexp on full input line
+-- API:
+--   rune.alias.exact(phrase, action, opts?)   -- a literal command phrase
+--   rune.alias.regex(pattern, action, opts?)  -- Go regexp on the whole line
+--   rune.alias.process(input)                 -- internal: processed, result
+--   rune.alias.list()                         -- exact first, then regex
+--   + shared management (get, enable, disable, toggle, remove, count,
+--     clear, remove_group); see registry.lua
 --
--- Returns a handle with :disable(), :enable(), :remove(), :name(), :group()
+-- Options (beyond name, group):
+--   once     = true  -- remove after the first match
+--   priority = 50    -- order among regex aliases (lower first)
 --
--- Options:
---   name     = "string"   -- Unique ID for upsert/management
---   group    = "string"   -- Group membership for bulk operations
---   once     = true       -- Auto-remove after first match
---   priority = 50         -- Execution order for regex aliases (lower = first)
+-- Notes:
+--   Exact aliases are tried first (the longest registered phrase wins);
+--   regex aliases only when none matches. An exact alias is named for its
+--   normalized phrase.
 --
--- Exact aliases are tried first; regex aliases only when none matches.
---
--- Action can be:
---   - String: expansion text, %1 %2 etc substituted from captures (regex only)
---   - Function (exact):  function(args, ctx)  -- args = text after matched phrase
---   - Function (regex):  function(matches, ctx) -- matches = array of captures
---
--- Context object:
---   ctx.line  = full input line
---   ctx.name  = alias name (if set)
---   ctx.group = alias group (if set)
---   ctx.type  = "alias"
---   ctx.args  = text after matched phrase (exact only)
---   ctx.matches = captures array (regex only)
+--   An action is a string (expansion text; %1 %2 substitute regex
+--   captures) or a function: function(args, ctx) for exact aliases (args
+--   = text after the phrase), function(matches, ctx) for regex. ctx =
+--   {line, name, group, type = "alias", args | matches}. A function that
+--   returns a string expands to it; nil consumes the command.
 
--- Exact-command indexes. The phrase map supports upsert/listing; the word
--- trie lets dispatch follow only registered prefixes and stop at the first
--- impossible continuation.
-local exact = {}
+local green, red, yellow, cyan, gray = rune.style.green, rune.style.red, rune.style.yellow, rune.style.cyan, rune.style.gray
+
+-- Exact-command index: a word trie, so dispatch follows only registered
+-- prefixes and stops at the first impossible continuation. (An exact alias
+-- is named for its phrase, so the registry's name index is the phrase map.)
 local exact_root = { children = {} }
 
 local function index_exact(data)
@@ -86,20 +83,13 @@ end
 
 local registry = rune.registry.new{
     kind = "alias",
-    action_field = "action",
     on_add = function(data)
         if data.is_exact then
-            -- An exact alias is named for its normalized phrase, so any
-            -- previous alias on that phrase is already gone by now.
-            exact[data.pattern] = data
             index_exact(data)
         end
     end,
     on_remove = function(data)
         if data.is_exact then
-            if exact[data.pattern] == data then
-                exact[data.pattern] = nil
-            end
             unindex_exact(data)
         end
     end,
@@ -107,16 +97,21 @@ local registry = rune.registry.new{
 
 -- Create an alias (internal)
 local function create_alias(pattern, action, opts, is_exact)
+    local api = is_exact and "rune.alias.exact" or "rune.alias.regex"
+    if type(action) ~= "function" and type(action) ~= "string" then
+        rune._raise(api .. ": action must be a function or string")
+    end
     return registry:add({
         pattern = pattern,
         action = action,
         is_exact = is_exact,
         source = rune.caller_source(2),
-    }, opts)
+    }, opts, api)
 end
 
 -- Public API
-rune.alias = {}
+
+rune.alias = registry:expose({})
 
 -- Match a literal command phrase. Whitespace separates words rather
 -- than being part of the phrase, matching the input parser's behavior.
@@ -141,81 +136,39 @@ end
 function rune.alias.regex(pattern, action, opts)
     local ok, err = rune.regex.validate(pattern)
     if not ok then
-        error("invalid alias pattern '" .. tostring(pattern) .. "': " .. tostring(err), 2)
+        error("rune.alias.regex: invalid pattern '" .. tostring(pattern) .. "': " .. tostring(err), 2)
     end
     return create_alias(pattern, action, opts, false)
-end
-
--- Management by name (an exact alias is named for its phrase)
-function rune.alias.get(name)
-    return registry:get(name)
-end
-
-function rune.alias.disable(name)
-    return registry:disable(name)
-end
-
-function rune.alias.enable(name)
-    return registry:enable(name)
-end
-
-function rune.alias.remove(name)
-    return registry:remove(name)
 end
 
 -- List all aliases - returns array of {match, mode, name, value, enabled, ...}
 -- Exact aliases first (sorted by key), then regex aliases in priority order.
 function rune.alias.list()
-    local function describe(data)
-        return {
-            match = data.pattern,
-            value = type(data.action) == "function" and "(function)" or tostring(data.action),
-            mode = data.is_exact and "exact" or "regex",
-            name = data.name,
-            enabled = data.enabled,
-            group = data.group,
-            once = data.once,
-            source = data.source,
-        }
+    local rows = registry:list(function(row, data)
+        row.match = data.pattern
+        row.value = type(data.action) == "function" and "(function)" or tostring(data.action)
+        row.mode = data.is_exact and "exact" or "regex"
+        row.once = data.once
+    end)
+    local exact, regex = {}, {}
+    for _, row in ipairs(rows) do
+        local bucket = row.mode == "exact" and exact or regex
+        bucket[#bucket + 1] = row
     end
-
-    local result = {}
-
-    local exact_keys = {}
-    for k in pairs(exact) do
-        exact_keys[#exact_keys + 1] = k
+    table.sort(exact, function(a, b) return a.match < b.match end)
+    for _, row in ipairs(regex) do
+        exact[#exact + 1] = row
     end
-    table.sort(exact_keys)
-    for _, key in ipairs(exact_keys) do
-        table.insert(result, describe(exact[key]))
-    end
-
-    for _, data in ipairs(registry:items()) do
-        if not data.is_exact then
-            table.insert(result, describe(data))
-        end
-    end
-
-    return result
+    return exact
 end
 
--- Clear all aliases
-function rune.alias.clear()
-    registry:clear()
-end
-
--- Count aliases
-function rune.alias.count()
-    return registry:count()
-end
+-- Dispatch
 
 -- Run an alias action protected, with quarantine: an action failing
 -- repeatedly is disabled like any hook/trigger/timer action.
 -- Returns the action's result, or nil on failure.
 local function run_action(data, arg, ctx)
-    local label = 'Alias "' .. tostring(data.name or data.pattern) .. '"' ..
-        (data.source and (" @" .. data.source) or "")
-    local ok, result = rune.guarded_call(label, data, data.action, arg, ctx)
+    local ok, result = registry:call(data, arg, ctx)
     if ok then
         return result
     end
@@ -279,7 +232,7 @@ function rune.alias.process(input)
     end
 
     -- Then try regex aliases (priority order) - uses Go regexp
-    for _, data in ipairs(registry:items()) do
+    for _, data in ipairs(registry:snapshot()) do
         if not data.is_exact and registry:active(data) then
             local matches = rune.regex.match(data.pattern, input)
             if matches then
@@ -310,7 +263,27 @@ function rune.alias.process(input)
     return false, nil
 end
 
--- Group operations
-function rune.alias.remove_group(group_name)
-    return registry:remove_group(group_name)
-end
+-- Defaults
+
+-- /aliases - List all aliases
+rune.command.add("aliases", function()
+    local aliases = rune.alias.list()
+    rune.echo(green("[Aliases]") .. gray(" (" .. #aliases .. " total)"))
+    if #aliases == 0 then
+        rune.echo("  " .. gray("(none)"))
+        return
+    end
+    for _, a in ipairs(aliases) do
+        local status = a.enabled and green("[on] ") or red("[off]")
+        local group_str = a.group and ("  " .. cyan("<" .. a.group .. ">")) or ""
+        local flags = {}
+        if a.once then flags[#flags + 1] = "once" end
+        -- An exact alias is named for its phrase, already in the match column.
+        local name_str = (a.name and a.name ~= a.match)
+            and (" " .. gray("name:") .. a.name) or ""
+        local flags_str = #flags > 0 and ("  " .. gray("(" .. table.concat(flags, ", ") .. ")")) or ""
+        local src_str = rune.registry._origin(a)
+        rune.echo(string.format("  %s %-8s %s %s %s %s%s%s%s",
+            status, a.mode, yellow('"' .. a.match .. '"'), gray("->"), a.value, name_str, group_str, flags_str, src_str))
+    end
+end, "List all aliases")

@@ -102,9 +102,12 @@ open spans before `prompt` handlers run. Finishing a partial line on submission
 or accepted send commits its latest processed overlay without calling the
 `prompt` hook again.
 
-Every `input` handler receives `(text, context)`. The context is read-only, and
-`context.mode` is always `"command"` or `"verbatim"`. Each handler sees the
-text returned by the preceding handler:
+Every `input` handler receives `(text, context)`. The context is read-only:
+`context.mode` is always `"command"` or `"verbatim"`, and `context.hidden` is
+`true` while the server hides input, as at a password prompt. Rune neither
+echoes nor records a hidden line in history; a handler that remembers input
+should skip it too. Each handler sees the text returned by the preceding
+handler:
 
 ```lua
 rune.hooks.on("input", function(text, context)
@@ -215,16 +218,37 @@ changes.
 
 ## Named core handlers
 
-Handlers the core registers under stable names, so you can disable or
-replace them: `log-output`, `log-echo` (logging policy, priority 200),
-`gmcp-hello` (the GMCP handshake), `gmcp-reset`, `first-run-welcome`,
-and `_completion_cache` / `_completion_input` (tab-completion word harvesting,
-priority 200).
+Every hook Rune installs has a name; `/hooks` lists them with a `core` tag.
+Names are kebab-case, and a leading `_` marks an internal handler that may
+change between releases. These are public, for you to disable or replace:
+
+| Name | Event | Does |
+|---|---|---|
+| `echo-style` | `echo` | Adds the green `> ` to echoed input (priority 100) |
+| `log-output` | `output` | Writes server lines to an open log (priority 200) |
+| `log-echo` | `echo` | Writes echoed input to an open log (priority 200) |
+| `gmcp-hello` | `gmcp_enabled` | Sends `Core.Hello` (priority 100); subscriptions are sent separately, after it |
+| `notice-<event>` | each of `connecting`, `connected`, `disconnecting`, `disconnected`, `reloading`, `reloaded`, `loaded`, `error` | Prints the `[System]` or `[Error]` line for that event |
+
+Replace one by registering a handler under the same name; `rune.hooks.clear()`
+brings the default back:
+
+```lua
+rune.hooks.on("echo", function(text)
+    return rune.style.cyan("» " .. text)
+end, { name = "echo-style" })
+
+rune.hooks.disable("notice-reloaded")   -- stop printing "[System] Scripts reloaded"
+```
+
+Notification events ignore return values, so disabling a notice by name is
+how to silence it. Disabling `notice-error` hides engine errors unless you
+replace it with a handler that shows them somewhere else.
 
 ## Managing
 
 Standard registry management applies:
-`rune.hooks.get/enable/disable/remove(name)`, `.list()`, `.count()`,
+`rune.hooks.get/enable/disable/toggle/remove(name)`, `.list()`, `.count()`,
 `.clear()`, `.remove_group(group)`: see
 [Registries](/reference/api/#managing). `/hooks` lists everything.
 

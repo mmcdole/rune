@@ -2,6 +2,11 @@ package session
 
 import "time"
 
+// Now implements lua.Host.
+func (s *Session) Now() time.Time {
+	return time.Now()
+}
+
 // TimerAfter implements lua.Host.
 func (s *Session) TimerAfter(d time.Duration) int {
 	return s.timer.After(d)

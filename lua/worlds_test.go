@@ -1,11 +1,14 @@
 package lua
 
-// World bookmarks and connect-target resolution (65_worlds.lua and the
-// /connect and /reconnect commands in 55_commands.lua), driven against
+// World bookmarks and connect-target resolution (connection.lua: the
+// rune.world API and the /connect and /reconnect commands), driven against
 // MockHost. The e2e wiring proofs live in
 // test/e2e/scenarios/connection.json.
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 // TestConnectCommandForms verifies the /connect argument shapes:
 // host+port, host+port+tls scheme, and the single host:port form.
@@ -77,4 +80,17 @@ func TestReconnectUsesStoredAddress(t *testing.T) {
 	if len(host.ConnectCalls) != 1 || host.ConnectCalls[0] != "tls://mud.example.com:4000" {
 		t.Errorf("connect calls = %v, want the stored address (scheme intact)", host.ConnectCalls)
 	}
+}
+
+// Regression: rune.world.remove reported success even when saving the
+// updated bookmarks failed.
+func TestWorldRemoveReportsSaveFailure(t *testing.T) {
+	engine, host, cleanup := setupTest(t)
+	defer cleanup()
+	assertLua(t, engine, `assert(rune.world.add("home", "example.com:4000"))`)
+	host.StoreErr = errors.New("disk full")
+	assertLua(t, engine, `
+		local ok, err = rune.world.remove("home")
+		assert(ok == nil and err == "disk full", "got " .. tostring(ok) .. ", " .. tostring(err))
+	`)
 }

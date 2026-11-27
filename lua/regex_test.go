@@ -12,12 +12,12 @@ func TestInvalidRegexFailsAtRegistration(t *testing.T) {
 	defer cleanup()
 
 	err := engine.DoString("setup", `rune.trigger.regex("(unclosed", "look")`)
-	if err == nil || !strings.Contains(err.Error(), "invalid trigger pattern") {
+	if err == nil || !strings.Contains(err.Error(), "rune.trigger.regex: invalid pattern") {
 		t.Errorf("expected registration error for bad trigger pattern, got: %v", err)
 	}
 
 	err = engine.DoString("setup2", `rune.alias.regex("(unclosed", "look")`)
-	if err == nil || !strings.Contains(err.Error(), "invalid alias pattern") {
+	if err == nil || !strings.Contains(err.Error(), "rune.alias.regex: invalid pattern") {
 		t.Errorf("expected registration error for bad alias pattern, got: %v", err)
 	}
 }

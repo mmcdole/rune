@@ -1,6 +1,6 @@
 package lua
 
-// Group master-switch semantics (20_registry.lua): an item fires only
+// Group master-switch semantics (registry.lua): an item fires only
 // if itself enabled AND its group enabled, across every registry.
 
 import "testing"
@@ -145,4 +145,19 @@ func TestGroupMasterSwitch(t *testing.T) {
 			want:  []string{"kill orc"},
 		},
 	})
+}
+
+// Regression: rune.group.list() used a hardcoded module list that missed
+// GMCP handlers, so their groups never appeared in /groups.
+func TestGroupListIncludesEveryRegistry(t *testing.T) {
+	engine, _, cleanup := setupTest(t)
+	defer cleanup()
+	assertLua(t, engine, `
+		rune.gmcp.on("Char.Vitals", function() end, { group = "vitals" })
+		local found = false
+		for _, g in ipairs(rune.group.list()) do
+			if g.name == "vitals" then found = true end
+		end
+		assert(found, "gmcp group missing from rune.group.list()")
+	`)
 }

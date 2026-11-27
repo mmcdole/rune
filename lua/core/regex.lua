@@ -1,10 +1,14 @@
--- Regex API
--- Cached pattern matching using Go's regexp engine.
+-- Regex
+-- Pattern matching with Go regexp syntax, and capture substitution.
+--
+-- Go owns compilation and matching (rune._regex); this file owns the
+-- pattern cache and how captures reach actions.
 --
 -- API:
---   rune.regex.compile(pattern)     -- Compile regex, returns userdata or nil+error
---   rune.regex.validate(pattern)    -- Check a pattern, returns true or nil+error
---   rune.regex.match(pattern, text) -- Match with caching, returns captures array or nil
+--   rune.regex.compile(pattern)      -- Regex userdata, or nil + error
+--   rune.regex.validate(pattern)     -- true, or nil + error
+--   rune.regex.match(pattern, text)  -- captures array, or nil
+--   rune.substitute_captures(template, matches)  -- internal: %1..%N
 
 rune.regex = {}
 
@@ -78,4 +82,14 @@ function rune.regex.match(pattern, text)
         captures[i - 1] = matches[i]
     end
     return captures
+end
+
+-- Substitute %1..%N capture references in a string action. Single pass
+-- with greedy digits, so %10 means capture 10, not capture 1 then "0".
+-- Unknown indices stay literal, and captured text is inserted literally,
+-- so a "%" in matched text cannot corrupt the template.
+function rune.substitute_captures(template, matches)
+    return (template:gsub("%%(%d+)", function(d)
+        return matches[tonumber(d)]
+    end))
 end

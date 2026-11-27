@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/mmcdole/rune/lua"
 )
 
 // Hold a cancelled operation in cleanup until the test lets it return.
@@ -61,7 +59,7 @@ func TestRunWaitsForBackgroundIO(t *testing.T) {
 				t.Fatal(err)
 			}
 			ui := newMockUI()
-			s := New(net, ui, Config{CoreScripts: lua.CoreScripts, ConfigDir: dir})
+			s := New(net, ui, Config{ConfigDir: dir})
 			done := make(chan struct{})
 			var runErr error
 			go func() {

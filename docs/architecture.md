@@ -132,7 +132,7 @@ implements by default and the LuaJIT backend implements under `-tags luajit`.
 
 - **Watchdog**: every Go→Lua entry runs under `Engine.guard` with a deadline (`Engine.CallTimeout`, default 5s). Runaway scripts are interrupted with an error; the VM stays usable. Nested entries share the outermost deadline. Host calls that legitimately block on the user (e.g. `open_editor` running `$EDITOR`) run under `Engine.pauseWatchdog`, which detaches the deadline and re-arms a fresh one.
 - **Handler isolation**: `rune.hooks.call` runs each handler under `pcall`; a throwing handler is reported and skipped, not allowed to abort the chain.
-- **Failure quarantine**: `rune.guarded_call(label, data, fn, ...)` tracks consecutive failures on a registry entry and disables it after 3 in a row, or at once when the watchdog interrupts it, since each repeat would stall the client for the full timeout. Used by hooks, triggers, aliases, timers, binds, bar renderers, and slash commands. Commands are quarantined individually (`rune.command.dispatch`), so a broken user command cannot abort the internal input dispatcher.
+- **Failure quarantine**: `rune.guarded_call(label, data, fn, ...)` (`lua/core/guard.lua`) tracks consecutive failures on a registry entry and disables it after 3 in a row, or at once when the watchdog interrupts it, since each repeat would stall the client for the full timeout. Used by every registry (hooks, triggers, aliases, timers, binds, bar renderers, slash commands, GMCP handlers) through `registry:call`. Commands are quarantined individually (`rune.command.dispatch`), so a broken user command cannot abort the internal input dispatcher.
 - **Degraded mode**: missing hook dispatch passes authored input onward unchanged; missing input routing falls back to verbatim physical-line sends or plain command sends while preserving `/quit` and `/reload`. Output falls back to raw text. An internal dispatcher that starts and then errors is never retried through Go, because it may already have sent part of the submission.
 - **Source attribution**: registrations record the registering script's `file:line` (`rune.caller_source`); it appears in error messages and the `/hooks`, `/triggers`, `/aliases`, `/timers`, `/binds`, `/bars` listings.
 - **Engine-level failures** route through `Engine.reportError` → the Lua `"error"` event, with a re-entrancy guard that falls back to direct printing.
@@ -363,7 +363,7 @@ discarded without firing.
 
 ### 4.2 Supported options
 
-The default compatibility table advertises only implemented options: Echo, SGA, EOR, TTYPE/MTTS, NAWS, CHARSET, NEW-ENVIRON/MNES (identity responders in `network/negotiate.go`, pure functions with byte-exact tests), MCCP2 (zlib read path in `client.go`; the source is a byte-exact `bufio.Reader`, so a clean stream end resumes plain telnet), and GMCP (option 201; framing and JSON conversion in Go, policy in `70_gmcp.lua`). MCCP3, MSSP, ZMP, and Linemode stay refused. The parser accepts subnegotiations for options enabled on either side (server-offered GMCP/MCCP are remote; client-answered TTYPE/NAWS are local).
+The default compatibility table advertises only implemented options: Echo, SGA, EOR, TTYPE/MTTS, NAWS, CHARSET, NEW-ENVIRON/MNES (identity responders in `network/negotiate.go`, pure functions with byte-exact tests), MCCP2 (zlib read path in `client.go`; the source is a byte-exact `bufio.Reader`, so a clean stream end resumes plain telnet), and GMCP (option 201; framing and JSON conversion in Go, policy in `gmcp.lua`). MCCP3, MSSP, ZMP, and Linemode stay refused. The parser accepts subnegotiations for options enabled on either side (server-offered GMCP/MCCP are remote; client-answered TTYPE/NAWS are local).
 
 ### 4.3 Ordered negotiation and GMCP
 
@@ -407,7 +407,7 @@ carry the Lua generation that created their callback; a result from before
 - `cmd/rune/`: Entry point
 - `internal/paths/`: Config dir resolution (XDG/APPDATA) and `~` expansion for user-given paths
 - `input/`: Input submission types and cursor conversions
-- `lua/`: Scripting engine, `rune._*` primitive registration, embedded Lua core (`lua/core/`)
+- `lua/`: Scripting engine, `rune._*` primitive registration, embedded Lua core (`lua/core/`). `Engine.LoadCore` runs the core files in the order listed by `CoreOrder` (`lua/assets.go`); a file loads after everything it uses at load time.
 - `network/`: TCP and Telnet logic
 - `session/`: Main application controller (implements `lua.Host`)
 - `text/`: Line type, ANSI stripper, degraded-path colors
@@ -501,7 +501,7 @@ bounded conversion; GMCP and storage select their existing compatibility
 policy. GMCP still owns raw-control-byte repair and its protocol-specific
 nesting check.
 
-`lua/core/10_json.lua` owns the public null value and private weak table-kind
+`lua/core/json.lua` owns the public null value and private weak table-kind
 marks. Its Go boundary uses tagged container trees so the existing script
 backend interface can carry nulls and empty arrays without losing their
 identity. Lua scalars cross directly. `lua/api_json.go` adapts those trees to

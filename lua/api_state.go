@@ -13,7 +13,7 @@ type ClientState struct {
 
 // registerStateFuncs creates the rune._state table that Go pushes
 // client state into. Lua exposes it as the read-only rune.state proxy
-// (00_init.lua), so scripts cannot corrupt Go-owned state.
+// (base.lua), so scripts cannot corrupt Go-owned state.
 func (e *Engine) registerStateFuncs() {
 	// Initialize with defaults
 	e.vm.RegisterModule("rune._state", nil, map[string]any{

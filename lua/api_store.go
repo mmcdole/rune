@@ -9,7 +9,7 @@ import (
 const maxStoreDepth = 64
 
 // registerStoreFuncs registers rune._store.* primitives.
-// The public rune.store API is defined in Lua (00_init.lua).
+// The public rune.store API is defined in Lua (base.lua).
 func (e *Engine) registerStoreFuncs() {
 	e.vm.RegisterModule("rune._store", map[string]script.GoFunc{
 		// rune._store.set(key, value): value may be a string, number,

@@ -1,10 +1,22 @@
 -- HTTP
--- Async HTTP requests. Go owns the transport (rune._http): the
--- request runs off the session goroutine, and the outcome comes back
--- through rune.http._deliver on the session goroutine, under the
--- watchdog like every other callback. This module owns the
--- id -> callback map, so pending callbacks die with the VM on
--- /reload (a late result for a stale id is dropped).
+-- Asynchronous HTTP requests with callbacks.
+--
+-- Go owns the transport (rune._http): a request runs off the session
+-- goroutine, and its outcome comes back through rune.http._deliver under
+-- the watchdog like any callback. This file owns the id -> callback map,
+-- so pending callbacks die with the VM on /reload.
+--
+-- API:
+--   rune.http.get(url, opts?, callback?)
+--   rune.http.post(url, body, opts?, callback?)
+--
+-- Options:
+--   headers = { [name] = value }
+--   timeout = seconds
+--
+-- Notes:
+--   callback(response, err): response is {status, body, headers} for any
+--   completed request; err is a message when the request itself failed.
 
 rune.http = {}
 
@@ -49,8 +61,6 @@ end
 -- a message when the request itself failed (DNS, timeout, TLS, ...).
 -- Both opts and callback are optional; get(url, callback) works.
 function rune.http.get(url, opts, callback)
-    -- Sequential, not `opts, callback = nil, opts`: gopher-lua clears
-    -- opts before the right-hand side is read, losing the callback.
     if type(opts) == "function" and callback == nil then
         callback = opts
         opts = nil

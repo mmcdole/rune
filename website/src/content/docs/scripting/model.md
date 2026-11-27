@@ -135,8 +135,9 @@ rune.trigger.disable("spam-gag")
 ```
 
 Every registry exposes the same functions, taking the item name: `get`,
-`enable`, `disable`, `remove`, plus `list()`, `count()`, `clear()`, and
-`remove_group(group)`. The full contract is in the
+`enable`, `disable`, `toggle`, `remove`, plus `list()`, `count()`, `clear()`,
+and `remove_group(group)`. `clear()` removes what you added and restores
+Rune's own defaults. The full contract is in the
 [API reference](/reference/api/#managing).
 
 `get` returns the handle, which is how you reach something you did not
