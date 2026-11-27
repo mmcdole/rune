@@ -9,8 +9,8 @@
 -- the screen; raw mode (opts.raw / "/log start raw") keeps the codes
 -- for color-faithful transcripts (view with `less -R`). Prompt
 -- observations are skipped because partial lines can repeat. Client
--- chrome (rune.echo, /help output) is not logged. Register your own
--- hooks against rune._log.write for a different policy; echo does not
+-- chrome (rune.echo, /help output) is not logged. Re-register the
+-- "log-output" / "log-echo" hooks with rune.log.write for a different policy; echo does not
 -- fire while the server hides input (passwords stay out of logs).
 
 local green, red, dim = rune.style.green, rune.style.red, rune.style.gray

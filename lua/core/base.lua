@@ -213,6 +213,12 @@ function rune.echo(text)
     rune._echo(text)
 end
 
+-- Wall-clock seconds since the Unix epoch, with sub-second precision.
+-- Subtract two readings for a duration; os.date accepts it for display.
+function rune.time()
+    return rune._time()
+end
+
 function rune.quit()
     rune._quit()
 end

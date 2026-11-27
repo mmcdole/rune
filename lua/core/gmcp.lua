@@ -129,13 +129,16 @@ function rune.gmcp._dispatch(package, data, raw)
     end
 end
 
--- Handshake policy: when the server negotiates GMCP, introduce
--- ourselves and declare subscriptions. Visible and overridable - hide
--- or replace it like any named hook.
+-- Handshake: when the server negotiates GMCP, introduce ourselves.
+-- Re-register "gmcp-hello" to send a different hello.
 rune.hooks.on("gmcp_enabled", function()
     rune._gmcp.send("Core.Hello", { client = "Rune", version = rune.version })
-    send_supports()
 end, { name = "gmcp-hello", priority = 100 })
+
+-- Subscriptions belong to the subscription manager, not the hello: they
+-- go out after it (a same-name hello replacement defaults to priority
+-- 50), so replacing the hello can't drop them.
+rune.hooks.on("gmcp_enabled", send_supports, { name = "_gmcp-supports", priority = 110 })
 
 -- /gmcp - status, or send a raw message for debugging
 rune.command.add("gmcp", function(args)

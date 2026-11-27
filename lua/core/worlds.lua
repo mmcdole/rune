@@ -11,6 +11,12 @@ rune.world = {}
 
 local KEY = "worlds"
 
+-- Remember the last address that actually connected, durably, so
+-- /reconnect and the /world marker survive /reload and restarts.
+rune.hooks.on("connected", function(addr)
+    rune.store.set("last_address", addr)
+end, { name = "_remember-address" })
+
 local function load_worlds()
     return rune.store.get(KEY) or {}
 end

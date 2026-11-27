@@ -50,6 +50,9 @@ type Host interface {
 	PaneScrollToTop(name string)
 	PaneScrollToBottom(name string)
 
+	// Clock
+	Now() time.Time
+
 	// Timers
 	TimerAfter(d time.Duration) int
 	TimerEvery(d time.Duration) int

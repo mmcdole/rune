@@ -62,9 +62,9 @@ func BenchmarkHotpathOnOutput(b *testing.B) {
 		{"core", ""},
 		// Attribute the fixed core cost: each variant disables one core
 		// output hook that runs on every line.
-		{"core-no-completion-cache", `rune.hooks.disable("_completion_cache")`},
+		{"core-no-completion-cache", `rune.hooks.disable("_completion-output")`},
 		{"core-no-log-hook", `rune.hooks.disable("log-output")`},
-		{"core-triggers-only", `rune.hooks.disable("_completion_cache"); rune.hooks.disable("log-output")`},
+		{"core-triggers-only", `rune.hooks.disable("_completion-output"); rune.hooks.disable("log-output")`},
 		{"literal10", literalTriggers(10)},
 		{"literal50", literalTriggers(50)},
 		{"literal200", literalTriggers(200)},

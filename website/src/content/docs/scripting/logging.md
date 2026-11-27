@@ -36,13 +36,12 @@ rune.log.write(text)          -- append a line directly (no-op when not logging)
 ## Changing the policy
 
 What gets written is two hooks, named `log-output` and `log-echo` at
-priority 200. To add timestamps, replace one:
+priority 200. To add timestamps, replace one by registering under its name:
 
 ```lua
-rune.hooks.disable("log-output")
 rune.hooks.on("output", function(line)
     rune.log.write(os.date("[%H:%M:%S] ") .. line:clean())
-end, { priority = 200 })
+end, { name = "log-output", priority = 200 })
 ```
 
 To log every raw line including gagged ones, register at a priority below

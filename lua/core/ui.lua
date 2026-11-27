@@ -129,8 +129,17 @@ local function render_completion_bar(width)
     return { left = left, right = right }
 end
 
--- Ctrl+C double-tap quit state
-local quit_pending = false
+-- Ctrl+C double-press quit: the first press on an empty line arms quit
+-- for QUIT_WINDOW seconds and the status bar says so; a second press in
+-- that window quits. A timestamp rather than a timer, so nothing can
+-- cancel the expiry and leave quit armed; the bar's periodic redraw
+-- clears the warning.
+local QUIT_WINDOW = 2
+local quit_at
+
+local function quit_armed()
+    return quit_at ~= nil and rune.time() - quit_at < QUIT_WINDOW
+end
 
 -- Ctrl+C binding: with text in the input it clears the line;
 -- on an empty line, first press warns and the second press quits.
@@ -139,15 +148,11 @@ rune.bind("ctrl+c", function()
         rune.input.set("")
         return
     end
-    if quit_pending then
+    if quit_armed() then
         rune.quit()
     else
-        quit_pending = true
+        quit_at = rune.time()
         rune.ui.refresh_bars()
-        rune.timer.after(2, function()
-            quit_pending = false
-            rune.ui.refresh_bars()
-        end, {name = "_quit_timeout"})
     end
 end)
 
@@ -164,7 +169,7 @@ rune.ui.bar("status", function(width)
 
     -- Left side: connection status (or quit warning)
     local left
-    if quit_pending then
+    if quit_armed() then
         left = yellow("Press Ctrl+C again to exit")
     elseif state.connected then
         left = green("●") .. " " .. gray(state.address)

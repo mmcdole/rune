@@ -151,9 +151,11 @@ rune.bind("ctrl+r", function()
 end)
 
 -- Reset on input submission
-rune.hooks.on("input", function(text)
+-- Submission is a Go action (input.submit), so the input event is how
+-- Lua learns of it. Priority 1 runs before any user hook can consume it.
+rune.hooks.on("input", function()
     history_reset()
-end, { priority = 1 })
+end, { name = "_history-reset", priority = 1 })
 
 -- Export for potential customization
 rune.history_nav = {
@@ -393,7 +395,7 @@ rune.hooks.on("output", function(line)
     for word in line:clean():gmatch("[%w_'%-]+") do
         cache_add(word)
     end
-end, { name = "_completion_cache", priority = 200 })
+end, { name = "_completion-output", priority = 200 })
 
 -- Add words from the effective input after core history expansion.
 rune.hooks.on("input", function(text, context)
@@ -403,7 +405,7 @@ rune.hooks.on("input", function(text, context)
     for word in text:gmatch("[%w_'%-]+") do
         cache_add(word)
     end
-end, { name = "_completion_input", priority = 200 })
+end, { name = "_completion-input", priority = 200 })
 
 -- Smart input_changed hook: data-driven, no flags
 rune.hooks.on("input_changed", function()
@@ -425,7 +427,7 @@ rune.hooks.on("input_changed", function()
     completion_state.original = nil
     completion_state.expected = nil
     update_matches()
-end, { name = "_completion_matches", priority = 100 })
+end, { name = "_completion-matches", priority = 100 })
 
 -- Cycle through completions (Tab = forward, Shift+Tab = backward)
 local function cycle(direction)

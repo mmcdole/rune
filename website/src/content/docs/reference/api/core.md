@@ -17,6 +17,7 @@ rune.disconnect()      -- close the connection
 rune.load(path)        -- run a Lua script; true, or nil + error
 rune.reload()          -- reload core + user scripts
 rune.quit()            -- exit the client
+rune.time()            -- wall-clock seconds since the epoch, sub-second precision
 
 rune.config_dir        -- path to the config directory (data, not a function)
 rune.version           -- client version string
@@ -31,6 +32,22 @@ rune.config.set(key, value)   -- validate and update a configuration value
 [rune.style](/reference/api/style/) for colored messages. `rune.reload`
 reloads the core plus your scripts; [`rune.session`](/reference/api/storage/)
 state survives it.
+
+### rune.time
+
+```lua
+rune.time()  --> 1732600000.437
+```
+
+Wall-clock seconds since the Unix epoch, with sub-second precision. Subtract
+two readings for a duration; `os.date` accepts the value for display:
+
+```lua
+local start = rune.time()
+-- ...later
+rune.echo(("Fight took %.1fs"):format(rune.time() - start))
+rune.echo(os.date("%H:%M", rune.time()))
+```
 
 ### rune.send
 

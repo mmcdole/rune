@@ -24,6 +24,9 @@
 -- Common options: name, group, priority, once. An option outside those
 -- and spec.options is ignored with a notice, which catches typos.
 --
+-- Entry names are kebab-case ("log-output"); Rune's internal entries add a
+-- leading underscore ("_trigger-output") and may change between releases.
+--
 -- Name is the only identity. Registries whose entries have a natural key
 -- (a bind's key, a bar's name, a command, an exact alias's phrase) pass it
 -- as the name via rune.registry.keyed_opts, so the management functions

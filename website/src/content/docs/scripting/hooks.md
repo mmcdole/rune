@@ -4,8 +4,11 @@ description: Inspect or change input and output, and respond to client events.
 ---
 
 Hooks let a script inspect or change input and output, and respond to events
-such as connecting or reloading. Rune also registers named hooks for triggers,
-local echo styling, and history expansion; `/hooks` lists them. After all input
+such as connecting or reloading. Rune's own features use the same hooks
+(trigger dispatch, local echo styling, logging, the `[System]` notices), each
+under a name; `/hooks` lists them, and the
+[named core handlers](/reference/api/hooks/#named-core-handlers) you can
+replace. After all input
 hooks finish, Rune handles the resulting text as normal command input or
 verbatim input.
 
@@ -31,7 +34,7 @@ Handlers run in priority order:
 | `input` | one physical line, context | Before echo and history: a string, including `""`, replaces the text for later handlers, `false` consumes that line, and any other value leaves it unchanged. The context is read-only: `context.mode` is `"command"` or `"verbatim"`, and `context.hidden` is `true` while the server hides input (a password prompt). |
 | `output` | a line object | Once per complete line. `false` gags, a string rewrites. The core handler runs output triggers at priority 100. |
 | `prompt` | a line object, `confirmed` | Cumulative partial-line observation (`false`) or GA/EOR-confirmed prompt (`true`). The core runs prompt triggers at priority 100. |
-| `echo` | one display-safe line of the final input | Like `output` but a plain string. Terminal controls have already been made visible. The `> ` prefix is the core handler; replace it if you like. |
+| `echo` | one display-safe line of the final input | Like `output` but a plain string. Terminal controls have already been made visible. The `> ` prefix comes from the core `echo-style` handler; register your own under that name to replace it. |
 
 For every data-flow event, rewrites chain: a handler returning a string
 replaces the text for subsequent handlers, `nil` or another value passes the

@@ -525,7 +525,7 @@ rune.hooks.on("output", function(line)
         return false
     end
     return modified
-end, { priority = 100 })
+end, { name = "_trigger-output", priority = 100 })
 
 -- Prompt triggers opt into partial lines, which may repeat as they grow.
 rune.hooks.on("prompt", function(line, confirmed)
@@ -534,4 +534,4 @@ rune.hooks.on("prompt", function(line, confirmed)
         return false
     end
     return modified
-end, { priority = 100 })
+end, { name = "_trigger-prompt", priority = 100 })
